@@ -1,0 +1,62 @@
+{
+  "timestamp_utc": "2026-09-26T16:17:42.581250+00:00",
+  "url": "https://www.tdx.com.cn/products/data/data/g4day/20260924.zip",
+  "download_bytes": 2721068,
+  "markets": {
+    "sh": {
+      "records": 27484,
+      "code_bytes": 4122600,
+      "data_bytes": 14071808
+    },
+    "sz": {
+      "records": 24294,
+      "code_bytes": 3644100,
+      "data_bytes": 12438528
+    },
+    "bj": {
+      "records": 385,
+      "code_bytes": 57750,
+      "data_bytes": 197120
+    }
+  },
+  "samples": {
+    "sh600036": {
+      "date": "2026-09-24",
+      "prev_close": 40.6,
+      "open": 40.6,
+      "high": 41.14,
+      "low": 40.58,
+      "close": 40.69,
+      "volume_shares": 50352355,
+      "amount_yuan": 2057945516.0
+    },
+    "sh600519": {
+      "date": "2026-09-24",
+      "prev_close": 1251.24,
+      "open": 1250.01,
+      "high": 1256.13,
+      "low": 1231.05,
+      "close": 1237.0,
+      "volume_shares": 3123935,
+      "amount_yuan": 3867310920.0
+    },
+    "sz000001": {
+      "date": "2026-09-24",
+      "prev_close": 11.35,
+      "open": 11.35,
+      "high": 11.47,
+      "low": 11.29,
+      "close": 11.3,
+      "volume_shares": 104381872,
+      "amount_yuan": 1186736895.7
+    }
+  },
+  "members": [
+    "sh260924.md1",
+    "sz260924.md1",
+    "sh260924.cod",
+    "sz260924.cod",
+    "bj260924.cod",
+    "bj260924.md1"
+  ]
+}

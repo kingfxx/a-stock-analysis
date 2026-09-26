@@ -1,0 +1,30 @@
+# A 股季度分析页面
+
+一个运行在本机的季度财务柱线图。输入沪深 A 股六位代码，可切换“营收＋净利润”“市值＋营收”“市值＋净利润”“前复权股价＋净利润”，并查看单季度、年度和滚动四季度（TTM）。默认示例为 300750 宁德时代。
+
+## 启动
+
+在本目录运行：
+
+```powershell
+& 'C:\Users\HINATA\AppData\Local\Programs\Python\Python311\python.exe' app.py
+```
+
+浏览器打开 [http://127.0.0.1:8765/](http://127.0.0.1:8765/)。退出时在启动窗口按 `Ctrl+C`。如端口已占用，可加 `--port 8766`。
+
+依赖版本见 `requirements.txt`，开发测试使用 `pytest`。当前电脑的 Python 3.11 已安装这些包；换电脑可运行 `python -m pip install -r requirements.txt`。图表脚本由本机 Plotly 提供，页面不依赖 CDN。首次查询一只股票会从新浪财报和腾讯月 K 请求数据，并写入 `data/cache/<代码>.json`；以后打开使用本地缓存，点击“刷新数据”才重新请求。
+
+## 指标口径
+
+- 营收和归母净利润来自季度利润表的当年累计值；单季度按相邻累计期差分，TTM 汇总连续四个单季度。缺季度时留空。
+- 股本取同一报告期资产负债表的“实收资本（或股本）”；季度末总市值＝未复权月末收盘价×报告期末股本。
+- 前复权股价取腾讯月 K 的前复权月末收盘价，仅用于走势，不用于市值。
+- 横轴是报告期；悬停同时列出财报实际披露日与价格采样日。图表是事后对照，不能当作当时已经公开的估值。
+
+目前不保存逐日行情和历史成交额。历史 PE/PB、股息率、财报修订的点时版本计算在后续阶段；此前的阶段 0 资料保留在 `docs/data-sources/`。范围变更记录见[季度页面方案](docs/plans/2026-09-27-quarterly-dashboard.md)。
+
+## 检查
+
+```powershell
+& 'C:\Users\HINATA\AppData\Local\Programs\Python\Python311\python.exe' -m pytest tests -q
+```

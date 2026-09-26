@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A 股季度分析</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101417; --panel:#1a2227; --ink:#edf4f4; --muted:#9aadb3; --line:#304049; --cyan:#38c4dc; --yellow:#f4d35e; --danger:#f4a9a3; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:"Microsoft YaHei UI","Noto Sans CJK SC",Arial,sans-serif; }
+    button,input,select { font:inherit; }
+    .shell { max-width:1370px; margin:auto; padding:25px 28px 42px; }
+    header { display:flex; align-items:end; justify-content:space-between; gap:24px; padding-bottom:24px; border-bottom:1px solid var(--line); }
+    .eyebrow { color:var(--cyan); letter-spacing:.2em; font-size:12px; font-weight:700; }
+    h1 { margin:8px 0 4px; font-size:clamp(27px,3vw,42px); letter-spacing:.03em; font-weight:700; }
+    .sub { margin:0; color:var(--muted); font-size:14px; }
+    .search { display:flex; gap:8px; align-items:center; }
+    .search input { width:158px; border:1px solid var(--line); background:#202a30; color:var(--ink); padding:11px 13px; border-radius:7px; outline:none; }
+    .search input:focus, select:focus, button:focus-visible, a:focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
+    button { cursor:pointer; border:0; background:var(--cyan); color:#071418; border-radius:7px; padding:11px 17px; font-weight:700; }
+    .refresh { color:var(--muted); text-decoration:none; font-size:13px; padding:9px; }
+    .refresh:hover { color:var(--ink); }
+    .context { display:flex; gap:24px; flex-wrap:wrap; margin:21px 0 25px; color:var(--muted); font-size:13px; }
+    .context strong { color:var(--ink); font-weight:600; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+    .panel-head { display:flex; align-items:end; justify-content:space-between; flex-wrap:wrap; gap:18px; padding:24px 27px 18px; border-bottom:1px solid var(--line); }
+    .panel-head h2 { margin:0 0 5px; font-size:22px; }
+    .panel-head p { margin:0; color:var(--muted); font-size:13px; max-width:700px; line-height:1.55; }
+    .controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+    select { min-width:170px; border:1px solid #4b616d; background:#26343c; color:var(--ink); padding:10px 12px; border-radius:7px; }
+    .period { display:flex; border:1px solid #4b616d; border-radius:7px; overflow:hidden; }
+    .period button { border-radius:0; background:transparent; color:var(--muted); padding:10px 12px; font-weight:500; }
+    .period button.active { background:#355363; color:#fff; }
+    #chart { height:min(64vh,620px); min-height:390px; }
+    .note { margin:0; padding:0 27px 23px; color:var(--muted); font-size:13px; line-height:1.6; }
+    .below { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
+    .mini { padding:20px 23px; background:#172026; border:1px solid var(--line); border-radius:10px; }
+    .mini h3 { margin:0 0 9px; font-size:14px; color:#d8e6e9; }
+    .mini p { margin:0; color:var(--muted); font-size:13px; line-height:1.75; }
+    .error,.warning { border-radius:8px; margin-bottom:15px; padding:12px 16px; font-size:14px; }
+    .error { background:#442729; color:#ffe2df; }
+    .warning { background:#4a3c22; color:#ffe5a1; }
+    .hide { display:none; }
+    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .search{width:100%} .search input{flex:1;min-width:0} .panel-head{padding:20px 15px} .controls{width:100%} select{flex:1} #chart{height:500px;min-height:420px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header>
+    <div>
+      <div class="eyebrow">A 股 · 本地研究</div>
+      <h1>季度经营对照</h1>
+      <p class="sub">一张图，对照经营成果与季度末市场价格</p>
+    </div>
+    <form class="search" action="/" method="get">
+      <label for="code">股票代码</label>
+      <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
+      <button type="submit">查看</button>
+      <a id="refresh" class="refresh" href="#">刷新数据</a>
+    </form>
+  </header>
+  <div class="context">
+    <span>标的 <strong id="stock-code"></strong></span>
+    <span>最新报告期 <strong id="latest-period">—</strong></span>
+    <span>本地缓存更新 <strong id="updated">—</strong></span>
+  </div>
+  <div id="error" class="error hide">__ERROR__</div>
+  <div id="warnings"></div>
+  <section class="panel" aria-label="季度对照图">
+    <div class="panel-head">
+      <div>
+        <h2 id="chart-title">营收与归母净利润</h2>
+        <p id="chart-subtitle">青色柱为营收，黄色线为归母净利润。左右轴分别标明单位。</p>
+      </div>
+      <div class="controls">
+        <label for="mode">对照指标</label>
+        <select id="mode">
+          <option value="revenue_profit">营收 ＋ 净利润</option>
+          <option value="mcap_revenue">市值 ＋ 营收</option>
+          <option value="mcap_profit">市值 ＋ 净利润</option>
+          <option value="price_profit">前复权股价 ＋ 净利润</option>
+        </select>
+        <div class="period" role="group" aria-label="财务周期">
+          <button type="button" data-period="quarter" class="active">单季度</button>
+          <button type="button" data-period="year">年度</button>
+          <button type="button" data-period="ttm">TTM</button>
+        </div>
+      </div>
+    </div>
+    <div id="chart" role="img" aria-label="季度财务与市场价格对照图"></div>
+    <p id="chart-note" class="note"></p>
+  </section>
+  <div class="below">
+    <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。价格取该季度最后一个交易月的收盘价；财报可能在数周后才披露。悬停可查看披露日与价格日期。本图用于事后对照，不能代表当时已知的估值。</p></section>
+    <section class="mini"><h3>来源与缺口</h3><p>季度财务和期末股本来自新浪财报三表；未复权及前复权价格来自腾讯月 K。图中空缺表示来源未返回所需字段，未用零值填补。数据保存在本机，点击“刷新数据”才重新请求。</p></section>
+  </div>
+</main>
+<script id="payload" type="application/json">__PAYLOAD__</script>
+<script src="/plotly.min.js"></script>
+<script>
+(() => {
+  const state = JSON.parse(document.getElementById('payload').textContent);
+  const error = document.getElementById('error');
+  if (error.textContent.trim()) error.classList.remove('hide');
+  document.getElementById('stock-code').textContent = state.code || '—';
+  document.getElementById('refresh').href = '/?code=' + encodeURIComponent(state.code || '300750') + '&refresh=1';
+  if (state.updated_at) document.getElementById('updated').textContent = new Date(state.updated_at).toLocaleString('zh-CN');
+  const periods = state.views?.quarter || [];
+  if (periods.length) document.getElementById('latest-period').textContent = periods.at(-1).period;
+  const warnings = document.getElementById('warnings');
+  for (const message of state.warnings || []) {
+    const div = document.createElement('div'); div.className = 'warning'; div.textContent = message; warnings.appendChild(div);
+  }
+  const configs = {
+    revenue_profit: {title:'营收与归母净利润', bar:'营业收入', barKey:'revenue', line:'归母净利润', lineKey:'profit', lineUnit:'亿元'},
+    mcap_revenue: {title:'市值与营业收入', bar:'营业收入', barKey:'revenue', line:'季度末总市值', lineKey:'market_cap', lineUnit:'亿元'},
+    mcap_profit: {title:'市值与归母净利润', bar:'归母净利润', barKey:'profit', line:'季度末总市值', lineKey:'market_cap', lineUnit:'亿元'},
+    price_profit: {title:'前复权股价与归母净利润', bar:'归母净利润', barKey:'profit', line:'季度末前复权股价', lineKey:'qfq_price', lineUnit:'元/股'}
+  };
+  let selectedPeriod = 'quarter';
+  const mode = document.getElementById('mode');
+  const note = document.getElementById('chart-note');
+  function label(row) {
+    if (selectedPeriod === 'year') return row.period.slice(0,4);
+    return row.period.slice(0,4) + ' Q' + ({'03':1,'06':2,'09':3,'12':4}[row.period.slice(5,7)] || '?');
+  }
+  function render() {
+    const cfg = configs[mode.value];
+    const rows = state.views?.[selectedPeriod] || [];
+    document.getElementById('chart-title').textContent = cfg.title;
+    document.getElementById('chart-subtitle').textContent = '青色柱：' + cfg.bar + '（亿元） · 黄色线：' + cfg.line + '（' + cfg.lineUnit + '）';
+    const xs = rows.map(label);
+    const custom = rows.map(r => [r.period, r.publish_date || '未知', r.price_date || '无价格']);
+    const bar = rows.map(r => r[cfg.barKey] == null ? null : r[cfg.barKey] / 1e8);
+    const line = rows.map(r => r[cfg.lineKey] == null ? null : r[cfg.lineKey] / (cfg.lineKey === 'qfq_price' ? 1 : 1e8));
+    const colors = {paper_bgcolor:'#1a2227', plot_bgcolor:'#1a2227', font:'#bbccd1'};
+    Plotly.react('chart', [
+      {type:'bar', name:cfg.bar, x:xs, y:bar, customdata:custom, marker:{color:'#38c4dc'},
+       hovertemplate:'%{x}<br>' + cfg.bar + '：%{y:,.2f} 亿元<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}<extra></extra>'},
+      {type:'scatter', mode:'lines+markers', name:cfg.line, x:xs, y:line, customdata:custom, yaxis:'y2',
+       line:{color:'#f4d35e',width:3}, marker:{size:5,color:'#f4d35e'}, connectgaps:false,
+       hovertemplate:'%{x}<br>' + cfg.line + '：%{y:,.2f} ' + cfg.lineUnit + '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}<br>价格日：%{customdata[2]}<extra></extra>'}
+    ], { ...colors, margin:{l:72,r:78,t:28,b:96}, barmode:'group', bargap:.36,
+      xaxis:{tickangle:-55,gridcolor:'#304049',zeroline:false,automargin:true},
+      yaxis:{title:cfg.bar + '（亿元）',gridcolor:'#304049',zeroline:false,rangemode:'tozero'},
+      yaxis2:{title:cfg.line + '（' + cfg.lineUnit + '）',overlaying:'y',side:'right',showgrid:false,zeroline:false,rangemode:'tozero'},
+      legend:{orientation:'h',x:.5,xanchor:'center',y:1.12,font:{size:12}},
+      hovermode:'x unified', showlegend:true }, {responsive:true,displaylogo:false,locale:'zh-CN'});
+    const missing = line.filter(v => v == null).length;
+    note.textContent = (selectedPeriod === 'quarter' ? '单季度值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? 'TTM 为连续四个单季度之和；缺期则留空。' : '年度值取当年年报累计数。') +
+      (cfg.lineKey === 'market_cap' ? ' 总市值按报告期末未复权价×期末股本计算。' : cfg.lineKey === 'qfq_price' ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
+      (missing ? ` 黄色线有 ${missing} 个缺失点。` : '');
+  }
+  mode.addEventListener('change', render);
+  document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => {
+    selectedPeriod = button.dataset.period;
+    document.querySelectorAll('[data-period]').forEach(item => item.classList.toggle('active', item === button));
+    render();
+  }));
+  if (typeof Plotly !== 'undefined') render();
+})();
+</script>
+</body>
+</html>

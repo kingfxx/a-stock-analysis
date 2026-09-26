@@ -1,0 +1,16 @@
+{
+  "timestamp_utc": "2026-09-26T16:13:27.322013+00:00",
+  "baostock_version": "0.8.9",
+  "query": {
+    "fields": "date,code,open,high,low,close,volume,amount,adjustflag,tradestatus",
+    "start_date": "1990-01-01",
+    "end_date": "2026-09-26",
+    "frequency": "d",
+    "adjustflag": "3"
+  },
+  "symbols": {},
+  "login": {
+    "error_code": "10002007",
+    "error_msg": "网络接收错误。"
+  }
+}

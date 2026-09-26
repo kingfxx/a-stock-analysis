@@ -1,0 +1,104 @@
+"""Loopback-only web server and small per-stock quarterly cache."""
+
+from __future__ import annotations
+
+import html
+import json
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+import requests
+from plotly.offline import get_plotlyjs
+
+from .core import build_period_rows, view_rows
+from .sources import fetch_financial_reports, fetch_monthly_prices, normalize_code
+
+
+ROOT = Path(__file__).resolve().parent.parent
+CACHE = ROOT / "data" / "cache"
+TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+
+
+def load_stock(code: str, refresh: bool = False) -> dict:
+    code = normalize_code(code)
+    path = CACHE / f"{code}.json"
+    old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    if old and not refresh:
+        return old
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0"})
+    try:
+        reports = fetch_financial_reports(code, session)
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        if old:
+            return {**old, "warnings": [f"财报更新失败，正在显示缓存：{exc}"]}
+        raise ValueError(f"无法获取 {code} 的季度财报：{exc}") from exc
+    warnings = []
+    prices = {}
+    for key, adjust in (("raw", ""), ("qfq", "qfq")):
+        try:
+            prices[key] = fetch_monthly_prices(code, session, adjust)
+        except (requests.RequestException, ValueError, KeyError) as exc:
+            prices[key] = old.get("prices", {}).get(key, []) if old else []
+            warnings.append(f"{key} 月末价格更新失败：{exc}")
+    data = {"code": code, "updated_at": datetime.now(timezone.utc).isoformat(),
+            "reports": reports, "prices": prices, "warnings": warnings}
+    CACHE.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    temporary.replace(path)
+    return data
+
+
+def render_page(code: str, refresh: bool) -> str:
+    try:
+        data = load_stock(code, refresh)
+        rows = build_period_rows(data["reports"], data["prices"]["raw"], data["prices"]["qfq"])
+        views = {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")}
+        payload = {"code": data["code"], "updated_at": data["updated_at"],
+                   "views": views, "warnings": data.get("warnings", [])}
+        error = ""
+    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+        payload = {"code": code, "views": {}, "warnings": []}
+        error = str(exc)
+    embedded = json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
+    return (TEMPLATE.replace("__PAYLOAD__", embedded)
+            .replace("__CODE__", html.escape(code, quote=True))
+            .replace("__ERROR__", html.escape(error)))
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/plotly.min.js":
+            body = get_plotlyjs().encode("utf-8")
+            content_type = "text/javascript; charset=utf-8"
+        elif parsed.path == "/":
+            query = parse_qs(parsed.query)
+            code = query.get("code", ["300750"])[0]
+            body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
+            content_type = "text/html; charset=utf-8"
+        else:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        if parsed.path == "/plotly.min.js":
+            self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def serve(port: int = 8765):
+    address = ("127.0.0.1", port)
+    server = ThreadingHTTPServer(address, Handler)
+    print(f"季度分析页面：http://127.0.0.1:{port}/", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
