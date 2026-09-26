@@ -62,7 +62,7 @@
     <div>
       <div class="eyebrow">A 股 · 本地研究</div>
       <h1>季度经营对照</h1>
-      <p class="sub">一张图，对照经营成果与季度末市场价格</p>
+      <p class="sub">一张图，对照经营成果与财报披露时的市场价格</p>
     </div>
     <div class="lookup">
       <details class="cached-picker" id="cached-picker">
@@ -112,8 +112,8 @@
     <p id="chart-note" class="note"></p>
   </section>
   <div class="below">
-    <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。价格取该季度最后一个交易月的收盘价；财报可能在数周后才披露。悬停可查看披露日与价格日期。本图用于事后对照，不能代表当时已知的估值。</p></section>
-    <section class="mini"><h3>来源与缺口</h3><p>季度财务和期末股本来自新浪财报三表；未复权及前复权价格来自腾讯月 K。图中空缺表示来源未返回所需字段，未用零值填补。数据保存在本机，点击“刷新数据”才重新请求。</p></section>
+    <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。股价取财报披露日或此前最近交易日的收盘价；两者相隔超过 15 天则留空。悬停可查看披露日与实际交易日。披露来源没有具体时刻，图中价格不代表披露瞬间可交易的价格。</p></section>
+    <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的未复权及前复权价格来自腾讯日 K，只缓存每份报告对应的价格快照。市值为披露日价格×报告期末股本的估算值。缺少价格或股本时留空。</p></section>
   </div>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
@@ -156,9 +156,9 @@
   }
   const configs = {
     revenue_profit: {title:'营收与归母净利润', bar:'营业收入', barKey:'revenue', line:'归母净利润', lineKey:'profit', lineUnit:'亿元'},
-    mcap_revenue: {title:'市值与营业收入', bar:'营业收入', barKey:'revenue', line:'季度末总市值', lineKey:'market_cap', lineUnit:'亿元'},
-    mcap_profit: {title:'市值与归母净利润', bar:'归母净利润', barKey:'profit', line:'季度末总市值', lineKey:'market_cap', lineUnit:'亿元'},
-    price_profit: {title:'前复权股价与归母净利润', bar:'归母净利润', barKey:'profit', line:'季度末前复权股价', lineKey:'qfq_price', lineUnit:'元/股'}
+    mcap_revenue: {title:'市值与营业收入', bar:'营业收入', barKey:'revenue', line:'披露日估算市值', lineKey:'market_cap', lineUnit:'亿元'},
+    mcap_profit: {title:'市值与归母净利润', bar:'归母净利润', barKey:'profit', line:'披露日估算市值', lineKey:'market_cap', lineUnit:'亿元'},
+    price_profit: {title:'前复权股价与归母净利润', bar:'归母净利润', barKey:'profit', line:'披露日前复权股价', lineKey:'qfq_price', lineUnit:'元/股'}
   };
   let selectedPeriod = 'quarter';
   const mode = document.getElementById('mode');
@@ -173,7 +173,8 @@
     document.getElementById('chart-title').textContent = cfg.title;
     document.getElementById('chart-subtitle').textContent = '青色柱：' + cfg.bar + '（亿元） · 黄色线：' + cfg.line + '（' + cfg.lineUnit + '）';
     const xs = rows.map(label);
-    const custom = rows.map(r => [r.period, r.publish_date || '未知', r.price_date || '无价格']);
+    const custom = rows.map(r => [r.period, r.publish_date || '未知',
+      (cfg.lineKey === 'qfq_price' ? r.qfq_price_date : r.price_date) || '无价格']);
     const bar = rows.map(r => r[cfg.barKey] == null ? null : r[cfg.barKey] / 1e8);
     const line = rows.map(r => r[cfg.lineKey] == null ? null : r[cfg.lineKey] / (cfg.lineKey === 'qfq_price' ? 1 : 1e8));
     const colors = {paper_bgcolor:'#1a2227', plot_bgcolor:'#1a2227', font:{color:'#edf4f4'}};
@@ -184,7 +185,8 @@
        hovertemplate:'%{x}<br>' + cfg.bar + '：%{y:,.2f} 亿元<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}<extra></extra>'},
       {type:'scatter', mode:'lines+markers', name:cfg.line, x:xs, y:line, customdata:custom, yaxis:'y2',
        line:{color:'#f4d35e',width:3}, marker:{size:5,color:'#f4d35e'}, connectgaps:false,
-       hovertemplate:'%{x}<br>' + cfg.line + '：%{y:,.2f} ' + cfg.lineUnit + '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}<br>价格日：%{customdata[2]}<extra></extra>'}
+       hovertemplate:'%{x}<br>' + cfg.line + '：%{y:,.2f} ' + cfg.lineUnit + '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}' +
+         (cfg.lineKey === 'market_cap' || cfg.lineKey === 'qfq_price' ? '<br>价格交易日：%{customdata[2]}' : '') + '<extra></extra>'}
     ], { ...colors, margin:{l:95,r:112,t:28,b:96}, barmode:'group', bargap:.36,
       xaxis:{tickangle:-55,tickfont:axisTicks,gridcolor:'#304049',zeroline:false,automargin:true},
       yaxis:{title:axisTitle(cfg.bar + '（亿元）'),tickfont:axisTicks,automargin:true,gridcolor:'#304049',zeroline:false,rangemode:'tozero'},
@@ -193,7 +195,7 @@
       hovermode:'x unified', showlegend:true }, {responsive:true,displaylogo:false,locale:'zh-CN'});
     const missing = line.filter(v => v == null).length;
     note.textContent = (selectedPeriod === 'quarter' ? '单季度值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? 'TTM 为连续四个单季度之和；缺期则留空。' : '年度值取当年年报累计数。') +
-      (cfg.lineKey === 'market_cap' ? ' 总市值按报告期末未复权价×期末股本计算。' : cfg.lineKey === 'qfq_price' ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
+      (cfg.lineKey === 'market_cap' ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : cfg.lineKey === 'qfq_price' ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
       (missing ? ` 黄色线有 ${missing} 个缺失点。` : '');
   }
   mode.addEventListener('change', render);

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
+from datetime import date
+
 
 def _quarter_before(period: str) -> str:
     year, month = int(period[:4]), int(period[5:7])
@@ -11,10 +14,28 @@ def _quarter_before(period: str) -> str:
     return f"{year}-{previous_month:02d}-{31 if previous_month == 3 else 30}"
 
 
+def disclosure_snapshots(reports: list[dict], daily_prices: list[dict]) -> list[dict]:
+    """Keep only the last trading close at or before each report disclosure."""
+    by_date = {price["date"]: price for price in daily_prices}
+    dates = sorted(by_date)
+    snapshots = []
+    for published in sorted({r.get("publish_date") for r in reports if r.get("publish_date")}):
+        try:
+            disclosure_day = date.fromisoformat(published)
+        except ValueError:
+            continue
+        index = bisect_right(dates, published) - 1
+        if index < 0 or (disclosure_day - date.fromisoformat(dates[index])).days > 15:
+            continue
+        price = by_date[dates[index]]
+        snapshots.append({"publish_date": published, "date": price["date"], "close": price["close"]})
+    return snapshots
+
+
 def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: list[dict]) -> list[dict]:
     by_period = {r["period"]: r for r in reports}
-    raw_by_month = {p["date"][:7]: p for p in raw_prices}
-    qfq_by_month = {p["date"][:7]: p for p in qfq_prices}
+    raw_by_disclosure = {p["publish_date"]: p for p in raw_prices}
+    qfq_by_disclosure = {p["publish_date"]: p for p in qfq_prices}
     rows = []
     for period in sorted(by_period):
         report = by_period[period]
@@ -30,8 +51,8 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             previous = prior.get(field) if prior else None
             return current - previous if previous is not None else None
 
-        raw = raw_by_month.get(period[:7])
-        qfq = qfq_by_month.get(period[:7])
+        raw = raw_by_disclosure.get(report.get("publish_date"))
+        qfq = qfq_by_disclosure.get(report.get("publish_date"))
         raw_close = raw.get("close") if raw else None
         qfq_close = qfq.get("close") if qfq else None
         shares = report.get("shares")
@@ -44,6 +65,7 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             "raw_price": raw_close,
             "qfq_price": qfq_close if qfq_close is not None and qfq_close > 0 else None,
             "price_date": raw.get("date") if raw else None,
+            "qfq_price_date": qfq.get("date") if qfq else None,
             "market_cap": raw_close * shares if raw_close is not None and shares is not None else None,
         }
         rows.append(row)

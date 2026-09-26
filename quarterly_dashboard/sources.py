@@ -1,9 +1,10 @@
-"""Public-source adapters for quarterly financial facts and month-end prices."""
+"""Public-source adapters for quarterly reports and disclosure-date prices."""
 
 from __future__ import annotations
 
 import math
 import re
+from datetime import date, timedelta
 
 import requests
 
@@ -86,6 +87,22 @@ def parse_monthly_prices(payload: dict, symbol: str, adjust: str) -> list[dict]:
     return output
 
 
+def parse_daily_prices(payload: dict, symbol: str, adjust: str) -> list[dict]:
+    if payload.get("code") != 0:
+        raise ValueError(f"腾讯日 K 请求失败：{payload.get('msg', payload.get('code'))}")
+    node = (payload.get("data") or {}).get(symbol) or {}
+    records = node.get(f"{adjust}day")
+    if records is None:
+        raise ValueError(f"腾讯日 K 未返回 {adjust}day 数据")
+    output = []
+    for record in records:
+        if len(record) < 3 or _number(record[2]) is None:
+            raise ValueError("腾讯日 K 字段格式不完整")
+        date.fromisoformat(record[0])
+        output.append({"date": record[0], "close": float(record[2])})
+    return output
+
+
 def normalize_code(code: str) -> str:
     code = code.strip().lower()
     if code.startswith(("sh", "sz")):
@@ -143,3 +160,34 @@ def fetch_monthly_prices(code: str, session: requests.Session, adjust: str = "")
                            headers={"Referer": "https://gu.qq.com/"}, timeout=18)
     response.raise_for_status()
     return parse_monthly_prices(response.json(), symbol, adjust)
+
+
+def fetch_daily_prices(code: str, session: requests.Session, adjust: str,
+                       earliest_date: str, latest_date: str) -> list[dict]:
+    """Page backward through Tencent daily K; callers retain only report-date snapshots."""
+    if adjust not in ("", "qfq"):
+        raise ValueError("仅支持未复权或前复权日 K")
+    symbol = symbol_for(code)
+    end = date.fromisoformat(latest_date)
+    earliest = date.fromisoformat(earliest_date)
+    prices = {}
+    for _ in range(50):
+        if end < earliest:
+            break
+        response = session.get(TENCENT_URL,
+                               params={"param": f"{symbol},day,,{end.isoformat()},640,{adjust}"},
+                               headers={"Referer": "https://gu.qq.com/"}, timeout=18)
+        response.raise_for_status()
+        batch = parse_daily_prices(response.json(), symbol, adjust)
+        if not batch:
+            break
+        prices.update({row["date"]: row for row in batch})
+        oldest = min(date.fromisoformat(row["date"]) for row in batch)
+        if oldest > end:
+            raise ValueError("腾讯日 K 分页没有向历史推进")
+        end = oldest - timedelta(days=1)
+        if len(batch) < 640:
+            break
+    else:
+        raise ValueError("腾讯日 K 历史分页超过 50 次")
+    return [prices[key] for key in sorted(prices)]

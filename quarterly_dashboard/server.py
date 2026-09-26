@@ -12,8 +12,8 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from plotly.offline import get_plotlyjs
 
-from .core import build_period_rows, view_rows
-from .sources import fetch_financial_reports, fetch_monthly_prices, fetch_stock_name, normalize_code
+from .core import build_period_rows, disclosure_snapshots, view_rows
+from .sources import fetch_daily_prices, fetch_financial_reports, fetch_stock_name, normalize_code
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +39,21 @@ def _add_missing_name(data: dict, path: Path, session: requests.Session) -> dict
     return data
 
 
+def _disclosure_prices(code: str, reports: list[dict], session: requests.Session,
+                       old: dict | None = None) -> tuple[dict, list[str], bool]:
+    dates = sorted({report.get("publish_date") for report in reports if report.get("publish_date")})
+    prices, warnings, complete = {}, [], True
+    for key, adjust in (("raw", ""), ("qfq", "qfq")):
+        try:
+            daily = fetch_daily_prices(code, session, adjust, dates[0], dates[-1]) if dates else []
+            prices[key] = disclosure_snapshots(reports, daily)
+        except (requests.RequestException, ValueError, KeyError) as exc:
+            complete = False
+            prices[key] = (old or {}).get("prices", {}).get(key, []) if (old or {}).get("price_basis") == "disclosure" else []
+            warnings.append(f"{key} 披露日价格更新失败：{exc}")
+    return prices, warnings, complete
+
+
 def load_stock(code: str, refresh: bool = False) -> dict:
     code = normalize_code(code)
     path = CACHE / f"{code}.json"
@@ -46,21 +61,21 @@ def load_stock(code: str, refresh: bool = False) -> dict:
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0"})
     if old and not refresh:
-        return _add_missing_name(old, path, session)
+        old = _add_missing_name(old, path, session)
+        if old.get("price_basis") == "disclosure":
+            return old
+        prices, warnings, complete = _disclosure_prices(code, old["reports"], session)
+        migrated = {**old, "prices": prices, "price_basis": "disclosure", "warnings": warnings}
+        if complete:
+            _save_cache(path, migrated)
+        return migrated
     try:
         reports = fetch_financial_reports(code, session)
     except (requests.RequestException, ValueError, KeyError) as exc:
         if old:
             return {**_add_missing_name(old, path, session), "warnings": [f"财报更新失败，正在显示缓存：{exc}"]}
         raise ValueError(f"无法获取 {code} 的季度财报：{exc}") from exc
-    warnings = []
-    prices = {}
-    for key, adjust in (("raw", ""), ("qfq", "qfq")):
-        try:
-            prices[key] = fetch_monthly_prices(code, session, adjust)
-        except (requests.RequestException, ValueError, KeyError) as exc:
-            prices[key] = old.get("prices", {}).get(key, []) if old else []
-            warnings.append(f"{key} 月末价格更新失败：{exc}")
+    prices, warnings, _ = _disclosure_prices(code, reports, session, old)
     try:
         name = fetch_stock_name(code, session)
     except (requests.RequestException, ValueError, KeyError) as exc:
@@ -68,7 +83,8 @@ def load_stock(code: str, refresh: bool = False) -> dict:
         if not name:
             warnings.append(f"股票名称获取失败：{exc}")
     data = {"code": code, "updated_at": datetime.now(timezone.utc).isoformat(),
-            "name": name, "reports": reports, "prices": prices, "warnings": warnings}
+            "name": name, "reports": reports, "prices": prices,
+            "price_basis": "disclosure", "warnings": warnings}
     _save_cache(path, data)
     return data
 
@@ -77,7 +93,8 @@ def cached_stocks() -> list[dict]:
     stocks = []
     for path in sorted(CACHE.glob("*.json")):
         try:
-            data = load_stock(path.stem)
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data = _add_missing_name(data, path, requests.Session())
         except (ValueError, KeyError, json.JSONDecodeError):
             continue
         stocks.append({"code": data["code"], "name": data.get("name")})
