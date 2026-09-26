@@ -1,4 +1,4 @@
-from quarterly_dashboard.sources import parse_financial_reports, parse_monthly_prices
+from quarterly_dashboard.sources import parse_financial_reports, parse_monthly_prices, parse_stock_name
 
 
 def test_financial_parser_uses_report_period_and_disclosure_date():
@@ -28,3 +28,13 @@ def test_monthly_parser_treats_empty_or_missing_data_as_failure():
         pass
     else:
         raise AssertionError("empty monthly K-line must fail")
+
+
+def test_stock_name_parser_checks_symbol_and_code():
+    assert parse_stock_name('v_sh601919="1~中远海控~601919~12.00";', "sh601919") == "中远海控"
+    try:
+        parse_stock_name('v_sh601919="1~别的股票~600519~12.00";', "sh601919")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("mismatched quote code must fail")

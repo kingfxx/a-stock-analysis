@@ -12,7 +12,7 @@
 
 浏览器打开 [http://127.0.0.1:8765/](http://127.0.0.1:8765/)。退出时在启动窗口按 `Ctrl+C`。如端口已占用，可加 `--port 8766`。
 
-依赖版本见 `requirements.txt`，开发测试使用 `pytest`。当前电脑的 Python 3.11 已安装这些包；换电脑可运行 `python -m pip install -r requirements.txt`。图表脚本由本机 Plotly 提供，页面不依赖 CDN。首次查询一只股票会从新浪财报和腾讯月 K 请求数据，并写入 `data/cache/<代码>.json`；以后打开使用本地缓存，点击“刷新数据”才重新请求。
+依赖版本见 `requirements.txt`，开发测试使用 `pytest`。当前电脑的 Python 3.11 已安装这些包；换电脑可运行 `python -m pip install -r requirements.txt`。图表脚本由本机 Plotly 提供，页面不依赖 CDN。首次查询一只股票会从新浪财报和腾讯月 K 请求数据，并写入 `data/cache/<代码>.json`；以后打开使用本地缓存，点击“刷新数据”才重新请求。股票名称由腾讯行情获取并保存在同一缓存中；旧缓存会单独补齐名称。页面顶部的“已缓存股票”可按代码或名称搜索并切换标的。
 
 ## 指标口径
 

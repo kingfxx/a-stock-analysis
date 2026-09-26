@@ -16,6 +16,18 @@
     .sub { margin:0; color:var(--muted); font-size:14px; }
     .search { display:flex; gap:8px; align-items:center; }
     .search input { width:158px; border:1px solid var(--line); background:#202a30; color:var(--ink); padding:11px 13px; border-radius:7px; outline:none; }
+    .lookup { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .cached-picker { position:relative; min-width:210px; }
+    .cached-picker summary { cursor:pointer; list-style:none; border:1px solid var(--line); background:#202a30; border-radius:7px; padding:11px 13px; }
+    .cached-picker summary::-webkit-details-marker { display:none; }
+    .cached-picker summary::after { content:'⌄'; float:right; color:var(--muted); }
+    .cached-picker[open] summary { border-color:var(--cyan); }
+    .cached-menu { position:absolute; z-index:10; top:calc(100% + 6px); right:0; width:max(260px,100%); padding:9px; background:#202a30; border:1px solid #4b616d; border-radius:8px; box-shadow:0 12px 30px #0008; }
+    .cached-menu input { width:100%; border:1px solid #4b616d; background:#101a20; color:var(--ink); border-radius:6px; padding:9px 10px; outline:none; }
+    .cached-list { max-height:260px; overflow:auto; padding-top:6px; }
+    .cached-list button { display:block; width:100%; padding:9px 10px; text-align:left; color:var(--ink); background:transparent; font-weight:500; }
+    .cached-list button:hover,.cached-list button:focus-visible { background:#355363; }
+    .cached-list p { margin:7px 9px; color:var(--muted); font-size:13px; }
     .search input:focus, select:focus, button:focus-visible, a:focus-visible { outline:2px solid var(--cyan); outline-offset:2px; }
     button { cursor:pointer; border:0; background:var(--cyan); color:#071418; border-radius:7px; padding:11px 17px; font-weight:700; }
     .refresh { color:var(--muted); text-decoration:none; font-size:13px; padding:9px; }
@@ -41,7 +53,7 @@
     .error { background:#442729; color:#ffe2df; }
     .warning { background:#4a3c22; color:#ffe5a1; }
     .hide { display:none; }
-    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .search{width:100%} .search input{flex:1;min-width:0} .panel-head{padding:20px 15px} .controls{width:100%} select{flex:1} #chart{height:500px;min-height:420px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} }
+    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .controls{width:100%} select{flex:1} #chart{height:500px;min-height:420px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} }
   </style>
 </head>
 <body>
@@ -52,12 +64,21 @@
       <h1>季度经营对照</h1>
       <p class="sub">一张图，对照经营成果与季度末市场价格</p>
     </div>
-    <form class="search" action="/" method="get">
-      <label for="code">股票代码</label>
-      <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
-      <button type="submit">查看</button>
-      <a id="refresh" class="refresh" href="#">刷新数据</a>
-    </form>
+    <div class="lookup">
+      <details class="cached-picker" id="cached-picker">
+        <summary>已缓存股票</summary>
+        <div class="cached-menu">
+          <input id="cached-search" type="search" placeholder="搜索代码或公司名称" aria-label="搜索已缓存股票">
+          <div id="cached-list" class="cached-list" aria-label="已缓存股票列表"></div>
+        </div>
+      </details>
+      <form class="search" action="/" method="get">
+        <label for="code">股票代码</label>
+        <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
+        <button type="submit">查看</button>
+        <a id="refresh" class="refresh" href="#">刷新数据</a>
+      </form>
+    </div>
   </header>
   <div class="context">
     <span>标的 <strong id="stock-code"></strong></span>
@@ -102,8 +123,30 @@
   const state = JSON.parse(document.getElementById('payload').textContent);
   const error = document.getElementById('error');
   if (error.textContent.trim()) error.classList.remove('hide');
-  document.getElementById('stock-code').textContent = state.code || '—';
+  document.getElementById('stock-code').textContent = state.code ? state.code + (state.name ? ' - ' + state.name : '') : '—';
   document.getElementById('refresh').href = '/?code=' + encodeURIComponent(state.code || '300750') + '&refresh=1';
+  const cachedSearch = document.getElementById('cached-search');
+  const cachedList = document.getElementById('cached-list');
+  function renderCachedStocks() {
+    const query = cachedSearch.value.trim().toLocaleLowerCase('zh-CN');
+    cachedList.replaceChildren();
+    const stocks = (state.cached_stocks || []).filter(stock =>
+      stock.code.includes(query) || (stock.name || '').toLocaleLowerCase('zh-CN').includes(query));
+    if (!stocks.length) {
+      const empty = document.createElement('p');
+      empty.textContent = (state.cached_stocks || []).length ? '没有匹配的股票' : '暂无缓存股票';
+      cachedList.appendChild(empty);
+    }
+    for (const stock of stocks) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = stock.code + (stock.name ? ' - ' + stock.name : ' - 名称暂缺');
+      button.addEventListener('click', () => { window.location.href = '/?code=' + encodeURIComponent(stock.code); });
+      cachedList.appendChild(button);
+    }
+  }
+  cachedSearch.addEventListener('input', renderCachedStocks);
+  renderCachedStocks();
   if (state.updated_at) document.getElementById('updated').textContent = new Date(state.updated_at).toLocaleString('zh-CN');
   const periods = state.views?.quarter || [];
   if (periods.length) document.getElementById('latest-period').textContent = periods.at(-1).period;
@@ -133,17 +176,19 @@
     const custom = rows.map(r => [r.period, r.publish_date || '未知', r.price_date || '无价格']);
     const bar = rows.map(r => r[cfg.barKey] == null ? null : r[cfg.barKey] / 1e8);
     const line = rows.map(r => r[cfg.lineKey] == null ? null : r[cfg.lineKey] / (cfg.lineKey === 'qfq_price' ? 1 : 1e8));
-    const colors = {paper_bgcolor:'#1a2227', plot_bgcolor:'#1a2227', font:'#bbccd1'};
+    const colors = {paper_bgcolor:'#1a2227', plot_bgcolor:'#1a2227', font:{color:'#edf4f4'}};
+    const axisTicks = {color:'#ffffff',size:13};
+    const axisTitle = text => ({text, font:{color:'#ffffff',size:15}, standoff:12});
     Plotly.react('chart', [
       {type:'bar', name:cfg.bar, x:xs, y:bar, customdata:custom, marker:{color:'#38c4dc'},
        hovertemplate:'%{x}<br>' + cfg.bar + '：%{y:,.2f} 亿元<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}<extra></extra>'},
       {type:'scatter', mode:'lines+markers', name:cfg.line, x:xs, y:line, customdata:custom, yaxis:'y2',
        line:{color:'#f4d35e',width:3}, marker:{size:5,color:'#f4d35e'}, connectgaps:false,
        hovertemplate:'%{x}<br>' + cfg.line + '：%{y:,.2f} ' + cfg.lineUnit + '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}<br>价格日：%{customdata[2]}<extra></extra>'}
-    ], { ...colors, margin:{l:72,r:78,t:28,b:96}, barmode:'group', bargap:.36,
-      xaxis:{tickangle:-55,gridcolor:'#304049',zeroline:false,automargin:true},
-      yaxis:{title:cfg.bar + '（亿元）',gridcolor:'#304049',zeroline:false,rangemode:'tozero'},
-      yaxis2:{title:cfg.line + '（' + cfg.lineUnit + '）',overlaying:'y',side:'right',showgrid:false,zeroline:false,rangemode:'tozero'},
+    ], { ...colors, margin:{l:95,r:112,t:28,b:96}, barmode:'group', bargap:.36,
+      xaxis:{tickangle:-55,tickfont:axisTicks,gridcolor:'#304049',zeroline:false,automargin:true},
+      yaxis:{title:axisTitle(cfg.bar + '（亿元）'),tickfont:axisTicks,automargin:true,gridcolor:'#304049',zeroline:false,rangemode:'tozero'},
+      yaxis2:{title:axisTitle(cfg.line + '（' + cfg.lineUnit + '）'),tickfont:axisTicks,automargin:true,overlaying:'y',side:'right',showgrid:false,zeroline:false,rangemode:'tozero'},
       legend:{orientation:'h',x:.5,xanchor:'center',y:1.12,font:{size:12}},
       hovermode:'x unified', showlegend:true }, {responsive:true,displaylogo:false,locale:'zh-CN'});
     const missing = line.filter(v => v == null).length;

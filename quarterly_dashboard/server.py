@@ -13,7 +13,7 @@ import requests
 from plotly.offline import get_plotlyjs
 
 from .core import build_period_rows, view_rows
-from .sources import fetch_financial_reports, fetch_monthly_prices, normalize_code
+from .sources import fetch_financial_reports, fetch_monthly_prices, fetch_stock_name, normalize_code
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,19 +21,37 @@ CACHE = ROOT / "data" / "cache"
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 
 
+def _save_cache(path: Path, data: dict) -> None:
+    CACHE.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    temporary.replace(path)
+
+
+def _add_missing_name(data: dict, path: Path, session: requests.Session) -> dict:
+    if "name" not in data:
+        try:
+            name = fetch_stock_name(data["code"], session)
+        except (requests.RequestException, ValueError, KeyError):
+            name = None
+        data = {**data, "name": name}
+        _save_cache(path, data)
+    return data
+
+
 def load_stock(code: str, refresh: bool = False) -> dict:
     code = normalize_code(code)
     path = CACHE / f"{code}.json"
     old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-    if old and not refresh:
-        return old
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0"})
+    if old and not refresh:
+        return _add_missing_name(old, path, session)
     try:
         reports = fetch_financial_reports(code, session)
     except (requests.RequestException, ValueError, KeyError) as exc:
         if old:
-            return {**old, "warnings": [f"财报更新失败，正在显示缓存：{exc}"]}
+            return {**_add_missing_name(old, path, session), "warnings": [f"财报更新失败，正在显示缓存：{exc}"]}
         raise ValueError(f"无法获取 {code} 的季度财报：{exc}") from exc
     warnings = []
     prices = {}
@@ -43,13 +61,27 @@ def load_stock(code: str, refresh: bool = False) -> dict:
         except (requests.RequestException, ValueError, KeyError) as exc:
             prices[key] = old.get("prices", {}).get(key, []) if old else []
             warnings.append(f"{key} 月末价格更新失败：{exc}")
+    try:
+        name = fetch_stock_name(code, session)
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        name = old.get("name") if old else None
+        if not name:
+            warnings.append(f"股票名称获取失败：{exc}")
     data = {"code": code, "updated_at": datetime.now(timezone.utc).isoformat(),
-            "reports": reports, "prices": prices, "warnings": warnings}
-    CACHE.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
-    temporary.replace(path)
+            "name": name, "reports": reports, "prices": prices, "warnings": warnings}
+    _save_cache(path, data)
     return data
+
+
+def cached_stocks() -> list[dict]:
+    stocks = []
+    for path in sorted(CACHE.glob("*.json")):
+        try:
+            data = load_stock(path.stem)
+        except (ValueError, KeyError, json.JSONDecodeError):
+            continue
+        stocks.append({"code": data["code"], "name": data.get("name")})
+    return stocks
 
 
 def render_page(code: str, refresh: bool) -> str:
@@ -57,12 +89,13 @@ def render_page(code: str, refresh: bool) -> str:
         data = load_stock(code, refresh)
         rows = build_period_rows(data["reports"], data["prices"]["raw"], data["prices"]["qfq"])
         views = {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")}
-        payload = {"code": data["code"], "updated_at": data["updated_at"],
+        payload = {"code": data["code"], "name": data.get("name"), "updated_at": data["updated_at"],
                    "views": views, "warnings": data.get("warnings", [])}
         error = ""
     except (ValueError, KeyError, json.JSONDecodeError) as exc:
-        payload = {"code": code, "views": {}, "warnings": []}
+        payload = {"code": code, "name": None, "views": {}, "warnings": []}
         error = str(exc)
+    payload["cached_stocks"] = cached_stocks()
     embedded = json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     return (TEMPLATE.replace("__PAYLOAD__", embedded)
             .replace("__CODE__", html.escape(code, quote=True))

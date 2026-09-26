@@ -10,6 +10,7 @@ import requests
 
 SINA_URL = "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022"
 TENCENT_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q="
 PROFIT_KEYS = (
     "归属于母公司所有者的净利润", "归属于母公司的净利润",
     "归属于母公司股东的净利润", "归属于上市公司股东的净利润",
@@ -97,6 +98,23 @@ def normalize_code(code: str) -> str:
 def symbol_for(code: str) -> str:
     code = normalize_code(code)
     return ("sh" if code.startswith("6") else "sz") + code
+
+
+def parse_stock_name(text: str, symbol: str) -> str:
+    match = re.fullmatch(rf'v_{re.escape(symbol)}="([^"]*)";?\s*', text.strip())
+    if not match:
+        raise ValueError("腾讯行情名称响应格式不正确")
+    fields = match.group(1).split("~")
+    if len(fields) < 3 or fields[2] != symbol[2:] or not fields[1].strip():
+        raise ValueError("腾讯行情名称与股票代码不匹配")
+    return fields[1].strip()
+
+
+def fetch_stock_name(code: str, session: requests.Session) -> str:
+    symbol = symbol_for(code)
+    response = session.get(TENCENT_QUOTE_URL + symbol, timeout=12)
+    response.raise_for_status()
+    return parse_stock_name(response.content.decode("gbk", errors="replace"), symbol)
 
 
 def fetch_financial_reports(code: str, session: requests.Session) -> list[dict]:
