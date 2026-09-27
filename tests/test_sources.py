@@ -1,4 +1,4 @@
-from quarterly_dashboard.sources import parse_financial_reports, parse_monthly_prices, parse_stock_name
+from quarterly_dashboard.sources import normalize_report_dates, parse_financial_reports, parse_monthly_prices, parse_stock_name
 
 
 def test_financial_parser_uses_report_period_and_disclosure_date():
@@ -13,9 +13,24 @@ def test_financial_parser_uses_report_period_and_disclosure_date():
     }}}}}
     assert parse_financial_reports(income, balance) == [{
         "period": "2025-06-30", "publish_date": "2025-08-15",
+        "source_publish_date": "2025-08-15",
         "revenue_ytd": 250.5, "profit_ytd": 45.2,
         "shares": 100.0, "equity": 500.0, "source_update_time": 123,
     }]
+
+
+def test_shifted_sina_dates_use_previous_year_same_period_record():
+    reports = [
+        {"period": "2020-12-31", "publish_date": "2022-04-22"},
+        {"period": "2021-12-31", "publish_date": "2023-03-10"},
+        {"period": "2022-12-31", "publish_date": "2024-03-16"},
+    ]
+    corrected = normalize_report_dates(reports)
+    assert corrected[0]["publish_date"] is None
+    assert corrected[1]["publish_date"] == "2022-04-22"
+    assert corrected[1]["source_publish_date"] == "2023-03-10"
+    assert corrected[2]["publish_date"] == "2023-03-10"
+    assert normalize_report_dates(corrected) == corrected
 
 
 def test_monthly_parser_treats_empty_or_missing_data_as_failure():

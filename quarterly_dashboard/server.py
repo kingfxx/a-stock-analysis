@@ -13,12 +13,13 @@ import requests
 from plotly.offline import get_plotlyjs
 
 from .core import build_period_rows, disclosure_snapshots, view_rows
-from .sources import fetch_daily_prices, fetch_financial_reports, fetch_stock_name, normalize_code
+from .sources import fetch_daily_prices, fetch_financial_reports, fetch_stock_name, normalize_code, normalize_report_dates
 
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "data" / "cache"
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 
 
 def _save_cache(path: Path, data: dict) -> None:
@@ -54,6 +55,20 @@ def _disclosure_prices(code: str, reports: list[dict], session: requests.Session
     return prices, warnings, complete
 
 
+def _migrate_cached(code: str, old: dict, path: Path, session: requests.Session) -> dict:
+    old = _add_missing_name(old, path, session)
+    if old.get("report_date_basis") == REPORT_DATE_BASIS and old.get("price_basis") == "disclosure":
+        return old
+    reports = (old["reports"] if old.get("report_date_basis") == REPORT_DATE_BASIS
+               else normalize_report_dates(old["reports"]))
+    prices, warnings, complete = _disclosure_prices(code, reports, session)
+    migrated = {**old, "reports": reports, "prices": prices, "price_basis": "disclosure",
+                "report_date_basis": REPORT_DATE_BASIS, "warnings": warnings}
+    if complete:
+        _save_cache(path, migrated)
+    return migrated
+
+
 def load_stock(code: str, refresh: bool = False) -> dict:
     code = normalize_code(code)
     path = CACHE / f"{code}.json"
@@ -61,19 +76,13 @@ def load_stock(code: str, refresh: bool = False) -> dict:
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0"})
     if old and not refresh:
-        old = _add_missing_name(old, path, session)
-        if old.get("price_basis") == "disclosure":
-            return old
-        prices, warnings, complete = _disclosure_prices(code, old["reports"], session)
-        migrated = {**old, "prices": prices, "price_basis": "disclosure", "warnings": warnings}
-        if complete:
-            _save_cache(path, migrated)
-        return migrated
+        return _migrate_cached(code, old, path, session)
     try:
         reports = fetch_financial_reports(code, session)
     except (requests.RequestException, ValueError, KeyError) as exc:
         if old:
-            return {**_add_missing_name(old, path, session), "warnings": [f"财报更新失败，正在显示缓存：{exc}"]}
+            fallback = _migrate_cached(code, old, path, session)
+            return {**fallback, "warnings": fallback.get("warnings", []) + [f"财报更新失败，正在显示缓存：{exc}"]}
         raise ValueError(f"无法获取 {code} 的季度财报：{exc}") from exc
     prices, warnings, _ = _disclosure_prices(code, reports, session, old)
     try:
@@ -84,7 +93,8 @@ def load_stock(code: str, refresh: bool = False) -> dict:
             warnings.append(f"股票名称获取失败：{exc}")
     data = {"code": code, "updated_at": datetime.now(timezone.utc).isoformat(),
             "name": name, "reports": reports, "prices": prices,
-            "price_basis": "disclosure", "warnings": warnings}
+            "price_basis": "disclosure", "report_date_basis": REPORT_DATE_BASIS,
+            "warnings": warnings}
     _save_cache(path, data)
     return data
 

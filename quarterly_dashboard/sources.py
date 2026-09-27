@@ -44,6 +44,33 @@ def _date(value):
     return f"{text[:4]}-{text[4:6]}-{text[6:8]}" if re.fullmatch(r"\d{8}", text) else None
 
 
+def normalize_report_dates(reports: list[dict]) -> list[dict]:
+    """Correct Sina's historical publish_date shift using the prior year's same period."""
+    by_period = {report["period"]: report for report in reports}
+
+    def source_date(report):
+        return report.get("source_publish_date", report.get("publish_date")) if report else None
+
+    def plausible(period, published):
+        if not published:
+            return False
+        try:
+            delay = (date.fromisoformat(published) - date.fromisoformat(period)).days
+        except ValueError:
+            return False
+        return 0 <= delay <= 366
+
+    corrected = []
+    for report in reports:
+        period = report["period"]
+        previous = by_period.get(f"{int(period[:4]) - 1}{period[4:]}")
+        candidate = source_date(previous)
+        raw = source_date(report)
+        published = candidate if plausible(period, candidate) else raw if plausible(period, raw) else None
+        corrected.append({**report, "source_publish_date": raw, "publish_date": published})
+    return corrected
+
+
 def parse_financial_reports(income_payload: dict, balance_payload: dict) -> list[dict]:
     income = (income_payload.get("result", {}).get("data", {}) or {}).get("report_list", {}) or {}
     balance = (balance_payload.get("result", {}).get("data", {}) or {}).get("report_list", {}) or {}
@@ -68,7 +95,7 @@ def parse_financial_reports(income_payload: dict, balance_payload: dict) -> list
         })
     if not output:
         raise ValueError("新浪利润表报告期无法解析")
-    return sorted(output, key=lambda row: row["period"])
+    return normalize_report_dates(sorted(output, key=lambda row: row["period"]))
 
 
 def parse_monthly_prices(payload: dict, symbol: str, adjust: str) -> list[dict]:
