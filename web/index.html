@@ -36,18 +36,23 @@
     .context strong { color:var(--ink); font-weight:600; }
     .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
     .panel-head { display:flex; align-items:end; justify-content:space-between; flex-wrap:wrap; gap:18px; padding:24px 27px 18px; border-bottom:1px solid var(--line); }
-    .panel-head h2 { margin:0 0 5px; font-size:22px; }
+    .panel-head > div:first-child { min-width:0; }
+    .panel-head h2 { margin:0 0 5px; font-size:22px; overflow-wrap:anywhere; }
     .panel-head p { margin:0; color:var(--muted); font-size:13px; max-width:700px; line-height:1.55; }
-    .controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+    .controls { display:flex; flex-wrap:wrap; align-items:end; gap:10px; }
+    .metric-choice { display:flex; flex-direction:column; gap:6px; min-width:170px; padding-left:10px; border-left:3px solid var(--choice-color); }
+    .metric-choice-toggle { align-self:flex-start; margin:-3px -6px; padding:3px 6px; border:1px solid transparent; background:transparent; color:var(--muted); font-size:12px; font-weight:700; }
+    .metric-choice-toggle[aria-pressed="true"] { color:var(--choice-color); background:#26343c; border-color:#4b616d; }
+    .metric-choice-toggle:hover { color:var(--choice-color); }
+    .metric-choice:has(.metric-choice-toggle[aria-pressed="false"]) { border-left-color:#58646c; }
+    .metric-choice select { width:100%; }
     select { min-width:170px; border:1px solid #4b616d; background:#26343c; color:var(--ink); padding:10px 12px; border-radius:7px; }
     .period { display:flex; border:1px solid #4b616d; border-radius:7px; overflow:hidden; }
     .period button { border-radius:0; background:transparent; color:var(--muted); padding:10px 12px; font-weight:500; }
     .period button.active { background:#355363; color:#fff; }
-    .quarter-key { display:flex; flex-wrap:wrap; align-items:center; gap:9px 18px; padding:13px 27px 0; color:var(--muted); font-size:12px; }
-    .quarter-key[hidden] { display:none; }
-    .quarter-key span { display:inline-flex; align-items:center; gap:6px; color:var(--ink); }
-    .quarter-key i { display:inline-block; width:11px; height:11px; border-radius:2px; background:var(--swatch-color); }
     #chart { height:min(64vh,620px); min-height:390px; }
+    .chart-scroll { overflow-x:auto; }
+    .chart-scroll-hint { display:none; }
     .note { margin:0; padding:0 27px 23px; color:var(--muted); font-size:13px; line-height:1.6; }
     .below { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
     .mini { padding:20px 23px; background:#172026; border:1px solid var(--line); border-radius:10px; }
@@ -76,7 +81,7 @@
     .error { background:#442729; color:#ffe2df; }
     .warning { background:#4a3c22; color:#ffe5a1; }
     .hide { display:none; }
-    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .controls{width:100%} select{flex:1} .quarter-key{padding:13px 15px 0} #chart{height:500px;min-height:420px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} .valuation-overview{grid-template-columns:1fr;padding:18px 15px 0;gap:13px} .valuation-current{max-width:230px} .valuation-levels{padding:14px 15px 0;gap:8px 17px} #valuation-chart{height:360px} }
+    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .panel-head > div:first-child{width:100%} .controls{width:100%;min-width:0} .metric-choice{flex:1 1 100%;min-width:0} .metric-choice select{min-width:0} .controls .period{width:100%;min-width:0} .controls .period button{flex:1;min-width:0;padding:10px 6px} select{flex:1} #chart{height:520px;min-height:420px} .chart-scroll.wide-chart #chart{min-width:850px} .chart-scroll-hint:not([hidden]){display:block;margin:10px 15px 0;color:var(--muted);font-size:12px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} .valuation-overview{grid-template-columns:1fr;padding:18px 15px 0;gap:13px} .valuation-current{max-width:230px} .valuation-levels{padding:14px 15px 0;gap:8px 17px} #valuation-chart{height:360px} }
   </style>
 </head>
 <body>
@@ -114,11 +119,12 @@
     <div class="panel-head">
       <div>
         <h2 id="chart-title">归母净利润与披露日前复权股价</h2>
-        <p id="chart-subtitle">彩色柱：归母净利润（亿元） · 黄色线：披露日前复权股价（元/股）</p>
+        <p id="chart-subtitle">青色柱：归母净利润（亿元） · 黄色线：披露日前复权股价（元/股）</p>
       </div>
       <div class="controls">
-        <label for="bar-metric">柱形 · 左轴</label>
-        <select id="bar-metric" aria-label="左轴柱形指标">
+        <div class="metric-choice" style="--choice-color:#38c4dc">
+        <button type="button" class="metric-choice-toggle" id="bar-metric-toggle" aria-pressed="true" aria-controls="chart">柱形 A · 青色</button>
+        <select id="bar-metric" aria-label="柱形 A 指标">
           <option value="revenue">营业收入</option>
           <option value="profit" selected>归母净利润</option>
           <option value="revenue_growth">营收同比增长率</option>
@@ -134,7 +140,28 @@
           <option value="market_cap">披露日估算市值</option>
           <option value="qfq_price">披露日前复权股价</option>
         </select>
-        <label for="line-metric">黄色线 · 右轴</label>
+        </div>
+        <div class="metric-choice" style="--choice-color:#b9a0f5">
+        <button type="button" class="metric-choice-toggle" id="bar-metric-2-toggle" aria-pressed="false" aria-controls="chart">柱形 B · 紫色</button>
+        <select id="bar-metric-2" aria-label="第二组柱形指标">
+          <option value="revenue" selected>营业收入</option>
+          <option value="profit">归母净利润</option>
+          <option value="revenue_growth">营收同比增长率</option>
+          <option value="profit_growth">归母净利润同比增长率</option>
+          <option value="roe">ROE（TTM 估算）</option>
+          <option value="operating_cash_flow">经营活动现金流净额</option>
+          <option value="free_cash_flow">简化自由现金流</option>
+          <option value="gross_margin">毛利率</option>
+          <option value="net_margin">净利率</option>
+          <option value="capex">资本开支 CapEx</option>
+          <option value="interest_bearing_debt">有息负债（简化）</option>
+          <option value="net_cash">净现金／净负债</option>
+          <option value="market_cap">披露日估算市值</option>
+          <option value="qfq_price">披露日前复权股价</option>
+        </select>
+        </div>
+        <div class="metric-choice" style="--choice-color:#f4d35e">
+        <button type="button" class="metric-choice-toggle" id="line-metric-toggle" aria-pressed="true" aria-controls="chart">折线 · 黄色</button>
         <select id="line-metric" aria-label="黄色线指标">
           <option value="profit">归母净利润</option>
           <option value="revenue">营业收入</option>
@@ -151,6 +178,7 @@
           <option value="market_cap">披露日估算市值</option>
           <option value="qfq_price" selected>披露日前复权股价</option>
         </select>
+        </div>
         <div class="period" role="group" aria-label="财务周期">
           <button type="button" data-period="quarter" class="active">单季度</button>
           <button type="button" data-period="year">年度</button>
@@ -158,14 +186,8 @@
         </div>
       </div>
     </div>
-    <div id="quarter-key" class="quarter-key" aria-label="柱形季度配色">
-      <strong>柱形季度配色</strong>
-      <span><i data-quarter="03" aria-hidden="true"></i>Q1</span>
-      <span><i data-quarter="06" aria-hidden="true"></i>Q2</span>
-      <span><i data-quarter="09" aria-hidden="true"></i>Q3</span>
-      <span><i data-quarter="12" aria-hidden="true"></i>Q4</span>
-    </div>
-    <div id="chart" role="img" aria-label="季度财务与市场价格对照图"></div>
+    <p id="chart-scroll-hint" class="chart-scroll-hint" hidden>向右滑动可查看其他纵轴与完整图表</p>
+    <div id="chart-scroll" class="chart-scroll"><div id="chart" role="img" aria-label="季度财务与市场价格对照图"></div></div>
     <p id="chart-note" class="note"></p>
   </section>
   <div class="below">
@@ -264,93 +286,139 @@
     market_cap: {name:'披露日估算市值', unit:'亿元', scale:1e8, dateKey:'price_date', referenceKey:'market_cap_reference'},
     qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date', referenceKey:'qfq_price_reference'}
   };
-  const quarterColors = {'03':'#55c5e8','06':'#70d3a4','09':'#b9a0f5','12':'#ff9b74'};
-  document.querySelectorAll('[data-quarter]').forEach(swatch => {
-    swatch.style.setProperty('--swatch-color', quarterColors[swatch.dataset.quarter]);
-  });
   let selectedPeriod = 'quarter';
-  const barMetric = document.getElementById('bar-metric');
-  const lineMetric = document.getElementById('line-metric');
+  const seriesControls = [
+    {id:'bar-metric', kind:'bar', label:'青色柱', color:'#38c4dc'},
+    {id:'bar-metric-2', kind:'bar', label:'紫色柱', color:'#b9a0f5'},
+    {id:'line-metric', kind:'line', label:'黄色线', color:'#f4d35e'}
+  ].map(series => ({...series, control:document.getElementById(series.id),
+    toggle:document.getElementById(series.id + '-toggle')}));
   const note = document.getElementById('chart-note');
   function label(row) {
     if (selectedPeriod === 'year') return row.period.slice(0,4);
     return row.period.slice(0,4) + ' Q' + ({'03':1,'06':2,'09':3,'12':4}[row.period.slice(5,7)] || '?');
   }
+  function positions(rows) {
+    let yearGap = 0;
+    return rows.map((row, index) => {
+      if (selectedPeriod === 'quarter' && index && row.period.slice(0,4) !== rows[index - 1].period.slice(0,4)) yearGap += .48;
+      return index + yearGap;
+    });
+  }
   function render() {
-    const bar = metrics[barMetric.value];
-    const line = metrics[lineMetric.value];
     const rows = state.views?.[selectedPeriod] || [];
-    const quarterView = selectedPeriod === 'quarter';
-    document.getElementById('quarter-key').hidden = !quarterView;
-    document.getElementById('chart-title').textContent = bar.name + '与' + line.name;
-    document.getElementById('chart-subtitle').textContent = (quarterView ? '彩色柱：' : '青色柱：') + bar.name + '（' + bar.unit + '） · 黄色线：' + line.name + '（' + line.unit + '）';
-    const xs = rows.map(label);
-    const custom = rows.map(r => [r.period, r.publish_date || '未知', r.price_date || '无价格', r.qfq_price_date || '无价格']);
-    const barValues = rows.map(r => r[barMetric.value] == null ? null : r[barMetric.value] / bar.scale);
-    const lineValues = rows.map(r => r[lineMetric.value] == null ? null : r[lineMetric.value] / line.scale);
-    const colors = {paper_bgcolor:'#1a2227', plot_bgcolor:'#1a2227', font:{color:'#edf4f4'}};
-    const axisTicks = {color:'#ffffff',size:13};
-    const axisTitle = text => ({text, font:{color:'#ffffff',size:15}, standoff:12});
-    const hover = metric => '%{x}<br>' + metric.name + '：%{y:,.2f} ' + metric.unit +
-      '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}' +
-      (metric.dateKey ? '<br>价格交易日：%{customdata[' + (metric.dateKey === 'price_date' ? 2 : 3) + ']}' : '') + '<extra></extra>';
-    const referenceValues = metric => rows.map(r => metric.referenceKey && r[metric.referenceKey] != null ? r[metric.referenceKey] / metric.scale : null);
-    const barReferences = referenceValues(bar);
-    const lineReferences = referenceValues(line);
-    const referenceSegments = (metric, values, references, color, axis) => {
+    const labels = rows.map(label);
+    const xs = positions(rows);
+    const active = seriesControls.filter(series => series.toggle.getAttribute('aria-pressed') === 'true').map(series => ({
+      ...series, key:series.control.value, metric:metrics[series.control.value],
+      values:rows.map(row => row[series.control.value] == null ? null : row[series.control.value] / metrics[series.control.value].scale)
+    }));
+    const axisGroups = [];
+    for (const series of active) {
+      let group = axisGroups.find(item => item.unit === series.metric.unit);
+      if (!group) {
+        group = {unit:series.metric.unit, names:[], color:series.color};
+        axisGroups.push(group);
+      }
+      if (!group.names.includes(series.metric.name)) group.names.push(series.metric.name);
+      const axisNumber = axisGroups.indexOf(group) + 1;
+      series.axis = axisNumber === 1 ? 'y' : 'y' + axisNumber;
+    }
+    document.getElementById('chart-scroll').classList.toggle('wide-chart', axisGroups.length > 2);
+    document.getElementById('chart-scroll-hint').hidden = axisGroups.length <= 2;
+    document.getElementById('chart-title').textContent = active.length
+      ? active.map(series => series.metric.name).join(' / ') : '选择指标开始对照';
+    document.getElementById('chart-subtitle').textContent = active.length
+      ? active.map(series => series.label + '：' + series.metric.name + '（' + series.metric.unit + '）').join(' · ')
+      : '点击上方序列标题以显示指标';
+    const custom = rows.map((row, index) => [
+      labels[index], row.period, row.publish_date || '未知',
+      row.price_date || '无价格', row.qfq_price_date || '无价格'
+    ]);
+    const hover = metric => '%{customdata[0]}<br>' + metric.name + '：%{y:,.2f} ' + metric.unit +
+      '<br>报告期：%{customdata[1]}<br>披露日：%{customdata[2]}' +
+      (metric.dateKey ? '<br>价格交易日：%{customdata[' + (metric.dateKey === 'price_date' ? 3 : 4) + ']}' : '') +
+      '<extra></extra>';
+    const traces = [];
+    const barCount = active.filter(series => series.kind === 'bar').length;
+    let barIndex = 0;
+    let referenceCount = 0;
+    for (const series of active) {
+      const metric = series.metric;
+      const width = barCount === 2 ? .30 : .48;
+      const offset = barCount === 2 ? (barIndex === 0 ? -.33 : .03) : -.24;
+      const referenceXs = series.kind === 'bar' ? xs.map(x => x + offset + width / 2) : xs;
+      if (series.kind === 'bar') {
+        traces.push({type:'bar', name:series.label + ' · ' + metric.name, x:xs, y:series.values,
+          yaxis:series.axis, width, offset, customdata:custom,
+          marker:{color:series.color}, hovertemplate:hover(metric)});
+        barIndex++;
+      } else {
+        traces.push({type:'scatter', mode:'lines+markers', name:series.label + ' · ' + metric.name,
+          x:xs, y:series.values, yaxis:series.axis, customdata:custom, connectgaps:false,
+          line:{color:series.color,width:3}, marker:{size:5,color:series.color},
+          hovertemplate:hover(metric)});
+      }
+      if (!metric.referenceKey) continue;
+      const references = rows.map(row => row[metric.referenceKey] == null ? null : row[metric.referenceKey] / metric.scale);
+      referenceCount += references.filter(value => value != null).length;
       const segmentX = [], segmentY = [];
-      for (let i = 1; i < rows.length; i++) {
-        const previous = values[i - 1] ?? references[i - 1];
-        const current = values[i] ?? references[i];
-        if (previous == null || current == null || (references[i - 1] == null && references[i] == null)) continue;
-        segmentX.push(xs[i - 1], xs[i], null);
+      for (let index = 1; index < rows.length; index++) {
+        const previous = series.values[index - 1] ?? references[index - 1];
+        const current = series.values[index] ?? references[index];
+        if (previous == null || current == null || (references[index - 1] == null && references[index] == null)) continue;
+        segmentX.push(referenceXs[index - 1], referenceXs[index], null);
         segmentY.push(previous, current, null);
       }
-      return segmentX.length ? {type:'scatter', mode:'lines', name:metric.name + ' · 参考段',
-        x:segmentX, y:segmentY, yaxis:axis, connectgaps:false, hoverinfo:'skip',
-        line:{color,width:2,dash:'dash'}} : null;
-    };
-    const referenceTrace = (metric, values, color, axis) => ({
-      type:'scatter', mode:'markers', name:metric.name + ' · 长间隔参考', x:xs, y:values, yaxis:axis,
-      customdata:rows.map(r => [r.period, r.publish_date || '未知',
-        r[metric.referenceKey + '_date'], r[metric.referenceKey + '_lag_days']]),
-      marker:{symbol:'circle-open',size:11,color,line:{color,width:2}},
-      hovertemplate:'%{x}<br>' + metric.name + '参考值：%{y:,.2f} ' + metric.unit +
-        '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}' +
-        '<br>实际交易日：%{customdata[2]}（相隔 %{customdata[3]} 天）' +
-        '<br>长间隔参考值，非披露日成交价<extra></extra>'
+      if (segmentX.length) traces.push({type:'scatter', mode:'lines', x:segmentX, y:segmentY,
+        yaxis:series.axis, connectgaps:false, hoverinfo:'skip', showlegend:false,
+        line:{color:series.color,width:2,dash:'dash'}});
+      if (references.some(value => value != null)) traces.push({type:'scatter', mode:'markers',
+        x:referenceXs, y:references, yaxis:series.axis, showlegend:false,
+        customdata:rows.map((row, index) => [labels[index], row.period, row.publish_date || '未知',
+          row[metric.referenceKey + '_date'], row[metric.referenceKey + '_lag_days']]),
+        marker:{symbol:'circle-open',size:11,color:series.color,line:{color:series.color,width:2}},
+        hovertemplate:'%{customdata[0]}<br>' + metric.name + '参考值：%{y:,.2f} ' + metric.unit +
+          '<br>报告期：%{customdata[1]}<br>披露日：%{customdata[2]}' +
+          '<br>实际交易日：%{customdata[3]}（相隔 %{customdata[4]} 天）' +
+          '<br>长间隔参考值，非披露日成交价<extra></extra>'});
+    }
+    const axisTicks = {color:'#ffffff',size:13};
+    const axisConfig = group => ({
+      title:{text:group.names.join(' / ') + '（' + group.unit + '）',
+        font:{color:group.color,size:14},standoff:12},
+      tickfont:axisTicks, automargin:true, zeroline:false, rangemode:'tozero',
+      gridcolor:'#304049'
     });
-    const traces = [
-      {type:'bar', name:bar.name, x:xs, y:barValues, customdata:custom,
-       marker:{color:quarterView ? rows.map(r => quarterColors[r.period.slice(5,7)] || '#38c4dc') : '#38c4dc'},
-       showlegend:!quarterView,
-       hovertemplate:hover(bar)},
-      {type:'scatter', mode:'lines+markers', name:line.name, x:xs, y:lineValues, customdata:custom, yaxis:'y2',
-       line:{color:'#f4d35e',width:3}, marker:{size:5,color:'#f4d35e'}, connectgaps:false,
-       hovertemplate:hover(line)}
-    ];
-    const barSegments = referenceSegments(bar, barValues, barReferences, '#38c4dc', 'y');
-    const lineSegments = referenceSegments(line, lineValues, lineReferences, '#f4d35e', 'y2');
-    if (barSegments) traces.push(barSegments);
-    if (lineSegments) traces.push(lineSegments);
-    if (barReferences.some(v => v != null)) traces.push(referenceTrace(bar, barReferences, '#38c4dc', 'y'));
-    if (lineReferences.some(v => v != null)) traces.push(referenceTrace(line, lineReferences, '#f4d35e', 'y2'));
-    Plotly.react('chart', traces, { ...colors, margin:{l:95,r:112,t:28,b:96}, barmode:'group', bargap:.36,
-      xaxis:{tickangle:-55,tickfont:axisTicks,gridcolor:'#304049',zeroline:false,automargin:true},
-      yaxis:{title:axisTitle(bar.name + '（' + bar.unit + '）'),tickfont:axisTicks,automargin:true,gridcolor:'#304049',zeroline:false,rangemode:'tozero'},
-      yaxis2:{title:axisTitle(line.name + '（' + line.unit + '）'),tickfont:axisTicks,automargin:true,overlaying:'y',side:'right',showgrid:false,zeroline:false,rangemode:'tozero'},
+    const layout = {
+      paper_bgcolor:'#1a2227', plot_bgcolor:'#1a2227', font:{color:'#edf4f4'},
+      margin:{l:100,r:axisGroups.length > 2 ? 195 : axisGroups.length > 1 ? 115 : 35,t:43,b:96},
+      barmode:'overlay', bargap:.27, hovermode:'x unified', showlegend:active.length > 0,
+      xaxis:{type:'linear', tickmode:'array', tickvals:xs, ticktext:labels, tickangle:-55,
+        tickfont:axisTicks, gridcolor:'#304049', zeroline:false, automargin:true,
+        visible:active.length > 0,
+        range:xs.length ? [xs[0] - .7, xs.at(-1) + .7] : undefined},
+      yaxis:axisGroups.length ? axisConfig(axisGroups[0]) : {visible:false},
       legend:{orientation:'h',x:.5,xanchor:'center',y:1.12,font:{size:12}},
-      hovermode:'x unified', showlegend:true }, {responsive:true,displaylogo:false,locale:'zh-CN'});
-    const missingBar = barValues.filter(v => v == null).length;
-    const missingLine = lineValues.filter(v => v == null).length;
-    const barReferenceCount = barReferences.filter(v => v != null).length;
-    const lineReferenceCount = lineReferences.filter(v => v != null).length;
-    const selectedMetrics = new Set([barMetric.value, lineMetric.value]);
+      annotations:active.length ? [] : [{text:'点击上方序列标题以显示指标',xref:'paper',yref:'paper',
+        x:.5,y:.5,showarrow:false,font:{color:'#9aadb3',size:17}}]
+    };
+    axisGroups.slice(1).forEach((group, index) => {
+      layout['yaxis' + (index + 2)] = {...axisConfig(group), overlaying:'y', side:'right',
+        anchor:'free', position:1, shift:index * 86, showgrid:false};
+    });
+    Plotly.react('chart', traces, layout, {responsive:true,displaylogo:false,locale:'zh-CN'});
+    const selectedMetrics = new Set(active.map(series => series.key));
     const hasFinancial = [...selectedMetrics].some(metric => !['market_cap','qfq_price','interest_bearing_debt','net_cash'].includes(metric));
     const hasBalance = selectedMetrics.has('interest_bearing_debt') || selectedMetrics.has('net_cash');
     const hasMarket = selectedMetrics.has('market_cap') || selectedMetrics.has('qfq_price');
-    const hasNegativeAdjusted = selectedMetrics.has('qfq_price') && rows.some(r => r.qfq_price != null && r.qfq_price < 0);
-    note.textContent = (hasFinancial ? (selectedPeriod === 'quarter' ? '单季度财务值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? '财务 TTM 为连续四个单季度之和；缺期则留空。' : '年度财务值取当年年报累计数。') : '') +
+    const hasNegativeAdjusted = selectedMetrics.has('qfq_price') && rows.some(row => row.qfq_price != null && row.qfq_price < 0);
+    const missingNote = active.map(series => {
+      const missing = series.values.filter(value => value == null).length;
+      return missing ? ' ' + series.label + '有 ' + missing + ' 个正式值缺失。' : '';
+    }).join('');
+    note.textContent = (!active.length ? '请点击上方序列标题，显示至少一个指标。' : '') +
+      (hasFinancial ? (selectedPeriod === 'quarter' ? '单季度财务值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? '财务 TTM 为连续四个单季度之和；缺期则留空。' : '年度财务值取当年年报累计数。') : '') +
       (hasMarket ? (hasFinancial ? ' ' : '') + '市场指标正式值取对应报告披露日附近的价格快照。' : '') +
       (selectedMetrics.has('market_cap') ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : '') +
       (selectedMetrics.has('qfq_price') ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
@@ -362,12 +430,16 @@
       (selectedMetrics.has('net_margin') ? ' 净利率＝合并净利润÷营业收入，并非归母净利率；按所选周期计算。' : '') +
       (selectedMetrics.has('capex') ? ' CapEx 取现金流量表“购建固定资产、无形资产和其他长期资产所支付的现金”；单季由累计值差分。' : '') +
       (hasBalance ? ' 有息负债（简化）＝短期借款＋应付短期债券＋一年内到期的非流动负债＋长期借款＋应付债券＋租赁负债；净现金＝报告期末货币资金－有息负债，正值为净现金，负值为净负债。均为期末时点值，不随单季／年度／TTM 切换而加总；货币资金可能含受限资金，债务科目亦可能含非有息部分。' : '') +
-      (barReferenceCount || lineReferenceCount ? ' 空心圆点为距披露日 16–180 天的最近交易价参考点；与相邻价格点用虚线连接，正常价格点之间仍用实线。' : '') +
-      (missingBar ? ` 柱形有 ${missingBar} 个正式值缺失${barReferenceCount ? `，其中 ${barReferenceCount} 个显示参考点` : ''}。` : '') +
-      (missingLine ? ` 黄色线有 ${missingLine} 个正式值缺失${lineReferenceCount ? `，其中 ${lineReferenceCount} 个显示参考点` : ''}。` : '');
+      (referenceCount ? ' 空心圆点为距披露日 16–180 天的最近交易价参考点；与相邻价格点用虚线连接，正常价格点之间仍用实线。' : '') +
+      missingNote;
   }
-  barMetric.addEventListener('change', render);
-  lineMetric.addEventListener('change', render);
+  seriesControls.forEach(series => {
+    series.control.addEventListener('change', render);
+    series.toggle.addEventListener('click', () => {
+      series.toggle.setAttribute('aria-pressed', String(series.toggle.getAttribute('aria-pressed') !== 'true'));
+      render();
+    });
+  });
   document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => {
     selectedPeriod = button.dataset.period;
     document.querySelectorAll('[data-period]').forEach(item => item.classList.toggle('active', item === button));
