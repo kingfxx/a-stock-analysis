@@ -94,12 +94,19 @@
         <p id="chart-subtitle">青色柱为营收，黄色线为归母净利润。左右轴分别标明单位。</p>
       </div>
       <div class="controls">
-        <label for="mode">对照指标</label>
-        <select id="mode">
-          <option value="revenue_profit">营收 ＋ 净利润</option>
-          <option value="mcap_revenue">市值 ＋ 营收</option>
-          <option value="mcap_profit">市值 ＋ 净利润</option>
-          <option value="price_profit">前复权股价 ＋ 净利润</option>
+        <label for="bar-metric">青色柱 · 左轴</label>
+        <select id="bar-metric" aria-label="青色柱指标">
+          <option value="revenue">营业收入</option>
+          <option value="profit">归母净利润</option>
+          <option value="market_cap">披露日估算市值</option>
+          <option value="qfq_price">披露日前复权股价</option>
+        </select>
+        <label for="line-metric">黄色线 · 右轴</label>
+        <select id="line-metric" aria-label="黄色线指标">
+          <option value="profit">归母净利润</option>
+          <option value="revenue">营业收入</option>
+          <option value="market_cap">披露日估算市值</option>
+          <option value="qfq_price">披露日前复权股价</option>
         </select>
         <div class="period" role="group" aria-label="财务周期">
           <button type="button" data-period="quarter" class="active">单季度</button>
@@ -154,51 +161,62 @@
   for (const message of state.warnings || []) {
     const div = document.createElement('div'); div.className = 'warning'; div.textContent = message; warnings.appendChild(div);
   }
-  const configs = {
-    revenue_profit: {title:'营收与归母净利润', bar:'营业收入', barKey:'revenue', line:'归母净利润', lineKey:'profit', lineUnit:'亿元'},
-    mcap_revenue: {title:'市值与营业收入', bar:'营业收入', barKey:'revenue', line:'披露日估算市值', lineKey:'market_cap', lineUnit:'亿元'},
-    mcap_profit: {title:'市值与归母净利润', bar:'归母净利润', barKey:'profit', line:'披露日估算市值', lineKey:'market_cap', lineUnit:'亿元'},
-    price_profit: {title:'前复权股价与归母净利润', bar:'归母净利润', barKey:'profit', line:'披露日前复权股价', lineKey:'qfq_price', lineUnit:'元/股'}
+  const metrics = {
+    revenue: {name:'营业收入', unit:'亿元', scale:1e8},
+    profit: {name:'归母净利润', unit:'亿元', scale:1e8},
+    market_cap: {name:'披露日估算市值', unit:'亿元', scale:1e8, dateKey:'price_date'},
+    qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date'}
   };
   let selectedPeriod = 'quarter';
-  const mode = document.getElementById('mode');
+  const barMetric = document.getElementById('bar-metric');
+  const lineMetric = document.getElementById('line-metric');
   const note = document.getElementById('chart-note');
   function label(row) {
     if (selectedPeriod === 'year') return row.period.slice(0,4);
     return row.period.slice(0,4) + ' Q' + ({'03':1,'06':2,'09':3,'12':4}[row.period.slice(5,7)] || '?');
   }
   function render() {
-    const cfg = configs[mode.value];
+    const bar = metrics[barMetric.value];
+    const line = metrics[lineMetric.value];
     const rows = state.views?.[selectedPeriod] || [];
-    document.getElementById('chart-title').textContent = cfg.title;
-    document.getElementById('chart-subtitle').textContent = '青色柱：' + cfg.bar + '（亿元） · 黄色线：' + cfg.line + '（' + cfg.lineUnit + '）';
+    document.getElementById('chart-title').textContent = bar.name + '与' + line.name;
+    document.getElementById('chart-subtitle').textContent = '青色柱：' + bar.name + '（' + bar.unit + '） · 黄色线：' + line.name + '（' + line.unit + '）';
     const xs = rows.map(label);
-    const custom = rows.map(r => [r.period, r.publish_date || '未知',
-      (cfg.lineKey === 'qfq_price' ? r.qfq_price_date : r.price_date) || '无价格']);
-    const bar = rows.map(r => r[cfg.barKey] == null ? null : r[cfg.barKey] / 1e8);
-    const line = rows.map(r => r[cfg.lineKey] == null ? null : r[cfg.lineKey] / (cfg.lineKey === 'qfq_price' ? 1 : 1e8));
+    const custom = rows.map(r => [r.period, r.publish_date || '未知', r.price_date || '无价格', r.qfq_price_date || '无价格']);
+    const barValues = rows.map(r => r[barMetric.value] == null ? null : r[barMetric.value] / bar.scale);
+    const lineValues = rows.map(r => r[lineMetric.value] == null ? null : r[lineMetric.value] / line.scale);
     const colors = {paper_bgcolor:'#1a2227', plot_bgcolor:'#1a2227', font:{color:'#edf4f4'}};
     const axisTicks = {color:'#ffffff',size:13};
     const axisTitle = text => ({text, font:{color:'#ffffff',size:15}, standoff:12});
+    const hover = metric => '%{x}<br>' + metric.name + '：%{y:,.2f} ' + metric.unit +
+      '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}' +
+      (metric.dateKey ? '<br>价格交易日：%{customdata[' + (metric.dateKey === 'price_date' ? 2 : 3) + ']}' : '') + '<extra></extra>';
     Plotly.react('chart', [
-      {type:'bar', name:cfg.bar, x:xs, y:bar, customdata:custom, marker:{color:'#38c4dc'},
-       hovertemplate:'%{x}<br>' + cfg.bar + '：%{y:,.2f} 亿元<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}<extra></extra>'},
-      {type:'scatter', mode:'lines+markers', name:cfg.line, x:xs, y:line, customdata:custom, yaxis:'y2',
+      {type:'bar', name:bar.name, x:xs, y:barValues, customdata:custom, marker:{color:'#38c4dc'},
+       hovertemplate:hover(bar)},
+      {type:'scatter', mode:'lines+markers', name:line.name, x:xs, y:lineValues, customdata:custom, yaxis:'y2',
        line:{color:'#f4d35e',width:3}, marker:{size:5,color:'#f4d35e'}, connectgaps:false,
-       hovertemplate:'%{x}<br>' + cfg.line + '：%{y:,.2f} ' + cfg.lineUnit + '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}' +
-         (cfg.lineKey === 'market_cap' || cfg.lineKey === 'qfq_price' ? '<br>价格交易日：%{customdata[2]}' : '') + '<extra></extra>'}
+       hovertemplate:hover(line)}
     ], { ...colors, margin:{l:95,r:112,t:28,b:96}, barmode:'group', bargap:.36,
       xaxis:{tickangle:-55,tickfont:axisTicks,gridcolor:'#304049',zeroline:false,automargin:true},
-      yaxis:{title:axisTitle(cfg.bar + '（亿元）'),tickfont:axisTicks,automargin:true,gridcolor:'#304049',zeroline:false,rangemode:'tozero'},
-      yaxis2:{title:axisTitle(cfg.line + '（' + cfg.lineUnit + '）'),tickfont:axisTicks,automargin:true,overlaying:'y',side:'right',showgrid:false,zeroline:false,rangemode:'tozero'},
+      yaxis:{title:axisTitle(bar.name + '（' + bar.unit + '）'),tickfont:axisTicks,automargin:true,gridcolor:'#304049',zeroline:false,rangemode:'tozero'},
+      yaxis2:{title:axisTitle(line.name + '（' + line.unit + '）'),tickfont:axisTicks,automargin:true,overlaying:'y',side:'right',showgrid:false,zeroline:false,rangemode:'tozero'},
       legend:{orientation:'h',x:.5,xanchor:'center',y:1.12,font:{size:12}},
       hovermode:'x unified', showlegend:true }, {responsive:true,displaylogo:false,locale:'zh-CN'});
-    const missing = line.filter(v => v == null).length;
-    note.textContent = (selectedPeriod === 'quarter' ? '单季度值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? 'TTM 为连续四个单季度之和；缺期则留空。' : '年度值取当年年报累计数。') +
-      (cfg.lineKey === 'market_cap' ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : cfg.lineKey === 'qfq_price' ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
-      (missing ? ` 黄色线有 ${missing} 个缺失点。` : '');
+    const missingBar = barValues.filter(v => v == null).length;
+    const missingLine = lineValues.filter(v => v == null).length;
+    const selectedMetrics = new Set([barMetric.value, lineMetric.value]);
+    const hasFinancial = selectedMetrics.has('revenue') || selectedMetrics.has('profit');
+    const hasMarket = selectedMetrics.has('market_cap') || selectedMetrics.has('qfq_price');
+    note.textContent = (hasFinancial ? (selectedPeriod === 'quarter' ? '单季度财务值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? '财务 TTM 为连续四个单季度之和；缺期则留空。' : '年度财务值取当年年报累计数。') : '') +
+      (hasMarket ? (hasFinancial ? ' ' : '') + '市场指标始终取对应报告披露日的价格快照。' : '') +
+      (selectedMetrics.has('market_cap') ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : '') +
+      (selectedMetrics.has('qfq_price') ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
+      (missingBar ? ` 青色柱有 ${missingBar} 个缺失点。` : '') +
+      (missingLine ? ` 黄色线有 ${missingLine} 个缺失点。` : '');
   }
-  mode.addEventListener('change', render);
+  barMetric.addEventListener('change', render);
+  lineMetric.addEventListener('change', render);
   document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => {
     selectedPeriod = button.dataset.period;
     document.querySelectorAll('[data-period]').forEach(item => item.classList.toggle('active', item === button));
