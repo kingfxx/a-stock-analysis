@@ -1,4 +1,4 @@
-from quarterly_dashboard.core import build_period_rows, disclosure_snapshots, view_rows
+from quarterly_dashboard.core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
 
 
 def test_quarterly_differences_and_ttm_require_contiguous_reports():
@@ -62,3 +62,26 @@ def test_negative_adjusted_close_is_not_treated_as_missing():
     row = build_period_rows(reports, raw, adjusted)[0]
     assert row["qfq_price"] == -5.152
     assert row["qfq_price_date"] == "2013-10-31"
+
+
+def test_long_trading_gap_keeps_last_close_as_separate_reference():
+    reports = [
+        {"period": "2015-06-30", "publish_date": "2015-08-28", "shares": 100},
+        {"period": "2015-09-30", "publish_date": "2015-10-29", "shares": 100},
+    ]
+    raw_daily = [{"date": "2015-08-07", "close": 11.63},
+                 {"date": "2015-12-25", "close": 11.07}]
+    qfq_daily = [{"date": "2015-08-07", "close": 1.386},
+                 {"date": "2015-12-25", "close": 0.9}]
+    assert disclosure_snapshots(reports, raw_daily) == []
+    raw_refs = disclosure_reference_snapshots(reports, raw_daily)
+    qfq_refs = disclosure_reference_snapshots(reports, qfq_daily)
+    assert [(p["publish_date"], p["date"], p["lag_days"]) for p in raw_refs] == [
+        ("2015-08-28", "2015-08-07", 21),
+        ("2015-10-29", "2015-08-07", 83),
+    ]
+    rows = build_period_rows(reports, [], [], raw_refs, qfq_refs)
+    assert [r["qfq_price"] for r in rows] == [None, None]
+    assert [r["qfq_price_reference"] for r in rows] == [1.386, 1.386]
+    assert [r["market_cap_reference"] for r in rows] == [1163, 1163]
+    assert disclosure_reference_snapshots(reports, raw_daily[:1]) == []

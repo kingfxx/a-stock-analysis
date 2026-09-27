@@ -43,6 +43,10 @@
     .period { display:flex; border:1px solid #4b616d; border-radius:7px; overflow:hidden; }
     .period button { border-radius:0; background:transparent; color:var(--muted); padding:10px 12px; font-weight:500; }
     .period button.active { background:#355363; color:#fff; }
+    .quarter-key { display:flex; flex-wrap:wrap; align-items:center; gap:9px 18px; padding:13px 27px 0; color:var(--muted); font-size:12px; }
+    .quarter-key[hidden] { display:none; }
+    .quarter-key span { display:inline-flex; align-items:center; gap:6px; color:var(--ink); }
+    .quarter-key i { display:inline-block; width:11px; height:11px; border-radius:2px; background:var(--swatch-color); }
     #chart { height:min(64vh,620px); min-height:390px; }
     .note { margin:0; padding:0 27px 23px; color:var(--muted); font-size:13px; line-height:1.6; }
     .below { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
@@ -53,7 +57,7 @@
     .error { background:#442729; color:#ffe2df; }
     .warning { background:#4a3c22; color:#ffe5a1; }
     .hide { display:none; }
-    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .controls{width:100%} select{flex:1} #chart{height:500px;min-height:420px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} }
+    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .controls{width:100%} select{flex:1} .quarter-key{padding:13px 15px 0} #chart{height:500px;min-height:420px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} }
   </style>
 </head>
 <body>
@@ -90,14 +94,14 @@
   <section class="panel" aria-label="季度对照图">
     <div class="panel-head">
       <div>
-        <h2 id="chart-title">营收与归母净利润</h2>
-        <p id="chart-subtitle">青色柱为营收，黄色线为归母净利润。左右轴分别标明单位。</p>
+        <h2 id="chart-title">归母净利润与披露日前复权股价</h2>
+        <p id="chart-subtitle">彩色柱：归母净利润（亿元） · 黄色线：披露日前复权股价（元/股）</p>
       </div>
       <div class="controls">
-        <label for="bar-metric">青色柱 · 左轴</label>
-        <select id="bar-metric" aria-label="青色柱指标">
+        <label for="bar-metric">柱形 · 左轴</label>
+        <select id="bar-metric" aria-label="左轴柱形指标">
           <option value="revenue">营业收入</option>
-          <option value="profit">归母净利润</option>
+          <option value="profit" selected>归母净利润</option>
           <option value="market_cap">披露日估算市值</option>
           <option value="qfq_price">披露日前复权股价</option>
         </select>
@@ -106,7 +110,7 @@
           <option value="profit">归母净利润</option>
           <option value="revenue">营业收入</option>
           <option value="market_cap">披露日估算市值</option>
-          <option value="qfq_price">披露日前复权股价</option>
+          <option value="qfq_price" selected>披露日前复权股价</option>
         </select>
         <div class="period" role="group" aria-label="财务周期">
           <button type="button" data-period="quarter" class="active">单季度</button>
@@ -115,12 +119,19 @@
         </div>
       </div>
     </div>
+    <div id="quarter-key" class="quarter-key" aria-label="柱形季度配色">
+      <strong>柱形季度配色</strong>
+      <span><i data-quarter="03" aria-hidden="true"></i>Q1</span>
+      <span><i data-quarter="06" aria-hidden="true"></i>Q2</span>
+      <span><i data-quarter="09" aria-hidden="true"></i>Q3</span>
+      <span><i data-quarter="12" aria-hidden="true"></i>Q4</span>
+    </div>
     <div id="chart" role="img" aria-label="季度财务与市场价格对照图"></div>
     <p id="chart-note" class="note"></p>
   </section>
   <div class="below">
-    <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。新浪部分历史披露日期错位，按上一年同报告期记录校正；无法可靠推断则留空。股价取校正披露日或此前最近交易日的收盘价，相隔超过 15 天则留空。悬停可查看日期；披露来源没有具体时刻，价格不代表披露瞬间可交易的价格。</p></section>
-    <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的未复权及前复权价格来自腾讯日 K，只缓存每份报告对应的价格快照。市值为披露日价格×报告期末股本的估算值。缺少价格或股本时留空。</p></section>
+    <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。新浪部分历史披露日期错位，按上一年同报告期记录校正；无法可靠推断则留空。股价取校正披露日或此前最近交易日的收盘价。相隔超过 15 天的价格不算披露日价格；若处于有前后交易记录的长间隔内，以空心圆点标出最近收盘参考值，与相邻价格点之间用虚线连接。悬停可查看实际交易日。</p></section>
+    <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的未复权及前复权价格来自腾讯日 K，只缓存每份报告对应的价格快照及长间隔参考点。市值为披露日价格×报告期末股本的估算值；缺少正式价格或股本时正式值留空。</p></section>
   </div>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
@@ -131,7 +142,7 @@
   const error = document.getElementById('error');
   if (error.textContent.trim()) error.classList.remove('hide');
   document.getElementById('stock-code').textContent = state.code ? state.code + (state.name ? ' - ' + state.name : '') : '—';
-  document.getElementById('refresh').href = '/?code=' + encodeURIComponent(state.code || '300750') + '&refresh=1';
+  document.getElementById('refresh').href = '/?code=' + encodeURIComponent(state.code || '601919') + '&refresh=1';
   const cachedSearch = document.getElementById('cached-search');
   const cachedList = document.getElementById('cached-list');
   function renderCachedStocks() {
@@ -164,9 +175,13 @@
   const metrics = {
     revenue: {name:'营业收入', unit:'亿元', scale:1e8},
     profit: {name:'归母净利润', unit:'亿元', scale:1e8},
-    market_cap: {name:'披露日估算市值', unit:'亿元', scale:1e8, dateKey:'price_date'},
-    qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date'}
+    market_cap: {name:'披露日估算市值', unit:'亿元', scale:1e8, dateKey:'price_date', referenceKey:'market_cap_reference'},
+    qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date', referenceKey:'qfq_price_reference'}
   };
+  const quarterColors = {'03':'#55c5e8','06':'#70d3a4','09':'#b9a0f5','12':'#ff9b74'};
+  document.querySelectorAll('[data-quarter]').forEach(swatch => {
+    swatch.style.setProperty('--swatch-color', quarterColors[swatch.dataset.quarter]);
+  });
   let selectedPeriod = 'quarter';
   const barMetric = document.getElementById('bar-metric');
   const lineMetric = document.getElementById('line-metric');
@@ -179,8 +194,10 @@
     const bar = metrics[barMetric.value];
     const line = metrics[lineMetric.value];
     const rows = state.views?.[selectedPeriod] || [];
+    const quarterView = selectedPeriod === 'quarter';
+    document.getElementById('quarter-key').hidden = !quarterView;
     document.getElementById('chart-title').textContent = bar.name + '与' + line.name;
-    document.getElementById('chart-subtitle').textContent = '青色柱：' + bar.name + '（' + bar.unit + '） · 黄色线：' + line.name + '（' + line.unit + '）';
+    document.getElementById('chart-subtitle').textContent = (quarterView ? '彩色柱：' : '青色柱：') + bar.name + '（' + bar.unit + '） · 黄色线：' + line.name + '（' + line.unit + '）';
     const xs = rows.map(label);
     const custom = rows.map(r => [r.period, r.publish_date || '未知', r.price_date || '无价格', r.qfq_price_date || '无价格']);
     const barValues = rows.map(r => r[barMetric.value] == null ? null : r[barMetric.value] / bar.scale);
@@ -191,13 +208,48 @@
     const hover = metric => '%{x}<br>' + metric.name + '：%{y:,.2f} ' + metric.unit +
       '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}' +
       (metric.dateKey ? '<br>价格交易日：%{customdata[' + (metric.dateKey === 'price_date' ? 2 : 3) + ']}' : '') + '<extra></extra>';
-    Plotly.react('chart', [
-      {type:'bar', name:bar.name, x:xs, y:barValues, customdata:custom, marker:{color:'#38c4dc'},
+    const referenceValues = metric => rows.map(r => metric.referenceKey && r[metric.referenceKey] != null ? r[metric.referenceKey] / metric.scale : null);
+    const barReferences = referenceValues(bar);
+    const lineReferences = referenceValues(line);
+    const referenceSegments = (metric, values, references, color, axis) => {
+      const segmentX = [], segmentY = [];
+      for (let i = 1; i < rows.length; i++) {
+        const previous = values[i - 1] ?? references[i - 1];
+        const current = values[i] ?? references[i];
+        if (previous == null || current == null || (references[i - 1] == null && references[i] == null)) continue;
+        segmentX.push(xs[i - 1], xs[i], null);
+        segmentY.push(previous, current, null);
+      }
+      return segmentX.length ? {type:'scatter', mode:'lines', name:metric.name + ' · 参考段',
+        x:segmentX, y:segmentY, yaxis:axis, connectgaps:false, hoverinfo:'skip',
+        line:{color,width:2,dash:'dash'}} : null;
+    };
+    const referenceTrace = (metric, values, color, axis) => ({
+      type:'scatter', mode:'markers', name:metric.name + ' · 长间隔参考', x:xs, y:values, yaxis:axis,
+      customdata:rows.map(r => [r.period, r.publish_date || '未知',
+        r[metric.referenceKey + '_date'], r[metric.referenceKey + '_lag_days']]),
+      marker:{symbol:'circle-open',size:11,color,line:{color,width:2}},
+      hovertemplate:'%{x}<br>' + metric.name + '参考值：%{y:,.2f} ' + metric.unit +
+        '<br>报告期：%{customdata[0]}<br>披露日：%{customdata[1]}' +
+        '<br>实际交易日：%{customdata[2]}（相隔 %{customdata[3]} 天）' +
+        '<br>长间隔参考值，非披露日成交价<extra></extra>'
+    });
+    const traces = [
+      {type:'bar', name:bar.name, x:xs, y:barValues, customdata:custom,
+       marker:{color:quarterView ? rows.map(r => quarterColors[r.period.slice(5,7)] || '#38c4dc') : '#38c4dc'},
+       showlegend:!quarterView,
        hovertemplate:hover(bar)},
       {type:'scatter', mode:'lines+markers', name:line.name, x:xs, y:lineValues, customdata:custom, yaxis:'y2',
        line:{color:'#f4d35e',width:3}, marker:{size:5,color:'#f4d35e'}, connectgaps:false,
        hovertemplate:hover(line)}
-    ], { ...colors, margin:{l:95,r:112,t:28,b:96}, barmode:'group', bargap:.36,
+    ];
+    const barSegments = referenceSegments(bar, barValues, barReferences, '#38c4dc', 'y');
+    const lineSegments = referenceSegments(line, lineValues, lineReferences, '#f4d35e', 'y2');
+    if (barSegments) traces.push(barSegments);
+    if (lineSegments) traces.push(lineSegments);
+    if (barReferences.some(v => v != null)) traces.push(referenceTrace(bar, barReferences, '#38c4dc', 'y'));
+    if (lineReferences.some(v => v != null)) traces.push(referenceTrace(line, lineReferences, '#f4d35e', 'y2'));
+    Plotly.react('chart', traces, { ...colors, margin:{l:95,r:112,t:28,b:96}, barmode:'group', bargap:.36,
       xaxis:{tickangle:-55,tickfont:axisTicks,gridcolor:'#304049',zeroline:false,automargin:true},
       yaxis:{title:axisTitle(bar.name + '（' + bar.unit + '）'),tickfont:axisTicks,automargin:true,gridcolor:'#304049',zeroline:false,rangemode:'tozero'},
       yaxis2:{title:axisTitle(line.name + '（' + line.unit + '）'),tickfont:axisTicks,automargin:true,overlaying:'y',side:'right',showgrid:false,zeroline:false,rangemode:'tozero'},
@@ -205,17 +257,20 @@
       hovermode:'x unified', showlegend:true }, {responsive:true,displaylogo:false,locale:'zh-CN'});
     const missingBar = barValues.filter(v => v == null).length;
     const missingLine = lineValues.filter(v => v == null).length;
+    const barReferenceCount = barReferences.filter(v => v != null).length;
+    const lineReferenceCount = lineReferences.filter(v => v != null).length;
     const selectedMetrics = new Set([barMetric.value, lineMetric.value]);
     const hasFinancial = selectedMetrics.has('revenue') || selectedMetrics.has('profit');
     const hasMarket = selectedMetrics.has('market_cap') || selectedMetrics.has('qfq_price');
     const hasNegativeAdjusted = selectedMetrics.has('qfq_price') && rows.some(r => r.qfq_price != null && r.qfq_price < 0);
     note.textContent = (hasFinancial ? (selectedPeriod === 'quarter' ? '单季度财务值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? '财务 TTM 为连续四个单季度之和；缺期则留空。' : '年度财务值取当年年报累计数。') : '') +
-      (hasMarket ? (hasFinancial ? ' ' : '') + '市场指标始终取对应报告披露日的价格快照。' : '') +
+      (hasMarket ? (hasFinancial ? ' ' : '') + '市场指标正式值取对应报告披露日附近的价格快照。' : '') +
       (selectedMetrics.has('market_cap') ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : '') +
       (selectedMetrics.has('qfq_price') ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
       (hasNegativeAdjusted ? ' 部分历史前复权值为负，图中保留数据源原值；它不是当时的未复权成交价。' : '') +
-      (missingBar ? ` 青色柱有 ${missingBar} 个缺失点。` : '') +
-      (missingLine ? ` 黄色线有 ${missingLine} 个缺失点。` : '');
+      (barReferenceCount || lineReferenceCount ? ' 空心圆点为距披露日 16–180 天的最近交易价参考点；与相邻价格点用虚线连接，正常价格点之间仍用实线。' : '') +
+      (missingBar ? ` 柱形有 ${missingBar} 个正式值缺失${barReferenceCount ? `，其中 ${barReferenceCount} 个显示参考点` : ''}。` : '') +
+      (missingLine ? ` 黄色线有 ${missingLine} 个正式值缺失${lineReferenceCount ? `，其中 ${lineReferenceCount} 个显示参考点` : ''}。` : '');
   }
   barMetric.addEventListener('change', render);
   lineMetric.addEventListener('change', render);

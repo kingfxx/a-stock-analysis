@@ -88,3 +88,24 @@ def test_serve_opens_browser_after_binding_when_requested(monkeypatch):
         "serving",
         "closed",
     ]
+
+
+def test_existing_disclosure_cache_adds_long_gap_references(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    path = tmp_path / "601919.json"
+    reports = [{"period": "2015-06-30", "publish_date": "2015-08-28"},
+               {"period": "2015-09-30", "publish_date": "2015-10-29"}]
+    path.write_text(json.dumps({"code": "601919", "name": "中远海控", "reports": reports,
+                                "price_basis": "disclosure", "report_date_basis": server.REPORT_DATE_BASIS,
+                                "prices": {"raw": [], "qfq": []}}), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: (_ for _ in ()).throw(AssertionError("finance refetched")))
+    monkeypatch.setattr(server, "fetch_daily_prices", lambda code, session, adjust, start, end: [
+        {"date": "2015-08-07", "close": 11.63 if adjust == "" else 1.386},
+        {"date": "2015-12-25", "close": 11.07 if adjust == "" else 0.9},
+    ])
+
+    data = server.load_stock("601919")
+    assert data["prices"]["raw"] == []
+    assert [p["date"] for p in data["prices"]["raw_reference"]] == ["2015-08-07"] * 2
+    assert [p["close"] for p in data["prices"]["qfq_reference"]] == [1.386] * 2
+    assert json.loads(path.read_text(encoding="utf-8"))["price_reference_basis"] == server.PRICE_REFERENCE_BASIS

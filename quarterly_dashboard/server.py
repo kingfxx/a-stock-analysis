@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from plotly.offline import get_plotlyjs
 
-from .core import build_period_rows, disclosure_snapshots, view_rows
+from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
 from .sources import fetch_daily_prices, fetch_financial_reports, fetch_stock_name, normalize_code, normalize_report_dates
 
 
@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "data" / "cache"
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
+PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
 
 
 def _save_cache(path: Path, data: dict) -> None:
@@ -46,25 +47,31 @@ def _disclosure_prices(code: str, reports: list[dict], session: requests.Session
     dates = sorted({report.get("publish_date") for report in reports if report.get("publish_date")})
     prices, warnings, complete = {}, [], True
     for key, adjust in (("raw", ""), ("qfq", "qfq")):
+        reference_key = f"{key}_reference"
         try:
             daily = fetch_daily_prices(code, session, adjust, dates[0], dates[-1]) if dates else []
             prices[key] = disclosure_snapshots(reports, daily)
+            prices[reference_key] = disclosure_reference_snapshots(reports, daily)
         except (requests.RequestException, ValueError, KeyError) as exc:
             complete = False
             prices[key] = (old or {}).get("prices", {}).get(key, []) if (old or {}).get("price_basis") == "disclosure" else []
+            prices[reference_key] = (old or {}).get("prices", {}).get(reference_key, [])
             warnings.append(f"{key} 披露日价格更新失败：{exc}")
     return prices, warnings, complete
 
 
 def _migrate_cached(code: str, old: dict, path: Path, session: requests.Session) -> dict:
     old = _add_missing_name(old, path, session)
-    if old.get("report_date_basis") == REPORT_DATE_BASIS and old.get("price_basis") == "disclosure":
+    if (old.get("report_date_basis") == REPORT_DATE_BASIS and old.get("price_basis") == "disclosure"
+            and old.get("price_reference_basis") == PRICE_REFERENCE_BASIS):
         return old
     reports = (old["reports"] if old.get("report_date_basis") == REPORT_DATE_BASIS
                else normalize_report_dates(old["reports"]))
-    prices, warnings, complete = _disclosure_prices(code, reports, session)
+    prices, warnings, complete = _disclosure_prices(code, reports, session, old)
     migrated = {**old, "reports": reports, "prices": prices, "price_basis": "disclosure",
-                "report_date_basis": REPORT_DATE_BASIS, "warnings": warnings}
+                "report_date_basis": REPORT_DATE_BASIS,
+                "price_reference_basis": PRICE_REFERENCE_BASIS if complete else None,
+                "warnings": warnings}
     if complete:
         _save_cache(path, migrated)
     return migrated
@@ -85,7 +92,7 @@ def load_stock(code: str, refresh: bool = False) -> dict:
             fallback = _migrate_cached(code, old, path, session)
             return {**fallback, "warnings": fallback.get("warnings", []) + [f"财报更新失败，正在显示缓存：{exc}"]}
         raise ValueError(f"无法获取 {code} 的季度财报：{exc}") from exc
-    prices, warnings, _ = _disclosure_prices(code, reports, session, old)
+    prices, warnings, complete = _disclosure_prices(code, reports, session, old)
     try:
         name = fetch_stock_name(code, session)
     except (requests.RequestException, ValueError, KeyError) as exc:
@@ -95,6 +102,7 @@ def load_stock(code: str, refresh: bool = False) -> dict:
     data = {"code": code, "updated_at": datetime.now(timezone.utc).isoformat(),
             "name": name, "reports": reports, "prices": prices,
             "price_basis": "disclosure", "report_date_basis": REPORT_DATE_BASIS,
+            "price_reference_basis": PRICE_REFERENCE_BASIS if complete else None,
             "warnings": warnings}
     _save_cache(path, data)
     return data
@@ -115,7 +123,8 @@ def cached_stocks() -> list[dict]:
 def render_page(code: str, refresh: bool) -> str:
     try:
         data = load_stock(code, refresh)
-        rows = build_period_rows(data["reports"], data["prices"]["raw"], data["prices"]["qfq"])
+        rows = build_period_rows(data["reports"], data["prices"]["raw"], data["prices"]["qfq"],
+                                 data["prices"].get("raw_reference"), data["prices"].get("qfq_reference"))
         views = {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")}
         payload = {"code": data["code"], "name": data.get("name"), "updated_at": data["updated_at"],
                    "views": views, "warnings": data.get("warnings", [])}
@@ -138,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
             content_type = "text/javascript; charset=utf-8"
         elif parsed.path == "/":
             query = parse_qs(parsed.query)
-            code = query.get("code", ["300750"])[0]
+            code = query.get("code", ["601919"])[0]
             body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
             content_type = "text/html; charset=utf-8"
         else:

@@ -32,10 +32,35 @@ def disclosure_snapshots(reports: list[dict], daily_prices: list[dict]) -> list[
     return snapshots
 
 
-def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: list[dict]) -> list[dict]:
+def disclosure_reference_snapshots(reports: list[dict], daily_prices: list[dict]) -> list[dict]:
+    """Keep clearly marked prior closes for report dates inside a long trading gap."""
+    by_date = {price["date"]: price for price in daily_prices}
+    dates = sorted(by_date)
+    references = []
+    for published in sorted({r.get("publish_date") for r in reports if r.get("publish_date")}):
+        try:
+            disclosure_day = date.fromisoformat(published)
+        except ValueError:
+            continue
+        index = bisect_right(dates, published) - 1
+        if index < 0 or index + 1 >= len(dates):
+            continue
+        lag = (disclosure_day - date.fromisoformat(dates[index])).days
+        if 15 < lag <= 180:
+            price = by_date[dates[index]]
+            references.append({"publish_date": published, "date": price["date"],
+                               "close": price["close"], "lag_days": lag})
+    return references
+
+
+def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: list[dict],
+                      raw_references: list[dict] | None = None,
+                      qfq_references: list[dict] | None = None) -> list[dict]:
     by_period = {r["period"]: r for r in reports}
     raw_by_disclosure = {p["publish_date"]: p for p in raw_prices}
     qfq_by_disclosure = {p["publish_date"]: p for p in qfq_prices}
+    raw_ref_by_disclosure = {p["publish_date"]: p for p in (raw_references or [])}
+    qfq_ref_by_disclosure = {p["publish_date"]: p for p in (qfq_references or [])}
     rows = []
     for period in sorted(by_period):
         report = by_period[period]
@@ -53,6 +78,8 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
 
         raw = raw_by_disclosure.get(report.get("publish_date"))
         qfq = qfq_by_disclosure.get(report.get("publish_date"))
+        raw_ref = raw_ref_by_disclosure.get(report.get("publish_date"))
+        qfq_ref = qfq_ref_by_disclosure.get(report.get("publish_date"))
         raw_close = raw.get("close") if raw else None
         qfq_close = qfq.get("close") if qfq else None
         shares = report.get("shares")
@@ -67,6 +94,12 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             "price_date": raw.get("date") if raw else None,
             "qfq_price_date": qfq.get("date") if qfq else None,
             "market_cap": raw_close * shares if raw_close is not None and shares is not None else None,
+            "qfq_price_reference": qfq_ref.get("close") if qfq_ref else None,
+            "qfq_price_reference_date": qfq_ref.get("date") if qfq_ref else None,
+            "qfq_price_reference_lag_days": qfq_ref.get("lag_days") if qfq_ref else None,
+            "market_cap_reference": raw_ref["close"] * shares if raw_ref and shares is not None else None,
+            "market_cap_reference_date": raw_ref.get("date") if raw_ref else None,
+            "market_cap_reference_lag_days": raw_ref.get("lag_days") if raw_ref else None,
         }
         rows.append(row)
     by_row = {r["period"]: r for r in rows}
