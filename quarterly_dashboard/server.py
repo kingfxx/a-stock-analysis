@@ -15,9 +15,9 @@ import requests
 from plotly.offline import get_plotlyjs
 
 from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
-from .sources import fetch_daily_prices, fetch_financial_reports, fetch_stock_name, normalize_code, normalize_report_dates
+from .sources import fetch_daily_prices, fetch_financial_reports, fetch_monthly_prices, fetch_stock_name, normalize_code, normalize_report_dates
 from .valuation import (fetch_dividend_yields, fetch_industry_snapshot, fetch_valuation_series,
-                        merge_dividend_yields, monthly_valuation, valuation_summary)
+                        merge_adjusted_prices, merge_dividend_yields, monthly_valuation, valuation_summary)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,7 +25,7 @@ CACHE = ROOT / "data" / "cache"
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
-VALUATION_BASIS = "paid_dividend_ttm_v1"
+VALUATION_BASIS = "monthly_qfq_overlay_v1"
 
 
 def _save_cache(path: Path, data: dict) -> None:
@@ -58,6 +58,14 @@ def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dic
                            and row.get("dividend_yield") is not None]
         warnings.append(f"历史股息率获取失败，显示已有缓存：{exc}")
     rows = merge_dividend_yields(rows, dividend_yields)
+    try:
+        adjusted_prices = fetch_monthly_prices(code, session, "qfq")
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        adjusted_prices = [{"date": row["qfq_close_date"], "close": row["qfq_close"]}
+                           for row in old.get("rows", []) if row.get("qfq_close_date")
+                           and row.get("qfq_close") is not None]
+        warnings.append(f"前复权月度股价获取失败，显示已有缓存：{exc}")
+    rows = merge_adjusted_prices(rows, adjusted_prices)
     time.sleep(1.0)  # Keep EastMoney peer and dividend requests at least a second apart.
     try:
         industry = fetch_industry_snapshot(code, session)

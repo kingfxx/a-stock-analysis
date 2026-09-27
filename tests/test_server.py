@@ -86,12 +86,31 @@ def test_dividend_source_failure_keeps_other_valuation_metrics(tmp_path, monkeyp
     monkeypatch.setattr(server, "fetch_valuation_series", lambda *args: {
         "pe": [{"date": "2026-09-24", "value": 9}], "pb": [], "market_cap": []})
     monkeypatch.setattr(server, "fetch_dividend_yields", lambda *args: (_ for _ in ()).throw(ValueError("unavailable")))
+    monkeypatch.setattr(server, "fetch_monthly_prices", lambda *args: [{"date": "2026-09-25", "close": 8.5}])
     monkeypatch.setattr(server, "fetch_industry_snapshot", lambda *args: {"pe": 12})
 
     data = server.load_valuation("601919", [])
     assert data["rows"][0]["pe"] == 9
+    assert data["rows"][0]["qfq_close"] == 8.5
     assert data["rows"][0].get("dividend_yield") is None
     assert "历史股息率获取失败" in data["warnings"][0]
+
+
+def test_adjusted_price_failure_preserves_cached_monthly_prices(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server.time, "sleep", lambda seconds: None)
+    path = tmp_path / "valuation" / "601919.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"rows": [{"date": "2026-09-25", "qfq_close": 8.5,
+                                         "qfq_close_date": "2026-09-24"}]}), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_valuation_series", lambda *args: {"pe": [], "pb": [], "market_cap": []})
+    monkeypatch.setattr(server, "fetch_dividend_yields", lambda *args: [])
+    monkeypatch.setattr(server, "fetch_monthly_prices", lambda *args: (_ for _ in ()).throw(ValueError("unavailable")))
+    monkeypatch.setattr(server, "fetch_industry_snapshot", lambda *args: {})
+
+    data = server.load_valuation("601919", [])
+    assert data["rows"][0]["qfq_close"] == 8.5
+    assert "前复权月度股价获取失败" in data["warnings"][0]
 
 
 def test_serve_opens_browser_after_binding_when_requested(monkeypatch):

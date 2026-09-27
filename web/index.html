@@ -56,6 +56,8 @@
     .valuation-panel { margin-top:18px; }
     .valuation-controls { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
     .valuation-controls .period { flex-shrink:0; }
+    .valuation-overlay { border:1px solid #4b616d; background:#26343c; color:var(--ink); font-size:13px; padding:10px 12px; font-weight:500; white-space:nowrap; }
+    .valuation-overlay[aria-pressed="true"] { border-color:var(--yellow); color:var(--yellow); background:#3a3528; }
     .valuation-overview { display:grid; grid-template-columns:190px minmax(0,1fr); gap:22px; padding:22px 27px 5px; }
     .valuation-current { padding:18px 20px; background:#24343d; border:1px solid #3d5966; border-radius:10px; }
     .valuation-current small { display:block; color:#afc2c9; font-size:12px; }
@@ -169,6 +171,7 @@
           <option value="5">最近 5 年</option>
           <option value="3">最近 3 年</option>
         </select>
+        <button id="valuation-price-overlay" class="valuation-overlay" type="button" aria-pressed="false">叠加前复权股价</button>
       </div>
     </div>
     <div class="valuation-overview">
@@ -335,6 +338,7 @@
   let valuationMetric = 'pe';
   const valuationNames = {pe:'市盈率 PE(TTM)',pb:'市净率 PB(MRQ)',ps:'市销率 PS(TTM)',dividend_yield:'股息率（近 12 个月已实施派息）'};
   const valuationRange = document.getElementById('valuation-range');
+  const valuationPriceOverlay = document.getElementById('valuation-price-overlay');
   const formattedValuation = value => value == null ? '—' : Number(value).toFixed(2) + (valuationMetric === 'dividend_yield' ? '%' : ' 倍');
   function renderValuation() {
     const years = valuationRange.value;
@@ -367,6 +371,8 @@
       'PE(TTM) 与 PB 取百度股市通历史估值。';
     note.textContent = sourceNote + ' 每月取最后一条可用记录；无效指标不纳入走势与分位。高/中/低线分别为所选区间有效月度值的 80%/50%/20% 分位。' + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
       (state.valuation?.updated_on || '未知') + '。' + (state.valuation?.warnings || []).join(' ');
+    const showPrice = valuationPriceOverlay.getAttribute('aria-pressed') === 'true';
+    if (showPrice) note.textContent += ' 前复权股价取腾讯月 K 每月最后交易日收盘价，显示于右轴；缺失月份留空。';
     const xs = rows.map(row => isYield ? row.dividend_yield_date || row.date : row.date);
     const ys = rows.map(row => row[valuationMetric]);
     const first = xs[0], last = xs.at(-1);
@@ -379,13 +385,19 @@
         x:[first,last],y:[view[key],view[key]],hoverinfo:'skip',
         line:{color,width:1.6,dash:'dash'}});
     }
+    if (showPrice) traces.push({type:'scatter',mode:'lines',name:'前复权股价',yaxis:'y2',
+      x:rows.map(row => row.qfq_close_date || row.date),y:rows.map(row => row.qfq_close ?? null),
+      connectgaps:false,line:{color:'#f4d35e',width:2.5},
+      hovertemplate:'%{x|%Y-%m-%d}<br>前复权股价：%{y:.2f} 元/股<extra></extra>'});
     Plotly.react('valuation-chart', traces, {
       paper_bgcolor:'#1a2227',plot_bgcolor:'#1a2227',font:{color:'#edf4f4'},
-      margin:{l:77,r:28,t:30,b:65},hovermode:'x unified',showlegend:false,
+      margin:{l:77,r:showPrice ? 82 : 28,t:30,b:65},hovermode:'x unified',showlegend:false,
       xaxis:{type:'date',tickformat:'%Y-%m',dtick:years === '10' ? 'M12' : years === '5' ? 'M6' : 'M3',
         tickfont:{color:'#ffffff',size:12},gridcolor:'#304049',zeroline:false,automargin:true},
       yaxis:{title:{text:isYield ? '股息率（%）' : '估值（倍）',font:{color:'#ffffff',size:14}},tickfont:{color:'#ffffff',size:12},
         gridcolor:'#304049',zeroline:false,rangemode:'tozero',automargin:true},
+      ...(showPrice ? {yaxis2:{title:{text:'前复权股价（元/股）',font:{color:'#f4d35e',size:14}},
+        tickfont:{color:'#f4d35e',size:12},overlaying:'y',side:'right',showgrid:false,zeroline:false,automargin:true}} : {}),
       annotations: rows.length ? [] : [{text:'暂无可用估值数据',xref:'paper',yref:'paper',x:.5,y:.5,
         showarrow:false,font:{color:'#9aadb3',size:17}}]
     }, {responsive:true,displaylogo:false,locale:'zh-CN'});
@@ -396,6 +408,10 @@
     renderValuation();
   }));
   valuationRange.addEventListener('change', renderValuation);
+  valuationPriceOverlay.addEventListener('click', () => {
+    valuationPriceOverlay.setAttribute('aria-pressed', valuationPriceOverlay.getAttribute('aria-pressed') !== 'true');
+    renderValuation();
+  });
   if (typeof Plotly !== 'undefined') { render(); renderValuation(); }
 })();
 </script>

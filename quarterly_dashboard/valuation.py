@@ -157,6 +157,20 @@ def merge_dividend_yields(rows: list[dict], yields: list[dict]) -> list[dict]:
     return [by_month[month] for month in sorted(by_month)]
 
 
+def merge_adjusted_prices(rows: list[dict], prices: list[dict]) -> list[dict]:
+    """Join actual monthly qfq closes without substituting a nearby month's price."""
+    by_month = {row["date"][:7]: dict(row) for row in rows}
+    for price in prices:
+        month = price["date"][:7]
+        row = by_month.setdefault(month, {"date": price["date"], "pe": None,
+                                          "pb": None, "ps": None})
+        if price["date"] >= row.get("qfq_close_date", ""):
+            row["qfq_close"] = _finite_number(price.get("close"))
+            row["qfq_close_date"] = price["date"]
+        row["date"] = max(row["date"], price["date"])
+    return [by_month[month] for month in sorted(by_month)]
+
+
 def monthly_valuation(series: dict[str, list[dict]], reports: list[dict]) -> list[dict]:
     """Use each month's last observation and only reports disclosed by that date."""
     last_in_month = {}

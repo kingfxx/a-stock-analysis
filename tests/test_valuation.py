@@ -2,7 +2,8 @@ import pytest
 
 from quarterly_dashboard.valuation import (
     fetch_dividend_events, fetch_industry_snapshot, fetch_valuation_series,
-    merge_dividend_yields, monthly_dividend_yields, monthly_valuation, valuation_summary,
+    merge_adjusted_prices, merge_dividend_yields, monthly_dividend_yields,
+    monthly_valuation, valuation_summary,
 )
 
 
@@ -82,6 +83,17 @@ def test_zero_dividend_yield_is_valid_but_has_no_industry_comparison():
     assert summary["current"] == 0
     assert summary["percentile"] == 0
     assert summary["industry"] is None
+
+
+def test_adjusted_prices_join_by_month_and_keep_actual_trade_date():
+    rows = [{"date": "2026-02-25", "pe": 9}, {"date": "2026-03-31", "pe": 10}]
+    prices = [{"date": "2026-02-27", "close": 12.5},
+              {"date": "2026-03-30", "close": 13.2}]
+    merged = merge_adjusted_prices(rows, prices)
+    assert merged[0]["qfq_close"] == 12.5
+    assert merged[0]["qfq_close_date"] == "2026-02-27"
+    assert merged[1]["qfq_close"] == 13.2
+    assert merged[1]["date"] == "2026-03-31"
 
 
 def test_monthly_valuation_uses_latest_observation_and_only_published_revenue():
