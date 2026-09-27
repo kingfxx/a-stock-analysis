@@ -39,12 +39,20 @@
     .panel-head > div:first-child { min-width:0; }
     .panel-head h2 { margin:0 0 5px; font-size:22px; overflow-wrap:anywhere; }
     .panel-head p { margin:0; color:var(--muted); font-size:13px; max-width:700px; line-height:1.55; }
+    .comparison-panel .panel-head { display:block; }
+    .comparison-panel .controls { margin-top:18px; }
     .controls { display:flex; flex-wrap:wrap; align-items:end; gap:10px; }
-    .metric-choice { display:flex; flex-direction:column; gap:6px; min-width:170px; padding-left:10px; border-left:3px solid var(--choice-color); }
-    .metric-choice-toggle { align-self:flex-start; margin:-3px -6px; padding:3px 6px; border:1px solid transparent; background:transparent; color:var(--muted); font-size:12px; font-weight:700; }
-    .metric-choice-toggle[aria-pressed="true"] { color:var(--choice-color); background:#26343c; border-color:#4b616d; }
-    .metric-choice-toggle:hover { color:var(--choice-color); }
-    .metric-choice:has(.metric-choice-toggle[aria-pressed="false"]) { border-left-color:#58646c; }
+    .metric-choice { display:flex; flex-direction:column; gap:6px; min-width:170px; }
+    .metric-choice-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .metric-choice-name { color:var(--muted); font-size:12px; font-weight:700; white-space:nowrap; }
+    .metric-mode-group { display:inline-flex; border:1px solid #4b616d; border-radius:6px; overflow:hidden; }
+    .metric-mode { padding:4px 9px; border-radius:0; background:transparent; color:var(--muted); font-size:12px; }
+    .metric-mode + .metric-mode { border-left:1px solid #4b616d; }
+    .metric-mode[aria-pressed="true"] { background:#355363; color:#fff; }
+    .metric-mode:hover { color:#fff; }
+    .series-key { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:10px; color:var(--muted); font-size:12px; }
+    .series-key span { display:inline-flex; align-items:center; gap:6px; }
+    .series-key i { width:9px; height:9px; background:var(--series-color); border-radius:2px; }
     .metric-choice select { width:100%; }
     select { min-width:170px; border:1px solid #4b616d; background:#26343c; color:var(--ink); padding:10px 12px; border-radius:7px; }
     .period { display:flex; border:1px solid #4b616d; border-radius:7px; overflow:hidden; }
@@ -115,16 +123,24 @@
   </div>
   <div id="error" class="error hide">__ERROR__</div>
   <div id="warnings"></div>
-  <section class="panel" aria-label="季度对照图">
+  <section class="panel comparison-panel" aria-label="季度对照图">
     <div class="panel-head">
       <div>
         <h2 id="chart-title">归母净利润与披露日前复权股价</h2>
-        <p id="chart-subtitle">青色柱：归母净利润（亿元） · 黄色线：披露日前复权股价（元/股）</p>
+        <p id="chart-subtitle">A 柱形：归母净利润（亿元） · C 折线：披露日前复权股价（元/股）</p>
+        <div class="series-key" aria-label="固定颜色图例">
+          <span style="--series-color:#38c4dc"><i aria-hidden="true"></i>A · 青色</span>
+          <span style="--series-color:#b9a0f5"><i aria-hidden="true"></i>B · 紫色</span>
+          <span style="--series-color:#f4d35e"><i aria-hidden="true"></i>C · 黄色</span>
+        </div>
       </div>
       <div class="controls">
-        <div class="metric-choice" style="--choice-color:#38c4dc">
-        <button type="button" class="metric-choice-toggle" id="bar-metric-toggle" aria-pressed="true" aria-controls="chart">柱形 A · 青色</button>
-        <select id="bar-metric" aria-label="柱形 A 指标">
+        <div class="metric-choice">
+        <div class="metric-choice-head"><span class="metric-choice-name">指标 A</span><div class="metric-mode-group" role="group" aria-label="指标 A 表现形式">
+          <button type="button" class="metric-mode" data-series-mode="bar" aria-pressed="true" aria-controls="chart">柱形</button>
+          <button type="button" class="metric-mode" data-series-mode="line" aria-pressed="false" aria-controls="chart">折线</button>
+        </div></div>
+        <select id="bar-metric" aria-label="指标 A">
           <option value="revenue">营业收入</option>
           <option value="profit" selected>归母净利润</option>
           <option value="revenue_growth">营收同比增长率</option>
@@ -142,9 +158,12 @@
           <option value="qfq_price">披露日前复权股价</option>
         </select>
         </div>
-        <div class="metric-choice" style="--choice-color:#b9a0f5">
-        <button type="button" class="metric-choice-toggle" id="bar-metric-2-toggle" aria-pressed="false" aria-controls="chart">柱形 B · 紫色</button>
-        <select id="bar-metric-2" aria-label="第二组柱形指标">
+        <div class="metric-choice">
+        <div class="metric-choice-head"><span class="metric-choice-name">指标 B</span><div class="metric-mode-group" role="group" aria-label="指标 B 表现形式">
+          <button type="button" class="metric-mode" data-series-mode="bar" aria-pressed="false" aria-controls="chart">柱形</button>
+          <button type="button" class="metric-mode" data-series-mode="line" aria-pressed="false" aria-controls="chart">折线</button>
+        </div></div>
+        <select id="bar-metric-2" aria-label="指标 B">
           <option value="revenue" selected>营业收入</option>
           <option value="profit">归母净利润</option>
           <option value="revenue_growth">营收同比增长率</option>
@@ -162,9 +181,12 @@
           <option value="qfq_price">披露日前复权股价</option>
         </select>
         </div>
-        <div class="metric-choice" style="--choice-color:#f4d35e">
-        <button type="button" class="metric-choice-toggle" id="line-metric-toggle" aria-pressed="true" aria-controls="chart">折线 · 黄色</button>
-        <select id="line-metric" aria-label="黄色线指标">
+        <div class="metric-choice">
+        <div class="metric-choice-head"><span class="metric-choice-name">指标 C</span><div class="metric-mode-group" role="group" aria-label="指标 C 表现形式">
+          <button type="button" class="metric-mode" data-series-mode="bar" aria-pressed="false" aria-controls="chart">柱形</button>
+          <button type="button" class="metric-mode" data-series-mode="line" aria-pressed="true" aria-controls="chart">折线</button>
+        </div></div>
+        <select id="line-metric" aria-label="指标 C">
           <option value="profit">归母净利润</option>
           <option value="revenue">营业收入</option>
           <option value="revenue_growth">营收同比增长率</option>
@@ -187,6 +209,12 @@
           <button type="button" data-period="year">年度</button>
           <button type="button" data-period="ttm">TTM</button>
         </div>
+        <label for="comparison-range">时间范围</label>
+        <select id="comparison-range" aria-label="财务图时间范围">
+          <option value="all" selected>全部时间</option>
+          <option value="10">最近 10 年</option>
+          <option value="5">最近 5 年</option>
+        </select>
       </div>
     </div>
     <p id="chart-scroll-hint" class="chart-scroll-hint" hidden>向右滑动可查看其他纵轴与完整图表</p>
@@ -296,17 +324,23 @@
     qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date', referenceKey:'qfq_price_reference'}
   };
   let selectedPeriod = ['quarter','year','ttm'].includes(savedSelections.period) ? savedSelections.period : 'quarter';
+  const comparisonRange = document.getElementById('comparison-range');
+  if (['all','10','5'].includes(savedSelections.comparisonRange)) comparisonRange.value = savedSelections.comparisonRange;
   const seriesControls = [
-    {id:'bar-metric', kind:'bar', label:'青色柱', color:'#38c4dc'},
-    {id:'bar-metric-2', kind:'bar', label:'紫色柱', color:'#b9a0f5'},
-    {id:'line-metric', kind:'line', label:'黄色线', color:'#f4d35e'}
+    {id:'bar-metric', defaultKind:'bar', label:'A', color:'#38c4dc'},
+    {id:'bar-metric-2', defaultKind:null, legacyKind:'bar', label:'B', color:'#b9a0f5'},
+    {id:'line-metric', defaultKind:'line', label:'C', color:'#f4d35e'}
   ].map(series => ({...series, control:document.getElementById(series.id),
-    toggle:document.getElementById(series.id + '-toggle')}));
+    buttons:[...document.getElementById(series.id).parentElement.querySelectorAll('[data-series-mode]')]}));
+  const modeOf = series => series.buttons.find(button => button.getAttribute('aria-pressed') === 'true')?.dataset.seriesMode || null;
   for (const series of seriesControls) {
     const metric = savedSelections.metrics?.[series.id];
     if ([...series.control.options].some(option => option.value === metric)) series.control.value = metric;
+    const savedMode = savedSelections.display?.[series.id];
     const visible = savedSelections.visible?.[series.id];
-    if (typeof visible === 'boolean') series.toggle.setAttribute('aria-pressed', String(visible));
+    const mode = ['bar','line'].includes(savedMode) ? savedMode : savedMode === null ? null
+      : typeof visible === 'boolean' ? (visible ? series.legacyKind || series.defaultKind : null) : series.defaultKind;
+    series.buttons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.seriesMode === mode)));
   }
   document.querySelectorAll('[data-period]').forEach(button =>
     button.classList.toggle('active', button.dataset.period === selectedPeriod));
@@ -323,11 +357,15 @@
     });
   }
   function render() {
-    const rows = state.views?.[selectedPeriod] || [];
+    const cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    if (comparisonRange.value !== 'all') cutoff.setFullYear(cutoff.getFullYear() - Number(comparisonRange.value));
+    const rows = (state.views?.[selectedPeriod] || []).filter(row =>
+      comparisonRange.value === 'all' || new Date(row.period + 'T00:00:00') >= cutoff);
     const labels = rows.map(label);
     const xs = positions(rows);
-    const active = seriesControls.filter(series => series.toggle.getAttribute('aria-pressed') === 'true').map(series => ({
-      ...series, key:series.control.value, metric:metrics[series.control.value],
+    const active = seriesControls.filter(series => modeOf(series)).map(series => ({
+      ...series, kind:modeOf(series), key:series.control.value, metric:metrics[series.control.value],
       values:rows.map(row => row[series.control.value] == null ? null : row[series.control.value] / metrics[series.control.value].scale)
     }));
     const axisGroups = [];
@@ -346,8 +384,8 @@
     document.getElementById('chart-title').textContent = active.length
       ? active.map(series => series.metric.name).join(' / ') : '选择指标开始对照';
     document.getElementById('chart-subtitle').textContent = active.length
-      ? active.map(series => series.label + '：' + series.metric.name + '（' + series.metric.unit + '）').join(' · ')
-      : '点击上方序列标题以显示指标';
+      ? active.map(series => series.label + (series.kind === 'bar' ? ' 柱形' : ' 折线') + '：' + series.metric.name + '（' + series.metric.unit + '）').join(' · ')
+      : '选择柱形或折线以显示指标';
     const custom = rows.map((row, index) => [
       labels[index], row.period, row.publish_date || '未知',
       row.price_date || '无价格', row.qfq_price_date || '无价格',
@@ -364,16 +402,16 @@
     let referenceCount = 0;
     for (const series of active) {
       const metric = series.metric;
-      const width = barCount === 2 ? .30 : .48;
-      const offset = barCount === 2 ? (barIndex === 0 ? -.33 : .03) : -.24;
+      const width = barCount ? (.72 - .04 * (barCount - 1)) / barCount : 0;
+      const offset = -.36 + barIndex * (width + .04);
       const referenceXs = series.kind === 'bar' ? xs.map(x => x + offset + width / 2) : xs;
       if (series.kind === 'bar') {
-        traces.push({type:'bar', name:series.label + ' · ' + metric.name, x:xs, y:series.values,
+        traces.push({type:'bar', name:series.label + ' 柱形 · ' + metric.name, x:xs, y:series.values,
           yaxis:series.axis, width, offset, customdata:custom,
           marker:{color:series.color}, hovertemplate:hover(metric)});
         barIndex++;
       } else {
-        traces.push({type:'scatter', mode:'lines+markers', name:series.label + ' · ' + metric.name,
+        traces.push({type:'scatter', mode:'lines+markers', name:series.label + ' 折线 · ' + metric.name,
           x:xs, y:series.values, yaxis:series.axis, customdata:custom, connectgaps:false,
           line:{color:series.color,width:3}, marker:{size:5,color:series.color},
           hovertemplate:hover(metric)});
@@ -419,7 +457,7 @@
         range:xs.length ? [xs[0] - .7, xs.at(-1) + .7] : undefined},
       yaxis:axisGroups.length ? axisConfig(axisGroups[0]) : {visible:false},
       legend:{orientation:'h',x:.5,xanchor:'center',y:1.12,font:{size:12}},
-      annotations:active.length ? [] : [{text:'点击上方序列标题以显示指标',xref:'paper',yref:'paper',
+      annotations:active.length ? [] : [{text:'选择柱形或折线以显示指标',xref:'paper',yref:'paper',
         x:.5,y:.5,showarrow:false,font:{color:'#9aadb3',size:17}}]
     };
     axisGroups.slice(1).forEach((group, index) => {
@@ -466,7 +504,7 @@
       const missing = series.values.filter(value => value == null).length;
       return missing ? ' ' + series.label + '有 ' + missing + ' 个正式值缺失。' : '';
     }).join('');
-    note.textContent = (!active.length ? '请点击上方序列标题，显示至少一个指标。' : '') +
+    note.textContent = (!active.length ? '请选择柱形或折线，显示至少一个指标。' : '') +
       (hasFinancial ? (selectedPeriod === 'quarter' ? '单季度财务值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? '财务 TTM 为连续四个单季度之和；缺期则留空。' : '年度财务值取当年年报累计数。') : '') +
       (hasMarket ? (hasFinancial ? ' ' : '') + '市场指标正式值取对应报告披露日附近的价格快照。' : '') +
       (selectedMetrics.has('market_cap') ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : '') +
@@ -485,11 +523,12 @@
   }
   seriesControls.forEach(series => {
     series.control.addEventListener('change', () => { saveSelections(); render(); });
-    series.toggle.addEventListener('click', () => {
-      series.toggle.setAttribute('aria-pressed', String(series.toggle.getAttribute('aria-pressed') !== 'true'));
+    series.buttons.forEach(button => button.addEventListener('click', () => {
+      const nextMode = modeOf(series) === button.dataset.seriesMode ? null : button.dataset.seriesMode;
+      series.buttons.forEach(item => item.setAttribute('aria-pressed', String(item.dataset.seriesMode === nextMode)));
       saveSelections();
       render();
-    });
+    }));
   });
   document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => {
     selectedPeriod = button.dataset.period;
@@ -497,6 +536,7 @@
     saveSelections();
     render();
   }));
+  comparisonRange.addEventListener('change', () => { saveSelections(); render(); });
   let valuationMetric = ['pe','pb','ps','dividend_yield'].includes(savedSelections.valuationMetric)
     ? savedSelections.valuationMetric : 'pe';
   const valuationNames = {pe:'市盈率 PE(TTM)',pb:'市净率 PB(MRQ)',ps:'市销率 PS(TTM)',dividend_yield:'股息率（近 12 个月已实施派息）'};
@@ -510,8 +550,9 @@
   function saveSelections() {
     const selections = {
       period:selectedPeriod,
+      comparisonRange:comparisonRange.value,
       metrics:Object.fromEntries(seriesControls.map(series => [series.id, series.control.value])),
-      visible:Object.fromEntries(seriesControls.map(series => [series.id, series.toggle.getAttribute('aria-pressed') === 'true'])),
+      display:Object.fromEntries(seriesControls.map(series => [series.id, modeOf(series)])),
       valuationMetric, valuationRange:valuationRange.value,
       valuationPriceOverlay:valuationPriceOverlay.getAttribute('aria-pressed') === 'true'
     };
