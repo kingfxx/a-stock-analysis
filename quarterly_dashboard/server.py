@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import shutil
 import time
 import webbrowser
 from datetime import date, datetime, timezone
@@ -15,7 +16,8 @@ import requests
 from plotly.offline import get_plotlyjs
 
 from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
-from .sources import fetch_daily_prices, fetch_financial_reports, fetch_monthly_prices, fetch_stock_name, normalize_code, normalize_report_dates
+from .sources import (fetch_cash_flow_reports, fetch_daily_prices, fetch_financial_reports,
+                      fetch_monthly_prices, fetch_stock_name, normalize_code, normalize_report_dates)
 from .valuation import (fetch_dividend_yields, fetch_industry_snapshot, fetch_valuation_series,
                         merge_adjusted_prices, merge_dividend_yields, monthly_valuation, valuation_summary)
 
@@ -25,14 +27,81 @@ CACHE = ROOT / "data" / "cache"
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
+CASH_FLOW_BASIS = "sina_cash_flow_ytd_v1"
+FINANCIAL_FIELDS_BASIS = "sina_margin_debt_inputs_v1"
+NEW_REPORT_FIELDS = ("operating_cost_ytd", "net_profit_ytd", "monetary_funds",
+                     "short_term_borrowings", "short_term_bonds",
+                     "current_noncurrent_liabilities", "long_term_borrowings",
+                     "bonds_payable", "lease_liabilities")
 VALUATION_BASIS = "monthly_qfq_overlay_v1"
+
+
+FINANCIAL_VALUES = ("revenue_ytd", "profit_ytd", "shares", "equity") + NEW_REPORT_FIELDS
+CASH_VALUES = ("operating_cash_flow_ytd", "capex_ytd")
 
 
 def _save_cache(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+    if path.exists():
+        backup = path.with_suffix(".json.bak")
+        backup_temporary = path.with_suffix(".json.bak.tmp")
+        shutil.copy2(path, backup_temporary)
+        backup_temporary.replace(backup)
     temporary.replace(path)
+
+
+def _keep_old(old: dict, message: str) -> dict:
+    return {**old, "warnings": old.get("warnings", []) + [message]}
+
+
+def _missing_old_values(old_reports: list[dict], fresh_by_period: dict[str, dict],
+                        fields: tuple[str, ...], require_all_periods: bool = False) -> list[str]:
+    missing = []
+    for old_report in old_reports:
+        period = old_report["period"]
+        fresh = fresh_by_period.get(period)
+        if fresh is None and (require_all_periods or any(old_report.get(field) is not None for field in fields)):
+            missing.append(period)
+        elif any(old_report.get(field) is not None and fresh.get(field) is None for field in fields):
+            missing.append(period)
+    return missing
+
+
+def _missing_price_snapshots(old: dict, new_prices: dict, reports: list[dict]) -> list[str]:
+    if old.get("price_basis") != "disclosure":
+        return []
+    current_dates = {report.get("publish_date") for report in reports}
+    missing = []
+    for key in ("raw", "qfq", "raw_reference", "qfq_reference"):
+        existing = old.get("prices", {}).get(key, [])
+        fresh_dates = {point.get("publish_date") for point in new_prices.get(key, [])}
+        if key.endswith("_reference"):
+            fresh_dates |= {point.get("publish_date") for point in new_prices.get(key[:-10], [])}
+        if existing and not fresh_dates:
+            missing.append(f"{key}:全部缺失")
+        missing.extend(f"{key}:{point['publish_date']}" for point in existing
+                       if point.get("publish_date") in current_dates
+                       and point["publish_date"] not in fresh_dates)
+    return missing
+
+
+def _missing_valuation_history(old: dict, rows: list[dict], industry: dict, today: str) -> list[str]:
+    fresh_by_month = {row["date"][:7]: row for row in rows}
+    ten_years_ago = f"{int(today[:4]) - 10}{today[4:]}"
+    missing = []
+    for old_row in old.get("rows", []):
+        month = old_row["date"][:7]
+        fresh = fresh_by_month.get(month, {})
+        for field in ("pe", "pb", "ps", "dividend_yield", "qfq_close"):
+            if old_row.get(field) is not None and (field == "qfq_close" or old_row["date"] >= ten_years_ago):
+                if fresh.get(field) is None:
+                    missing.append(f"{month}:{field}")
+    for field in ("pe", "pb", "ps"):
+        if old.get("industry", {}).get(field) is not None and industry.get(field) is None:
+            missing.append(f"industry:{field}")
+    return missing
 
 
 def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dict:
@@ -48,11 +117,15 @@ def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dic
     try:
         rows = monthly_valuation(fetch_valuation_series(code, session), reports)
     except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        if old:
+            return _keep_old(old, f"历史估值获取失败，保留原缓存：{exc}")
         rows = old.get("rows", [])
         warnings.append(f"历史估值获取失败，显示已有缓存：{exc}")
     try:
         dividend_yields = fetch_dividend_yields(code, session)
     except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        if old:
+            return _keep_old(old, f"历史股息率获取失败，保留原缓存：{exc}")
         dividend_yields = [{"date": row["dividend_yield_date"], "value": row["dividend_yield"]}
                            for row in old.get("rows", []) if row.get("dividend_yield_date")
                            and row.get("dividend_yield") is not None]
@@ -61,6 +134,8 @@ def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dic
     try:
         adjusted_prices = fetch_monthly_prices(code, session, "qfq")
     except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        if old:
+            return _keep_old(old, f"前复权月度股价获取失败，保留原缓存：{exc}")
         adjusted_prices = [{"date": row["qfq_close_date"], "close": row["qfq_close"]}
                            for row in old.get("rows", []) if row.get("qfq_close_date")
                            and row.get("qfq_close") is not None]
@@ -70,8 +145,24 @@ def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dic
     try:
         industry = fetch_industry_snapshot(code, session)
     except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        if old:
+            return _keep_old(old, f"行业估值获取失败，保留原缓存：{exc}")
         industry = old.get("industry", {})
         warnings.append(f"行业估值获取失败，显示已有缓存：{exc}")
+    if old:
+        missing = _missing_valuation_history(old, rows, industry, today)
+        if missing:
+            return _keep_old(old, f"估值历史覆盖不足（{len(missing)} 项），保留原缓存")
+        by_month = {row["date"][:7]: dict(row) for row in old.get("rows", [])}
+        for row in rows:
+            month = row["date"][:7]
+            previous = by_month.get(month, {})
+            by_month[month] = {**previous, **{key: value for key, value in row.items()
+                                            if value is not None and key != "date"},
+                              "date": max(previous.get("date", row["date"]), row["date"])}
+        rows = [by_month[month] for month in sorted(by_month)]
+        industry = {**old.get("industry", {}),
+                    **{key: value for key, value in industry.items() if value is not None}}
     data = {"rows": rows, "industry": industry, "updated_on": today, "basis": VALUATION_BASIS,
             "warnings": warnings}
     _save_cache(path, data)
@@ -109,16 +200,57 @@ def _disclosure_prices(code: str, reports: list[dict], session: requests.Session
 
 def _migrate_cached(code: str, old: dict, path: Path, session: requests.Session) -> dict:
     old = _add_missing_name(old, path, session)
+    if old.get("reports") and old.get("financial_fields_basis") != FINANCIAL_FIELDS_BASIS:
+        try:
+            fresh_reports = {report["period"]: report for report in fetch_financial_reports(code, session)}
+        except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+            old = _keep_old(old, f"新增财报字段获取失败：{exc}")
+        else:
+            missing = _missing_old_values(old["reports"], fresh_reports, NEW_REPORT_FIELDS,
+                                          require_all_periods=True)
+            if missing:
+                old = _keep_old(old, f"新增财报字段历史覆盖不足（{len(missing)} 期），保留原缓存")
+            else:
+                old = {**old, "reports": [
+                    {**report, **{field: value for field in NEW_REPORT_FIELDS
+                                 if (value := fresh_reports[report["period"]].get(field)) is not None}}
+                    for report in old["reports"]],
+                       "financial_fields_basis": FINANCIAL_FIELDS_BASIS}
+                _save_cache(path, old)
+    cash_warnings = []
+    if old.get("cash_flow_basis") != CASH_FLOW_BASIS:
+        try:
+            cash_flows = fetch_cash_flow_reports(code, session)
+        except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+            cash_warnings.append(f"现金流量表获取失败：{exc}")
+            old = {**old, "warnings": old.get("warnings", []) + cash_warnings}
+        else:
+            missing = _missing_old_values(old["reports"], cash_flows, CASH_VALUES)
+            if missing:
+                cash_warnings.append(f"现金流量表历史覆盖不足（{len(missing)} 期），保留原缓存")
+                old = {**old, "warnings": old.get("warnings", []) + cash_warnings}
+            else:
+                old = {**old, "reports": [
+                    {**report, **{field: value for field in CASH_VALUES
+                                 if (value := cash_flows.get(report["period"], {}).get(field)) is not None}}
+                    for report in old["reports"]],
+                       "cash_flow_basis": CASH_FLOW_BASIS}
+                _save_cache(path, old)
     if (old.get("report_date_basis") == REPORT_DATE_BASIS and old.get("price_basis") == "disclosure"
             and old.get("price_reference_basis") == PRICE_REFERENCE_BASIS):
         return old
     reports = (old["reports"] if old.get("report_date_basis") == REPORT_DATE_BASIS
                else normalize_report_dates(old["reports"]))
     prices, warnings, complete = _disclosure_prices(code, reports, session, old)
+    missing_prices = _missing_price_snapshots(old, prices, reports) if complete else []
+    if missing_prices:
+        return _keep_old(old, f"价格快照历史覆盖不足（{len(missing_prices)} 项），保留原缓存")
+    if not complete:
+        return _keep_old(old, "披露日价格获取失败，保留原缓存：" + "；".join(warnings))
     migrated = {**old, "reports": reports, "prices": prices, "price_basis": "disclosure",
                 "report_date_basis": REPORT_DATE_BASIS,
                 "price_reference_basis": PRICE_REFERENCE_BASIS if complete else None,
-                "warnings": warnings}
+                "warnings": cash_warnings + warnings}
     if complete:
         _save_cache(path, migrated)
     return migrated
@@ -136,10 +268,37 @@ def load_stock(code: str, refresh: bool = False) -> dict:
         reports = fetch_financial_reports(code, session)
     except (requests.RequestException, ValueError, KeyError) as exc:
         if old:
-            fallback = _migrate_cached(code, old, path, session)
-            return {**fallback, "warnings": fallback.get("warnings", []) + [f"财报更新失败，正在显示缓存：{exc}"]}
+            return _keep_old(old, f"财报更新失败，保留原缓存：{exc}")
         raise ValueError(f"无法获取 {code} 的季度财报：{exc}") from exc
+    if old:
+        missing = _missing_old_values(old.get("reports", []),
+                                      {report["period"]: report for report in reports}, FINANCIAL_VALUES,
+                                      require_all_periods=True)
+        if missing:
+            return _keep_old(old, f"财报更新未覆盖已有报告期或指标（{len(missing)} 期），保留原缓存")
+    cash_flow_basis = None
+    cash_warnings = []
+    try:
+        cash_flows = fetch_cash_flow_reports(code, session)
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        if old:
+            return _keep_old(old, f"现金流量表获取失败，保留原缓存：{exc}")
+        cash_warnings.append(f"现金流量表获取失败：{exc}")
+    else:
+        if old:
+            missing = _missing_old_values(old.get("reports", []), cash_flows, CASH_VALUES)
+            if missing:
+                return _keep_old(old, f"现金流量表历史覆盖不足（{len(missing)} 期），保留原缓存")
+        reports = [{**report, **cash_flows.get(report["period"], {})} for report in reports]
+        cash_flow_basis = CASH_FLOW_BASIS
     prices, warnings, complete = _disclosure_prices(code, reports, session, old)
+    if old and not complete:
+        return _keep_old(old, "披露日价格更新失败，保留原缓存：" + "；".join(warnings))
+    if old:
+        missing_prices = _missing_price_snapshots(old, prices, reports)
+        if missing_prices:
+            return _keep_old(old, f"价格快照历史覆盖不足（{len(missing_prices)} 项），保留原缓存")
+    warnings = cash_warnings + warnings
     try:
         name = fetch_stock_name(code, session)
     except (requests.RequestException, ValueError, KeyError) as exc:
@@ -149,6 +308,8 @@ def load_stock(code: str, refresh: bool = False) -> dict:
     data = {"code": code, "updated_at": datetime.now(timezone.utc).isoformat(),
             "name": name, "reports": reports, "prices": prices,
             "price_basis": "disclosure", "report_date_basis": REPORT_DATE_BASIS,
+            "cash_flow_basis": cash_flow_basis,
+            "financial_fields_basis": FINANCIAL_FIELDS_BASIS,
             "price_reference_basis": PRICE_REFERENCE_BASIS if complete else None,
             "warnings": warnings}
     _save_cache(path, data)

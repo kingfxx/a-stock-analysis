@@ -11,6 +11,7 @@ def test_existing_cache_gets_name_without_refetching_financial_data(tmp_path, mo
                                 "updated_at": "2026-09-26T00:00:00+00:00"}), encoding="utf-8")
     monkeypatch.setattr(server, "fetch_stock_name", lambda code, session: "中远海控")
     monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: (_ for _ in ()).throw(AssertionError("finance refetched")))
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: {})
 
     data = server.load_stock("601919")
     assert data["name"] == "中远海控"
@@ -18,11 +19,74 @@ def test_existing_cache_gets_name_without_refetching_financial_data(tmp_path, mo
     assert server.cached_stocks() == [{"code": "601919", "name": "中远海控"}]
 
 
+def test_existing_cache_adds_cash_flow_without_refetching_prices(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    path = tmp_path / "600887.json"
+    path.write_text(json.dumps({"code": "600887", "name": "伊利股份", "reports": [
+        {"period": "2025-12-31", "publish_date": "2026-04-30", "revenue_ytd": 100}],
+        "prices": {"raw": [], "qfq": []}, "price_basis": "disclosure",
+        "price_reference_basis": server.PRICE_REFERENCE_BASIS,
+        "report_date_basis": server.REPORT_DATE_BASIS,
+        "financial_fields_basis": server.FINANCIAL_FIELDS_BASIS}), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: (_ for _ in ()).throw(AssertionError("finance refetched")))
+    monkeypatch.setattr(server, "fetch_daily_prices", lambda *args: (_ for _ in ()).throw(AssertionError("prices refetched")))
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: {
+        "2025-12-31": {"operating_cash_flow_ytd": 30, "capex_ytd": 8}})
+
+    data = server.load_stock("600887")
+    assert data["reports"][0]["operating_cash_flow_ytd"] == 30
+    assert data["reports"][0]["capex_ytd"] == 8
+    assert json.loads(path.read_text(encoding="utf-8"))["cash_flow_basis"] == server.CASH_FLOW_BASIS
+
+
+def test_existing_cache_backfills_new_report_fields_without_refetching_prices(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    path = tmp_path / "300750.json"
+    path.write_text(json.dumps({"code": "300750", "name": "宁德时代", "reports": [
+        {"period": "2025-12-31", "revenue_ytd": 100, "capex_ytd": 8}],
+        "prices": {"raw": [], "qfq": []}, "price_basis": "disclosure",
+        "price_reference_basis": server.PRICE_REFERENCE_BASIS,
+        "report_date_basis": server.REPORT_DATE_BASIS,
+        "cash_flow_basis": server.CASH_FLOW_BASIS}), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: [{
+        "period": "2025-12-31", "operating_cost_ytd": 60, "net_profit_ytd": 20,
+        "monetary_funds": 30, "short_term_borrowings": 10,
+        "short_term_bonds": None, "current_noncurrent_liabilities": 0,
+        "long_term_borrowings": 5, "bonds_payable": None, "lease_liabilities": 2}])
+    monkeypatch.setattr(server, "fetch_daily_prices", lambda *args: (_ for _ in ()).throw(AssertionError("prices refetched")))
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: (_ for _ in ()).throw(AssertionError("cash refetched")))
+    data = server.load_stock("300750")
+    assert data["reports"][0]["capex_ytd"] == 8
+    assert data["reports"][0]["operating_cost_ytd"] == 60
+    assert data["reports"][0]["net_profit_ytd"] == 20
+    assert data["reports"][0]["monetary_funds"] == 30
+    assert data["financial_fields_basis"] == server.FINANCIAL_FIELDS_BASIS
+
+
+def test_cash_flow_refresh_failure_retains_previous_cash_values(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    path = tmp_path / "600887.json"
+    path.write_text(json.dumps({"code": "600887", "name": "伊利股份", "reports": [
+        {"period": "2025-12-31", "operating_cash_flow_ytd": 30, "capex_ytd": 8}],
+        "prices": {"raw": [], "qfq": []}, "cash_flow_basis": server.CASH_FLOW_BASIS}), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: [{"period": "2025-12-31"}])
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: (_ for _ in ()).throw(ValueError("offline")))
+    monkeypatch.setattr(server, "_disclosure_prices", lambda *args: ({"raw": [], "qfq": []}, [], True))
+    monkeypatch.setattr(server, "fetch_stock_name", lambda *args: "伊利股份")
+
+    data = server.load_stock("600887", refresh=True)
+    assert data["reports"][0]["operating_cash_flow_ytd"] == 30
+    assert data["reports"][0]["capex_ytd"] == 8
+    assert "现金流量表获取失败" in data["warnings"][0]
+
+
 def test_month_end_cache_migrates_to_disclosure_snapshots(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: (_ for _ in ()).throw(ValueError("offline")))
     path = tmp_path / "601919.json"
     report = {"period": "2026-06-30", "publish_date": "2026-08-29"}
     path.write_text(json.dumps({"code": "601919", "name": "中远海控", "reports": [report],
+                                "financial_fields_basis": server.FINANCIAL_FIELDS_BASIS,
                                 "prices": {"raw": [{"date": "2026-06-30", "close": 12}], "qfq": []}}),
                     encoding="utf-8")
     monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: (_ for _ in ()).throw(AssertionError("finance refetched")))
@@ -32,13 +96,16 @@ def test_month_end_cache_migrates_to_disclosure_snapshots(tmp_path, monkeypatch)
     data = server.load_stock("601919")
     assert data["prices"]["raw"] == [{"publish_date": "2026-08-29", "date": "2026-08-28", "close": 16.88}]
     assert data["price_basis"] == "disclosure"
+    assert "现金流量表获取失败" in data["warnings"][0]
     assert json.loads(path.read_text(encoding="utf-8"))["price_basis"] == "disclosure"
 
 
 def test_cache_migrates_shifted_report_dates_and_reprices(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: {})
     path = tmp_path / "300750.json"
     path.write_text(json.dumps({"code": "300750", "name": "宁德时代", "price_basis": "disclosure",
+                                "financial_fields_basis": server.FINANCIAL_FIELDS_BASIS,
                                 "reports": [
                                     {"period": "2020-12-31", "publish_date": "2022-04-22"},
                                     {"period": "2021-12-31", "publish_date": "2023-03-10"}],
@@ -140,10 +207,12 @@ def test_serve_opens_browser_after_binding_when_requested(monkeypatch):
 
 def test_existing_disclosure_cache_adds_long_gap_references(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: {})
     path = tmp_path / "601919.json"
     reports = [{"period": "2015-06-30", "publish_date": "2015-08-28"},
                {"period": "2015-09-30", "publish_date": "2015-10-29"}]
     path.write_text(json.dumps({"code": "601919", "name": "中远海控", "reports": reports,
+                                "financial_fields_basis": server.FINANCIAL_FIELDS_BASIS,
                                 "price_basis": "disclosure", "report_date_basis": server.REPORT_DATE_BASIS,
                                 "prices": {"raw": [], "qfq": []}}), encoding="utf-8")
     monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: (_ for _ in ()).throw(AssertionError("finance refetched")))
@@ -157,3 +226,97 @@ def test_existing_disclosure_cache_adds_long_gap_references(tmp_path, monkeypatc
     assert [p["date"] for p in data["prices"]["raw_reference"]] == ["2015-08-07"] * 2
     assert [p["close"] for p in data["prices"]["qfq_reference"]] == [1.386] * 2
     assert json.loads(path.read_text(encoding="utf-8"))["price_reference_basis"] == server.PRICE_REFERENCE_BASIS
+
+
+def test_partial_financial_refresh_keeps_last_good_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    path = tmp_path / "601919.json"
+    previous = {"code": "601919", "name": "中远海控", "reports": [
+        {"period": "2025-03-31", "revenue_ytd": 100},
+        {"period": "2025-06-30", "revenue_ytd": 220}],
+        "prices": {"raw": [], "qfq": []}, "updated_at": "old"}
+    path.write_text(json.dumps(previous), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: [
+        {"period": "2025-06-30", "revenue_ytd": 230}])
+    data = server.load_stock("601919", refresh=True)
+    assert data["reports"] == previous["reports"]
+    assert "未覆盖已有报告期" in data["warnings"][0]
+    assert json.loads(path.read_text(encoding="utf-8")) == previous
+
+
+def test_partial_cash_flow_refresh_keeps_last_good_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    path = tmp_path / "601919.json"
+    previous = {"code": "601919", "name": "中远海控", "reports": [
+        {"period": "2025-03-31", "revenue_ytd": 100,
+         "operating_cash_flow_ytd": 30, "capex_ytd": 4},
+        {"period": "2025-06-30", "revenue_ytd": 220,
+         "operating_cash_flow_ytd": 60, "capex_ytd": 9}],
+        "prices": {"raw": [], "qfq": []}, "updated_at": "old"}
+    path.write_text(json.dumps(previous), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: [
+        {"period": p["period"], "revenue_ytd": p["revenue_ytd"]} for p in previous["reports"]])
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: {
+        "2025-06-30": {"operating_cash_flow_ytd": 61, "capex_ytd": 10}})
+    data = server.load_stock("601919", refresh=True)
+    assert data["reports"] == previous["reports"]
+    assert "现金流量表" in data["warnings"][0]
+    assert json.loads(path.read_text(encoding="utf-8")) == previous
+
+
+def test_partial_price_refresh_keeps_last_good_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    path = tmp_path / "601919.json"
+    previous = {"code": "601919", "name": "中远海控", "reports": [
+        {"period": "2025-03-31", "publish_date": "2025-04-25", "revenue_ytd": 100}],
+        "prices": {"raw": [{"publish_date": "2025-04-25", "date": "2025-04-25", "close": 10}],
+                   "qfq": []}, "price_basis": "disclosure", "updated_at": "old"}
+    path.write_text(json.dumps(previous), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: previous["reports"])
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: {})
+    monkeypatch.setattr(server, "fetch_daily_prices", lambda *args: [])
+    data = server.load_stock("601919", refresh=True)
+    assert data["prices"] == previous["prices"]
+    assert "价格快照" in data["warnings"][0]
+    assert json.loads(path.read_text(encoding="utf-8")) == previous
+
+
+def test_successful_refresh_saves_previous_cache_as_backup(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    path = tmp_path / "601919.json"
+    previous = {"code": "601919", "name": "中远海控", "reports": [],
+                "prices": {"raw": [], "qfq": []}}
+    path.write_text(json.dumps(previous), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: [
+        {"period": "2025-03-31", "revenue_ytd": 100}])
+    monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: {
+        "2025-03-31": {"operating_cash_flow_ytd": 10, "capex_ytd": 2}})
+    monkeypatch.setattr(server, "_disclosure_prices", lambda *args: (
+        {"raw": [], "qfq": [], "raw_reference": [], "qfq_reference": []}, [], True))
+    monkeypatch.setattr(server, "fetch_stock_name", lambda *args: "中远海控")
+    data = server.load_stock("601919", refresh=True)
+    assert data["reports"][0]["revenue_ytd"] == 100
+    assert json.loads(path.with_suffix(".json.bak").read_text(encoding="utf-8")) == previous
+
+
+def test_partial_valuation_refresh_keeps_previous_months_and_backup_untouched(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server.time, "sleep", lambda seconds: None)
+    path = tmp_path / "valuation" / "601919.json"
+    path.parent.mkdir()
+    previous = {"rows": [
+        {"date": "2026-07-31", "pe": 8, "pb": 1.0, "qfq_close": 9, "qfq_close_date": "2026-07-31"},
+        {"date": "2026-08-31", "pe": 9, "pb": 1.1, "qfq_close": 10, "qfq_close_date": "2026-08-31"}],
+        "industry": {"pe": 12}, "updated_on": "2026-09-01", "basis": server.VALUATION_BASIS}
+    path.write_text(json.dumps(previous), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_valuation_series", lambda *args: {
+        "pe": [{"date": "2026-08-31", "value": 9}],
+        "pb": [{"date": "2026-08-31", "value": 1.1}], "market_cap": []})
+    monkeypatch.setattr(server, "fetch_dividend_yields", lambda *args: [])
+    monkeypatch.setattr(server, "fetch_monthly_prices", lambda *args: [
+        {"date": "2026-08-31", "close": 10}])
+    monkeypatch.setattr(server, "fetch_industry_snapshot", lambda *args: {"pe": 12})
+    data = server.load_valuation("601919", [], refresh=True)
+    assert data["rows"] == previous["rows"]
+    assert "历史覆盖不足" in data["warnings"][0]
+    assert json.loads(path.read_text(encoding="utf-8")) == previous

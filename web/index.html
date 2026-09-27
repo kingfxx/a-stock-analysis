@@ -121,6 +121,16 @@
         <select id="bar-metric" aria-label="左轴柱形指标">
           <option value="revenue">营业收入</option>
           <option value="profit" selected>归母净利润</option>
+          <option value="revenue_growth">营收同比增长率</option>
+          <option value="profit_growth">归母净利润同比增长率</option>
+          <option value="roe">ROE（TTM 估算）</option>
+          <option value="operating_cash_flow">经营活动现金流净额</option>
+          <option value="free_cash_flow">简化自由现金流</option>
+          <option value="gross_margin">毛利率</option>
+          <option value="net_margin">净利率</option>
+          <option value="capex">资本开支 CapEx</option>
+          <option value="interest_bearing_debt">有息负债（简化）</option>
+          <option value="net_cash">净现金／净负债</option>
           <option value="market_cap">披露日估算市值</option>
           <option value="qfq_price">披露日前复权股价</option>
         </select>
@@ -128,6 +138,16 @@
         <select id="line-metric" aria-label="黄色线指标">
           <option value="profit">归母净利润</option>
           <option value="revenue">营业收入</option>
+          <option value="revenue_growth">营收同比增长率</option>
+          <option value="profit_growth">归母净利润同比增长率</option>
+          <option value="roe">ROE（TTM 估算）</option>
+          <option value="operating_cash_flow">经营活动现金流净额</option>
+          <option value="free_cash_flow">简化自由现金流</option>
+          <option value="gross_margin">毛利率</option>
+          <option value="net_margin">净利率</option>
+          <option value="capex">资本开支 CapEx</option>
+          <option value="interest_bearing_debt">有息负债（简化）</option>
+          <option value="net_cash">净现金／净负债</option>
           <option value="market_cap">披露日估算市值</option>
           <option value="qfq_price" selected>披露日前复权股价</option>
         </select>
@@ -231,6 +251,16 @@
   const metrics = {
     revenue: {name:'营业收入', unit:'亿元', scale:1e8},
     profit: {name:'归母净利润', unit:'亿元', scale:1e8},
+    revenue_growth: {name:'营收同比增长率', unit:'%', scale:1},
+    profit_growth: {name:'归母净利润同比增长率', unit:'%', scale:1},
+    roe: {name:'ROE（TTM 估算）', unit:'%', scale:1},
+    operating_cash_flow: {name:'经营活动现金流净额', unit:'亿元', scale:1e8},
+    free_cash_flow: {name:'简化自由现金流', unit:'亿元', scale:1e8},
+    gross_margin: {name:'毛利率', unit:'%', scale:1},
+    net_margin: {name:'净利率', unit:'%', scale:1},
+    capex: {name:'资本开支 CapEx', unit:'亿元', scale:1e8},
+    interest_bearing_debt: {name:'有息负债（简化）', unit:'亿元', scale:1e8},
+    net_cash: {name:'净现金／净负债', unit:'亿元', scale:1e8},
     market_cap: {name:'披露日估算市值', unit:'亿元', scale:1e8, dateKey:'price_date', referenceKey:'market_cap_reference'},
     qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date', referenceKey:'qfq_price_reference'}
   };
@@ -316,7 +346,8 @@
     const barReferenceCount = barReferences.filter(v => v != null).length;
     const lineReferenceCount = lineReferences.filter(v => v != null).length;
     const selectedMetrics = new Set([barMetric.value, lineMetric.value]);
-    const hasFinancial = selectedMetrics.has('revenue') || selectedMetrics.has('profit');
+    const hasFinancial = [...selectedMetrics].some(metric => !['market_cap','qfq_price','interest_bearing_debt','net_cash'].includes(metric));
+    const hasBalance = selectedMetrics.has('interest_bearing_debt') || selectedMetrics.has('net_cash');
     const hasMarket = selectedMetrics.has('market_cap') || selectedMetrics.has('qfq_price');
     const hasNegativeAdjusted = selectedMetrics.has('qfq_price') && rows.some(r => r.qfq_price != null && r.qfq_price < 0);
     note.textContent = (hasFinancial ? (selectedPeriod === 'quarter' ? '单季度财务值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? '财务 TTM 为连续四个单季度之和；缺期则留空。' : '年度财务值取当年年报累计数。') : '') +
@@ -324,6 +355,13 @@
       (selectedMetrics.has('market_cap') ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : '') +
       (selectedMetrics.has('qfq_price') ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
       (hasNegativeAdjusted ? ' 部分历史前复权值为负，图中保留数据源原值；它不是当时的未复权成交价。' : '') +
+      ([...selectedMetrics].some(metric => metric.endsWith('_growth')) ? ' 同比增长率按去年相同报告期、相同周期口径比较；基期小于等于零或缺失时留空。' : '') +
+      (selectedMetrics.has('roe') ? ' ROE（TTM 估算）＝连续四季度归母净利润÷本期与上年同期归母净资产均值；非官方加权平均 ROE。' : '') +
+      (selectedMetrics.has('operating_cash_flow') || selectedMetrics.has('free_cash_flow') ? ' 经营现金流来自新浪现金流量表；单季度由累计值差分。简化自由现金流＝经营现金流－购建长期资产支付的现金，不能视为精确可分配现金。' : '') +
+      (selectedMetrics.has('gross_margin') ? ' 毛利率＝（营业收入－营业成本）÷营业收入；按所选周期的收入、成本计算。' : '') +
+      (selectedMetrics.has('net_margin') ? ' 净利率＝合并净利润÷营业收入，并非归母净利率；按所选周期计算。' : '') +
+      (selectedMetrics.has('capex') ? ' CapEx 取现金流量表“购建固定资产、无形资产和其他长期资产所支付的现金”；单季由累计值差分。' : '') +
+      (hasBalance ? ' 有息负债（简化）＝短期借款＋应付短期债券＋一年内到期的非流动负债＋长期借款＋应付债券＋租赁负债；净现金＝报告期末货币资金－有息负债，正值为净现金，负值为净负债。均为期末时点值，不随单季／年度／TTM 切换而加总；货币资金可能含受限资金，债务科目亦可能含非有息部分。' : '') +
       (barReferenceCount || lineReferenceCount ? ' 空心圆点为距披露日 16–180 天的最近交易价参考点；与相邻价格点用虚线连接，正常价格点之间仍用实线。' : '') +
       (missingBar ? ` 柱形有 ${missingBar} 个正式值缺失${barReferenceCount ? `，其中 ${barReferenceCount} 个显示参考点` : ''}。` : '') +
       (missingLine ? ` 黄色线有 ${missingLine} 个正式值缺失${lineReferenceCount ? `，其中 ${lineReferenceCount} 个显示参考点` : ''}。` : '');

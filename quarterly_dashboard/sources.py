@@ -18,6 +18,17 @@ PROFIT_KEYS = (
 )
 SHARE_KEYS = ("实收资本(或股本)", "实收资本（或股本）", "股本")
 EQUITY_KEYS = ("归属于母公司股东权益合计", "归属于母公司股东的权益", "归属于母公司所有者权益合计")
+CASH_FLOW_KEYS = ("经营活动产生的现金流量净额",)
+CAPEX_KEYS = ("购建固定资产、无形资产和其他长期资产所支付的现金",
+              "购建固定资产、无形资产和其他长期资产支付的现金")
+DEBT_FIELDS = {
+    "short_term_borrowings": ("短期借款",),
+    "short_term_bonds": ("应付短期债券",),
+    "current_noncurrent_liabilities": ("一年内到期的非流动负债",),
+    "long_term_borrowings": ("长期借款",),
+    "bonds_payable": ("应付债券",),
+    "lease_liabilities": ("租赁负债",),
+}
 
 
 def _number(value):
@@ -84,11 +95,17 @@ def parse_financial_reports(income_payload: dict, balance_payload: dict) -> list
         fields = {item.get("item_title"): item.get("item_value") for item in record.get("data", [])}
         counterpart = balance.get(key, {})
         balance_fields = {item.get("item_title"): item.get("item_value") for item in counterpart.get("data", [])}
+        debt_fields = {field: _first(balance_fields, names) for field, names in DEBT_FIELDS.items()
+                       if any(name in balance_fields for name in names)}
         output.append({
             "period": period,
             "publish_date": _date(record.get("publish_date")),
             "revenue_ytd": _first(fields, ("营业收入", "营业总收入")),
             "profit_ytd": _first(fields, PROFIT_KEYS),
+            "operating_cost_ytd": _first(fields, ("营业成本",)),
+            "net_profit_ytd": _first(fields, ("净利润",)),
+            "monetary_funds": _first(balance_fields, ("货币资金",)),
+            **debt_fields,
             "shares": _first(balance_fields, SHARE_KEYS),
             "equity": _first(balance_fields, EQUITY_KEYS),
             "source_update_time": record.get("update_time"),
@@ -96,6 +113,23 @@ def parse_financial_reports(income_payload: dict, balance_payload: dict) -> list
     if not output:
         raise ValueError("新浪利润表报告期无法解析")
     return normalize_report_dates(sorted(output, key=lambda row: row["period"]))
+
+
+def parse_cash_flow_reports(payload: dict) -> dict[str, dict]:
+    periods = (payload.get("result", {}).get("data", {}) or {}).get("report_list", {}) or {}
+    if not periods:
+        raise ValueError("新浪现金流量表没有报告期记录")
+    result = {}
+    for key, record in periods.items():
+        period = _date(key)
+        if period is None:
+            continue
+        fields = {item.get("item_title"): item.get("item_value") for item in record.get("data", [])}
+        result[period] = {"operating_cash_flow_ytd": _first(fields, CASH_FLOW_KEYS),
+                          "capex_ytd": _first(fields, CAPEX_KEYS)}
+    if not result:
+        raise ValueError("新浪现金流量表报告期无法解析")
+    return result
 
 
 def parse_monthly_prices(payload: dict, symbol: str, adjust: str) -> list[dict]:
@@ -177,6 +211,19 @@ def fetch_financial_reports(code: str, session: requests.Session) -> list[dict]:
         return payload
 
     return parse_financial_reports(one("lrb"), one("fzb"))
+
+
+def fetch_cash_flow_reports(code: str, session: requests.Session) -> dict[str, dict]:
+    symbol = symbol_for(code)
+    response = session.get(SINA_URL, params={"paperCode": symbol, "source": "llb",
+                                             "type": "0", "page": "1", "num": "200"}, timeout=18)
+    response.raise_for_status()
+    payload = response.json()
+    data = payload.get("result", {}).get("data", {}) or {}
+    periods = data.get("report_list", {}) or {}
+    if int(data.get("report_count") or 0) > len(periods):
+        raise ValueError(f"新浪llb只返回 {len(periods)}/{data['report_count']} 期，历史不完整")
+    return parse_cash_flow_reports(payload)
 
 
 def fetch_monthly_prices(code: str, session: requests.Session, adjust: str = "") -> list[dict]:

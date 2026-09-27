@@ -19,7 +19,10 @@ def test_quarterly_differences_and_ttm_require_contiguous_reports():
     assert rows[-1]["market_cap"] == 400
     assert rows[-1]["qfq_price"] == 3.8
     assert rows[1]["market_cap"] is None
-    assert view_rows(rows, "year") == [{**rows[-1], "revenue": 70, "profit": 14}]
+    annual = view_rows(rows, "year")[0]
+    assert annual["revenue"] == 70
+    assert annual["profit"] == 14
+    assert annual["operating_cash_flow"] is None
 
 
 def test_missing_previous_cumulative_report_does_not_invent_quarter():
@@ -31,6 +34,79 @@ def test_missing_previous_cumulative_report_does_not_invent_quarter():
     assert rows[1]["revenue_quarter"] is None
     assert rows[1]["profit_ttm"] is None
     assert view_rows(rows, "quarter")[1]["revenue"] is None
+
+
+def test_growth_roe_and_cash_flows_use_comparable_periods():
+    reports = []
+    for year, data in ((2024, [(100, 10, 12, 2, 80), (220, 24, 28, 5, 84),
+                               (360, 39, 45, 8, 90), (520, 56, 64, 12, 100)]),
+                       (2025, [(120, 15, 18, 3, 110), (270, 33, 38, 7, 120),
+                               (450, 54, 60, 10, 130), (650, 78, 87, 16, 140)])):
+        for month, (revenue, profit, cash, capex, equity) in zip((3, 6, 9, 12), data):
+            reports.append({"period": f"{year}-{month:02d}-{31 if month in (3, 12) else 30}",
+                            "revenue_ytd": revenue, "profit_ytd": profit,
+                            "operating_cash_flow_ytd": cash, "capex_ytd": capex, "equity": equity})
+    rows = build_period_rows(reports, [], [])
+    q2 = view_rows(rows, "quarter")[5]
+    assert q2["operating_cash_flow"] == 20
+    assert q2["free_cash_flow"] == 16
+    assert q2["revenue_growth"] == 25
+    assert q2["profit_growth"] == (18 / 14 - 1) * 100
+    assert q2["roe"] == 65 / ((84 + 120) / 2) * 100
+    annual = view_rows(rows, "year")[-1]
+    assert annual["operating_cash_flow"] == 87
+    assert annual["free_cash_flow"] == 71
+    assert annual["revenue_growth"] == 25
+    assert annual["roe"] == 78 / 120 * 100
+    ttm = view_rows(rows, "ttm")[5]
+    assert ttm["operating_cash_flow"] == 64 - 28 + 38
+    assert ttm["revenue_growth"] is None  # No earlier complete four-quarter window.
+
+
+def test_negative_prior_profit_and_missing_cash_flow_do_not_make_ratios():
+    reports = [{"period": "2024-03-31", "revenue_ytd": 10, "profit_ytd": -2, "equity": 10},
+               {"period": "2025-03-31", "revenue_ytd": 15, "profit_ytd": 3, "equity": 12}]
+    rows = view_rows(build_period_rows(reports, [], []), "quarter")
+    assert rows[1]["revenue_growth"] == 50
+    assert rows[1]["profit_growth"] is None
+    assert rows[1]["operating_cash_flow"] is None
+    assert rows[1]["free_cash_flow"] is None
+    assert rows[1]["roe"] is None
+
+
+def test_margins_capex_and_balance_sheet_debt_keep_period_basis():
+    reports = [
+        {"period": "2025-03-31", "revenue_ytd": 100, "operating_cost_ytd": 60,
+         "net_profit_ytd": 20, "capex_ytd": 8, "monetary_funds": 80,
+         "short_term_borrowings": 10, "short_term_bonds": None,
+         "current_noncurrent_liabilities": 5, "long_term_borrowings": 20,
+         "bonds_payable": None, "lease_liabilities": 5},
+        {"period": "2025-06-30", "revenue_ytd": 250, "operating_cost_ytd": 170,
+         "net_profit_ytd": 35, "capex_ytd": 20, "monetary_funds": 30,
+         "short_term_borrowings": 15, "short_term_bonds": None,
+         "current_noncurrent_liabilities": 10, "long_term_borrowings": 20,
+         "bonds_payable": None, "lease_liabilities": 5},
+    ]
+    rows = build_period_rows(reports, [], [])
+    q2 = view_rows(rows, "quarter")[1]
+    assert q2["gross_margin"] == 100 * (150 - 110) / 150
+    assert q2["net_margin"] == 10
+    assert q2["capex"] == 12
+    assert q2["interest_bearing_debt"] == 50
+    assert q2["net_cash"] == -20
+    assert view_rows(rows, "ttm")[1]["gross_margin"] is None
+    assert view_rows(rows, "ttm")[1]["capex"] is None
+
+
+def test_missing_debt_component_or_zero_revenue_does_not_invent_metric():
+    reports = [{"period": "2025-03-31", "revenue_ytd": 0,
+                "operating_cost_ytd": 0, "net_profit_ytd": 2,
+                "monetary_funds": 10, "short_term_borrowings": 3}]
+    row = view_rows(build_period_rows(reports, [], []), "quarter")[0]
+    assert row["gross_margin"] is None
+    assert row["net_margin"] is None
+    assert row["interest_bearing_debt"] is None
+    assert row["net_cash"] is None
 
 
 def test_weekend_disclosure_uses_last_trading_close_and_never_quarter_end():
