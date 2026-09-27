@@ -52,3 +52,13 @@ def test_weekend_disclosure_uses_last_trading_close_and_never_quarter_end():
 def test_disclosure_without_recent_trading_price_is_missing():
     reports = [{"publish_date": "2026-08-29"}]
     assert disclosure_snapshots(reports, [{"date": "2026-06-30", "close": 12}]) == []
+
+
+def test_negative_adjusted_close_is_not_treated_as_missing():
+    reports = [{"period": "2013-09-30", "publish_date": "2013-10-31",
+                "revenue_ytd": 10, "profit_ytd": 1, "shares": 100, "equity": 50}]
+    raw = [{"publish_date": "2013-10-31", "date": "2013-10-31", "close": 3.13}]
+    adjusted = [{"publish_date": "2013-10-31", "date": "2013-10-31", "close": -5.152}]
+    row = build_period_rows(reports, raw, adjusted)[0]
+    assert row["qfq_price"] == -5.152
+    assert row["qfq_price_date"] == "2013-10-31"

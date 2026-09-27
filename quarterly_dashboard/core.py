@@ -63,7 +63,7 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             "revenue_ttm": None,
             "profit_ttm": None,
             "raw_price": raw_close,
-            "qfq_price": qfq_close if qfq_close is not None and qfq_close > 0 else None,
+            "qfq_price": qfq_close,
             "price_date": raw.get("date") if raw else None,
             "qfq_price_date": qfq.get("date") if qfq else None,
             "market_cap": raw_close * shares if raw_close is not None and shares is not None else None,

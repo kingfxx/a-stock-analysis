@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -152,11 +153,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def serve(port: int = 8765):
+def serve(port: int = 8765, open_browser: bool = False):
     address = ("127.0.0.1", port)
     server = ThreadingHTTPServer(address, Handler)
-    print(f"季度分析页面：http://127.0.0.1:{port}/", flush=True)
+    url = f"http://127.0.0.1:{port}/"
+    print(f"季度分析页面：{url}", flush=True)
     try:
+        if open_browser:
+            webbrowser.open(url)
         server.serve_forever()
     except KeyboardInterrupt:
         pass

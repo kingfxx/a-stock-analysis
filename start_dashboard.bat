@@ -10,7 +10,7 @@ if not exist "%PYTHON_EXE%" (
 
 echo Dashboard: http://127.0.0.1:8765/
 echo Keep this window open while using the dashboard. Close it to stop the server.
-"%PYTHON_EXE%" app.py
+"%PYTHON_EXE%" app.py --open-browser
 
 if errorlevel 1 (
     echo Server stopped with an error. Check the message above.

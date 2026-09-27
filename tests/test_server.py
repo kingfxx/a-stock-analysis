@@ -63,3 +63,28 @@ def test_render_page_includes_cached_stock_options(tmp_path, monkeypatch):
     page = server.render_page("601919", False)
     assert '"name": "中远海控"' in page
     assert '"cached_stocks": [{"code": "601919", "name": "中远海控"}]' in page
+
+
+def test_serve_opens_browser_after_binding_when_requested(monkeypatch):
+    events = []
+
+    class FakeServer:
+        def __init__(self, address, handler):
+            events.append(("bound", address))
+
+        def serve_forever(self):
+            events.append("serving")
+
+        def server_close(self):
+            events.append("closed")
+
+    monkeypatch.setattr(server, "ThreadingHTTPServer", FakeServer)
+    monkeypatch.setattr(server.webbrowser, "open", lambda url: events.append(("opened", url)))
+
+    server.serve(8766, open_browser=True)
+    assert events == [
+        ("bound", ("127.0.0.1", 8766)),
+        ("opened", "http://127.0.0.1:8766/"),
+        "serving",
+        "closed",
+    ]

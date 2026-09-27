@@ -208,10 +208,12 @@
     const selectedMetrics = new Set([barMetric.value, lineMetric.value]);
     const hasFinancial = selectedMetrics.has('revenue') || selectedMetrics.has('profit');
     const hasMarket = selectedMetrics.has('market_cap') || selectedMetrics.has('qfq_price');
+    const hasNegativeAdjusted = selectedMetrics.has('qfq_price') && rows.some(r => r.qfq_price != null && r.qfq_price < 0);
     note.textContent = (hasFinancial ? (selectedPeriod === 'quarter' ? '单季度财务值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? '财务 TTM 为连续四个单季度之和；缺期则留空。' : '年度财务值取当年年报累计数。') : '') +
       (hasMarket ? (hasFinancial ? ' ' : '') + '市场指标始终取对应报告披露日的价格快照。' : '') +
       (selectedMetrics.has('market_cap') ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : '') +
       (selectedMetrics.has('qfq_price') ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
+      (hasNegativeAdjusted ? ' 部分历史前复权值为负，图中保留数据源原值；它不是当时的未复权成交价。' : '') +
       (missingBar ? ` 青色柱有 ${missingBar} 个缺失点。` : '') +
       (missingLine ? ` 黄色线有 ${missingLine} 个缺失点。` : '');
   }
