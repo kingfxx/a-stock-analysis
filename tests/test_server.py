@@ -60,9 +60,38 @@ def test_render_page_includes_cached_stock_options(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "load_stock", lambda code, refresh=False: {
         "code": "601919", "name": "中远海控", "reports": [],
         "prices": {"raw": [], "qfq": []}, "updated_at": "2026-09-26T00:00:00+00:00"})
+    monkeypatch.setattr(server, "load_valuation", lambda code, reports, refresh=False: {
+        "rows": [], "industry": {}, "updated_on": "2026-09-27", "warnings": []})
     page = server.render_page("601919", False)
     assert '"name": "中远海控"' in page
     assert '"cached_stocks": [{"code": "601919", "name": "中远海控"}]' in page
+
+
+def test_valuation_cache_is_reused_without_network(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    path = tmp_path / "valuation" / "601919.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"rows": [{"date": "2026-09-25", "pe": 9}],
+                                "industry": {"pe": 12},
+                                "updated_on": server.date.today().isoformat(),
+                                "basis": server.VALUATION_BASIS, "warnings": []}),
+                    encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_valuation_series", lambda *args: (_ for _ in ()).throw(AssertionError("network called")))
+    assert server.load_valuation("601919", [])["rows"][0]["pe"] == 9
+
+
+def test_dividend_source_failure_keeps_other_valuation_metrics(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(server, "fetch_valuation_series", lambda *args: {
+        "pe": [{"date": "2026-09-24", "value": 9}], "pb": [], "market_cap": []})
+    monkeypatch.setattr(server, "fetch_dividend_yields", lambda *args: (_ for _ in ()).throw(ValueError("unavailable")))
+    monkeypatch.setattr(server, "fetch_industry_snapshot", lambda *args: {"pe": 12})
+
+    data = server.load_valuation("601919", [])
+    assert data["rows"][0]["pe"] == 9
+    assert data["rows"][0].get("dividend_yield") is None
+    assert "历史股息率获取失败" in data["warnings"][0]
 
 
 def test_serve_opens_browser_after_binding_when_requested(monkeypatch):

@@ -53,11 +53,28 @@
     .mini { padding:20px 23px; background:#172026; border:1px solid var(--line); border-radius:10px; }
     .mini h3 { margin:0 0 9px; font-size:14px; color:#d8e6e9; }
     .mini p { margin:0; color:var(--muted); font-size:13px; line-height:1.75; }
+    .valuation-panel { margin-top:18px; }
+    .valuation-controls { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+    .valuation-controls .period { flex-shrink:0; }
+    .valuation-overview { display:grid; grid-template-columns:190px minmax(0,1fr); gap:22px; padding:22px 27px 5px; }
+    .valuation-current { padding:18px 20px; background:#24343d; border:1px solid #3d5966; border-radius:10px; }
+    .valuation-current small { display:block; color:#afc2c9; font-size:12px; }
+    .valuation-current strong { display:block; color:#fff; font-size:34px; line-height:1.25; font-variant-numeric:tabular-nums; }
+    .valuation-current span { color:var(--muted); font-size:12px; }
+    .valuation-summary { display:flex; justify-content:center; flex-direction:column; gap:7px; min-width:0; }
+    .valuation-summary p { margin:0; color:#dce8e8; line-height:1.6; font-size:15px; }
+    .valuation-summary strong { color:#f4d35e; font-weight:700; }
+    .valuation-levels { display:flex; gap:20px; flex-wrap:wrap; padding:14px 27px 0; color:var(--muted); font-size:13px; }
+    .valuation-levels span { display:inline-flex; align-items:center; gap:7px; }
+    .valuation-levels i { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--level-color); }
+    .valuation-levels b { color:var(--ink); font-weight:600; }
+    #valuation-chart { height:400px; }
+    .valuation-note { padding-top:2px; }
     .error,.warning { border-radius:8px; margin-bottom:15px; padding:12px 16px; font-size:14px; }
     .error { background:#442729; color:#ffe2df; }
     .warning { background:#4a3c22; color:#ffe5a1; }
     .hide { display:none; }
-    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .controls{width:100%} select{flex:1} .quarter-key{padding:13px 15px 0} #chart{height:500px;min-height:420px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} }
+    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .controls{width:100%} select{flex:1} .quarter-key{padding:13px 15px 0} #chart{height:500px;min-height:420px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} .valuation-overview{grid-template-columns:1fr;padding:18px 15px 0;gap:13px} .valuation-current{max-width:230px} .valuation-levels{padding:14px 15px 0;gap:8px 17px} #valuation-chart{height:360px} }
   </style>
 </head>
 <body>
@@ -133,6 +150,42 @@
     <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。新浪部分历史披露日期错位，按上一年同报告期记录校正；无法可靠推断则留空。股价取校正披露日或此前最近交易日的收盘价。相隔超过 15 天的价格不算披露日价格；若处于有前后交易记录的长间隔内，以空心圆点标出最近收盘参考值，与相邻价格点之间用虚线连接。悬停可查看实际交易日。</p></section>
     <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的未复权及前复权价格来自腾讯日 K，只缓存每份报告对应的价格快照及长间隔参考点。市值为披露日价格×报告期末股本的估算值；缺少正式价格或股本时正式值留空。</p></section>
   </div>
+  <section class="panel valuation-panel" aria-label="估值与历史分位">
+    <div class="panel-head">
+      <div>
+        <h2>估值与分位</h2>
+        <p>月度估值走势 · 与所选区间历史分布及当前同行业均值对照</p>
+      </div>
+      <div class="valuation-controls">
+        <div class="period" role="group" aria-label="估值指标">
+          <button type="button" data-valuation-metric="pe" class="active">市盈率 PE</button>
+          <button type="button" data-valuation-metric="pb">市净率 PB</button>
+          <button type="button" data-valuation-metric="ps">市销率 PS</button>
+          <button type="button" data-valuation-metric="dividend_yield">股息率</button>
+        </div>
+        <label for="valuation-range">时间范围</label>
+        <select id="valuation-range" aria-label="估值时间范围">
+          <option value="10" selected>最近 10 年</option>
+          <option value="5">最近 5 年</option>
+          <option value="3">最近 3 年</option>
+        </select>
+      </div>
+    </div>
+    <div class="valuation-overview">
+      <div class="valuation-current"><small id="valuation-current-label">当前市盈率 PE(TTM)</small><strong id="valuation-current">—</strong><span id="valuation-current-date">最近月度采样</span></div>
+      <div class="valuation-summary">
+        <p id="valuation-history">历史：正在计算…</p>
+        <p id="valuation-industry">行业：正在获取…</p>
+      </div>
+    </div>
+    <div class="valuation-levels" aria-label="历史估值参考线">
+      <span><i style="--level-color:#6ac9aa"></i><small id="valuation-high-label">高估（80% 分位）</small><b id="valuation-high">—</b></span>
+      <span><i style="--level-color:#f4b560"></i><small id="valuation-median-label">中值（50% 分位）</small><b id="valuation-median">—</b></span>
+      <span><i style="--level-color:#ed8180"></i><small id="valuation-low-label">低估（20% 分位）</small><b id="valuation-low">—</b></span>
+    </div>
+    <div id="valuation-chart" role="img" aria-label="月度估值走势与历史分位参考线"></div>
+    <p id="valuation-note" class="note valuation-note"></p>
+  </section>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script src="/plotly.min.js"></script>
@@ -279,7 +332,71 @@
     document.querySelectorAll('[data-period]').forEach(item => item.classList.toggle('active', item === button));
     render();
   }));
-  if (typeof Plotly !== 'undefined') render();
+  let valuationMetric = 'pe';
+  const valuationNames = {pe:'市盈率 PE(TTM)',pb:'市净率 PB(MRQ)',ps:'市销率 PS(TTM)',dividend_yield:'股息率（近 12 个月已实施派息）'};
+  const valuationRange = document.getElementById('valuation-range');
+  const formattedValuation = value => value == null ? '—' : Number(value).toFixed(2) + (valuationMetric === 'dividend_yield' ? '%' : ' 倍');
+  function renderValuation() {
+    const years = valuationRange.value;
+    const view = state.valuation?.views?.[years]?.[valuationMetric];
+    const rows = view?.rows || [];
+    const current = view?.current;
+    document.getElementById('valuation-current-label').textContent = valuationMetric === 'dividend_yield' ? '最近月度 · 近 12 个月股息率' : '最近月度 ' + valuationNames[valuationMetric];
+    document.getElementById('valuation-current').textContent = formattedValuation(current);
+    document.getElementById('valuation-current-date').textContent = view?.current_date || '暂无有效月度数据';
+    document.getElementById('valuation-high').textContent = formattedValuation(view?.high);
+    document.getElementById('valuation-median').textContent = formattedValuation(view?.median);
+    document.getElementById('valuation-low').textContent = formattedValuation(view?.low);
+    const isYield = valuationMetric === 'dividend_yield';
+    document.getElementById('valuation-high-label').textContent = isYield ? '高股息（80% 分位）' : '高估（80% 分位）';
+    document.getElementById('valuation-median-label').textContent = '中值（50% 分位）';
+    document.getElementById('valuation-low-label').textContent = isYield ? '低股息（20% 分位）' : '低估（20% 分位）';
+    const history = document.getElementById('valuation-history');
+    history.textContent = view?.count ? `历史：当前高于近 ${years} 年 ${view.percentile}% 的有效月份（${view.count} 个月）。` : `历史：近 ${years} 年暂无可用的${valuationNames[valuationMetric]}月度数据。`;
+    const industry = document.getElementById('valuation-industry');
+    const relation = {higher:'高于',lower:'低于',equal:'等于'}[view?.industry_relation];
+    const peers = state.valuation?.peer_count;
+    industry.textContent = isYield ? '行业：数据源暂无同口径的行业平均股息率。' :
+      view?.industry == null ? '行业：暂无可用的同行业平均估值。' : relation ?
+      `行业：当前${relation}同行业平均（${formattedValuation(view.industry)}${peers ? '，约 ' + peers + ' 只同业股票' : ''}）。` :
+      `行业：同行业平均为 ${formattedValuation(view.industry)}，暂无当前值可比较。`;
+    const note = document.getElementById('valuation-note');
+    const sourceNote = isYield ?
+      '股息率＝截至当月未复权收盘价前 365 天内已除权实施的税前每股现金分红之和 ÷ 该月最后交易日未复权收盘价 × 100%；无已实施分红时显示 0%。分红事件来自东方财富，股价来自腾讯日 K。' : valuationMetric === 'ps' ?
+      'PS 为百度总市值 ÷ 截至该月已披露财报的 TTM 营收；历史财报可能包含后续修订。' :
+      'PE(TTM) 与 PB 取百度股市通历史估值。';
+    note.textContent = sourceNote + ' 每月取最后一条可用记录；无效指标不纳入走势与分位。高/中/低线分别为所选区间有效月度值的 80%/50%/20% 分位。' + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
+      (state.valuation?.updated_on || '未知') + '。' + (state.valuation?.warnings || []).join(' ');
+    const xs = rows.map(row => isYield ? row.dividend_yield_date || row.date : row.date);
+    const ys = rows.map(row => row[valuationMetric]);
+    const first = xs[0], last = xs.at(-1);
+    const traces = [{type:'scatter',mode:'lines+markers',name:valuationNames[valuationMetric],
+      x:xs,y:ys,connectgaps:false,fill:'tozeroy',fillcolor:'rgba(84,151,220,0.11)',
+      line:{color:'#69a9ed',width:2.8},marker:{color:'#69a9ed',size:5},
+      hovertemplate:'%{x|%Y-%m-%d}<br>' + valuationNames[valuationMetric] + '：%{y:.2f}' + (isYield ? '%' : ' 倍') + '<extra></extra>'}];
+    for (const [key, label, color] of [['high',isYield ? '高股息 · 80%' : '高估 · 80%','#6ac9aa'],['median','中值 · 50%','#f4b560'],['low',isYield ? '低股息 · 20%' : '低估 · 20%','#ed8180']]) {
+      if (view?.[key] != null && first && last) traces.push({type:'scatter',mode:'lines',name:label,
+        x:[first,last],y:[view[key],view[key]],hoverinfo:'skip',
+        line:{color,width:1.6,dash:'dash'}});
+    }
+    Plotly.react('valuation-chart', traces, {
+      paper_bgcolor:'#1a2227',plot_bgcolor:'#1a2227',font:{color:'#edf4f4'},
+      margin:{l:77,r:28,t:30,b:65},hovermode:'x unified',showlegend:false,
+      xaxis:{type:'date',tickformat:'%Y-%m',dtick:years === '10' ? 'M12' : years === '5' ? 'M6' : 'M3',
+        tickfont:{color:'#ffffff',size:12},gridcolor:'#304049',zeroline:false,automargin:true},
+      yaxis:{title:{text:isYield ? '股息率（%）' : '估值（倍）',font:{color:'#ffffff',size:14}},tickfont:{color:'#ffffff',size:12},
+        gridcolor:'#304049',zeroline:false,rangemode:'tozero',automargin:true},
+      annotations: rows.length ? [] : [{text:'暂无可用估值数据',xref:'paper',yref:'paper',x:.5,y:.5,
+        showarrow:false,font:{color:'#9aadb3',size:17}}]
+    }, {responsive:true,displaylogo:false,locale:'zh-CN'});
+  }
+  document.querySelectorAll('[data-valuation-metric]').forEach(button => button.addEventListener('click', () => {
+    valuationMetric = button.dataset.valuationMetric;
+    document.querySelectorAll('[data-valuation-metric]').forEach(item => item.classList.toggle('active', item === button));
+    renderValuation();
+  }));
+  valuationRange.addEventListener('change', renderValuation);
+  if (typeof Plotly !== 'undefined') { render(); renderValuation(); }
 })();
 </script>
 </body>

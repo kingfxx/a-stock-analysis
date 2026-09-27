@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import html
 import json
+import time
 import webbrowser
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -15,6 +16,8 @@ from plotly.offline import get_plotlyjs
 
 from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
 from .sources import fetch_daily_prices, fetch_financial_reports, fetch_stock_name, normalize_code, normalize_report_dates
+from .valuation import (fetch_dividend_yields, fetch_industry_snapshot, fetch_valuation_series,
+                        merge_dividend_yields, monthly_valuation, valuation_summary)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -22,13 +25,49 @@ CACHE = ROOT / "data" / "cache"
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
+VALUATION_BASIS = "paid_dividend_ttm_v1"
 
 
 def _save_cache(path: Path, data: dict) -> None:
-    CACHE.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
     temporary.replace(path)
+
+
+def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dict:
+    """Cache compact monthly valuation rows separately from financial snapshots."""
+    path = CACHE / "valuation" / f"{code}.json"
+    old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    today = date.today().isoformat()
+    if old.get("updated_on") == today and old.get("basis") == VALUATION_BASIS and not refresh:
+        return old
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0"})
+    warnings = []
+    try:
+        rows = monthly_valuation(fetch_valuation_series(code, session), reports)
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        rows = old.get("rows", [])
+        warnings.append(f"历史估值获取失败，显示已有缓存：{exc}")
+    try:
+        dividend_yields = fetch_dividend_yields(code, session)
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        dividend_yields = [{"date": row["dividend_yield_date"], "value": row["dividend_yield"]}
+                           for row in old.get("rows", []) if row.get("dividend_yield_date")
+                           and row.get("dividend_yield") is not None]
+        warnings.append(f"历史股息率获取失败，显示已有缓存：{exc}")
+    rows = merge_dividend_yields(rows, dividend_yields)
+    time.sleep(1.0)  # Keep EastMoney peer and dividend requests at least a second apart.
+    try:
+        industry = fetch_industry_snapshot(code, session)
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        industry = old.get("industry", {})
+        warnings.append(f"行业估值获取失败，显示已有缓存：{exc}")
+    data = {"rows": rows, "industry": industry, "updated_on": today, "basis": VALUATION_BASIS,
+            "warnings": warnings}
+    _save_cache(path, data)
+    return data
 
 
 def _add_missing_name(data: dict, path: Path, session: requests.Session) -> dict:
@@ -126,11 +165,21 @@ def render_page(code: str, refresh: bool) -> str:
         rows = build_period_rows(data["reports"], data["prices"]["raw"], data["prices"]["qfq"],
                                  data["prices"].get("raw_reference"), data["prices"].get("qfq_reference"))
         views = {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")}
+        valuation = load_valuation(data["code"], data["reports"], refresh)
+        valuation_views = {
+            str(years): {metric: valuation_summary(valuation["rows"], metric, years,
+                                                   valuation["industry"])
+                         for metric in ("pe", "pb", "ps", "dividend_yield")}
+            for years in (3, 5, 10)
+        }
         payload = {"code": data["code"], "name": data.get("name"), "updated_at": data["updated_at"],
-                   "views": views, "warnings": data.get("warnings", [])}
+                   "views": views, "warnings": data.get("warnings", []),
+                   "valuation": {"views": valuation_views, "updated_on": valuation["updated_on"],
+                                 "peer_count": valuation["industry"].get("peer_count"),
+                                 "warnings": valuation["warnings"]}}
         error = ""
     except (ValueError, KeyError, json.JSONDecodeError) as exc:
-        payload = {"code": code, "name": None, "views": {}, "warnings": []}
+        payload = {"code": code, "name": None, "views": {}, "warnings": [], "valuation": {"views": {}}}
         error = str(exc)
     payload["cached_stocks"] = cached_stocks()
     embedded = json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
