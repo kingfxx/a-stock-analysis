@@ -153,6 +153,32 @@ def test_dividend_events_are_cached_and_partial_refresh_keeps_history(tmp_path, 
     assert "保留原缓存" in warnings[0]
 
 
+def test_empty_dividend_cache_retries_on_normal_open(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    stock = {"code": "601600", "reports": [], "dividend_events": [],
+             "dividend_basis": server.DIVIDEND_BASIS}
+    path = tmp_path / "601600.json"
+    path.write_text(json.dumps(stock), encoding="utf-8")
+    event = {"date": "2026-08-14", "report_period": "2025-12-31",
+             "per_share": .147, "total_shares": 17154971327}
+    monkeypatch.setattr(server, "fetch_dividend_events", lambda *args: [event])
+    events, warnings = server.load_dividends(stock)
+    assert events == [event] and not warnings
+    assert json.loads(path.read_text(encoding="utf-8"))["dividend_events"] == [event]
+
+
+def test_empty_dividend_response_does_not_mark_cache_complete(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    stock = {"code": "601600", "reports": []}
+    path = tmp_path / "601600.json"
+    path.write_text(json.dumps(stock), encoding="utf-8")
+    monkeypatch.setattr(server, "fetch_dividend_events", lambda *args: [])
+    events, warnings = server.load_dividends(stock)
+    assert events is None
+    assert "空" in warnings[0]
+    assert "dividend_basis" not in json.loads(path.read_text(encoding="utf-8"))
+
+
 def test_render_page_includes_report_period_cash_dividend(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE", tmp_path)
     monkeypatch.setattr(server, "cached_stocks", lambda: [])

@@ -324,13 +324,17 @@ def load_stock(code: str, refresh: bool = False) -> dict:
 def load_dividends(data: dict, refresh: bool = False) -> tuple[list[dict] | None, list[str]]:
     """Cache implemented dividend events with stock fundamentals; protect older history."""
     old_events = data.get("dividend_events")
-    if data.get("dividend_basis") == DIVIDEND_BASIS and not refresh:
+    if data.get("dividend_basis") == DIVIDEND_BASIS and old_events and not refresh:
         return old_events, []
     session = requests.Session()
     try:
         events = fetch_dividend_events(data["code"], session)
     except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
         return old_events, [f"现金分红获取失败，保留原缓存：{exc}"]
+    if not events:
+        if old_events:
+            return old_events, ["现金分红接口返回空记录，保留原缓存"]
+        return None, ["现金分红接口返回空记录，未标记为补齐完成；下次打开将自动重试"]
     if old_events:
         fresh_by_key = {(event.get("date"), event.get("report_period")): event for event in events}
         missing = [event for event in old_events

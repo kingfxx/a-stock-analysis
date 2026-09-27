@@ -426,6 +426,36 @@
       layout['yaxis' + (index + 2)] = {...axisConfig(group), overlaying:'y', side:'right',
         anchor:'free', position:1, shift:index * 86, showgrid:false};
     });
+    const priceSeries = active.find(series => series.key === 'qfq_price' && series.axis !== 'y');
+    if (priceSeries) {
+      const leftValues = active.filter(series => series.axis === 'y')
+        .flatMap(series => [...series.values, ...(series.metric.referenceKey
+          ? rows.map(row => row[series.metric.referenceKey] == null
+            ? null : row[series.metric.referenceKey] / series.metric.scale) : [])])
+        .filter(Number.isFinite);
+      const priceValues = [...priceSeries.values,
+        ...rows.map(row => row.qfq_price_reference)].filter(Number.isFinite);
+      const leftMin = Math.min(...leftValues);
+      const leftMax = Math.max(...leftValues);
+      const priceMin = Math.min(...priceValues);
+      const priceMax = Math.max(...priceValues);
+      // A small negative adjustment tail should not put positive prices below the profit zero line.
+      if (leftMin < 0 && leftMax > 0 && priceMax > 0 && priceMin >= -priceMax * .1) {
+        const leftRange = [leftMin * 1.12, leftMax * 1.12];
+        const priceTop = Math.max(priceMax * 1.12,
+          priceMin < 0 ? -priceMin * 1.12 * leftRange[1] / -leftRange[0] : 0);
+        if (priceTop > 0) {
+          const priceAxis = layout['yaxis' + priceSeries.axis.slice(1)];
+          const roughStep = priceTop / 5;
+          const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+          const step = [1, 2, 5, 10].find(value => value * magnitude >= roughStep) * magnitude;
+          layout.yaxis.range = leftRange;
+          priceAxis.range = [leftRange[0] / leftRange[1] * priceTop, priceTop];
+          priceAxis.tickmode = 'array';
+          priceAxis.tickvals = Array.from({length:Math.floor(priceTop / step) + 1}, (_, index) => index * step);
+        }
+      }
+    }
     Plotly.react('chart', traces, layout, {responsive:true,displaylogo:false,locale:'zh-CN'});
     const selectedMetrics = new Set(active.map(series => series.key));
     const hasFinancial = [...selectedMetrics].some(metric => !['market_cap','qfq_price','interest_bearing_debt','net_cash','cash_dividend'].includes(metric));
