@@ -46,16 +46,21 @@ def test_industry_snapshot_selects_average_not_median():
 def test_dividend_events_convert_per_ten_shares_to_per_share():
     class Session:
         def get(self, url, params, **kwargs):
-            return FakeResponse({"result": {"count": 2, "data": [
-                {"EX_DIVIDEND_DATE": "2026-06-26 00:00:00", "PRETAX_BONUS_RMB": 4.4,
+            return FakeResponse({"result": {"count": 3, "data": [
+                {"EX_DIVIDEND_DATE": "2026-06-26 00:00:00", "REPORT_DATE": "2025-12-31 00:00:00",
+                 "TOTAL_SHARES": 1000000000, "PRETAX_BONUS_RMB": 4.4,
                  "ASSIGN_PROGRESS": "实施分配"},
                 {"EX_DIVIDEND_DATE": None, "PRETAX_BONUS_RMB": 10,
                  "ASSIGN_PROGRESS": "预案"},
+                {"EX_DIVIDEND_DATE": "2099-06-26", "REPORT_DATE": "2098-12-31",
+                 "TOTAL_SHARES": 1000000000, "PRETAX_BONUS_RMB": 10},
             ]}})
 
     events = fetch_dividend_events("601919", Session())
     assert events[0]["date"] == "2026-06-26"
     assert events[0]["per_share"] == pytest.approx(.44)
+    assert events[0]["report_period"] == "2025-12-31"
+    assert events[0]["total_shares"] == 1000000000
     assert len(events) == 1
 
 

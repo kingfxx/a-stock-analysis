@@ -104,10 +104,17 @@ def fetch_dividend_events(code: str, session: requests.Session) -> list[dict]:
     events = []
     for record in records:
         ex_date = str(record.get("EX_DIVIDEND_DATE") or "")[:10]
+        report_period = str(record.get("REPORT_DATE") or "")[:10]
         cash_per_ten = _positive(record.get("PRETAX_BONUS_RMB"))
         if ex_date and cash_per_ten is not None:
             date.fromisoformat(ex_date)
-            events.append({"date": ex_date, "per_share": cash_per_ten / 10})
+            if ex_date > date.today().isoformat():
+                continue
+            if report_period:
+                date.fromisoformat(report_period)
+            events.append({"date": ex_date, "report_period": report_period or None,
+                           "per_share": cash_per_ten / 10,
+                           "total_shares": _positive(record.get("TOTAL_SHARES"))})
     return sorted(events, key=lambda event: event["date"])
 
 

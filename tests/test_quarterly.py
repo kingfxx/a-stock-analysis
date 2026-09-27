@@ -25,6 +25,31 @@ def test_quarterly_differences_and_ttm_require_contiguous_reports():
     assert annual["operating_cash_flow"] is None
 
 
+def test_cash_dividends_follow_report_period_not_payment_year():
+    reports = [{"period": f"2025-{month}", "profit_ytd": index + 1}
+               for index, month in enumerate(("03-31", "06-30", "09-30", "12-31"))]
+    dividends = [
+        {"report_period": "2025-06-30", "date": "2025-08-20", "per_share": 1,
+         "total_shares": 100000000},
+        {"report_period": "2025-12-31", "date": "2026-04-22", "per_share": 2,
+         "total_shares": 100000000},
+    ]
+    rows = build_period_rows(reports, [], [], dividend_events=dividends)
+    assert [row["cash_dividend"] for row in view_rows(rows, "quarter")] == [0, 100000000, 0, 200000000]
+    annual = view_rows(rows, "year")[0]
+    assert annual["cash_dividend"] == 300000000
+    assert "2026-04-22" in annual["cash_dividend_details"]
+    assert view_rows(rows, "ttm")[-1]["cash_dividend"] == 300000000
+
+
+def test_cash_dividend_missing_share_base_is_unknown_not_zero():
+    reports = [{"period": "2025-12-31"}]
+    dividends = [{"report_period": "2025-12-31", "date": "2026-04-22",
+                  "per_share": 2, "total_shares": None}]
+    row = view_rows(build_period_rows(reports, [], [], dividend_events=dividends), "year")[0]
+    assert row["cash_dividend"] is None
+
+
 def test_missing_previous_cumulative_report_does_not_invent_quarter():
     reports = [
         {"period": "2025-03-31", "publish_date": "2025-04-25", "revenue_ytd": 10, "profit_ytd": 2, "shares": None, "equity": None},

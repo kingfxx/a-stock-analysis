@@ -72,7 +72,8 @@ def disclosure_reference_snapshots(reports: list[dict], daily_prices: list[dict]
 
 def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: list[dict],
                       raw_references: list[dict] | None = None,
-                      qfq_references: list[dict] | None = None) -> list[dict]:
+                      qfq_references: list[dict] | None = None,
+                      dividend_events: list[dict] | None = None) -> list[dict]:
     by_period = {r["period"]: r for r in reports}
     raw_by_disclosure = {p["publish_date"]: p for p in raw_prices}
     qfq_by_disclosure = {p["publish_date"]: p for p in qfq_prices}
@@ -140,7 +141,29 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
         }
         rows.append(row)
     by_row = {r["period"]: r for r in rows}
+    dividends_by_period: dict[str, list[dict]] = {}
+    for event in dividend_events or []:
+        if event.get("report_period") in by_row:
+            dividends_by_period.setdefault(event["report_period"], []).append(event)
+
+    def dividend_values(events):
+        if dividend_events is None:
+            return None, ""
+        amounts = [event["per_share"] * event["total_shares"]
+                   if event.get("per_share") is not None and event.get("total_shares") is not None
+                   else None for event in events]
+        details = "、".join(f'{event["report_period"]} → {event["date"]}' for event in events)
+        return (sum(amounts) if all(amount is not None for amount in amounts) else None), details
+
     for row in rows:
+        current_period = row["period"]
+        for suffix, events in (
+            ("quarter", dividends_by_period.get(current_period, [])),
+            ("ytd", [event for period, group in dividends_by_period.items()
+                     if period[:4] == current_period[:4] and period <= current_period
+                     for event in group]),
+        ):
+            row[f"cash_dividend_{suffix}"], row[f"cash_dividend_details_{suffix}"] = dividend_values(events)
         chain = [row]
         while len(chain) < 4:
             previous = by_row.get(_quarter_before(chain[-1]["period"]))
@@ -148,11 +171,17 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
                 break
             chain.append(previous)
         if len(chain) == 4:
+            ttm_events = [event for item in chain
+                          for event in dividends_by_period.get(item["period"], [])]
+            row["cash_dividend_ttm"], row["cash_dividend_details_ttm"] = dividend_values(ttm_events)
             for field in ("revenue", "profit", "operating_cost", "net_profit", "capex",
                           "operating_cash_flow", "free_cash_flow"):
                 values = [item[f"{field}_quarter"] for item in chain]
                 if all(value is not None for value in values):
                     row[f"{field}_ttm"] = sum(values)
+        else:
+            row["cash_dividend_ttm"] = None
+            row["cash_dividend_details_ttm"] = ""
         previous_year = by_row.get(_year_before(row["period"]))
         for suffix in ("quarter", "ytd", "ttm"):
             for field in ("revenue", "profit"):
@@ -177,6 +206,8 @@ def view_rows(rows: list[dict], period: str) -> list[dict]:
         suffix = {"quarter": "quarter", "ttm": "ttm", "year": "ytd"}[period]
         result.append({**row, "revenue": row.get(f"revenue_{suffix}"),
                        "profit": row.get(f"profit_{suffix}"),
+                       "cash_dividend": row.get(f"cash_dividend_{suffix}"),
+                       "cash_dividend_details": row.get(f"cash_dividend_details_{suffix}"),
                        "capex": row.get(f"capex_{suffix}"),
                        "gross_margin": _margin(row.get(f"revenue_{suffix}"),
                                                (row[f"revenue_{suffix}"] - row[f"operating_cost_{suffix}"])

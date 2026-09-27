@@ -18,17 +18,19 @@ from plotly.offline import get_plotlyjs
 from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
 from .sources import (fetch_cash_flow_reports, fetch_daily_prices, fetch_financial_reports,
                       fetch_monthly_prices, fetch_stock_name, normalize_code, normalize_report_dates)
-from .valuation import (fetch_dividend_yields, fetch_industry_snapshot, fetch_valuation_series,
+from .valuation import (fetch_dividend_events, fetch_dividend_yields, fetch_industry_snapshot, fetch_valuation_series,
                         merge_adjusted_prices, merge_dividend_yields, monthly_valuation, valuation_summary)
 
 
 ROOT = Path(__file__).resolve().parent.parent
-CACHE = ROOT / "data" / "cache"
+CACHE = ROOT / "data" / "fundamentals"
+VALUATION_CACHE = ROOT / "data" / "valuation"
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
 CASH_FLOW_BASIS = "sina_cash_flow_ytd_v1"
 FINANCIAL_FIELDS_BASIS = "sina_margin_debt_inputs_v1"
+DIVIDEND_BASIS = "eastmoney_implemented_report_period_total_shares_v1"
 NEW_REPORT_FIELDS = ("operating_cost_ytd", "net_profit_ytd", "monetary_funds",
                      "short_term_borrowings", "short_term_bonds",
                      "current_noncurrent_liabilities", "long_term_borrowings",
@@ -106,7 +108,7 @@ def _missing_valuation_history(old: dict, rows: list[dict], industry: dict, toda
 
 def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dict:
     """Cache compact monthly valuation rows separately from financial snapshots."""
-    path = CACHE / "valuation" / f"{code}.json"
+    path = VALUATION_CACHE / f"{code}.json"
     old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     today = date.today().isoformat()
     if old.get("updated_on") == today and old.get("basis") == VALUATION_BASIS and not refresh:
@@ -312,8 +314,34 @@ def load_stock(code: str, refresh: bool = False) -> dict:
             "financial_fields_basis": FINANCIAL_FIELDS_BASIS,
             "price_reference_basis": PRICE_REFERENCE_BASIS if complete else None,
             "warnings": warnings}
+    if old and "dividend_events" in old:
+        data["dividend_events"] = old["dividend_events"]
+        data["dividend_basis"] = old.get("dividend_basis")
     _save_cache(path, data)
     return data
+
+
+def load_dividends(data: dict, refresh: bool = False) -> tuple[list[dict] | None, list[str]]:
+    """Cache implemented dividend events with stock fundamentals; protect older history."""
+    old_events = data.get("dividend_events")
+    if data.get("dividend_basis") == DIVIDEND_BASIS and not refresh:
+        return old_events, []
+    session = requests.Session()
+    try:
+        events = fetch_dividend_events(data["code"], session)
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        return old_events, [f"现金分红获取失败，保留原缓存：{exc}"]
+    if old_events:
+        fresh_by_key = {(event.get("date"), event.get("report_period")): event for event in events}
+        missing = [event for event in old_events
+                   if (new := fresh_by_key.get((event.get("date"), event.get("report_period")))) is None
+                   or (event.get("total_shares") is not None and new.get("total_shares") is None)]
+        if missing:
+            return old_events, [f"现金分红历史覆盖不足（{len(missing)} 笔），保留原缓存"]
+    data["dividend_events"] = events
+    data["dividend_basis"] = DIVIDEND_BASIS
+    _save_cache(CACHE / f'{data["code"]}.json', data)
+    return events, []
 
 
 def cached_stocks() -> list[dict]:
@@ -331,8 +359,10 @@ def cached_stocks() -> list[dict]:
 def render_page(code: str, refresh: bool) -> str:
     try:
         data = load_stock(code, refresh)
+        dividends, dividend_warnings = load_dividends(data, refresh)
         rows = build_period_rows(data["reports"], data["prices"]["raw"], data["prices"]["qfq"],
-                                 data["prices"].get("raw_reference"), data["prices"].get("qfq_reference"))
+                                 data["prices"].get("raw_reference"), data["prices"].get("qfq_reference"),
+                                 dividends)
         views = {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")}
         valuation = load_valuation(data["code"], data["reports"], refresh)
         valuation_views = {
@@ -342,7 +372,7 @@ def render_page(code: str, refresh: bool) -> str:
             for years in (3, 5, 10)
         }
         payload = {"code": data["code"], "name": data.get("name"), "updated_at": data["updated_at"],
-                   "views": views, "warnings": data.get("warnings", []),
+                   "views": views, "warnings": data.get("warnings", []) + dividend_warnings,
                    "valuation": {"views": valuation_views, "updated_on": valuation["updated_on"],
                                  "peer_count": valuation["industry"].get("peer_count"),
                                  "warnings": valuation["warnings"]}}

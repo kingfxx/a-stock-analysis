@@ -129,13 +129,48 @@ def test_render_page_includes_cached_stock_options(tmp_path, monkeypatch):
         "prices": {"raw": [], "qfq": []}, "updated_at": "2026-09-26T00:00:00+00:00"})
     monkeypatch.setattr(server, "load_valuation", lambda code, reports, refresh=False: {
         "rows": [], "industry": {}, "updated_on": "2026-09-27", "warnings": []})
+    monkeypatch.setattr(server, "load_dividends", lambda data, refresh=False: ([], []))
     page = server.render_page("601919", False)
     assert '"name": "中远海控"' in page
     assert '"cached_stocks": [{"code": "601919", "name": "中远海控"}]' in page
 
 
-def test_valuation_cache_is_reused_without_network(tmp_path, monkeypatch):
+def test_dividend_events_are_cached_and_partial_refresh_keeps_history(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE", tmp_path)
+    stock = {"code": "601919", "reports": []}
+    path = tmp_path / "601919.json"
+    path.write_text(json.dumps(stock), encoding="utf-8")
+    event = {"date": "2026-06-26", "report_period": "2025-12-31",
+             "per_share": .44, "total_shares": 1000000000}
+    monkeypatch.setattr(server, "fetch_dividend_events", lambda *args: [event])
+    events, warnings = server.load_dividends(stock)
+    assert events == [event] and not warnings
+    assert json.loads(path.read_text(encoding="utf-8"))["dividend_events"] == [event]
+    monkeypatch.setattr(server, "fetch_dividend_events", lambda *args: [])
+    assert server.load_dividends(stock)[0] == [event]
+    events, warnings = server.load_dividends(stock, refresh=True)
+    assert events == [event]
+    assert "保留原缓存" in warnings[0]
+
+
+def test_render_page_includes_report_period_cash_dividend(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server, "cached_stocks", lambda: [])
+    monkeypatch.setattr(server, "load_stock", lambda code, refresh=False: {
+        "code": "601919", "name": "中远海控", "reports": [{"period": "2025-12-31"}],
+        "prices": {"raw": [], "qfq": []}, "updated_at": "2026-09-27T00:00:00+00:00"})
+    monkeypatch.setattr(server, "load_dividends", lambda data, refresh=False: ([
+        {"date": "2026-06-26", "report_period": "2025-12-31",
+         "per_share": .44, "total_shares": 1000000000}], []))
+    monkeypatch.setattr(server, "load_valuation", lambda code, reports, refresh=False: {
+        "rows": [], "industry": {}, "updated_on": "2026-09-27", "warnings": []})
+    page = server.render_page("601919", False)
+    assert '"cash_dividend": 440000000.0' in page
+    assert '2025-12-31 → 2026-06-26' in page
+
+
+def test_valuation_cache_is_reused_without_network(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
     path = tmp_path / "valuation" / "601919.json"
     path.parent.mkdir()
     path.write_text(json.dumps({"rows": [{"date": "2026-09-25", "pe": 9}],
@@ -148,7 +183,7 @@ def test_valuation_cache_is_reused_without_network(tmp_path, monkeypatch):
 
 
 def test_dividend_source_failure_keeps_other_valuation_metrics(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
     monkeypatch.setattr(server.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(server, "fetch_valuation_series", lambda *args: {
         "pe": [{"date": "2026-09-24", "value": 9}], "pb": [], "market_cap": []})
@@ -164,7 +199,7 @@ def test_dividend_source_failure_keeps_other_valuation_metrics(tmp_path, monkeyp
 
 
 def test_adjusted_price_failure_preserves_cached_monthly_prices(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
     monkeypatch.setattr(server.time, "sleep", lambda seconds: None)
     path = tmp_path / "valuation" / "601919.json"
     path.parent.mkdir()
@@ -300,7 +335,7 @@ def test_successful_refresh_saves_previous_cache_as_backup(tmp_path, monkeypatch
 
 
 def test_partial_valuation_refresh_keeps_previous_months_and_backup_untouched(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
     monkeypatch.setattr(server.time, "sleep", lambda seconds: None)
     path = tmp_path / "valuation" / "601919.json"
     path.parent.mkdir()

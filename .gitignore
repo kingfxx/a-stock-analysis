@@ -14,5 +14,10 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Downloaded stock data is rebuilt on demand.
+# Downloaded stock data is rebuilt on demand. Keep the old path ignored too.
 data/cache/
+data/fundamentals/
+data/valuation/
+
+# Local report checks and UI screenshots are separate from application data.
+data/verification/

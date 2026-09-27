@@ -132,6 +132,7 @@
           <option value="roe">ROE（TTM 估算）</option>
           <option value="operating_cash_flow">经营活动现金流净额</option>
           <option value="free_cash_flow">简化自由现金流</option>
+          <option value="cash_dividend">估算现金分红（已实施）</option>
           <option value="gross_margin">毛利率</option>
           <option value="net_margin">净利率</option>
           <option value="capex">资本开支 CapEx</option>
@@ -151,6 +152,7 @@
           <option value="roe">ROE（TTM 估算）</option>
           <option value="operating_cash_flow">经营活动现金流净额</option>
           <option value="free_cash_flow">简化自由现金流</option>
+          <option value="cash_dividend">估算现金分红（已实施）</option>
           <option value="gross_margin">毛利率</option>
           <option value="net_margin">净利率</option>
           <option value="capex">资本开支 CapEx</option>
@@ -170,6 +172,7 @@
           <option value="roe">ROE（TTM 估算）</option>
           <option value="operating_cash_flow">经营活动现金流净额</option>
           <option value="free_cash_flow">简化自由现金流</option>
+          <option value="cash_dividend">估算现金分红（已实施）</option>
           <option value="gross_margin">毛利率</option>
           <option value="net_margin">净利率</option>
           <option value="capex">资本开支 CapEx</option>
@@ -237,6 +240,11 @@
 <script>
 (() => {
   const state = JSON.parse(document.getElementById('payload').textContent);
+  const selectionsKey = 'investment-dashboard-selections-v1';
+  let savedSelections = {};
+  try { savedSelections = JSON.parse(sessionStorage.getItem(selectionsKey)) || {}; }
+  catch { savedSelections = {}; }
+  if (typeof savedSelections !== 'object' || Array.isArray(savedSelections)) savedSelections = {};
   const error = document.getElementById('error');
   if (error.textContent.trim()) error.classList.remove('hide');
   document.getElementById('stock-code').textContent = state.code ? state.code + (state.name ? ' - ' + state.name : '') : '—';
@@ -278,6 +286,7 @@
     roe: {name:'ROE（TTM 估算）', unit:'%', scale:1},
     operating_cash_flow: {name:'经营活动现金流净额', unit:'亿元', scale:1e8},
     free_cash_flow: {name:'简化自由现金流', unit:'亿元', scale:1e8},
+    cash_dividend: {name:'估算现金分红（已实施）', unit:'亿元', scale:1e8},
     gross_margin: {name:'毛利率', unit:'%', scale:1},
     net_margin: {name:'净利率', unit:'%', scale:1},
     capex: {name:'资本开支 CapEx', unit:'亿元', scale:1e8},
@@ -286,13 +295,21 @@
     market_cap: {name:'披露日估算市值', unit:'亿元', scale:1e8, dateKey:'price_date', referenceKey:'market_cap_reference'},
     qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date', referenceKey:'qfq_price_reference'}
   };
-  let selectedPeriod = 'quarter';
+  let selectedPeriod = ['quarter','year','ttm'].includes(savedSelections.period) ? savedSelections.period : 'quarter';
   const seriesControls = [
     {id:'bar-metric', kind:'bar', label:'青色柱', color:'#38c4dc'},
     {id:'bar-metric-2', kind:'bar', label:'紫色柱', color:'#b9a0f5'},
     {id:'line-metric', kind:'line', label:'黄色线', color:'#f4d35e'}
   ].map(series => ({...series, control:document.getElementById(series.id),
     toggle:document.getElementById(series.id + '-toggle')}));
+  for (const series of seriesControls) {
+    const metric = savedSelections.metrics?.[series.id];
+    if ([...series.control.options].some(option => option.value === metric)) series.control.value = metric;
+    const visible = savedSelections.visible?.[series.id];
+    if (typeof visible === 'boolean') series.toggle.setAttribute('aria-pressed', String(visible));
+  }
+  document.querySelectorAll('[data-period]').forEach(button =>
+    button.classList.toggle('active', button.dataset.period === selectedPeriod));
   const note = document.getElementById('chart-note');
   function label(row) {
     if (selectedPeriod === 'year') return row.period.slice(0,4);
@@ -333,11 +350,13 @@
       : '点击上方序列标题以显示指标';
     const custom = rows.map((row, index) => [
       labels[index], row.period, row.publish_date || '未知',
-      row.price_date || '无价格', row.qfq_price_date || '无价格'
+      row.price_date || '无价格', row.qfq_price_date || '无价格',
+      row.cash_dividend_details || '该报告期暂无已实施分红'
     ]);
     const hover = metric => '%{customdata[0]}<br>' + metric.name + '：%{y:,.2f} ' + metric.unit +
       '<br>报告期：%{customdata[1]}<br>披露日：%{customdata[2]}' +
       (metric.dateKey ? '<br>价格交易日：%{customdata[' + (metric.dateKey === 'price_date' ? 3 : 4) + ']}' : '') +
+      (metric === metrics.cash_dividend ? '<br>归属报告期 → 实际除权日：%{customdata[5]}' : '') +
       '<extra></extra>';
     const traces = [];
     const barCount = active.filter(series => series.kind === 'bar').length;
@@ -409,7 +428,7 @@
     });
     Plotly.react('chart', traces, layout, {responsive:true,displaylogo:false,locale:'zh-CN'});
     const selectedMetrics = new Set(active.map(series => series.key));
-    const hasFinancial = [...selectedMetrics].some(metric => !['market_cap','qfq_price','interest_bearing_debt','net_cash'].includes(metric));
+    const hasFinancial = [...selectedMetrics].some(metric => !['market_cap','qfq_price','interest_bearing_debt','net_cash','cash_dividend'].includes(metric));
     const hasBalance = selectedMetrics.has('interest_bearing_debt') || selectedMetrics.has('net_cash');
     const hasMarket = selectedMetrics.has('market_cap') || selectedMetrics.has('qfq_price');
     const hasNegativeAdjusted = selectedMetrics.has('qfq_price') && rows.some(row => row.qfq_price != null && row.qfq_price < 0);
@@ -429,26 +448,47 @@
       (selectedMetrics.has('gross_margin') ? ' 毛利率＝（营业收入－营业成本）÷营业收入；按所选周期的收入、成本计算。' : '') +
       (selectedMetrics.has('net_margin') ? ' 净利率＝合并净利润÷营业收入，并非归母净利率；按所选周期计算。' : '') +
       (selectedMetrics.has('capex') ? ' CapEx 取现金流量表“购建固定资产、无形资产和其他长期资产所支付的现金”；单季由累计值差分。' : '') +
+      (selectedMetrics.has('cash_dividend') ? ' 估算现金分红仅计已实施记录，按归属报告期而非实际到账日放置；金额＝税前每股派息×数据源总股本，未扣除不参与分红的回购股等，因此并非公告实付总额。0 表示截至当前缓存暂无该期已实施分红。' : '') +
       (hasBalance ? ' 有息负债（简化）＝短期借款＋应付短期债券＋一年内到期的非流动负债＋长期借款＋应付债券＋租赁负债；净现金＝报告期末货币资金－有息负债，正值为净现金，负值为净负债。均为期末时点值，不随单季／年度／TTM 切换而加总；货币资金可能含受限资金，债务科目亦可能含非有息部分。' : '') +
       (referenceCount ? ' 空心圆点为距披露日 16–180 天的最近交易价参考点；与相邻价格点用虚线连接，正常价格点之间仍用实线。' : '') +
       missingNote;
   }
   seriesControls.forEach(series => {
-    series.control.addEventListener('change', render);
+    series.control.addEventListener('change', () => { saveSelections(); render(); });
     series.toggle.addEventListener('click', () => {
       series.toggle.setAttribute('aria-pressed', String(series.toggle.getAttribute('aria-pressed') !== 'true'));
+      saveSelections();
       render();
     });
   });
   document.querySelectorAll('[data-period]').forEach(button => button.addEventListener('click', () => {
     selectedPeriod = button.dataset.period;
     document.querySelectorAll('[data-period]').forEach(item => item.classList.toggle('active', item === button));
+    saveSelections();
     render();
   }));
-  let valuationMetric = 'pe';
+  let valuationMetric = ['pe','pb','ps','dividend_yield'].includes(savedSelections.valuationMetric)
+    ? savedSelections.valuationMetric : 'pe';
   const valuationNames = {pe:'市盈率 PE(TTM)',pb:'市净率 PB(MRQ)',ps:'市销率 PS(TTM)',dividend_yield:'股息率（近 12 个月已实施派息）'};
   const valuationRange = document.getElementById('valuation-range');
   const valuationPriceOverlay = document.getElementById('valuation-price-overlay');
+  if (['3','5','10'].includes(savedSelections.valuationRange)) valuationRange.value = savedSelections.valuationRange;
+  if (typeof savedSelections.valuationPriceOverlay === 'boolean')
+    valuationPriceOverlay.setAttribute('aria-pressed', String(savedSelections.valuationPriceOverlay));
+  document.querySelectorAll('[data-valuation-metric]').forEach(button =>
+    button.classList.toggle('active', button.dataset.valuationMetric === valuationMetric));
+  function saveSelections() {
+    const selections = {
+      period:selectedPeriod,
+      metrics:Object.fromEntries(seriesControls.map(series => [series.id, series.control.value])),
+      visible:Object.fromEntries(seriesControls.map(series => [series.id, series.toggle.getAttribute('aria-pressed') === 'true'])),
+      valuationMetric, valuationRange:valuationRange.value,
+      valuationPriceOverlay:valuationPriceOverlay.getAttribute('aria-pressed') === 'true'
+    };
+    try { sessionStorage.setItem(selectionsKey, JSON.stringify(selections)); }
+    catch { /* Storage may be unavailable; the page still works with defaults. */ }
+  }
+  window.addEventListener('pagehide', saveSelections);
   const formattedValuation = value => value == null ? '—' : Number(value).toFixed(2) + (valuationMetric === 'dividend_yield' ? '%' : ' 倍');
   function renderValuation() {
     const years = valuationRange.value;
@@ -515,11 +555,13 @@
   document.querySelectorAll('[data-valuation-metric]').forEach(button => button.addEventListener('click', () => {
     valuationMetric = button.dataset.valuationMetric;
     document.querySelectorAll('[data-valuation-metric]').forEach(item => item.classList.toggle('active', item === button));
+    saveSelections();
     renderValuation();
   }));
-  valuationRange.addEventListener('change', renderValuation);
+  valuationRange.addEventListener('change', () => { saveSelections(); renderValuation(); });
   valuationPriceOverlay.addEventListener('click', () => {
     valuationPriceOverlay.setAttribute('aria-pressed', valuationPriceOverlay.getAttribute('aria-pressed') !== 'true');
+    saveSelections();
     renderValuation();
   });
   if (typeof Plotly !== 'undefined') { render(); renderValuation(); }
