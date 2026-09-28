@@ -123,13 +123,8 @@ def test_cache_migrates_shifted_report_dates_and_reprices(tmp_path, monkeypatch)
 
 def test_render_page_includes_cached_stock_options(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
     (tmp_path / "601919.json").write_text(json.dumps({"code": "601919", "name": "中远海控"}), encoding="utf-8")
-    monkeypatch.setattr(server, "load_stock", lambda code, refresh=False: {
-        "code": "601919", "name": "中远海控", "reports": [],
-        "prices": {"raw": [], "qfq": []}, "updated_at": "2026-09-26T00:00:00+00:00"})
-    monkeypatch.setattr(server, "load_valuation", lambda code, reports, refresh=False: {
-        "rows": [], "industry": {}, "updated_on": "2026-09-27", "warnings": []})
-    monkeypatch.setattr(server, "load_dividends", lambda data, refresh=False: ([], []))
     page = server.render_page("601919", False)
     assert '"name": "中远海控"' in page
     assert '"cached_stocks": [{"code": "601919", "name": "中远海控"}]' in page
@@ -181,15 +176,13 @@ def test_empty_dividend_response_does_not_mark_cache_complete(tmp_path, monkeypa
 
 def test_render_page_includes_report_period_cash_dividend(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE", tmp_path)
+    monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
     monkeypatch.setattr(server, "cached_stocks", lambda: [])
-    monkeypatch.setattr(server, "load_stock", lambda code, refresh=False: {
+    (tmp_path / "601919.json").write_text(json.dumps({
         "code": "601919", "name": "中远海控", "reports": [{"period": "2025-12-31"}],
-        "prices": {"raw": [], "qfq": []}, "updated_at": "2026-09-27T00:00:00+00:00"})
-    monkeypatch.setattr(server, "load_dividends", lambda data, refresh=False: ([
-        {"date": "2026-06-26", "report_period": "2025-12-31",
-         "per_share": .44, "total_shares": 1000000000}], []))
-    monkeypatch.setattr(server, "load_valuation", lambda code, reports, refresh=False: {
-        "rows": [], "industry": {}, "updated_on": "2026-09-27", "warnings": []})
+        "prices": {"raw": [], "qfq": []}, "updated_at": "2026-09-27T00:00:00+00:00",
+        "dividend_events": [{"date": "2026-06-26", "report_period": "2025-12-31",
+                             "per_share": .44, "total_shares": 1000000000}]}), encoding="utf-8")
     page = server.render_page("601919", False)
     assert '"cash_dividend": 440000000.0' in page
     assert '2025-12-31 → 2026-06-26' in page

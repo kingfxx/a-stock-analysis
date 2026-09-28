@@ -22,6 +22,37 @@ def _growth(current, previous):
     return (current / previous - 1) * 100 if current is not None and previous is not None and previous > 0 else None
 
 
+HOVER_YOY_FIELDS = ("revenue", "profit", "operating_cash_flow", "free_cash_flow",
+                    "cash_dividend", "capex", "interest_bearing_debt", "net_cash")
+
+
+def _hover_yoy(current, previous, field: str) -> str:
+    """Describe comparable values without misleading percentages on negative bases."""
+    if current is None:
+        change = "—（本期数据缺失）"
+    elif previous is None:
+        change = "—（缺少上年同期）"
+    elif previous == 0:
+        change = "—（上年同期为零）"
+    elif current == previous:
+        change = "0.00%"
+    elif previous < 0:
+        if current > 0:
+            change = "扭亏为盈" if field == "profit" else "由负转正"
+        elif current == 0:
+            change = "亏损归零" if field == "profit" else "负值归零"
+        elif field == "profit":
+            change = "亏损收窄" if current > previous else "亏损扩大"
+        else:
+            change = "负值收窄" if current > previous else "负值扩大"
+    elif current < 0:
+        change = "转亏" if field == "profit" else "由正转负"
+    else:
+        percent = round(_growth(current, previous), 2)
+        change = f"{percent:+.2f}%" if percent else "0.00%"
+    return "同比 " + change + ("（仅已实施口径）" if field == "cash_dividend" else "")
+
+
 DEBT_COMPONENTS = ("short_term_borrowings", "short_term_bonds",
                    "current_noncurrent_liabilities", "long_term_borrowings",
                    "bonds_payable", "lease_liabilities")
@@ -218,4 +249,10 @@ def view_rows(rows: list[dict], period: str) -> list[dict]:
                        "profit_growth": row.get(f"profit_growth_{suffix}"),
                        "operating_cash_flow": row.get(f"operating_cash_flow_{suffix}"),
                        "free_cash_flow": row.get(f"free_cash_flow_{suffix}")})
+    # Compute before the browser applies a date range; never persist derived hover data.
+    by_period = {row["period"]: row for row in result}
+    for row in result:
+        previous = by_period.get(_year_before(row["period"]), {})
+        row["yoy"] = {field: _hover_yoy(row.get(field), previous.get(field), field)
+                      for field in HOVER_YOY_FIELDS}
     return result

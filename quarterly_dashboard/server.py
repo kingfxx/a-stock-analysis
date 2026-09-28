@@ -10,6 +10,7 @@ import webbrowser
 from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -36,6 +37,7 @@ NEW_REPORT_FIELDS = ("operating_cost_ytd", "net_profit_ytd", "monetary_funds",
                      "current_noncurrent_liabilities", "long_term_borrowings",
                      "bonds_payable", "lease_liabilities")
 VALUATION_BASIS = "monthly_qfq_overlay_v1"
+_DATA_LOCKS: dict[str, Lock] = {}
 
 
 FINANCIAL_VALUES = ("revenue_ytd", "profit_ytd", "shares", "equity") + NEW_REPORT_FIELDS
@@ -342,9 +344,12 @@ def load_dividends(data: dict, refresh: bool = False) -> tuple[list[dict] | None
                    or (event.get("total_shares") is not None and new.get("total_shares") is None)]
         if missing:
             return old_events, [f"现金分红历史覆盖不足（{len(missing)} 笔），保留原缓存"]
-    data["dividend_events"] = events
-    data["dividend_basis"] = DIVIDEND_BASIS
-    _save_cache(CACHE / f'{data["code"]}.json', data)
+    # Fetch without holding the financial lock; merge only once network work ends.
+    path = CACHE / f'{data["code"]}.json'
+    with _DATA_LOCKS.setdefault("financial:" + data["code"], Lock()):
+        latest = _read_cache(path) or data
+        data.update(latest, dividend_events=events, dividend_basis=DIVIDEND_BASIS)
+        _save_cache(path, data)
     return events, []
 
 
@@ -353,36 +358,100 @@ def cached_stocks() -> list[dict]:
     for path in sorted(CACHE.glob("*.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            data = _add_missing_name(data, path, requests.Session())
         except (ValueError, KeyError, json.JSONDecodeError):
             continue
         stocks.append({"code": data["code"], "name": data.get("name")})
     return stocks
 
 
+def _read_cache(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def _needs_financial(data: dict) -> bool:
+    return (not data or "name" not in data
+            or data.get("financial_fields_basis") != FINANCIAL_FIELDS_BASIS
+            or data.get("cash_flow_basis") != CASH_FLOW_BASIS
+            or data.get("report_date_basis") != REPORT_DATE_BASIS
+            or data.get("price_basis") != "disclosure"
+            or data.get("price_reference_basis") != PRICE_REFERENCE_BASIS)
+
+
+def _needs_dividends(data: dict) -> bool:
+    return data.get("dividend_basis") != DIVIDEND_BASIS or not data.get("dividend_events")
+
+
+def _financial_payload(data: dict) -> dict:
+    if not data:
+        return {"views": {}, "warnings": []}
+    reports = data.get("reports", [])
+    if data.get("report_date_basis") != REPORT_DATE_BASIS:
+        reports = normalize_report_dates(reports)
+    prices = (data.get("prices", {}) if data.get("price_basis") == "disclosure"
+              and data.get("report_date_basis") == REPORT_DATE_BASIS else {})
+    rows = build_period_rows(reports, prices.get("raw", []), prices.get("qfq", []),
+                             prices.get("raw_reference"), prices.get("qfq_reference"),
+                             data.get("dividend_events") or None)
+    return {"code": data["code"], "name": data.get("name"), "updated_at": data.get("updated_at"),
+            "views": {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")},
+            "warnings": data.get("warnings", []), "needs_dividends": _needs_dividends(data)}
+
+
+def _valuation_payload(data: dict) -> dict:
+    if not data:
+        return {"views": {}, "warnings": []}
+    industry = data.get("industry", {})
+    return {"views": {
+        str(years): {metric: valuation_summary(data.get("rows", []), metric, years, industry)
+                     for metric in ("pe", "pb", "ps", "dividend_yield")}
+        for years in (3, 5, 10)},
+        "updated_on": data.get("updated_on"), "peer_count": industry.get("peer_count"),
+        "warnings": data.get("warnings", [])}
+
+
+def load_chart_data(code: str, section: str, refresh: bool = False) -> dict:
+    """Network work runs in separate requests; serialize writes to each stock cache."""
+    code = normalize_code(code)
+    if section not in {"financial", "dividends", "valuation"}:
+        raise ValueError("未知数据类型")
+    lock_key = section + ":" + code
+    with _DATA_LOCKS.setdefault(lock_key, Lock()):
+        if section == "financial":
+            data = load_stock(code, refresh)
+        else:
+            data = _read_cache(CACHE / f"{code}.json")
+            if not data:
+                raise ValueError("财报尚未加载，请稍后重试")
+            if section == "valuation":
+                reports = data.get("reports", [])
+                if data.get("report_date_basis") != REPORT_DATE_BASIS:
+                    reports = normalize_report_dates(reports)
+                return _valuation_payload(load_valuation(code, reports, refresh))
+            events, warnings = load_dividends(data, refresh)
+            data = _read_cache(CACHE / f"{code}.json") or data
+            data = {**data, "dividend_events": events,
+                    "warnings": data.get("warnings", []) + warnings}
+        return {**_financial_payload(data), "cached_stocks": cached_stocks()}
+
+
 def render_page(code: str, refresh: bool) -> str:
+    """Return cached charts immediately, without making any external requests."""
+    payload = {"code": code, "views": {}, "warnings": [], "valuation": {"views": {}},
+               "loading": {"financial": True, "dividends": True, "valuation": True},
+               "refresh_requested": refresh}
     try:
-        data = load_stock(code, refresh)
-        dividends, dividend_warnings = load_dividends(data, refresh)
-        rows = build_period_rows(data["reports"], data["prices"]["raw"], data["prices"]["qfq"],
-                                 data["prices"].get("raw_reference"), data["prices"].get("qfq_reference"),
-                                 dividends)
-        views = {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")}
-        valuation = load_valuation(data["code"], data["reports"], refresh)
-        valuation_views = {
-            str(years): {metric: valuation_summary(valuation["rows"], metric, years,
-                                                   valuation["industry"])
-                         for metric in ("pe", "pb", "ps", "dividend_yield")}
-            for years in (3, 5, 10)
-        }
-        payload = {"code": data["code"], "name": data.get("name"), "updated_at": data["updated_at"],
-                   "views": views, "warnings": data.get("warnings", []) + dividend_warnings,
-                   "valuation": {"views": valuation_views, "updated_on": valuation["updated_on"],
-                                 "peer_count": valuation["industry"].get("peer_count"),
-                                 "warnings": valuation["warnings"]}}
+        code = normalize_code(code)
+        data = _read_cache(CACHE / f"{code}.json")
+        valuation = _read_cache(VALUATION_CACHE / f"{code}.json")
+        payload.update(_financial_payload(data))
+        payload["valuation"] = _valuation_payload(valuation)
+        payload["loading"] = {"financial": _needs_financial(data),
+                              "dividends": _needs_dividends(data),
+                              "valuation": not valuation
+                              or valuation.get("updated_on") != date.today().isoformat()
+                              or valuation.get("basis") != VALUATION_BASIS}
         error = ""
     except (ValueError, KeyError, json.JSONDecodeError) as exc:
-        payload = {"code": code, "name": None, "views": {}, "warnings": [], "valuation": {"views": {}}}
         error = str(exc)
     payload["cached_stocks"] = cached_stocks()
     embedded = json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
@@ -394,6 +463,7 @@ def render_page(code: str, refresh: bool) -> str:
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
+        status = 200
         if parsed.path == "/plotly.min.js":
             body = get_plotlyjs().encode("utf-8")
             content_type = "text/javascript; charset=utf-8"
@@ -402,14 +472,27 @@ class Handler(BaseHTTPRequestHandler):
             code = query.get("code", ["601919"])[0]
             body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
             content_type = "text/html; charset=utf-8"
+        elif parsed.path in {"/api/financial", "/api/dividends", "/api/valuation"}:
+            query = parse_qs(parsed.query)
+            try:
+                data = load_chart_data(query.get("code", ["601919"])[0],
+                                       parsed.path.rsplit("/", 1)[-1],
+                                       query.get("refresh") == ["1"])
+            except (requests.RequestException, ValueError, KeyError, TypeError, OSError) as exc:
+                status = 503
+                data = {"error": str(exc)}
+            body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            content_type = "application/json; charset=utf-8"
         else:
             self.send_error(404)
             return
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         if parsed.path == "/plotly.min.js":
             self.send_header("Cache-Control", "public, max-age=86400")
+        else:
+            self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 

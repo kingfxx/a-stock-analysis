@@ -218,6 +218,8 @@
       </div>
     </div>
     <p id="chart-scroll-hint" class="chart-scroll-hint" hidden>向右滑动可查看其他纵轴与完整图表</p>
+    <p id="financial-status" class="note" role="status" aria-live="polite"></p>
+    <p id="dividends-status" class="note" role="status" aria-live="polite"></p>
     <div id="chart-scroll" class="chart-scroll"><div id="chart" role="img" aria-label="季度财务与市场价格对照图"></div></div>
     <p id="chart-note" class="note"></p>
   </section>
@@ -259,6 +261,7 @@
       <span><i style="--level-color:#f4b560"></i><small id="valuation-median-label">中值（50% 分位）</small><b id="valuation-median">—</b></span>
       <span><i style="--level-color:#ed8180"></i><small id="valuation-low-label">低估（20% 分位）</small><b id="valuation-low">—</b></span>
     </div>
+    <p id="valuation-status" class="note" role="status" aria-live="polite"></p>
     <div id="valuation-chart" role="img" aria-label="月度估值走势与历史分位参考线"></div>
     <p id="valuation-note" class="note valuation-note"></p>
   </section>
@@ -303,9 +306,13 @@
   const periods = state.views?.quarter || [];
   if (periods.length) document.getElementById('latest-period').textContent = periods.at(-1).period;
   const warnings = document.getElementById('warnings');
-  for (const message of state.warnings || []) {
-    const div = document.createElement('div'); div.className = 'warning'; div.textContent = message; warnings.appendChild(div);
+  function renderWarnings() {
+    warnings.replaceChildren();
+    for (const message of state.warnings || []) {
+      const div = document.createElement('div'); div.className = 'warning'; div.textContent = message; warnings.appendChild(div);
+    }
   }
+  renderWarnings();
   const metrics = {
     revenue: {name:'营业收入', unit:'亿元', scale:1e8},
     profit: {name:'归母净利润', unit:'亿元', scale:1e8},
@@ -391,7 +398,8 @@
       row.price_date || '无价格', row.qfq_price_date || '无价格',
       row.cash_dividend_details || '该报告期暂无已实施分红'
     ]);
-    const hover = metric => '%{customdata[0]}<br>' + metric.name + '：%{y:,.2f} ' + metric.unit +
+    const hover = (metric, hasYoy) => '%{customdata[0]}<br>' + metric.name + '：%{y:,.2f} ' + metric.unit +
+      (hasYoy ? '；%{customdata[6]}' : '') +
       '<br>报告期：%{customdata[1]}<br>披露日：%{customdata[2]}' +
       (metric.dateKey ? '<br>价格交易日：%{customdata[' + (metric.dateKey === 'price_date' ? 3 : 4) + ']}' : '') +
       (metric === metrics.cash_dividend ? '<br>归属报告期 → 实际除权日：%{customdata[5]}' : '') +
@@ -402,19 +410,22 @@
     let referenceCount = 0;
     for (const series of active) {
       const metric = series.metric;
+      const hasYoy = rows.some(row => row.yoy?.[series.key] != null);
+      const seriesCustom = hasYoy
+        ? custom.map((item, index) => [...item, rows[index].yoy?.[series.key] || '同比 —（缺少上年同期）']) : custom;
       const width = barCount ? (.72 - .04 * (barCount - 1)) / barCount : 0;
       const offset = -.36 + barIndex * (width + .04);
       const referenceXs = series.kind === 'bar' ? xs.map(x => x + offset + width / 2) : xs;
       if (series.kind === 'bar') {
         traces.push({type:'bar', name:series.label + ' 柱形 · ' + metric.name, x:xs, y:series.values,
-          yaxis:series.axis, width, offset, customdata:custom,
-          marker:{color:series.color}, hovertemplate:hover(metric)});
+          yaxis:series.axis, width, offset, customdata:seriesCustom,
+          marker:{color:series.color}, hovertemplate:hover(metric, hasYoy)});
         barIndex++;
       } else {
         traces.push({type:'scatter', mode:'lines+markers', name:series.label + ' 折线 · ' + metric.name,
-          x:xs, y:series.values, yaxis:series.axis, customdata:custom, connectgaps:false,
+          x:xs, y:series.values, yaxis:series.axis, customdata:seriesCustom, connectgaps:false,
           line:{color:series.color,width:3}, marker:{size:5,color:series.color},
-          hovertemplate:hover(metric)});
+          hovertemplate:hover(metric, hasYoy)});
       }
       if (!metric.referenceKey) continue;
       const references = rows.map(row => row[metric.referenceKey] == null ? null : row[metric.referenceKey] / metric.scale);
@@ -635,7 +646,82 @@
     saveSelections();
     renderValuation();
   });
+  // Background data loading.
+  let dashboardUpdating = false;
+  const sectionNames = {financial:'财务', dividends:'分红', valuation:'估值'};
+  function sectionStatus(section, message) {
+    document.getElementById(section + '-status').textContent = sectionNames[section] + '：' + message;
+  }
+  function applyFinancial(data) {
+    for (const key of ['name','updated_at','views','warnings','cached_stocks']) {
+      if (Object.hasOwn(data, key)) state[key] = data[key];
+    }
+    document.getElementById('stock-code').textContent = state.code + (state.name ? ' - ' + state.name : '');
+    document.getElementById('updated').textContent = state.updated_at ? new Date(state.updated_at).toLocaleString('zh-CN') : '—';
+    document.getElementById('latest-period').textContent = state.views?.quarter?.at(-1)?.period || '—';
+    state.loading.dividends = Boolean(data.needs_dividends);
+    renderCachedStocks();
+    renderWarnings();
+    if (typeof Plotly !== 'undefined') render();
+  }
+  async function requestSection(section, force) {
+    const hasCache = section === 'valuation'
+      ? Object.keys(state.valuation?.views || {}).length > 0 : Object.keys(state.views || {}).length > 0;
+    sectionStatus(section, hasCache ? '显示已有数据，后台更新中…' : '正在加载…');
+    try {
+      const response = await fetch('/api/' + section + '?code=' + encodeURIComponent(state.code) +
+        (force ? '&refresh=1' : ''), {cache:'no-store'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || '请求失败');
+      if (section === 'valuation') {
+        state.valuation = data;
+        if (typeof Plotly !== 'undefined') renderValuation();
+      } else {
+        if (section === 'dividends') data.warnings = [...new Set([...(state.warnings || []), ...(data.warnings || [])])];
+        applyFinancial(data);
+      }
+      sectionStatus(section, data.warnings?.length ? '更新未全部完成，已显示可用数据，请留意提示。' : '数据已就绪');
+      return true;
+    } catch (exception) {
+      sectionStatus(section, '加载失败，' + (hasCache ? '保留已有数据。' : '可点击“刷新数据”重试。') + ' ' + exception.message);
+      return false;
+    }
+  }
+  async function loadDashboard(force = false) {
+    if (dashboardUpdating) return;
+    dashboardUpdating = true;
+    const refresh = document.getElementById('refresh');
+    refresh.setAttribute('aria-disabled', 'true');
+    refresh.textContent = '更新中…';
+    const hasReports = Boolean(state.views?.quarter?.length);
+    const needsFinancial = force || state.loading.financial;
+    const needsValuation = force || state.loading.valuation;
+    const financial = needsFinancial ? requestSection('financial', force) : Promise.resolve(true);
+    if (!needsFinancial) sectionStatus('financial', '已显示本地缓存');
+    const dividends = financial.then(ok => {
+      if (!ok) { sectionStatus('dividends', '财务加载失败，保留已有数据'); return; }
+      if (force || state.loading.dividends) return requestSection('dividends', force);
+      sectionStatus('dividends', '已显示本地缓存');
+    });
+    const valuation = !needsValuation ? Promise.resolve(sectionStatus('valuation', '已显示本地缓存'))
+      : !needsFinancial && hasReports ? requestSection('valuation', false)
+      : financial.then(ok => {
+        if (ok) return requestSection('valuation', force);
+        sectionStatus('valuation', '财务加载失败，保留已有数据');
+      });
+    try { await Promise.all([financial, dividends, valuation]); }
+    finally {
+      dashboardUpdating = false;
+      refresh.setAttribute('aria-disabled', 'false');
+      refresh.textContent = '刷新数据';
+    }
+  }
+  document.getElementById('refresh').addEventListener('click', event => {
+    event.preventDefault();
+    loadDashboard(true);
+  });
   if (typeof Plotly !== 'undefined') { render(); renderValuation(); }
+  loadDashboard(Boolean(state.refresh_requested));
 })();
 </script>
 </body>
