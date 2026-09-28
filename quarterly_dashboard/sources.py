@@ -18,6 +18,8 @@ PROFIT_KEYS = (
 )
 SHARE_KEYS = ("实收资本(或股本)", "实收资本（或股本）", "股本")
 EQUITY_KEYS = ("归属于母公司股东权益合计", "归属于母公司股东的权益", "归属于母公司所有者权益合计")
+TOTAL_EQUITY_KEYS = ("所有者权益(或股东权益)合计", "所有者权益（或股东权益）合计",
+                     "所有者权益合计", "股东权益合计")
 CASH_FLOW_KEYS = ("经营活动产生的现金流量净额",)
 CAPEX_KEYS = ("购建固定资产、无形资产和其他长期资产所支付的现金",
               "购建固定资产、无形资产和其他长期资产支付的现金")
@@ -47,6 +49,24 @@ def _first(fields: dict, names: tuple[str, ...]):
             value = _number(fields[name])
             if value is not None:
                 return value
+    return None
+
+
+def _financing_interest_income(items: list[dict]):
+    # Sina also has INTEINCO (operating interest revenue of finance subsidiaries).
+    # Only INTEINCOOPCOST belongs to the finance-expense breakdown used by ROIC.
+    for item in items:
+        if item.get("item_field") == "INTEINCOOPCOST":
+            return _number(item.get("item_value"))
+    in_finance_expenses = False
+    for item in items:
+        title = item.get("item_title")
+        if title == "财务费用":
+            in_finance_expenses = True
+        elif title in ("利息支出", "营业利润", "投资收益", "其他收益"):
+            in_finance_expenses = False
+        elif in_finance_expenses and title == "利息收入":
+            return _number(item.get("item_value"))
     return None
 
 
@@ -92,11 +112,19 @@ def parse_financial_reports(income_payload: dict, balance_payload: dict) -> list
         period = _date(key)
         if period is None:
             continue
-        fields = {item.get("item_title"): item.get("item_value") for item in record.get("data", [])}
+        items = record.get("data", [])
+        fields = {item.get("item_title"): item.get("item_value") for item in items}
         counterpart = balance.get(key, {})
         balance_fields = {item.get("item_title"): item.get("item_value") for item in counterpart.get("data", [])}
         debt_fields = {field: _first(balance_fields, names) for field, names in DEBT_FIELDS.items()
                        if any(name in balance_fields for name in names)}
+        interest_expense = _first(fields, ("利息费用",))
+        # Expense-only item: Sina preserves credit/debit display signs in some
+        # issuers (e.g. Midea), while others report positive expense magnitudes.
+        # Normalize this specific cost at ingestion, never finance expenses or
+        # operating "利息支出", taxes, interest income, or the calculated result.
+        if interest_expense is not None and interest_expense < 0:
+            interest_expense = -interest_expense
         output.append({
             "period": period,
             "publish_date": _date(record.get("publish_date")),
@@ -104,6 +132,11 @@ def parse_financial_reports(income_payload: dict, balance_payload: dict) -> list
             "profit_ytd": _first(fields, PROFIT_KEYS),
             "operating_cost_ytd": _first(fields, ("营业成本",)),
             "net_profit_ytd": _first(fields, ("净利润",)),
+            "profit_before_tax_ytd": _first(fields, ("利润总额",)),
+            "income_tax_expense_ytd": _first(fields, ("所得税费用",)),
+            "interest_expense_ytd": interest_expense,
+            "non_operating_interest_income_ytd": _financing_interest_income(items),
+            "total_equity": _first(balance_fields, TOTAL_EQUITY_KEYS),
             "monetary_funds": _first(balance_fields, ("货币资金",)),
             **debt_fields,
             "shares": _first(balance_fields, SHARE_KEYS),

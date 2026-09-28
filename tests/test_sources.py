@@ -36,11 +36,38 @@ def test_financial_parser_uses_report_period_and_disclosure_date():
         "revenue_ytd": 250.5, "profit_ytd": 45.2,
         "operating_cost_ytd": 150.5, "net_profit_ytd": 50.0,
         "monetary_funds": 300.0,
+        "profit_before_tax_ytd": None, "income_tax_expense_ytd": None,
+        "interest_expense_ytd": None, "non_operating_interest_income_ytd": None,
+        "total_equity": None,
         "short_term_borrowings": 10.0, "short_term_bonds": None,
         "current_noncurrent_liabilities": 5.0, "long_term_borrowings": 20.0,
         "bonds_payable": None, "lease_liabilities": 3.0,
         "shares": 100.0, "equity": 500.0, "source_update_time": 123,
     }]
+
+
+def test_roic_parser_uses_consolidated_equity_and_financing_interest_not_operating_interest():
+    income = {"result": {"data": {"report_list": {"20251231": {"data": [
+        {"item_title": "利润总额", "item_value": "100"},
+        {"item_title": "所得税费用", "item_value": "20"},
+        {"item_title": "利息收入", "item_field": "INTEINCO", "item_value": "40"},
+        {"item_title": "财务费用", "item_value": "-5"},
+        {"item_title": "利息收入", "item_field": "INTEINCOOPCOST", "item_value": "2"},
+        {"item_title": "利息费用", "item_field": "INTERESTEXPENSE", "item_value": "-10"},
+        {"item_title": "利息支出", "item_value": "90"},
+    ]}}}}}
+    balance = {"result": {"data": {"report_list": {"20251231": {"data": [
+        {"item_title": "归属于母公司股东权益合计", "item_value": "500"},
+        {"item_title": "所有者权益(或股东权益)合计", "item_value": "600"},
+    ]}}}}}
+    row = parse_financial_reports(income, balance)[0]
+    assert row['profit_before_tax_ytd'] == 100
+    assert row['income_tax_expense_ytd'] == 20
+    assert row['interest_expense_ytd'] == 10
+    assert row['non_operating_interest_income_ytd'] == 2
+    assert row['total_equity'] == 600
+    income['result']['data']['report_list']['20251231']['data'][4]['item_value'] = None
+    assert parse_financial_reports(income, balance)[0]['non_operating_interest_income_ytd'] is None
 
 
 def test_shifted_sina_dates_use_previous_year_same_period_record():

@@ -146,6 +146,7 @@
           <option value="revenue_growth">营收同比增长率</option>
           <option value="profit_growth">归母净利润同比增长率</option>
           <option value="roe">ROE（TTM 估算）</option>
+          <option value="roic">ROIC（简化估算）</option>
           <option value="operating_cash_flow">经营活动现金流净额</option>
           <option value="free_cash_flow">简化自由现金流</option>
           <option value="cash_dividend">估算现金分红（已实施）</option>
@@ -169,6 +170,7 @@
           <option value="revenue_growth">营收同比增长率</option>
           <option value="profit_growth">归母净利润同比增长率</option>
           <option value="roe">ROE（TTM 估算）</option>
+          <option value="roic">ROIC（简化估算）</option>
           <option value="operating_cash_flow">经营活动现金流净额</option>
           <option value="free_cash_flow">简化自由现金流</option>
           <option value="cash_dividend">估算现金分红（已实施）</option>
@@ -192,6 +194,7 @@
           <option value="revenue_growth">营收同比增长率</option>
           <option value="profit_growth">归母净利润同比增长率</option>
           <option value="roe">ROE（TTM 估算）</option>
+          <option value="roic">ROIC（简化估算）</option>
           <option value="operating_cash_flow">经营活动现金流净额</option>
           <option value="free_cash_flow">简化自由现金流</option>
           <option value="cash_dividend">估算现金分红（已实施）</option>
@@ -319,6 +322,7 @@
     revenue_growth: {name:'营收同比增长率', unit:'%', scale:1},
     profit_growth: {name:'归母净利润同比增长率', unit:'%', scale:1},
     roe: {name:'ROE（TTM 估算）', unit:'%', scale:1},
+    roic: {name:'ROIC（TTM，简化估算）', unit:'%', scale:1},
     operating_cash_flow: {name:'经营活动现金流净额', unit:'亿元', scale:1e8},
     free_cash_flow: {name:'简化自由现金流', unit:'亿元', scale:1e8},
     cash_dividend: {name:'估算现金分红（已实施）', unit:'亿元', scale:1e8},
@@ -364,6 +368,7 @@
     });
   }
   function render() {
+    metrics.roic.name = selectedPeriod === 'year' ? 'ROIC（年度，简化估算）' : 'ROIC（TTM，简化估算）';
     const cutoff = new Date();
     cutoff.setHours(0, 0, 0, 0);
     if (comparisonRange.value !== 'all') cutoff.setFullYear(cutoff.getFullYear() - Number(comparisonRange.value));
@@ -475,35 +480,25 @@
       layout['yaxis' + (index + 2)] = {...axisConfig(group), overlaying:'y', side:'right',
         anchor:'free', position:1, shift:index * 86, showgrid:false};
     });
-    const priceSeries = active.find(series => series.key === 'qfq_price' && series.axis !== 'y');
-    if (priceSeries) {
-      const leftValues = active.filter(series => series.axis === 'y')
-        .flatMap(series => [...series.values, ...(series.metric.referenceKey
-          ? rows.map(row => row[series.metric.referenceKey] == null
-            ? null : row[series.metric.referenceKey] / series.metric.scale) : [])])
-        .filter(Number.isFinite);
-      const priceValues = [...priceSeries.values,
-        ...rows.map(row => row.qfq_price_reference)].filter(Number.isFinite);
-      const leftMin = Math.min(...leftValues);
-      const leftMax = Math.max(...leftValues);
-      const priceMin = Math.min(...priceValues);
-      const priceMax = Math.max(...priceValues);
-      // A small negative adjustment tail should not put positive prices below the profit zero line.
-      if (leftMin < 0 && leftMax > 0 && priceMax > 0 && priceMin >= -priceMax * .1) {
-        const leftRange = [leftMin * 1.12, leftMax * 1.12];
-        const priceTop = Math.max(priceMax * 1.12,
-          priceMin < 0 ? -priceMin * 1.12 * leftRange[1] / -leftRange[0] : 0);
-        if (priceTop > 0) {
-          const priceAxis = layout['yaxis' + priceSeries.axis.slice(1)];
-          const roughStep = priceTop / 5;
-          const magnitude = 10 ** Math.floor(Math.log10(roughStep));
-          const step = [1, 2, 5, 10].find(value => value * magnitude >= roughStep) * magnitude;
-          layout.yaxis.range = leftRange;
-          priceAxis.range = [leftRange[0] / leftRange[1] * priceTop, priceTop];
-          priceAxis.tickmode = 'array';
-          priceAxis.tickvals = Array.from({length:Math.floor(priceTop / step) + 1}, (_, index) => index * step);
-        }
-      }
+    if (axisGroups.length > 1) {
+      // Give every unit the same positive/negative space ratio. Include reference
+      // traces, so aligning zero never hides a negative price or financial value.
+      const extents = axisGroups.map((group, index) => {
+        const axis = index === 0 ? 'y' : 'y' + (index + 1);
+        const values = traces.filter(trace => trace.yaxis === axis)
+          .flatMap(trace => trace.y).filter(Number.isFinite);
+        const positive = Math.max(0, ...values);
+        const negative = Math.max(0, ...values.map(value => -value));
+        return {positive, negative, scale:Math.max(positive, negative) || 1};
+      });
+      const positiveFraction = Math.max(...extents.map(item => item.positive / item.scale));
+      const negativeFraction = Math.max(...extents.map(item => item.negative / item.scale));
+      extents.forEach((item, index) => {
+        const axis = layout[index === 0 ? 'yaxis' : 'yaxis' + (index + 1)];
+        axis.range = [-item.scale * negativeFraction * 1.12,
+                       item.scale * (positiveFraction || (negativeFraction ? 0 : 1)) * 1.12];
+        axis.autorange = false;
+      });
     }
     Plotly.react('chart', traces, layout, {responsive:true,displaylogo:false,locale:'zh-CN'});
     const selectedMetrics = new Set(active.map(series => series.key));
@@ -523,6 +518,7 @@
       (hasNegativeAdjusted ? ' 部分历史前复权值为负，图中保留数据源原值；它不是当时的未复权成交价。' : '') +
       ([...selectedMetrics].some(metric => metric.endsWith('_growth')) ? ' 同比增长率按去年相同报告期、相同周期口径比较；基期小于等于零或缺失时留空。' : '') +
       (selectedMetrics.has('roe') ? ' ROE（TTM 估算）＝连续四季度归母净利润÷本期与上年同期归母净资产均值；非官方加权平均 ROE。' : '') +
+      (selectedMetrics.has('roic') ? ' ROIC（简化估算）＝税后经营利润÷期初期末投入资本均值；年度用全年利润，单季度与 TTM 视图均用连续四季度利润及上年同期、本期资本。税后经营利润＝（利润总额＋费用化利息－财务费用项下利息收入）×（1－所得税费用÷利润总额）；投入资本＝合并所有者权益＋简化有息负债－全部货币资金，尚未剔除其他非经营性损益。关键字段缺失、利润总额非正、税率异常或平均资本非正时留空。' : '') +
       (selectedMetrics.has('operating_cash_flow') || selectedMetrics.has('free_cash_flow') ? ' 经营现金流来自新浪现金流量表；单季度由累计值差分。简化自由现金流＝经营现金流－购建长期资产支付的现金，不能视为精确可分配现金。' : '') +
       (selectedMetrics.has('gross_margin') ? ' 毛利率＝（营业收入－营业成本）÷营业收入；按所选周期的收入、成本计算。' : '') +
       (selectedMetrics.has('net_margin') ? ' 净利率＝合并净利润÷营业收入，并非归母净利率；按所选周期计算。' : '') +

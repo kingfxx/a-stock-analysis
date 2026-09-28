@@ -30,12 +30,14 @@ TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
 CASH_FLOW_BASIS = "sina_cash_flow_ytd_v1"
-FINANCIAL_FIELDS_BASIS = "sina_margin_debt_inputs_v1"
+FINANCIAL_FIELDS_BASIS = "sina_margin_debt_roic_inputs_v2"
 DIVIDEND_BASIS = "eastmoney_implemented_report_period_total_shares_v1"
 NEW_REPORT_FIELDS = ("operating_cost_ytd", "net_profit_ytd", "monetary_funds",
                      "short_term_borrowings", "short_term_bonds",
                      "current_noncurrent_liabilities", "long_term_borrowings",
-                     "bonds_payable", "lease_liabilities")
+                     "bonds_payable", "lease_liabilities", "total_equity",
+                     "profit_before_tax_ytd", "income_tax_expense_ytd",
+                     "interest_expense_ytd", "non_operating_interest_income_ytd")
 VALUATION_BASIS = "monthly_qfq_overlay_v1"
 _DATA_LOCKS: dict[str, Lock] = {}
 
@@ -280,6 +282,14 @@ def load_stock(code: str, refresh: bool = False) -> dict:
                                       require_all_periods=True)
         if missing:
             return _keep_old(old, f"财报更新未覆盖已有报告期或指标（{len(missing)} 期），保留原缓存")
+        old_by_period = {report["period"]: report for report in old.get("reports", [])}
+        # Keep optional methodology inputs across source refreshes, including
+        # explicit zero/None. Future source-provided hook values take precedence.
+        for report in reports:
+            previous = old_by_period.get(report["period"], {})
+            for field in ("excess_cash", "non_operating_adjustments_ytd"):
+                if field in previous and field not in report:
+                    report[field] = previous[field]
     cash_flow_basis = None
     cash_warnings = []
     try:

@@ -47,12 +47,16 @@ def test_existing_cache_backfills_new_report_fields_without_refetching_prices(tm
         "prices": {"raw": [], "qfq": []}, "price_basis": "disclosure",
         "price_reference_basis": server.PRICE_REFERENCE_BASIS,
         "report_date_basis": server.REPORT_DATE_BASIS,
-        "cash_flow_basis": server.CASH_FLOW_BASIS}), encoding="utf-8")
+        "cash_flow_basis": server.CASH_FLOW_BASIS,
+        "financial_fields_basis": "sina_margin_debt_inputs_v1"}), encoding="utf-8")
     monkeypatch.setattr(server, "fetch_financial_reports", lambda *args: [{
         "period": "2025-12-31", "operating_cost_ytd": 60, "net_profit_ytd": 20,
         "monetary_funds": 30, "short_term_borrowings": 10,
         "short_term_bonds": None, "current_noncurrent_liabilities": 0,
-        "long_term_borrowings": 5, "bonds_payable": None, "lease_liabilities": 2}])
+        "long_term_borrowings": 5, "bonds_payable": None, "lease_liabilities": 2,
+        "profit_before_tax_ytd": 100, "income_tax_expense_ytd": 20,
+        "interest_expense_ytd": 10, "non_operating_interest_income_ytd": 2,
+        "total_equity": 500}])
     monkeypatch.setattr(server, "fetch_daily_prices", lambda *args: (_ for _ in ()).throw(AssertionError("prices refetched")))
     monkeypatch.setattr(server, "fetch_cash_flow_reports", lambda *args: (_ for _ in ()).throw(AssertionError("cash refetched")))
     data = server.load_stock("300750")
@@ -60,7 +64,64 @@ def test_existing_cache_backfills_new_report_fields_without_refetching_prices(tm
     assert data["reports"][0]["operating_cost_ytd"] == 60
     assert data["reports"][0]["net_profit_ytd"] == 20
     assert data["reports"][0]["monetary_funds"] == 30
+    assert data["reports"][0]["total_equity"] == 500
+    assert data["reports"][0]["interest_expense_ytd"] == 10
+    assert data["reports"][0]["non_operating_interest_income_ytd"] == 2
     assert data["financial_fields_basis"] == server.FINANCIAL_FIELDS_BASIS
+
+
+def test_roic_migration_retains_user_hooks_and_rejects_losing_known_inputs(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE", tmp_path)
+    report = {"period": "2025-12-31", "total_equity": 500,
+              "interest_expense_ytd": 10, "excess_cash": 0,
+              "non_operating_adjustments_ytd": -20}
+    old = {"code": "300750", "name": "宁德时代", "reports": [report],
+           "prices": {"raw": [], "qfq": []}, "price_basis": "disclosure",
+           "price_reference_basis": server.PRICE_REFERENCE_BASIS,
+           "report_date_basis": server.REPORT_DATE_BASIS,
+           "cash_flow_basis": server.CASH_FLOW_BASIS,
+           "financial_fields_basis": "sina_margin_debt_inputs_v1"}
+    path = tmp_path / '300750.json'
+    path.write_text(json.dumps(old), encoding='utf-8')
+    monkeypatch.setattr(server, 'fetch_financial_reports', lambda *args: [
+        {'period': '2025-12-31', 'total_equity': 500, 'interest_expense_ytd': None}])
+    result = server.load_stock('300750')
+    assert result['reports'] == [report]
+    assert '保留原缓存' in result['warnings'][0]
+    assert json.loads(path.read_text(encoding='utf-8')) == old
+    monkeypatch.setattr(server, 'fetch_financial_reports', lambda *args: [
+        {'period': '2025-12-31', 'total_equity': 600, 'interest_expense_ytd': 10}])
+    result = server.load_stock('300750')
+    assert result['reports'][0]['total_equity'] == 600
+    assert result['reports'][0]['excess_cash'] == 0
+    assert result['reports'][0]['non_operating_adjustments_ytd'] == -20
+    assert json.loads(path.with_suffix('.json.bak').read_text(encoding='utf-8')) == old
+
+
+def test_roic_is_selectable_in_all_three_series_menus():
+    from html.parser import HTMLParser
+
+    class Menus(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.current = None
+            self.options = {}
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'select':
+                self.current = attrs.get('id')
+            if tag == 'option' and self.current:
+                self.options.setdefault(self.current, []).append(attrs.get('value'))
+
+        def handle_endtag(self, tag):
+            if tag == 'select':
+                self.current = None
+
+    menus = Menus()
+    menus.feed(server.TEMPLATE)
+    for control in ('bar-metric', 'bar-metric-2', 'line-metric'):
+        assert 'roic' in menus.options[control]
 
 
 def test_cash_flow_refresh_failure_retains_previous_cash_values(tmp_path, monkeypatch):
@@ -351,6 +412,29 @@ def test_successful_refresh_saves_previous_cache_as_backup(tmp_path, monkeypatch
     data = server.load_stock("601919", refresh=True)
     assert data["reports"][0]["revenue_ytd"] == 100
     assert json.loads(path.with_suffix(".json.bak").read_text(encoding="utf-8")) == previous
+
+
+def test_full_refresh_keeps_explicit_roic_extension_inputs(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, 'CACHE', tmp_path)
+    old_reports = [
+        {'period': '2024-12-31', 'excess_cash': 0, 'non_operating_adjustments_ytd': -20},
+        {'period': '2025-12-31', 'excess_cash': None, 'non_operating_adjustments_ytd': None}]
+    path = tmp_path / '601919.json'
+    path.write_text(json.dumps({'code': '601919', 'name': '中远海控',
+                               'reports': old_reports, 'prices': {'raw': [], 'qfq': []}}), encoding='utf-8')
+    monkeypatch.setattr(server, 'fetch_financial_reports', lambda *args: [
+        {'period': '2024-12-31', 'total_equity': 500},
+        {'period': '2025-12-31', 'total_equity': 600},
+        {'period': '2026-03-31', 'total_equity': 650}])
+    monkeypatch.setattr(server, 'fetch_cash_flow_reports', lambda *args: {})
+    monkeypatch.setattr(server, '_disclosure_prices', lambda *args: ({'raw': [], 'qfq': []}, [], True))
+    monkeypatch.setattr(server, 'fetch_stock_name', lambda *args: '中远海控')
+    result = server.load_stock('601919', refresh=True)
+    for old, fresh in zip(old_reports, result['reports']):
+        for field in ('excess_cash', 'non_operating_adjustments_ytd'):
+            assert field in fresh and fresh[field] == old[field]
+    assert 'excess_cash' not in result['reports'][-1]
+    assert json.loads(path.read_text(encoding='utf-8'))['reports'] == result['reports']
 
 
 def test_partial_valuation_refresh_keeps_previous_months_and_backup_untouched(tmp_path, monkeypatch):

@@ -5,6 +5,8 @@ from __future__ import annotations
 from bisect import bisect_right
 from datetime import date
 
+from .roic import calculate_roic
+
 
 def _quarter_before(period: str) -> str:
     year, month = int(period[:4]), int(period[5:7])
@@ -56,6 +58,8 @@ def _hover_yoy(current, previous, field: str) -> str:
 DEBT_COMPONENTS = ("short_term_borrowings", "short_term_bonds",
                    "current_noncurrent_liabilities", "long_term_borrowings",
                    "bonds_payable", "lease_liabilities")
+ROIC_PROFIT_FIELDS = ("profit_before_tax", "income_tax_expense", "interest_expense",
+                      "non_operating_interest_income", "non_operating_adjustments")
 
 
 def _margin(revenue, numerator):
@@ -116,13 +120,13 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
         prior = by_period.get(_quarter_before(period))
         is_q1 = period[5:7] == "03"
 
-        def quarter_value(field):
-            current = report.get(field)
+        def quarter_value(field, default=None):
+            current = report.get(field, default)
             if current is None:
                 return None
             if is_q1:
                 return current
-            previous = prior.get(field) if prior else None
+            previous = prior.get(field, default) if prior else None
             return current - previous if previous is not None else None
 
         raw = raw_by_disclosure.get(report.get("publish_date"))
@@ -170,6 +174,12 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             "market_cap_reference_date": raw_ref.get("date") if raw_ref else None,
             "market_cap_reference_lag_days": raw_ref.get("lag_days") if raw_ref else None,
         }
+        for field in ROIC_PROFIT_FIELDS:
+            # Optional signed pre-tax adjustment is cumulative like other flows.
+            # Absence means zero; explicit None propagates unknown data.
+            default = 0 if field == "non_operating_adjustments" else None
+            row[f"{field}_quarter"] = quarter_value(f"{field}_ytd", default)
+            row[f"{field}_ttm"] = None
         rows.append(row)
     by_row = {r["period"]: r for r in rows}
     dividends_by_period: dict[str, list[dict]] = {}
@@ -205,8 +215,8 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             ttm_events = [event for item in chain
                           for event in dividends_by_period.get(item["period"], [])]
             row["cash_dividend_ttm"], row["cash_dividend_details_ttm"] = dividend_values(ttm_events)
-            for field in ("revenue", "profit", "operating_cost", "net_profit", "capex",
-                          "operating_cash_flow", "free_cash_flow"):
+            for field in (("revenue", "profit", "operating_cost", "net_profit", "capex",
+                           "operating_cash_flow", "free_cash_flow") + ROIC_PROFIT_FIELDS):
                 values = [item[f"{field}_quarter"] for item in chain]
                 if all(value is not None for value in values):
                     row[f"{field}_ttm"] = sum(values)
@@ -214,6 +224,12 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             row["cash_dividend_ttm"] = None
             row["cash_dividend_details_ttm"] = ""
         previous_year = by_row.get(_year_before(row["period"]))
+        for suffix in ("ttm", "ytd"):
+            profit_inputs = {field: row.get(f"{field}_{suffix}",
+                                           0 if field == "non_operating_adjustments" else None)
+                             for field in ROIC_PROFIT_FIELDS}
+            row[f"roic_{suffix}"] = (calculate_roic(profit_inputs, previous_year or {}, row)
+                                      if suffix == "ttm" or current_period[5:7] == "12" else None)
         for suffix in ("quarter", "ytd", "ttm"):
             for field in ("revenue", "profit"):
                 row[f"{field}_growth_{suffix}"] = _growth(
@@ -237,6 +253,7 @@ def view_rows(rows: list[dict], period: str) -> list[dict]:
         suffix = {"quarter": "quarter", "ttm": "ttm", "year": "ytd"}[period]
         result.append({**row, "revenue": row.get(f"revenue_{suffix}"),
                        "profit": row.get(f"profit_{suffix}"),
+                       "roic": row.get("roic_ytd" if period == "year" else "roic_ttm"),
                        "cash_dividend": row.get(f"cash_dividend_{suffix}"),
                        "cash_dividend_details": row.get(f"cash_dividend_details_{suffix}"),
                        "capex": row.get(f"capex_{suffix}"),
