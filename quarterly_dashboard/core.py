@@ -266,6 +266,9 @@ def view_rows(rows: list[dict], period: str) -> list[dict]:
                        "profit_growth": row.get(f"profit_growth_{suffix}"),
                        "operating_cash_flow": row.get(f"operating_cash_flow_{suffix}"),
                        "free_cash_flow": row.get(f"free_cash_flow_{suffix}")})
+        if period == "year":
+            annual = result[-1]
+            annual["dividend_payout_ratio"] = _margin(annual["profit"], annual["cash_dividend"])
     # Compute before the browser applies a date range; never persist derived hover data.
     by_period = {row["period"]: row for row in result}
     for row in result:

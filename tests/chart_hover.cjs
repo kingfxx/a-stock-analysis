@@ -14,7 +14,7 @@ for (const period of ['quarter', 'year', 'ttm']) {
       const elements = new Map();
       const context = {
         state: {views: {[period]: [{period:'2025-12-31', publish_date:'2026-04-30',
-          profit:100e8, cash_dividend:10e8, qfq_price:20, market_cap:500e8,
+          profit:100e8, cash_dividend:10e8, dividend_payout_ratio:10, qfq_price:20, market_cap:500e8,
           profit_growth:20, gross_margin:30, roic:17.28, cash_dividend_details:'2025-12-31 → 2026-06-05',
           yoy: {profit:'同比 +20.00%', cash_dividend:'同比 +10.00%（仅已实施口径）'}}]}},
         selectedPeriod: period, comparisonRange: {value:'all'},
@@ -36,6 +36,31 @@ for (const period of ['quarter', 'year', 'ttm']) {
         assert.match(hover, /亿元；同比 \+10\.00%（仅已实施口径）/);
         assert.match(hover, /2025-12-31 → 2026-06-05/);
       } else assert.doesNotMatch(hover, /；同比/);
+      if (key === 'cash_dividend' && period === 'year') {
+        assert.match(hover, /分红率：10\.00%（仅已实施口径）/);
+        assert.match(context.note.textContent, /全年归母净利润/);
+        for (const [profit, dividend, ratio, expected] of [
+          [100e8, 0, 0, '分红率：0.00%'],
+          [100e8, 150e8, 150, '分红率：150.00%'],
+          [-10e8, 10e8, null, '分红率：—（归母净利润非正）'],
+          [0, 10e8, null, '分红率：—（归母净利润非正）'],
+          [null, 10e8, null, '分红率：—（数据缺失）'],
+          [100e8, null, null, '分红率：—（数据缺失）'],
+        ]) {
+          Object.assign(context.state.views.year[0], {profit, cash_dividend:dividend, dividend_payout_ratio:ratio});
+          // The payout detail must not depend on a YoY value being available.
+          context.state.views.year[0].yoy = {};
+          vm.runInContext('render();', context);
+          const payoutTrace = context.traces[0];
+          const detail = payoutTrace.hovertemplate.replace(/%\{customdata\[(\d+)\]\}/g,
+            (_, index) => payoutTrace.customdata[0][index]);
+          assert.ok(detail.includes(expected), detail);
+          assert.doesNotMatch(detail, /undefined/);
+        }
+      } else {
+        assert.doesNotMatch(hover, /分红率/);
+        assert.doesNotMatch(context.note.textContent, /全年归母净利润/);
+      }
       if (key === 'roic') {
         assert.match(hover, new RegExp(period === 'year' ? 'ROIC（年度，简化估算）' : 'ROIC（TTM，简化估算）'));
         assert.equal(trace.y[0], 17.28);
