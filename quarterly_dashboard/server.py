@@ -7,7 +7,7 @@ import json
 import shutil
 import time
 import webbrowser
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
@@ -18,6 +18,9 @@ from plotly.offline import get_plotlyjs
 
 from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
 from .network import create_data_session
+from .storage import DEFAULT_DATABASE, Database, instance_lock
+from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
+                    shareholder_price_snapshots)
 from .sources import (fetch_cash_flow_reports, fetch_daily_prices, fetch_financial_reports,
                       fetch_monthly_prices, fetch_stock_name, normalize_code, normalize_report_dates)
 from .valuation import (fetch_dividend_events, fetch_dividend_yields, fetch_industry_snapshot, fetch_valuation_series,
@@ -27,6 +30,8 @@ from .valuation import (fetch_dividend_events, fetch_dividend_yields, fetch_indu
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "data" / "fundamentals"
 VALUATION_CACHE = ROOT / "data" / "valuation"
+CHIP_CACHE = ROOT / "data" / "chips"
+DATABASE_PATH = DEFAULT_DATABASE
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
@@ -418,13 +423,54 @@ def _valuation_payload(data: dict) -> dict:
         "warnings": data.get("warnings", [])}
 
 
+def load_chips(code: str, section: str, refresh: bool = False) -> dict:
+    """Cache full raw histories independently; only the response is windowed."""
+    path = CHIP_CACHE / section / f"{code}.json"
+    old = _read_cache(path)
+    today = date.today().isoformat()
+    if old.get("updated_on") == today and old.get("basis") == CHIP_BASIS and not refresh:
+        return chip_payload(old, section)
+    try:
+        with create_data_session() as session:
+            records = fetch_chip_records(code, section, session)
+            prices = []
+            if section == "shareholders" and records:
+                dates = sorted(row["END_DATE"][:10] for row in records)
+                earliest = (date.fromisoformat(dates[0]) - timedelta(days=15)).isoformat()
+                daily = fetch_daily_prices(code, session, "", earliest, dates[-1])
+                if not daily:
+                    raise ValueError("腾讯未返回股东人数对应的未复权价格")
+                prices = shareholder_price_snapshots(records, daily)
+        fresh = chip_rows(records, section, prices)
+        old_rows = chip_rows(old.get("records", []), section, old.get("prices"))
+        if section == "shareholders" and old.get("basis") != CHIP_BASIS:
+            # Prototype caches used the detail table's price without a trading
+            # date. It is not comparable to the current 15-day snapshot rule.
+            old_rows = [{**row, "close": None} for row in old_rows]
+        missing = missing_chip_history(old_rows, fresh, section)
+        if missing:
+            raise ValueError(f"历史覆盖不足（{len(missing)} 个日期）")
+    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+        if old:
+            return chip_payload(_keep_old(old, f"筹码更新失败，保留原缓存：{exc}"), section)
+        raise ValueError(f"无法获取 {code} 的筹码数据：{exc}") from exc
+    data = {"code": code, "basis": CHIP_BASIS, "records": records,
+            "updated_on": today, "empty": not records, "warnings": []}
+    if section == "shareholders":
+        data["prices"] = prices
+    _save_cache(path, data)
+    return chip_payload(data, section)
+
+
 def load_chart_data(code: str, section: str, refresh: bool = False) -> dict:
     """Network work runs in separate requests; serialize writes to each stock cache."""
     code = normalize_code(code)
-    if section not in {"financial", "dividends", "valuation"}:
+    if section not in {"financial", "dividends", "valuation", "shareholders", "financing"}:
         raise ValueError("未知数据类型")
     lock_key = section + ":" + code
     with _DATA_LOCKS.setdefault(lock_key, Lock()):
+        if section in {"shareholders", "financing"}:
+            return load_chips(code, section, refresh)
         if section == "financial":
             data = load_stock(code, refresh)
         else:
@@ -459,6 +505,11 @@ def render_page(code: str, refresh: bool) -> str:
                               "valuation": not valuation
                               or valuation.get("updated_on") != date.today().isoformat()
                               or valuation.get("basis") != VALUATION_BASIS}
+        for section in ("shareholders", "financing"):
+            chips = _read_cache(CHIP_CACHE / section / f"{code}.json")
+            payload[section] = chip_payload(chips, section)
+            payload["loading"][section] = (not chips or chips.get("updated_on") != date.today().isoformat()
+                                            or chips.get("basis") != CHIP_BASIS)
         error = ""
     except (ValueError, KeyError, json.JSONDecodeError) as exc:
         error = str(exc)
@@ -481,7 +532,8 @@ class Handler(BaseHTTPRequestHandler):
             code = query.get("code", ["601919"])[0]
             body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
             content_type = "text/html; charset=utf-8"
-        elif parsed.path in {"/api/financial", "/api/dividends", "/api/valuation"}:
+        elif parsed.path in {"/api/financial", "/api/dividends", "/api/valuation",
+                             "/api/shareholders", "/api/financing"}:
             query = parse_qs(parsed.query)
             try:
                 data = load_chart_data(query.get("code", ["601919"])[0],
@@ -507,15 +559,24 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(port: int = 8765, open_browser: bool = False):
-    address = ("127.0.0.1", port)
-    server = ThreadingHTTPServer(address, Handler)
-    url = f"http://127.0.0.1:{port}/"
-    print(f"季度分析页面：{url}", flush=True)
-    try:
-        if open_browser:
-            webbrowser.open(url)
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    # P1 initializes infrastructure only. Business loaders still read/write JSON.
+    with instance_lock(DATABASE_PATH):
+        address = ("127.0.0.1", port)
+        server = ThreadingHTTPServer(address, Handler)
+        try:
+            db = Database(DATABASE_PATH)
+            runtime = db.initialize()
+            db.check()
+            recovered = db.recover_interrupted_runs()
+            db.daily_backup()
+            print(f"SQLite {runtime['sqlite_version']} / {runtime['journal_mode']} / "
+                  f"结构版本 {runtime['schema_version']}；恢复中断任务 {recovered} 个", flush=True)
+            url = f"http://127.0.0.1:{port}/"
+            print(f"季度分析页面：{url}", flush=True)
+            if open_browser:
+                webbrowser.open(url)
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()

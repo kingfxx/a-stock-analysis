@@ -85,6 +85,15 @@
     .valuation-levels b { color:var(--ink); font-weight:600; }
     #valuation-chart { height:400px; }
     .valuation-note { padding-top:2px; }
+    .chip-region { margin-top:32px; }
+    .chip-region > h2 { margin:0 0 7px; font-size:26px; }
+    .chip-region > .sub { margin-bottom:18px; line-height:1.6; }
+    .chip-panel + .chip-panel { margin-top:18px; }
+    .chip-panel h3 { margin:0 0 6px; font-size:21px; }
+    .chip-chart { height:390px; }
+    .chip-summary { padding:18px 27px 12px; color:var(--ink); font-size:14px; line-height:1.7; }
+    .chip-panel .note { padding-bottom:14px; }
+    @media(max-width:800px) { .chip-chart{height:340px} .chip-summary{padding:16px 15px 10px} .chip-panel .valuation-controls{width:100%} }
     .error,.warning { border-radius:8px; margin-bottom:15px; padding:12px 16px; font-size:14px; }
     .error { background:#442729; color:#ffe2df; }
     .warning { background:#4a3c22; color:#ffe5a1; }
@@ -267,6 +276,36 @@
     <p id="valuation-status" class="note" role="status" aria-live="polite"></p>
     <div id="valuation-chart" role="img" aria-label="月度估值走势与历史分位参考线"></div>
     <p id="valuation-note" class="note valuation-note"></p>
+  </section>
+  <section class="chip-region" aria-label="筹码评估">
+    <h2>筹码评估</h2>
+    <p class="sub">对照股东人数、融资资金与股价变化，观察持有结构和杠杆资金的趋势。</p>
+    <section class="panel chip-panel" aria-label="股东人数与股价趋势">
+      <div class="panel-head">
+        <div><h3>股东人数与股价</h3><p>按股东人数实际更新频率采样 · 青色为股东人数，红色为未复权收盘价</p></div>
+        <div class="valuation-controls"><label for="shareholders-range">时间范围</label>
+          <select id="shareholders-range"><option value="all">全部时间</option><option value="10">最近 10 年</option><option value="5">最近 5 年</option></select>
+        </div>
+      </div>
+      <div id="shareholders-summary" class="chip-summary">等待股东人数数据…</div>
+      <p id="shareholders-status" class="note" role="status" aria-live="polite"></p>
+      <div id="shareholders-chart" class="chip-chart" role="img" aria-label="股东人数与未复权股价双轴趋势图"></div>
+      <p class="note">横轴为股东人数统计截止日，不是公告日；悬停可查看公告日和实际价格日期。人数采用东方财富 F10 总股东户数口径，A/H 股公司不一定仅含 A 股股东。股价取腾讯未复权日 K 在截止日或此前最近交易日的收盘价，相隔超过 15 天时留空。股东人数不补成日度数据，连线仅用于对照趋势。</p>
+      <p id="shareholders-note" class="note"></p>
+    </section>
+    <section class="panel chip-panel" aria-label="融资与股价趋势">
+      <div class="panel-head">
+        <div><h3>融资与股价 · 最近一年</h3><p>按交易日展示 · 绿色为融资指标，红色为未复权收盘价</p></div>
+        <div class="valuation-controls"><label for="financing-metric">融资指标</label>
+          <select id="financing-metric"><option value="margin_balance">融资余额</option><option value="total_balance">融资融券余额</option><option value="net_buy">融资净买入</option></select>
+        </div>
+      </div>
+      <div id="financing-summary" class="chip-summary">等待融资数据…</div>
+      <p id="financing-status" class="note" role="status" aria-live="polite"></p>
+      <div id="financing-chart" class="chip-chart" role="img" aria-label="最近一年融资与未复权股价双轴趋势图"></div>
+      <p class="note">融资余额是尚未偿还的融资金额；融资融券余额包含融券余额；融资净买入＝融资买入额－融资偿还额，可为负。金额显示为亿元，原始记录按日保存、金额保留元。股价为同日未复权收盘价，除权除息可能造成跳变。</p>
+      <p id="financing-note" class="note"></p>
+    </section>
   </section>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
@@ -569,7 +608,9 @@
       metrics:Object.fromEntries(seriesControls.map(series => [series.id, series.control.value])),
       display:Object.fromEntries(seriesControls.map(series => [series.id, modeOf(series)])),
       valuationMetric, valuationRange:valuationRange.value,
-      valuationPriceOverlay:valuationPriceOverlay.getAttribute('aria-pressed') === 'true'
+      valuationPriceOverlay:valuationPriceOverlay.getAttribute('aria-pressed') === 'true',
+      shareholdersRange:document.getElementById('shareholders-range').value,
+      financingMetric:document.getElementById('financing-metric').value
     };
     try { sessionStorage.setItem(selectionsKey, JSON.stringify(selections)); }
     catch { /* Storage may be unavailable; the page still works with defaults. */ }
@@ -650,9 +691,69 @@
     saveSelections();
     renderValuation();
   });
+  // Chip assessment charts.
+  const financingNames = {margin_balance:'融资余额',total_balance:'融资融券余额',net_buy:'融资净买入'};
+  const shareholdersRange = document.getElementById('shareholders-range');
+  const financingMetricSelect = document.getElementById('financing-metric');
+  if (['all','10','5'].includes(savedSelections.shareholdersRange)) shareholdersRange.value = savedSelections.shareholdersRange;
+  if (Object.hasOwn(financingNames, savedSelections.financingMetric)) financingMetricSelect.value = savedSelections.financingMetric;
+  function renderChips(section) {
+    const financing = section === 'financing';
+    const data = state[section] || {};
+    let rows = data.rows || [];
+    if (!financing && shareholdersRange.value !== 'all') {
+      const cutoff = new Date();
+      cutoff.setFullYear(cutoff.getFullYear() - Number(shareholdersRange.value));
+      const day = cutoff.getFullYear() + '-' + String(cutoff.getMonth()+1).padStart(2,'0') + '-' + String(cutoff.getDate()).padStart(2,'0');
+      rows = rows.filter(row => row.date >= day);
+    }
+    const metric = financing ? financingMetricSelect.value : 'holders';
+    const name = financing ? financingNames[metric] : '股东人数';
+    const divisor = financing ? 1e8 : 1e4;
+    const unit = financing ? '亿元' : '万户';
+    const latest = data.latest;
+    const latestValue = latest?.[metric];
+    const valueText = latestValue == null ? '—' : financing ? (latestValue/divisor).toFixed(2) + ' 亿元' : Number(latestValue).toLocaleString('zh-CN') + ' 户';
+    document.getElementById(section + '-summary').textContent = latest
+      ? `${latest.date} · ${name} ${valueText} · 收盘价 ${latest.close == null ? '—' : latest.close.toFixed(2) + ' 元/股'}`
+      : data.empty ? (financing ? '数据源暂无该股票的融资记录。' : '数据源暂无该股票的股东人数记录。') : '暂无可用数据';
+    document.getElementById(section + '-note').textContent =
+      `来源：东方财富 · 本地更新 ${data.updated_on || '—'} · 已保存 ${data.stored_count || 0} 条${financing ? '日度' : '股东人数'}记录，当前显示 ${rows.length} 条。` + (data.warnings || []).join(' ');
+    const dates = rows.map(row => row.date);
+    const traces = [{type:financing && metric === 'net_buy' ? 'bar' : 'scatter',
+      mode:financing ? 'lines' : 'lines+markers',name,x:dates,
+      y:rows.map(row => row[metric] == null ? null : row[metric]/divisor),
+      customdata:rows.map(row => [row.announced_on || '未提供',row.holders]),
+      connectgaps:false,line:{color:financing ? '#8ecb49' : '#38c4dc',width:2},
+      marker:{color:financing ? '#8ecb49' : '#38c4dc',size:5},
+      hovertemplate:financing ? `%{x|%Y-%m-%d}<br>${name}：%{y:.3f} 亿元<extra></extra>`
+        : '统计截止日：%{x|%Y-%m-%d}<br>股东人数：%{customdata[1]:,} 户<br>公告日：%{customdata[0]}<extra></extra>'},
+      {type:'scatter',mode:financing ? 'lines' : 'lines+markers',name:'未复权收盘价',
+       x:dates,y:rows.map(row => row.close),yaxis:'y2',connectgaps:false,
+       customdata:rows.map(row => row.price_date || row.date),
+       line:{color:'#ed8180',width:2},marker:{size:4},
+       hovertemplate:'%{x|%Y-%m-%d}<br>未复权收盘价：%{y:.2f} 元/股<br>价格日期：%{customdata}<extra></extra>'}];
+    Plotly.react(section + '-chart', traces, {
+      paper_bgcolor:'#1a2227',plot_bgcolor:'#1a2227',font:{color:'#edf4f4'},
+      margin:{l:80,r:80,t:25,b:80},hovermode:'x unified',
+      legend:{orientation:'h',x:0,y:-.2},
+      xaxis:{type:'date',tickformat:financing ? '%Y-%m' : '%Y-%m-%d',
+        ...(financing && data.window_start ? {range:[data.window_start,data.window_end],dtick:'M2'} : {}),
+        gridcolor:'#304049',zeroline:false,automargin:true},
+      yaxis:{title:{text:`${name}（${unit}）`},gridcolor:'#304049',zeroline:metric === 'net_buy',
+        zerolinecolor:'#9aadb3',rangemode:'tozero',automargin:true},
+      yaxis2:{title:{text:'收盘价（元/股）'},overlaying:'y',side:'right',showgrid:false,
+        zeroline:false,automargin:true,tickfont:{color:'#ed8180'}},
+      annotations:rows.length && rows.some(row => row[metric] != null || row.close != null) ? [] :
+        [{text:financing && data.stored_count ? '最近一年暂无记录' : '暂无可用数据',xref:'paper',yref:'paper',x:.5,y:.5,
+          showarrow:false,font:{color:'#9aadb3',size:17}}]
+    }, {responsive:true,displaylogo:false,locale:'zh-CN'});
+  }
+  shareholdersRange.addEventListener('change', () => { saveSelections(); renderChips('shareholders'); });
+  financingMetricSelect.addEventListener('change', () => { saveSelections(); renderChips('financing'); });
   // Background data loading.
   let dashboardUpdating = false;
-  const sectionNames = {financial:'财务', dividends:'分红', valuation:'估值'};
+  const sectionNames = {financial:'财务', dividends:'分红', valuation:'估值',shareholders:'股东人数',financing:'融资'};
   function sectionStatus(section, message) {
     document.getElementById(section + '-status').textContent = sectionNames[section] + '：' + message;
   }
@@ -670,7 +771,9 @@
   }
   async function requestSection(section, force) {
     const hasCache = section === 'valuation'
-      ? Object.keys(state.valuation?.views || {}).length > 0 : Object.keys(state.views || {}).length > 0;
+      ? Object.keys(state.valuation?.views || {}).length > 0
+      : ['shareholders','financing'].includes(section) ? Boolean(state[section]?.stored_count)
+      : Object.keys(state.views || {}).length > 0;
     sectionStatus(section, hasCache ? '显示已有数据，后台更新中…' : '正在加载…');
     try {
       const response = await fetch('/api/' + section + '?code=' + encodeURIComponent(state.code) +
@@ -680,6 +783,9 @@
       if (section === 'valuation') {
         state.valuation = data;
         if (typeof Plotly !== 'undefined') renderValuation();
+      } else if (['shareholders','financing'].includes(section)) {
+        state[section] = data;
+        if (typeof Plotly !== 'undefined') renderChips(section);
       } else {
         if (section === 'dividends') data.warnings = [...new Set([...(state.warnings || []), ...(data.warnings || [])])];
         applyFinancial(data);
@@ -713,7 +819,9 @@
         if (ok) return requestSection('valuation', force);
         sectionStatus('valuation', '财务加载失败，保留已有数据');
       });
-    try { await Promise.all([financial, dividends, valuation]); }
+    const chips = ['shareholders','financing'].map(section => force || state.loading[section]
+      ? requestSection(section, force) : Promise.resolve(sectionStatus(section, '已显示本地缓存')));
+    try { await Promise.all([financial, dividends, valuation, ...chips]); }
     finally {
       dashboardUpdating = false;
       refresh.setAttribute('aria-disabled', 'false');
@@ -725,6 +833,7 @@
     loadDashboard(true);
   });
   if (typeof Plotly !== 'undefined') { render(); renderValuation(); }
+  if (typeof Plotly !== 'undefined') { renderChips('shareholders'); renderChips('financing'); }
   loadDashboard(Boolean(state.refresh_requested));
 })();
 </script>

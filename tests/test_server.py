@@ -295,7 +295,7 @@ def test_adjusted_price_failure_preserves_cached_monthly_prices(tmp_path, monkey
     assert "前复权月度股价获取失败" in data["warnings"][0]
 
 
-def test_serve_opens_browser_after_binding_when_requested(monkeypatch):
+def test_serve_opens_browser_after_binding_when_requested(monkeypatch, tmp_path):
     events = []
 
     class FakeServer:
@@ -309,6 +309,7 @@ def test_serve_opens_browser_after_binding_when_requested(monkeypatch):
             events.append("closed")
 
     monkeypatch.setattr(server, "ThreadingHTTPServer", FakeServer)
+    monkeypatch.setattr(server, "DATABASE_PATH", tmp_path / "stock_analysis.sqlite3")
     monkeypatch.setattr(server.webbrowser, "open", lambda url: events.append(("opened", url)))
 
     server.serve(8766, open_browser=True)

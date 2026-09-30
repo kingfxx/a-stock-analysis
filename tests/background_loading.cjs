@@ -16,7 +16,7 @@ function setup(loading, views = {quarter:[{profit:10}]}) {
       warnings:[], cached_stocks:[]},
     error: {textContent:'', classList:{remove() {}}},
     Plotly: {}, render: () => rendered.push('financial'),
-    renderValuation: () => rendered.push('valuation'), renderCachedStocks() {},
+    renderValuation: () => rendered.push('valuation'), renderChips: section => rendered.push(section), renderCachedStocks() {},
     renderWarnings() {},
     document: {getElementById: id => {
       if (!elements.has(id)) elements.set(id, {textContent:'',
@@ -57,6 +57,8 @@ function setup(loading, views = {quarter:[{profit:10}]}) {
   fixture = setup({financial:false, dividends:false, valuation:false});
   completion = fixture.context.loadDashboard(true);
   fixture.respond('financial', {error:'数据源超时'}, false);
+  fixture.respond('shareholders', {rows:[],warnings:[]});
+  fixture.respond('financing', {rows:[],warnings:[]});
   await completion;
   assert.equal(fixture.context.state.views.quarter[0].profit, 10);
   assert.deepEqual(fixture.context.state.valuation.views, {old:true});
@@ -79,5 +81,17 @@ function setup(loading, views = {quarter:[{profit:10}]}) {
   assert.equal(fixture.context.state.views.quarter[0].cash_dividend, 8);
   assert.ok(fixture.context.state.warnings.includes('价格快照获取失败'));
   assert.ok(fixture.context.state.valuation.views.pe);
-  console.log('Background chart loading, failure retention and PS dependency passed');
+  // Chip charts load even if financial loading fails or is slow.
+  fixture = setup({financial:true,dividends:true,valuation:true,shareholders:true,financing:true}, {});
+  completion = fixture.context.loadDashboard();
+  assert.equal(fixture.pending.size, 3);
+  fixture.respond('shareholders', {rows:[{date:'2026-06-30',holders:10000}],stored_count:1,warnings:[]});
+  fixture.respond('financing', {rows:[{date:'2026-09-29',margin_balance:100}],stored_count:300,warnings:[]});
+  await tick();
+  assert.ok(fixture.rendered.includes('shareholders'));
+  assert.ok(fixture.rendered.includes('financing'));
+  fixture.respond('financial', {error:'offline'}, false);
+  await completion;
+  assert.equal(fixture.context.state.financing.stored_count, 300);
+  console.log('Independent chart loading, failure retention and PS dependency passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

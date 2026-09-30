@@ -23,6 +23,7 @@ def payload(page):
 def cache(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE", tmp_path / "fundamentals")
     monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
+    monkeypatch.setattr(server, "CHIP_CACHE", tmp_path / "chips")
     server.CACHE.mkdir()
     server.VALUATION_CACHE.mkdir()
     return tmp_path
@@ -52,7 +53,8 @@ def test_first_visit_returns_shell_without_fetching_data(cache, monkeypatch):
     data = payload(server.render_page("601600", False))
     assert data["code"] == "601600"
     assert data["views"] == {}
-    assert data["loading"] == {"financial": True, "dividends": True, "valuation": True}
+    assert data["loading"] == {"financial": True, "dividends": True, "valuation": True,
+                               "shareholders": True, "financing": True}
     assert not list(cache.rglob("*.json"))
 
 
@@ -67,7 +69,8 @@ def test_initial_page_shows_stale_cache_and_schedules_only_missing_updates(cache
     assert data["views"]["year"][0]["profit"] == 10
     assert data["views"]["year"][0]["cash_dividend"] == 100
     assert data["valuation"]["views"]["10"]["pe"]["current"] == 9
-    assert data["loading"] == {"financial": False, "dividends": False, "valuation": True}
+    assert data["loading"] == {"financial": False, "dividends": False, "valuation": True,
+                               "shareholders": True, "financing": True}
     assert all(path.read_bytes() == contents for path, contents in before.items())
 
 

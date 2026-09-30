@@ -18,6 +18,15 @@ Thumbs.db
 data/cache/
 data/fundamentals/
 data/valuation/
+data/chips/
 
 # Local report checks and UI screenshots are separate from application data.
 data/verification/
+
+# Local SQLite files, runtime locks and consistent backups are not Git artifacts.
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
+*.sqlite3.lock
+data/backups/
