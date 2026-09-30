@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "result": {
+    "count": 2,
+    "pages": 2,
+    "data": [
+      {
+        "SECURITY_CODE": "601919",
+        "REPORT_DATE": "2026-06-30 00:00:00",
+        "PLAN_NOTICE_DATE": "2026-08-29 00:00:00",
+        "NOTICE_DATE": "2026-08-29 00:00:00",
+        "EQUITY_RECORD_DATE": "2026-10-22 00:00:00",
+        "EX_DIVIDEND_DATE": null,
+        "ASSIGN_PROGRESS": "董事会决议通过",
+        "PRETAX_BONUS_RMB": 4.3
+      }
+    ]
+  }
+}

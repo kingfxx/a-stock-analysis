@@ -195,6 +195,15 @@ def test_background_browser_loading_preserves_and_updates_charts_independently()
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_valuation_frequency_browser_controls_use_saved_rows_and_ignore_stale_responses():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to exercise valuation controls")
+    result = subprocess.run([node, str(Path(__file__).with_name("valuation_ui.cjs"))],
+                            capture_output=True, text=True, encoding="utf-8")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.fixture
 def http_server(cache):
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
@@ -239,7 +248,7 @@ def test_live_data_failure_returns_json_error_without_affecting_page(http_server
         assert payload(response.read().decode("utf-8"))["views"] == {}
 
 
-def test_live_shared_price_context_pins_all_consumers_and_rejects_missing_version(http_server):
+def test_live_shared_price_context_pins_all_consumers_and_rejects_missing_version(http_server, monkeypatch):
     chips, prices = server.services()
     days = ["2026-01-05", "2026-06-30", "2026-09-29"]
     rows = [dict(date=day, open=20, close=21, high=22, low=19, volume=100,
@@ -253,6 +262,12 @@ def test_live_shared_price_context_pins_all_consumers_and_rejects_missing_versio
     (server.VALUATION_CACHE / "601600.json").write_text(json.dumps({
         "rows":[{"date":"2026-06-30","pe":9}],"basis":server.VALUATION_BASIS,
         "updated_on":server.date.today().isoformat()}), encoding="utf-8")
+    server.FundamentalService(chips.db, server.CACHE).import_legacy("601600")
+    server.ValuationService(chips.db, server.VALUATION_CACHE).import_legacy("601600")
+    monkeypatch.setattr(server.FundamentalService, "_fetch_page", staticmethod(
+        lambda *args: (_ for _ in ()).throw(ValueError("offline"))))
+    monkeypatch.setattr(server.ValuationService, "_fetch_indicator", staticmethod(
+        lambda *args: (_ for _ in ()).throw(ValueError("offline"))))
     chips.fetcher = lambda code, section, source, **kw: (
         [dict(SCODE=code,DATE=days[-1],RZYE=100,SPJ=21)] if section == "financing" else
         [dict(SECURITY_CODE=code,END_DATE=days[1],HOLDER_TOTAL_NUM=100)])
@@ -287,8 +302,8 @@ def test_bad_financial_json_does_not_hide_sqlite_chip_facts(cache):
     path.write_text("broken JSON", encoding="utf-8")
     page = server.render_page("601600", False)
     assert payload(page)["financing"]["stored_count"] == 1
-    assert "fundamentals 缓存不可用" in page
+    assert "fundamentals 缓存不可用" not in page
     bundle = server.price_bundle("601600", version=0)
     assert bundle["financing"]["stored_count"] == 1
-    assert bundle["warnings"]
+    assert "fundamentals 缓存不可用" not in " ".join(bundle["warnings"])
     assert path.read_text(encoding="utf-8") == "broken JSON"

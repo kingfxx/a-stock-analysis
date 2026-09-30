@@ -1,0 +1,24 @@
+{
+  "result": {
+    "status": {"code": 0},
+    "data": {
+      "report_count": "3",
+      "report_date": [
+        {"date_value": "20260630"},
+        {"date_value": "20260331"}
+      ],
+      "report_list": {
+        "20260630": {
+          "publish_date": "20260829",
+          "update_time": 1787914325,
+          "data": [
+            {"item_title": "营业收入", "item_value": "70617000000.000000"},
+            {"item_title": "利息收入", "item_field": "INTEINCO", "item_value": "79281000000.000000"},
+            {"item_title": "手续费及佣金收入", "item_value": "14770000000.000000"}
+          ]
+        },
+        "20260331": {"publish_date": "20260429", "update_time": 1770000000, "data": []}
+      }
+    }
+  }
+}

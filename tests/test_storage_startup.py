@@ -4,7 +4,7 @@ from quarterly_dashboard import server
 from quarterly_dashboard.storage import Database, StorageError, instance_lock
 
 
-def test_startup_initializes_database_without_importing_or_rewriting_json(tmp_path, monkeypatch):
+def test_startup_imports_legacy_datasets_without_rewriting_json_or_network(tmp_path, monkeypatch):
     database = tmp_path / "stock_analysis.sqlite3"
     legacy = tmp_path / "fundamentals" / "000001.json"
     legacy.parent.mkdir()
@@ -12,6 +12,8 @@ def test_startup_initializes_database_without_importing_or_rewriting_json(tmp_pa
     original = legacy.read_bytes()
     monkeypatch.setattr(server, "DATABASE_PATH", database)
     monkeypatch.setattr(server, "CACHE", legacy.parent)
+    monkeypatch.setattr(server, "CHIP_CACHE", tmp_path / "chips")
+    monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
     def no_network(*args, **kwargs):
         pytest.fail("Database startup must not request sources")
     monkeypatch.setattr(server.requests.Session, "request", no_network)
@@ -20,7 +22,10 @@ def test_startup_initializes_database_without_importing_or_rewriting_json(tmp_pa
         def __init__(self, *args):
             events.append("bound")
         def serve_forever(self):
-            assert Database(database).check()["instruments"] == 0
+            assert Database(database).check()["instruments"] == 1
+            with Database(database).connection() as conn:
+                assert conn.execute("SELECT count(*) FROM legacy_imports WHERE path=?",
+                                    (str(legacy.resolve()),)).fetchone()[0] == 3
             assert legacy.read_bytes() == original
             assert list((database.parent / "backups").glob("*-daily-*.sqlite3"))
             events.append("serving")

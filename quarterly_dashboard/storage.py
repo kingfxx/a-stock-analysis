@@ -21,7 +21,7 @@ from typing import Callable, Iterator
 
 DEFAULT_DATABASE = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.sqlite3"
 APPLICATION_ID = 0x4153544B  # ASTK; refuse an unrelated SQLite file.
-MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"))
+MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_facts.sql"))
 
 
 class StorageError(RuntimeError):
@@ -73,6 +73,15 @@ def _migration_files():
 def _day(value: str | None):
     if value is not None and date.fromisoformat(value).isoformat() != value:
         raise ValueError("Dates must be YYYY-MM-DD")
+
+
+def _raw_payload(value) -> tuple[str, str]:
+    if isinstance(value, str):
+        parsed = json.loads(value)
+    else:
+        parsed = value
+    encoded = json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -238,6 +247,125 @@ class Database:
             return conn.execute("SELECT id FROM instruments WHERE exchange=? AND code=?",
                                 (exchange, code)).fetchone()[0]
 
+    def upsert_financial_reports(self, conn, key: SyncKey, run_id: int, rows: list[dict]) -> None:
+        if not key.dataset.startswith("financial:") or key.adjustment != "raw":
+            raise ValueError("Expected a financial report synchronization key")
+        report_type = key.dataset.removeprefix("financial:")
+        for row in rows:
+            _day(row["period"])
+            _day(row.get("publish_date"))
+            raw_json, content_hash = _raw_payload(row["raw_json"])
+            conn.execute(
+                "INSERT INTO financial_reports(instrument_id,source,report_type,period,publish_date,update_time,"
+                "raw_json,content_hash,obtained_at,run_id) VALUES (?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(instrument_id,source,report_type,period) DO UPDATE SET "
+                "publish_date=excluded.publish_date,update_time=excluded.update_time,raw_json=excluded.raw_json,"
+                "content_hash=excluded.content_hash,obtained_at=excluded.obtained_at,run_id=excluded.run_id",
+                (key.instrument_id, key.source, report_type, row["period"], row.get("publish_date"),
+                 row.get("update_time"), raw_json, content_hash, utc_now(), run_id))
+
+    def financial_reports(self, instrument_id: int, source: str, report_type: str) -> list[dict]:
+        with self.connection() as conn:
+            return [dict(row) for row in conn.execute(
+                "SELECT * FROM financial_reports WHERE instrument_id=? AND source=? AND report_type=? ORDER BY period",
+                (instrument_id, source, report_type))]
+
+    def upsert_dividend_events(self, conn, key: SyncKey, run_id: int, rows: list[dict]) -> None:
+        if key.dataset != "dividends" or key.adjustment != "raw":
+            raise ValueError("Expected a dividend synchronization key")
+        for row in rows:
+            for field in ("report_period", "proposal_date", "notice_date", "registration_date",
+                          "ex_dividend_date"):
+                _day(row.get(field))
+            raw_json, content_hash = _raw_payload(row["raw_json"])
+            conn.execute(
+                "INSERT INTO dividend_events(instrument_id,source,event_key,source_event_id,report_period,"
+                "proposal_date,notice_date,registration_date,ex_dividend_date,status,cash_per_ten,raw_json,"
+                "content_hash,obtained_at,run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(instrument_id,source,event_key) DO UPDATE SET "
+                "source_event_id=excluded.source_event_id,report_period=excluded.report_period,"
+                "proposal_date=excluded.proposal_date,notice_date=excluded.notice_date,"
+                "registration_date=excluded.registration_date,ex_dividend_date=excluded.ex_dividend_date,"
+                "status=excluded.status,cash_per_ten=excluded.cash_per_ten,raw_json=excluded.raw_json,"
+                "content_hash=excluded.content_hash,obtained_at=excluded.obtained_at,run_id=excluded.run_id",
+                (key.instrument_id, key.source, row["event_key"], row.get("source_event_id"),
+                 row.get("report_period"), row.get("proposal_date"), row.get("notice_date"),
+                 row.get("registration_date"), row.get("ex_dividend_date"), row["status"],
+                 row.get("cash_per_ten"), raw_json, content_hash, utc_now(), run_id))
+
+    def dividend_events(self, instrument_id: int, source: str) -> list[dict]:
+        with self.connection() as conn:
+            return [dict(row) for row in conn.execute(
+                "SELECT * FROM dividend_events WHERE instrument_id=? AND source=? "
+                "ORDER BY coalesce(ex_dividend_date,notice_date,proposal_date),id",
+                (instrument_id, source))]
+
+    def upsert_valuation_observations(self, conn, key: SyncKey, run_id: int, rows: list[dict]) -> None:
+        if not key.dataset.startswith("valuation:") or key.adjustment != "raw":
+            raise ValueError("Expected a valuation synchronization key")
+        metric = key.dataset.removeprefix("valuation:")
+        for row in rows:
+            _day(row["observed_on"])
+            raw_json, content_hash = _raw_payload(row["raw_json"])
+            window_value = row.get("source_windows_json", row.get("source_windows", []))
+            windows = json.dumps(json.loads(window_value) if isinstance(window_value, str) else window_value,
+                                 ensure_ascii=False, separators=(",", ":"))
+            conn.execute(
+                "INSERT INTO valuation_observations(instrument_id,source,metric,observed_on,value,source_windows_json,"
+                "sampling_version,raw_json,content_hash,obtained_at,run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(instrument_id,source,metric,observed_on) DO UPDATE SET "
+                "value=excluded.value,source_windows_json=excluded.source_windows_json,"
+                "sampling_version=excluded.sampling_version,raw_json=excluded.raw_json,"
+                "content_hash=excluded.content_hash,obtained_at=excluded.obtained_at,run_id=excluded.run_id",
+                (key.instrument_id, key.source, metric, row["observed_on"], row["value"], windows,
+                 row["sampling_version"], raw_json, content_hash, utc_now(), run_id))
+
+    def valuation_observations(self, instrument_id: int, source: str, metric: str) -> list[dict]:
+        with self.connection() as conn:
+            return [dict(row) for row in conn.execute(
+                "SELECT * FROM valuation_observations WHERE instrument_id=? AND source=? AND metric=? ORDER BY observed_on",
+                (instrument_id, source, metric))]
+
+    def insert_industry_snapshot(self, conn, key: SyncKey, run_id: int, row: dict) -> None:
+        if key.dataset != "industry" or key.adjustment != "raw":
+            raise ValueError("Expected an industry synchronization key")
+        raw_json, content_hash = _raw_payload(row["raw_json"])
+        conn.execute(
+            "INSERT INTO industry_snapshots(instrument_id,source,snapshot_at,industry_name,industry_code,"
+            "classification_basis,raw_json,content_hash,run_id) VALUES (?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(instrument_id,source,snapshot_at) DO UPDATE SET "
+            "industry_name=excluded.industry_name,industry_code=excluded.industry_code,"
+            "classification_basis=excluded.classification_basis,raw_json=excluded.raw_json,"
+            "content_hash=excluded.content_hash,run_id=excluded.run_id",
+            (key.instrument_id, key.source, row["snapshot_at"], row["industry_name"],
+             row.get("industry_code"), row["classification_basis"], raw_json, content_hash, run_id))
+
+    def record_legacy_import(self, conn, key: SyncKey, run_id: int, path: str, content_hash: str,
+                             record_count: int) -> bool:
+        existing = conn.execute("SELECT content_hash FROM legacy_imports WHERE path=? AND dataset=?",
+                                (str(path), key.dataset)).fetchone()
+        if existing:
+            if existing[0] != content_hash:
+                raise StorageError("Legacy import path/dataset already records different contents")
+            return False
+        conn.execute("INSERT INTO legacy_imports VALUES (?,?,?,?,?,?,?)",
+                     (str(path), content_hash, key.dataset, key.instrument_id, run_id, record_count, utc_now()))
+        return True
+
+    def insert_legacy_valuation_snapshot(self, conn, key: SyncKey, run_id: int, source_path: str,
+                                         observed_month: str, methodology_version: str, row) -> None:
+        if key.dataset != "valuation_legacy" or key.adjustment != "raw":
+            raise ValueError("Expected a legacy valuation synchronization key")
+        if len(observed_month) != 7:
+            raise ValueError("Observed month must be YYYY-MM")
+        _day(observed_month + "-01")
+        raw_json, _ = _raw_payload(row)
+        conn.execute(
+            "INSERT INTO legacy_valuation_snapshots(instrument_id,source_path,observed_month,"
+            "methodology_version,row_json,imported_at,run_id) VALUES (?,?,?,?,?,?,?)",
+            (key.instrument_id, str(source_path), observed_month, methodology_version,
+             raw_json, utc_now(), run_id))
+
     def start_sync(self, key: SyncKey, *, parser_version: str, methodology_version: str,
                    trigger_reason="refresh", requested_start=None, requested_end=None) -> int:
         _day(requested_start)
@@ -323,7 +451,7 @@ class Database:
         conn = self._open("ro")
         try:
             conn.execute("BEGIN")
-            self._validate_schema(conn, current=current)
+            schema_count = self._validate_schema(conn, current=current)
             integrity = [row[0] for row in conn.execute("PRAGMA integrity_check")]
             foreign_keys = conn.execute("PRAGMA foreign_key_check").fetchall()
             if integrity != ["ok"] or foreign_keys:
@@ -357,12 +485,39 @@ class Database:
                     + ("OR r.status<>'success' OR r.adjustment<>'raw'" if table != "adjusted_price_versions"
                        else "OR r.adjustment<>f.adjustment"),
                     (dataset,)).fetchone()[0]
+            if schema_count >= 3:
+                p4_rules = (
+                    ("financial_reports", "r.dataset<>'financial:'||f.report_type OR r.source<>f.source"),
+                    ("dividend_events", "r.dataset<>'dividends' OR r.source<>f.source"),
+                    ("valuation_observations", "r.dataset<>'valuation:'||f.metric OR r.source<>f.source"),
+                    ("industry_snapshots", "r.dataset<>'industry' OR r.source<>f.source"),
+                    ("legacy_valuation_snapshots", "r.dataset<>'valuation_legacy'"),
+                    ("legacy_imports", "r.dataset<>f.dataset"),
+                )
+                for table, rule in p4_rules:
+                    invalid_provenance += conn.execute(
+                        f"SELECT count(*) FROM {table} f JOIN sync_runs r ON r.id=f.run_id "
+                        f"WHERE f.instrument_id<>r.instrument_id OR {rule} OR "
+                        + ("r.status NOT IN ('success','no_data')" if table == "legacy_imports"
+                           else "r.status<>'success'")
+                    ).fetchone()[0]
+                invalid_provenance += conn.execute(
+                    "SELECT count(*) FROM report_overrides f LEFT JOIN sync_runs r ON r.id=f.run_id "
+                    "WHERE (f.origin='manual' AND f.run_id IS NOT NULL) "
+                    "OR (f.origin='legacy' AND (r.id IS NULL OR r.instrument_id<>f.instrument_id "
+                    "OR r.dataset<>'report_overrides' OR r.status<>'success'))"
+                ).fetchone()[0]
             if invalid_runs or invalid_versions or invalid_active or invalid_provenance:
                 raise StorageError("Successful synchronization/price version relationships are inconsistent")
-            return {"path": str(self.path), "sqlite_version": sqlite3.sqlite_version,
+            result = {"path": str(self.path), "sqlite_version": sqlite3.sqlite_version,
                     "schema_version": conn.execute("PRAGMA user_version").fetchone()[0],
                     "journal_mode": conn.execute("PRAGMA journal_mode").fetchone()[0],
                     "integrity": "ok", "instruments": conn.execute("SELECT count(*) FROM instruments").fetchone()[0]}
+            if schema_count >= 3:
+                result["p4_facts"] = {table: conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+                                      for table in ("financial_reports", "dividend_events", "valuation_observations",
+                                                    "industry_snapshots", "report_overrides", "legacy_valuation_snapshots")}
+            return result
         finally:
             conn.close()
 

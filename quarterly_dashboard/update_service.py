@@ -195,7 +195,8 @@ class ChipService:
             return False
         with data_lock(self.db, "import:" + section, code):
             with self.db.connection() as conn:
-                if conn.execute("SELECT 1 FROM legacy_imports WHERE path=?", (str(path),)).fetchone():
+                if conn.execute("SELECT 1 FROM legacy_imports WHERE path=? AND dataset=?",
+                                (str(path), section)).fetchone():
                     return False
             contents = path.read_bytes()
             data = json.loads(contents)

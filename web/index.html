@@ -243,7 +243,7 @@
     <div class="panel-head">
       <div>
         <h2>估值与分位</h2>
-        <p>月度估值走势 · 与所选区间历史分布及当前同行业均值对照</p>
+        <p>估值走势 · 与所选区间历史分布及当前同行业均值对照</p>
       </div>
       <div class="valuation-controls">
         <div class="period" role="group" aria-label="估值指标">
@@ -258,11 +258,18 @@
           <option value="5">最近 5 年</option>
           <option value="3">最近 3 年</option>
         </select>
+        <label for="valuation-frequency">展示频率</label>
+        <select id="valuation-frequency" aria-label="估值展示频率">
+          <option value="auto" selected>自动</option>
+          <option value="day">日</option>
+          <option value="week">周</option>
+          <option value="month">月</option>
+        </select>
         <button id="valuation-price-overlay" class="valuation-overlay" type="button" aria-pressed="false">叠加前复权股价</button>
       </div>
     </div>
     <div class="valuation-overview">
-      <div class="valuation-current"><small id="valuation-current-label">当前市盈率 PE(TTM)</small><strong id="valuation-current">—</strong><span id="valuation-current-date">最近月度采样</span></div>
+      <div class="valuation-current"><small id="valuation-current-label">当前市盈率 PE(TTM)</small><strong id="valuation-current">—</strong><span id="valuation-current-date">最近观察</span></div>
       <div class="valuation-summary">
         <p id="valuation-history">历史：正在计算…</p>
         <p id="valuation-industry">行业：正在获取…</p>
@@ -274,7 +281,7 @@
       <span><i style="--level-color:#ed8180"></i><small id="valuation-low-label">低估（20% 分位）</small><b id="valuation-low">—</b></span>
     </div>
     <p id="valuation-status" class="note" role="status" aria-live="polite"></p>
-    <div id="valuation-chart" role="img" aria-label="月度估值走势与历史分位参考线"></div>
+    <div id="valuation-chart" role="img" aria-label="估值走势与历史分位参考线"></div>
     <p id="valuation-note" class="note valuation-note"></p>
   </section>
   <section class="chip-region" aria-label="筹码评估">
@@ -600,6 +607,12 @@
     ? savedSelections.valuationMetric : 'pe';
   const valuationNames = {pe:'市盈率 PE(TTM)',pb:'市净率 PB(MRQ)',ps:'市销率 PS(TTM)',dividend_yield:'股息率（近 12 个月已实施派息）'};
   const valuationRange = document.getElementById('valuation-range');
+  const valuationFrequency = document.getElementById('valuation-frequency');
+  const valuationFrequencyKey = 'investment-valuation-frequency-v1';
+  try {
+    const savedFrequency = localStorage.getItem(valuationFrequencyKey);
+    if (['auto','day','week','month'].includes(savedFrequency)) valuationFrequency.value = savedFrequency;
+  } catch { /* Storage may be unavailable; automatic frequency still works. */ }
   const valuationPriceOverlay = document.getElementById('valuation-price-overlay');
   if (['3','5','10'].includes(savedSelections.valuationRange)) valuationRange.value = savedSelections.valuationRange;
   if (typeof savedSelections.valuationPriceOverlay === 'boolean')
@@ -625,14 +638,18 @@
   }
   window.addEventListener('pagehide', saveSelections);
   const formattedValuation = value => value == null ? '—' : Number(value).toFixed(2) + (valuationMetric === 'dividend_yield' ? '%' : ' 倍');
+  const automaticValuationFrequency = years => Number(years) <= 3 ? 'day' : Number(years) <= 5 ? 'week' : 'month';
   function renderValuation() {
     const years = valuationRange.value;
     const view = state.valuation?.views?.[years]?.[valuationMetric];
-    const rows = view?.rows || [];
+    const frequency = valuationFrequency.value === 'auto'
+      ? automaticValuationFrequency(years) : valuationFrequency.value;
+    const rows = view?.rows_by_frequency ? (view.rows_by_frequency[frequency] || []) : (view?.rows || []);
+    const frequencyName = {day:'日',week:'周',month:'月'}[frequency];
     const current = view?.current;
-    document.getElementById('valuation-current-label').textContent = valuationMetric === 'dividend_yield' ? '最近月度 · 近 12 个月股息率' : '最近月度 ' + valuationNames[valuationMetric];
+    document.getElementById('valuation-current-label').textContent = '最近观察 · ' + valuationNames[valuationMetric];
     document.getElementById('valuation-current').textContent = formattedValuation(current);
-    document.getElementById('valuation-current-date').textContent = view?.current_date || '暂无有效月度数据';
+    document.getElementById('valuation-current-date').textContent = view?.current_date || '暂无有效观察';
     document.getElementById('valuation-high').textContent = formattedValuation(view?.high);
     document.getElementById('valuation-median').textContent = formattedValuation(view?.median);
     document.getElementById('valuation-low').textContent = formattedValuation(view?.low);
@@ -641,7 +658,8 @@
     document.getElementById('valuation-median-label').textContent = '中值（50% 分位）';
     document.getElementById('valuation-low-label').textContent = isYield ? '低股息（20% 分位）' : '低估（20% 分位）';
     const history = document.getElementById('valuation-history');
-    history.textContent = view?.count ? `历史：当前高于近 ${years} 年 ${view.percentile}% 的有效月份（${view.count} 个月）。` : `历史：近 ${years} 年暂无可用的${valuationNames[valuationMetric]}月度数据。`;
+    const percentileFrequency = {trading_day:'交易日',day:'交易日',week:'周',month:'月'}[view?.percentile_frequency] || '有效';
+    history.textContent = view?.count ? `历史：当前高于近 ${years} 年 ${view.percentile}% 的${percentileFrequency}样本（${view.count} 个）；切换展示频率不改变分位。` : `历史：近 ${years} 年暂无可用的${valuationNames[valuationMetric]}数据。`;
     const industry = document.getElementById('valuation-industry');
     const relation = {higher:'高于',lower:'低于',equal:'等于'}[view?.industry_relation];
     const peers = state.valuation?.peer_count;
@@ -651,29 +669,32 @@
       `行业：同行业平均为 ${formattedValuation(view.industry)}，暂无当前值可比较。`;
     const note = document.getElementById('valuation-note');
     const sourceNote = isYield ?
-      '股息率＝截至当月未复权收盘价前 365 天内已除权实施的税前每股现金分红之和 ÷ 该月最后交易日未复权收盘价 × 100%；无已实施分红时显示 0%。分红事件来自东方财富，股价来自腾讯日 K。' : valuationMetric === 'ps' ?
-      'PS 为百度总市值 ÷ 截至该月已披露财报的 TTM 营收；历史财报可能包含后续修订。' :
+      '股息率＝截至观察日未复权收盘价前 365 天内已除权实施的税前每股现金分红之和 ÷ 该观察日未复权收盘价 × 100%；无已实施分红时显示 0%。分红事件来自东方财富，股价来自腾讯日 K。' : valuationMetric === 'ps' ?
+      'PS 为百度总市值 ÷ 截至观察日已披露财报的 TTM 营收；历史财报可能包含后续修订。' :
       'PE(TTM) 与 PB 取百度股市通历史估值。';
-    note.textContent = sourceNote + ' 每月取最后一条可用记录；无效指标不纳入走势与分位。高/中/低线分别为所选区间有效月度值的 80%/50%/20% 分位。' + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
+    note.textContent = sourceNote + ` 当前按${frequencyName}展示；周/月取周期内最后一条有效观察，悬停显示指标实际观察日；无效指标不纳入走势与分位。高/中/低线分别为所选区间统一样本口径的 80%/50%/20% 分位。` + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
       (state.valuation?.updated_on || '未知') + '。' + (state.valuation?.warnings || []).join(' ');
+    if (view?.sparse_hint) note.textContent += ' ' + view.sparse_hint;
+    else if (frequency === 'day' && Number(years) > 3) note.textContent += ' 较早段可能只有稀疏观察；图中仅显示已有日期，不插值。';
     const showPrice = valuationPriceOverlay.getAttribute('aria-pressed') === 'true';
-    if (showPrice) note.textContent += ' 前复权股价取共享日 K 每月最后交易日收盘价，显示于右轴；缺失月份留空。';
-    const xs = rows.map(row => isYield ? row.dividend_yield_date || row.date : row.date);
+    if (showPrice) note.textContent += ' 前复权股价取共享日 K 对应展示周期最后交易日收盘价，显示于右轴；缺失周期留空。';
+    const xs = rows.map(row => row.date);
     const ys = rows.map(row => row[valuationMetric]);
+    const observedDates = rows.map(row => row[valuationMetric + '_date'] || row.observation_date || row.date);
     const first = xs[0], last = xs.at(-1);
     const traces = [{type:'scatter',mode:'lines+markers',name:valuationNames[valuationMetric],
-      x:xs,y:ys,connectgaps:false,fill:'tozeroy',fillcolor:'rgba(84,151,220,0.11)',
+      x:xs,y:ys,customdata:rows.map((row, index) => [observedDates[index], row.period_complete === false ? '（本周期未完结）' : '']),connectgaps:false,fill:'tozeroy',fillcolor:'rgba(84,151,220,0.11)',
       line:{color:'#69a9ed',width:2.8},marker:{color:'#69a9ed',size:5},
-      hovertemplate:'%{x|%Y-%m-%d}<br>' + valuationNames[valuationMetric] + '：%{y:.2f}' + (isYield ? '%' : ' 倍') + '<extra></extra>'}];
+      hovertemplate:'展示日期：%{x|%Y-%m-%d}%{customdata[1]}<br>实际观察日：%{customdata[0]}<br>' + valuationNames[valuationMetric] + '：%{y:.2f}' + (isYield ? '%' : ' 倍') + '<extra></extra>'}];
     for (const [key, label, color] of [['high',isYield ? '高股息 · 80%' : '高估 · 80%','#6ac9aa'],['median','中值 · 50%','#f4b560'],['low',isYield ? '低股息 · 20%' : '低估 · 20%','#ed8180']]) {
       if (view?.[key] != null && first && last) traces.push({type:'scatter',mode:'lines',name:label,
         x:[first,last],y:[view[key],view[key]],hoverinfo:'skip',
         line:{color,width:1.6,dash:'dash'}});
     }
     if (showPrice) traces.push({type:'scatter',mode:'lines',name:'前复权股价',yaxis:'y2',
-      x:rows.map(row => row.qfq_close_date || row.date),y:rows.map(row => row.qfq_close ?? null),
+      x:xs,y:rows.map(row => row.qfq_close ?? null),customdata:rows.map(row => [row.qfq_close_date || row.date]),
       connectgaps:false,line:{color:'#f4d35e',width:2.5},
-      hovertemplate:'%{x|%Y-%m-%d}<br>前复权股价：%{y:.2f} 元/股<extra></extra>'});
+      hovertemplate:'展示日期：%{x|%Y-%m-%d}<br>实际交易日：%{customdata[0]}<br>前复权股价：%{y:.2f} 元/股<extra></extra>'});
     Plotly.react('valuation-chart', traces, {
       paper_bgcolor:'#1a2227',plot_bgcolor:'#1a2227',font:{color:'#edf4f4'},
       margin:{l:77,r:showPrice ? 82 : 28,t:30,b:65},hovermode:'x unified',showlegend:false,
@@ -694,6 +715,11 @@
     renderValuation();
   }));
   valuationRange.addEventListener('change', () => { saveSelections(); renderValuation(); });
+  valuationFrequency.addEventListener('change', () => {
+    try { localStorage.setItem(valuationFrequencyKey, valuationFrequency.value); }
+    catch { /* A disabled storage backend must not stop chart updates. */ }
+    renderValuation();
+  });
   valuationPriceOverlay.addEventListener('click', () => {
     valuationPriceOverlay.setAttribute('aria-pressed', valuationPriceOverlay.getAttribute('aria-pressed') !== 'true');
     saveSelections();
@@ -825,10 +851,17 @@
       if (section === 'valuation') {
         if (Object.hasOwn(state, 'price_version') && !state.price_version) {
           for (const [years, metrics] of Object.entries(data.views || {})) for (const [metric, summary] of Object.entries(metrics)) {
-            const previous = new Map((state.valuation?.views?.[years]?.[metric]?.rows || []).map(row => [row.date.slice(0,7),row]));
-            for (const row of summary.rows || []) {
-              for (const key of Object.keys(row).filter(key => key.startsWith('qfq_'))) delete row[key];
-              for (const [key,value] of Object.entries(previous.get(row.date.slice(0,7)) || {})) if (key.startsWith('qfq_')) row[key] = value;
+            const oldSummary = state.valuation?.views?.[years]?.[metric];
+            const frequencyRows = [['legacy', summary.rows || []], ...Object.entries(summary.rows_by_frequency || {})];
+            for (const [frequency, rows] of frequencyRows) {
+              const oldRows = frequency === 'legacy' ? oldSummary?.rows || []
+                : oldSummary?.rows_by_frequency?.[frequency] || [];
+              const rowKey = row => frequency === 'legacy' ? row.date.slice(0,7) : row.date;
+              const previous = new Map(oldRows.map(row => [rowKey(row),row]));
+              for (const row of rows) {
+                for (const key of Object.keys(row).filter(key => key.startsWith('qfq_'))) delete row[key];
+                for (const [key,value] of Object.entries(previous.get(rowKey(row)) || {})) if (key.startsWith('qfq_')) row[key] = value;
+              }
             }
           }
         }

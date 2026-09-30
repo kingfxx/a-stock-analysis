@@ -16,6 +16,7 @@ BAIDU_URL = "https://gushitong.baidu.com/opendata"
 EASTMONEY_URL = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
 DIVIDEND_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 BAIDU_INDICATORS = {"pe": "市盈率(TTM)", "pb": "市净率", "market_cap": "总市值"}
+BAIDU_WINDOWS = ("近十年", "近五年", "近三年", "近一年")
 
 
 def _finite_number(value):
@@ -36,35 +37,54 @@ def _nonnegative(value):
     return result if result is not None and result >= 0 else None
 
 
-def fetch_valuation_series(code: str, session: requests.Session) -> dict[str, list[dict]]:
-    """Baidu's latest ten-year PE/PB/capitalization series (cap in 亿元)."""
+def fetch_valuation_indicator(code: str, session: requests.Session, metric: str,
+                              window: str = "近十年") -> list[dict]:
+    """One Baidu metric and source window; capitalization values are in 亿元."""
     code = normalize_code(code)
-    result = {}
-    for key, indicator in BAIDU_INDICATORS.items():
-        response = session.get(BAIDU_URL, params={
-            "openapi": "1", "dspName": "iphone", "tn": "tangram", "client": "app",
-            "query": indicator, "code": code, "word": "", "resource_id": "51171",
-            "market": "ab", "tag": indicator, "chart_select": "近十年",
-            "industry_select": "", "skip_industry": "1", "finClientType": "pc",
-        }, timeout=20)
-        response.raise_for_status()
-        try:
-            chart = response.json()["Result"][0]["DisplayData"]["resultData"]["tplData"]["result"]["chartInfo"][0]
-            body = chart["body"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError(f"百度未返回 {indicator} 历史序列") from exc
-        if not body:
-            raise ValueError(f"百度未返回 {indicator} 历史序列")
-        points = []
-        for raw_date, raw_value in body:
-            date.fromisoformat(raw_date)
-            points.append({"date": raw_date, "value": _finite_number(raw_value)})
-        result[key] = points
-    return result
+    if metric not in BAIDU_INDICATORS or window not in BAIDU_WINDOWS:
+        raise ValueError("不支持的百度估值指标或时间范围")
+    indicator = BAIDU_INDICATORS[metric]
+    response = session.get(BAIDU_URL, params={
+        "openapi": "1", "dspName": "iphone", "tn": "tangram", "client": "app",
+        "query": indicator, "code": code, "word": "", "resource_id": "51171",
+        "market": "ab", "tag": indicator, "chart_select": window,
+        "industry_select": "", "skip_industry": "1", "finClientType": "pc",
+    }, timeout=20)
+    response.raise_for_status()
+    try:
+        chart = response.json()["Result"][0]["DisplayData"]["resultData"]["tplData"]["result"]["chartInfo"][0]
+        body = chart["body"]
+        if chart.get("type", window) != window or chart.get("header", [indicator])[0] != indicator:
+            raise ValueError
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise ValueError(f"百度未返回 {indicator} {window} 历史序列") from exc
+    if not body:
+        raise ValueError(f"百度未返回 {indicator} {window} 历史序列")
+    points = []
+    seen = set()
+    for raw_date, raw_value in body:
+        date.fromisoformat(raw_date)
+        if raw_date in seen:
+            raise ValueError("百度估值序列存在重复日期")
+        seen.add(raw_date)
+        points.append({"date": raw_date, "value": _finite_number(raw_value)})
+    return points
+
+
+def fetch_valuation_series(code: str, session: requests.Session,
+                           window: str = "近十年") -> dict[str, list[dict]]:
+    """Fetch all three Baidu metrics; defaults to the original ten-year API."""
+    return {metric: fetch_valuation_indicator(code, session, metric, window)
+            for metric in BAIDU_INDICATORS}
 
 
 def fetch_industry_snapshot(code: str, session: requests.Session) -> dict:
     """EastMoney's current peer-group arithmetic average, not a historical series."""
+    return fetch_industry_snapshot_details(code, session)["snapshot"]
+
+
+def fetch_industry_snapshot_details(code: str, session: requests.Session) -> dict:
+    """Keep the source record alongside its normalized peer average."""
     symbol = symbol_for(code)
     security = f"{code}.{symbol[:2].upper()}"
     response = session.get(EASTMONEY_URL, params={
@@ -78,11 +98,72 @@ def fetch_industry_snapshot(code: str, session: requests.Session) -> dict:
         average = next(row for row in rows if row.get("CORRE_SECURITY_CODE") == "行业平均")
     except (KeyError, StopIteration, TypeError) as exc:
         raise ValueError("东方财富未返回同行业平均估值") from exc
-    return {"pe": _positive(average.get("PE_TTM")),
-            "pb": _positive(average.get("PB_MRQ")),
-            "ps": _positive(average.get("PS_TTM")),
-            "peer_count": average.get("TOTAL_COUNT"),
-            "report_period": str(average.get("REPORT_DATE") or "")[:10] or None}
+    snapshot = {"pe": _positive(average.get("PE_TTM")),
+                "pb": _positive(average.get("PB_MRQ")),
+                "ps": _positive(average.get("PS_TTM")),
+                "peer_count": average.get("TOTAL_COUNT"),
+                "report_period": str(average.get("REPORT_DATE") or "")[:10] or None}
+    return {"snapshot": snapshot, "raw": average,
+            "industry_name": str(average.get("INDUSTRY_NAME") or average.get("HYMC") or "未知行业"),
+            "industry_code": average.get("INDUSTRY_CODE") or average.get("HYDM")}
+
+
+def fetch_dividend_event_page(code: str, session: requests.Session, *,
+                              date_field: str | None = None, since: str | None = None,
+                              page: int = 1, page_size: int = 200,
+                              report_period: str | None = None) -> dict:
+    """Return one EastMoney page without discarding proposals or source fields."""
+    code = normalize_code(code)
+    if ((date_field is None) != (since is None) or
+            date_field not in (None, "NOTICE_DATE", "PLAN_NOTICE_DATE", "EX_DIVIDEND_DATE") or
+            not isinstance(page, int) or page < 1 or
+            not isinstance(page_size, int) or page_size < 1):
+        raise ValueError("分红分页或日期过滤参数无效")
+    if since is not None:
+        date.fromisoformat(since)
+    if report_period is not None:
+        date.fromisoformat(report_period)
+    filter_text = f'(SECURITY_CODE="{code}")'
+    if date_field:
+        filter_text += f"({date_field}>='{since}')"
+    if report_period:
+        filter_text += f'(REPORT_DATE="{report_period}")'
+    response = session.get(DIVIDEND_URL, params={
+        "reportName": "RPT_SHAREBONUS_DET", "columns": "ALL",
+        "filter": filter_text, "pageNumber": str(page), "pageSize": str(page_size),
+        "sortTypes": "-1", "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB", "client": "WEB",
+    }, headers={"Referer": "https://data.eastmoney.com/", "User-Agent": "Mozilla/5.0"}, timeout=20)
+    response.raise_for_status()
+    payload = response.json()
+    if page == 1 and payload.get("code") == 9201 and payload.get("result") is None:
+        return {"records": [], "total": 0, "pages": 0}
+    try:
+        if payload.get("success") is not True:
+            raise ValueError
+        result = payload["result"]
+        records = result["data"]
+        total = int(result["count"])
+        pages = int(result["pages"])
+        expected = min(page_size, max(0, total - (page - 1) * page_size))
+        if (total < 0 or pages < 0 or not isinstance(records, list) or len(records) != expected or
+                (total and pages != math.ceil(total / page_size)) or
+                (not total and pages not in (0, 1))):
+            raise ValueError
+        for record in records:
+            if not isinstance(record, dict) or record.get("SECURITY_CODE") != code:
+                raise ValueError
+            if date_field:
+                raw_date = str(record.get(date_field) or "")[:10]
+                if not raw_date or date.fromisoformat(raw_date).isoformat() < since:
+                    raise ValueError
+            if report_period:
+                raw_period = str(record.get("REPORT_DATE") or "")[:10]
+                if not raw_period or date.fromisoformat(raw_period).isoformat() != report_period:
+                    raise ValueError
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("东方财富分红分页数据不完整或忽略过滤") from exc
+    return {"records": records, "total": total, "pages": pages}
 
 
 def fetch_dividend_events(code: str, session: requests.Session) -> list[dict]:
@@ -245,6 +326,126 @@ def valuation_summary(rows: list[dict], metric: str, years: int, industry: dict,
         "median": _percentile(values, .5) if values else None,
         "low": _percentile(values, .2) if values else None,
         "percentile": round(100 * sum(value < current for value in values) / len(values), 1) if current is not None else None,
+        "industry": benchmark,
+        "industry_relation": ("higher" if current > benchmark else "lower" if current < benchmark else "equal")
+        if current is not None and benchmark is not None else None,
+    }
+
+
+def valuation_observation_rows(series: dict[str, list[dict]], reports: list[dict]) -> list[dict]:
+    """Join each real Baidu observation; PS uses revenue known on that exact day."""
+    by_date: dict[str, dict] = {}
+    financial = sorted(
+        ((row["publish_date"], row["period"], row["revenue_ttm"])
+         for row in build_period_rows(reports, [], []) if row.get("publish_date")),
+        key=lambda item: (item[0], item[1]),
+    )
+    disclosures = [item[0] for item in financial]
+    for metric in ("pe", "pb", "market_cap"):
+        for point in series.get(metric, []):
+            day = date.fromisoformat(point["date"]).isoformat()
+            row = by_date.setdefault(day, {"date": day, "pe": None, "pb": None, "ps": None})
+            if metric in ("pe", "pb"):
+                row[metric] = _positive(point.get("value"))
+                row[f"{metric}_date"] = day
+                continue
+            row["ps_date"] = day
+            index = bisect_right(disclosures, day) - 1
+            if index >= 0:
+                published, _, revenue_ttm = financial[index]
+                age = (date.fromisoformat(day) - date.fromisoformat(published)).days
+                cap = _positive(point.get("value"))
+                if cap is not None and revenue_ttm and revenue_ttm > 0 and age <= 400:
+                    row["ps"] = _positive(cap * 1e8 / revenue_ttm)
+    return [by_date[day] for day in sorted(by_date)]
+
+
+def aggregate_valuation_rows(rows, frequency, *, as_of=None):
+    """Take each metric's last real observation in a Shanghai calendar period."""
+    if frequency not in ("day", "week", "month"):
+        raise ValueError("Unsupported valuation frequency")
+    end = date.fromisoformat(as_of) if as_of else date.today()
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        day = date.fromisoformat(row["date"])
+        if day > end:
+            continue
+        if frequency == "day":
+            key = day.isoformat()
+        elif frequency == "week":
+            key = (day - timedelta(days=day.weekday())).isoformat()
+        else:
+            key = day.strftime("%Y-%m")
+        groups.setdefault(key, []).append(row)
+    result = []
+    for key in sorted(groups):
+        items = sorted(groups[key], key=lambda row: row["date"])
+        latest = items[-1]["date"]
+        if frequency == "day":
+            period_end = date.fromisoformat(key)
+        elif frequency == "week":
+            period_end = date.fromisoformat(key) + timedelta(days=6)
+        else:
+            month_start = date.fromisoformat(key + "-01")
+            period_end = (month_start.replace(year=month_start.year + 1, month=1)
+                          if month_start.month == 12 else month_start.replace(month=month_start.month + 1)) - timedelta(days=1)
+        aggregated = {"date": latest, "period_complete": period_end < end or frequency != "day" and period_end == end}
+        for metric in ("pe", "pb", "ps", "dividend_yield", "qfq_close"):
+            selected = next((row for row in reversed(items) if row.get(metric) is not None), None)
+            if selected:
+                aggregated[metric] = selected[metric]
+                aggregated[f"{metric}_date"] = selected.get(f"{metric}_date", selected["date"])
+            else:
+                aggregated[metric] = None
+        result.append(aggregated)
+    return result
+
+
+def valuation_summary_observations(rows, metric, years, industry, *, as_of=None, trading_dates=None):
+    if metric not in ("pe", "pb", "ps", "dividend_yield") or years not in (3, 5, 10):
+        raise ValueError("不支持的估值指标或时间范围")
+    end = date.fromisoformat(as_of) if as_of else date.today()
+    try:
+        start = end.replace(year=end.year - years)
+    except ValueError:
+        start = end.replace(year=end.year - years, day=28)
+    window = sorted((row for row in rows if start.isoformat() <= row["date"] <= end.isoformat()),
+                    key=lambda row: row["date"])
+    valid_number = _nonnegative if metric == "dividend_yield" else _positive
+    valid = [row for row in window if valid_number(row.get(metric)) is not None]
+    known_trade_dates = {day for day in (trading_dates or [])
+                         if start.isoformat() <= day <= end.isoformat()}
+    display = {frequency: aggregate_valuation_rows(window, frequency, as_of=end.isoformat())
+               for frequency in ("day", "week", "month")}
+    if known_trade_dates:
+        display["day"] = [row for row in display["day"] if row["date"] in known_trade_dates]
+    observed_dates = {row["date"] for row in valid}
+    dense = bool(known_trade_dates) and known_trade_dates <= observed_dates
+    if dense:
+        sample = [row for row in valid if row["date"] in known_trade_dates]
+        sample_frequency = "trading_day"
+    else:
+        sample = [row for row in display["month"] if valid_number(row.get(metric)) is not None]
+        sample_frequency = "month"
+    values = sorted(float(row[metric]) for row in sample)
+    latest = valid[-1] if valid else None
+    current = valid_number(latest.get(metric)) if latest else None
+    benchmark = _positive(industry.get(metric))
+    frequency = {3: "day", 5: "week", 10: "month"}[years]
+    return {
+        "rows": display[frequency], "rows_by_frequency": display, "frequency": frequency,
+        "count": len(values), "sample_count": len(values),
+        "sample_frequency": sample_frequency, "percentile_frequency": sample_frequency,
+        "percentile_methodology_version": "uniform_trade_or_month_v1",
+        "sparse": not dense,
+        "sparse_hint": ("较早段观测较稀疏；请以悬浮提示中的实际日期为准。" if not dense else None),
+        "current": current,
+        "current_date": latest.get(f"{metric}_date", latest["date"]) if latest else None,
+        "high": _percentile(values, .8) if values else None,
+        "median": _percentile(values, .5) if values else None,
+        "low": _percentile(values, .2) if values else None,
+        "percentile": round(100 * sum(value < current for value in values) / len(values), 1)
+        if current is not None and values else None,
         "industry": benchmark,
         "industry_relation": ("higher" if current > benchmark else "lower" if current < benchmark else "equal")
         if current is not None and benchmark is not None else None,

@@ -229,6 +229,44 @@ def fetch_stock_name(code: str, session: requests.Session) -> str:
     return parse_stock_name(response.content.decode("gbk", errors="replace"), symbol)
 
 
+def fetch_financial_report_page(code: str, session: requests.Session, source: str,
+                                num: int = 8, page: int = 1) -> dict:
+    """Read one raw Sina statement page; ``total`` counts all historical periods."""
+    symbol = symbol_for(code)
+    if source not in ("lrb", "fzb", "llb") or not isinstance(num, int) or num < 1 or not isinstance(page, int) or page < 1:
+        raise ValueError("新浪报表类型或分页参数无效")
+    response = session.get(SINA_URL, params={"paperCode": symbol, "source": source,
+                                             "type": "0", "page": str(page), "num": str(num)}, timeout=18)
+    response.raise_for_status()
+    try:
+        result = response.json()["result"]
+        if result.get("status", {}).get("code", 0) != 0:
+            raise ValueError
+        data = result["data"]
+        total = int(data["report_count"])
+        records = data["report_list"]
+        if total < 0 or not isinstance(records, dict):
+            raise ValueError
+        periods = list(records)
+        if len(periods) != min(num, max(0, total - (page - 1) * num)):
+            raise ValueError
+        if any(_date(period) is None or not isinstance(records[period], dict) or
+               not isinstance(records[period].get("data"), list) for period in periods):
+            raise ValueError
+        for period in periods:
+            date.fromisoformat(_date(period))
+        if periods != sorted(periods, reverse=True):
+            raise ValueError
+        listed = data.get("report_date")
+        if listed is not None and [item.get("date_value") for item in listed] != periods:
+            raise ValueError
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"新浪{source}分页数据不完整或无效") from exc
+    return {"records": records, "total": total,
+            "newest_period": _date(periods[0]) if periods else None,
+            "oldest_period": _date(periods[-1]) if periods else None}
+
+
 def fetch_financial_reports(code: str, session: requests.Session) -> list[dict]:
     symbol = symbol_for(code)
 

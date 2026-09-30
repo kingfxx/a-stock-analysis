@@ -22,7 +22,10 @@ from .network import create_data_session
 from .storage import DEFAULT_DATABASE, Database, StorageError, instance_lock
 from .price_service import PriceService, PriceVersionUnavailable, month_closes
 from .price_projection import chip_prices, financial_prices, valuation_prices
-from .update_service import ChipService, instrument_id, sync_state, recently_checked
+from .fundamental_service import FundamentalService
+from .dividend_service import DividendService
+from .valuation_service import ValuationService
+from .update_service import ChipService, instrument_id, sync_state, recently_checked, audit_due
 from .storage import SyncKey
 from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
                     shareholder_price_snapshots)
@@ -30,7 +33,7 @@ from .sources import (fetch_cash_flow_reports, fetch_financial_reports,
                       fetch_stock_name, normalize_code, normalize_report_dates)
 from .valuation import (fetch_dividend_events, fetch_industry_snapshot, fetch_valuation_series,
                         merge_adjusted_prices, merge_dividend_yields, monthly_valuation, valuation_summary,
-                        monthly_dividend_yields)
+                        monthly_dividend_yields, valuation_summary_observations)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -125,6 +128,8 @@ def _missing_valuation_history(old: dict, rows: list[dict], industry: dict, toda
 
 def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dict:
     """Cache compact monthly valuation rows separately from financial snapshots."""
+    if Path(DATABASE_PATH).exists():
+        return p4_services()[2].update(code, reports, refresh=refresh)
     path = VALUATION_CACHE / f"{code}.json"
     old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     today = date.today().isoformat()
@@ -276,6 +281,8 @@ def _migrate_cached(code: str, old: dict, path: Path, session: requests.Session)
 
 def load_stock(code: str, refresh: bool = False) -> dict:
     code = normalize_code(code)
+    if Path(DATABASE_PATH).exists():
+        return p4_services()[0].update(code, refresh=refresh)
     path = CACHE / f"{code}.json"
     old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
     session = create_data_session()
@@ -346,6 +353,9 @@ def load_stock(code: str, refresh: bool = False) -> dict:
 
 def load_dividends(data: dict, refresh: bool = False) -> tuple[list[dict] | None, list[str]]:
     """Cache implemented dividend events with stock fundamentals; protect older history."""
+    if Path(DATABASE_PATH).exists():
+        updated = p4_services()[1].update(data["code"], refresh=refresh)
+        return updated["events"], updated["warnings"]
     old_events = data.get("dividend_events")
     if data.get("dividend_basis") == DIVIDEND_BASIS and old_events and not refresh:
         return old_events, []
@@ -375,6 +385,11 @@ def load_dividends(data: dict, refresh: bool = False) -> tuple[list[dict] | None
 
 
 def cached_stocks() -> list[dict]:
+    if Path(DATABASE_PATH).exists():
+        db = services()[0].db
+        with db.connection() as conn:
+            return [{"code": row["code"], "name": row["name"]} for row in conn.execute(
+                "SELECT code,name FROM instruments ORDER BY code")]
     stocks = []
     for path in sorted(CACHE.glob("*.json")):
         try:
@@ -430,6 +445,41 @@ def _valuation_payload(data: dict) -> dict:
         "warnings": data.get("warnings", [])}
 
 
+def _p4_valuation_payload(data, *, raw=None, qfq=None, events=None):
+    """Project saved observations at all display frequencies without source requests."""
+    if not data:
+        return {"views": {}, "warnings": []}
+    raw, qfq, events = raw or [], qfq or [], events or []
+    rows = merge_dividend_yields(data.get("rows", []), monthly_dividend_yields(raw, events)) if raw else data.get("rows", [])
+    rows = merge_adjusted_prices(rows, month_closes(qfq)) if qfq else rows
+    observation_rows = [dict(row) for row in data.get("observation_rows", [])]
+    qfq_by_day = {row["date"]: row["close"] for row in qfq}
+    for row in observation_rows:
+        if row["date"] in qfq_by_day:
+            row["qfq_close"] = qfq_by_day[row["date"]]
+            row["qfq_close_date"] = row["date"]
+    trading_dates = [row["date"] for row in raw]
+    views = {}
+    for years in (3, 5, 10):
+        views[str(years)] = {}
+        for metric in ("pe", "pb", "ps"):
+            if observation_rows:
+                views[str(years)][metric] = valuation_summary_observations(
+                    observation_rows, metric, years, data.get("industry", {}), trading_dates=trading_dates)
+            else:
+                views[str(years)][metric] = valuation_summary(rows, metric, years, data.get("industry", {}))
+        yield_summary = valuation_summary(rows, "dividend_yield", years, data.get("industry", {}))
+        yield_summary["rows_by_frequency"] = {frequency: yield_summary["rows"] for frequency in ("day", "week", "month")}
+        yield_summary["frequency"] = {3: "day", 5: "week", 10: "month"}[years]
+        views[str(years)]["dividend_yield"] = yield_summary
+    return {"views": views, "updated_on": data.get("updated_on"),
+            "peer_count": data.get("industry", {}).get("peer_count"),
+            "sampling_version": data.get("basis"),
+            "coverage": data.get("coverage", {}),
+            "legacy_snapshot_available": data.get("legacy_snapshot_available", False),
+            "warnings": data.get("warnings", [])}
+
+
 def services(*, initialized=False):
     key = (str(Path(DATABASE_PATH).resolve()), str(CHIP_CACHE.resolve()))
     with _SERVICE_LOCK:
@@ -440,6 +490,44 @@ def services(*, initialized=False):
                     db.initialize()
             _SERVICES[key] = (ChipService(db, CHIP_CACHE), PriceService(db))
         return _SERVICES[key]
+
+
+def p4_services():
+    db = services()[0].db
+    return (FundamentalService(db, CACHE), DividendService(db, CACHE),
+            ValuationService(db, VALUATION_CACHE, fetch_industry=ValuationService._fetch_industry))
+
+
+def import_p4_legacy(db):
+    """One-time, dataset-qualified imports; damaged files never block other stocks."""
+    importers = ((FundamentalService(db, CACHE), CACHE),
+                 (DividendService(db, CACHE), CACHE),
+                 (ValuationService(db, VALUATION_CACHE), VALUATION_CACHE))
+    warnings = []
+    for importer, root in importers:
+        for path in sorted(root.glob("*.json")):
+            try:
+                importer.import_legacy(normalize_code(path.stem))
+            except (ValueError, KeyError, TypeError, OSError, StorageError, sqlite3.DatabaseError) as exc:
+                warnings.append(f"{path.name} {type(importer).__name__} 导入未完成，原文件保留：{exc}")
+    return warnings
+
+
+def p4_loading(code):
+    db = services()[0].db
+    identity = instrument_id(db, code)
+    if not identity:
+        return {"financial": True, "dividends": True, "valuation": True}
+    datasets = {"financial": [(f"financial:{kind}", "sina:CompanyFinanceService.getFinanceReport2022")
+                              for kind in ("lrb", "fzb", "llb")],
+                "dividends": [("dividends", "eastmoney:RPT_SHAREBONUS_DET")],
+                "valuation": [(f"valuation:{metric}", "baidu:opendata")
+                              for metric in ("pe", "pb", "market_cap")]
+                + [("industry", "eastmoney:RPT_PCF10_INDUSTRY_CVALUE")]}
+    return {section: any((not (state := sync_state(db, SyncKey(identity, dataset, source)))
+                           or not recently_checked(state, seconds=86400) or audit_due(state))
+                          for dataset, source in keys)
+            for section, keys in datasets.items()}
 
 
 def fetch_daily_prices(code, session, adjust, earliest_date, latest_date):
@@ -462,7 +550,10 @@ def fetch_monthly_prices(code, session, adjust="qfq"):
 
 
 def fetch_dividend_yields(code, session):
-    # Dividend facts remain in their existing source path until P4.
+    if Path(DATABASE_PATH).exists():
+        _, dividends, _ = p4_services()
+        raw = services()[1].read(code, "raw")
+        return monthly_dividend_yields(raw, dividends.read(code))
     events = fetch_dividend_events(code, session)
     end = date.today()
     start = (end - timedelta(days=3660)).isoformat()
@@ -496,11 +587,12 @@ def price_bundle(code, *, refresh=False, full=False, version=None):
             except ValueError as exc:
                 warnings.append(str(exc))
     version, raw, qfq = shared_projection(code, version, lease=True)
-    financial = _consumer_cache(CACHE / f"{code}.json", warnings)
-    if financial and financial.get("report_date_basis") != REPORT_DATE_BASIS:
-        financial = {**financial, "reports": normalize_report_dates(financial.get("reports", [])),
-                     "report_date_basis": REPORT_DATE_BASIS}
-    valuation = _consumer_cache(VALUATION_CACHE / f"{code}.json", warnings)
+    fundamentals, dividends, valuations = p4_services()
+    financial = fundamentals.read(code)
+    events = dividends.read(code)
+    financial["dividend_events"] = events
+    financial["dividend_basis"] = DIVIDEND_BASIS if events else None
+    valuation = valuations.read(code, financial.get("reports", []))
     if not version:
         warnings.append("共享前复权尚未就绪，财务和估值的已有价格快照暂按缓存展示。")
     price_meta = prices.version_info(code, version)
@@ -510,7 +602,7 @@ def price_bundle(code, *, refresh=False, full=False, version=None):
         data["price_validated_at"] = price_meta.get("validated_at")
     return dict(price_version=version, price_context=price_meta, warnings=warnings,
                 financial=_financial_payload(financial_prices(financial, raw, qfq) if version else financial),
-                valuation=_valuation_payload(valuation_prices(valuation, qfq) if version else valuation) if valuation else {"views": {}},
+                valuation=_p4_valuation_payload(valuation, raw=raw, qfq=qfq, events=events),
                 shareholders=holders, financing=financing)
 
 
@@ -523,6 +615,34 @@ def load_chart_data(code: str, section: str, refresh: bool = False, *, price_ver
     with _DATA_LOCKS.setdefault(lock_key, Lock()):
         if section in {"shareholders", "financing"}:
             return load_chips(code, section, refresh, price_version=price_version, full=full)
+        if Path(DATABASE_PATH).exists():
+            fundamentals, dividends, valuations = p4_services()
+            if section == "financial":
+                data = fundamentals.update(code, refresh=refresh, full=full)
+                data["dividend_events"] = dividends.read(code)
+                data["dividend_basis"] = DIVIDEND_BASIS if data["dividend_events"] else None
+                if price_version:
+                    _, raw, qfq = shared_projection(code, price_version, lease=True)
+                    data = financial_prices(data, raw, qfq)
+                return {**_financial_payload(data), "cached_stocks": cached_stocks(),
+                        "price_version": price_version}
+            if section == "dividends":
+                data = fundamentals.read(code)
+                updated = dividends.update(code, refresh=refresh, full=full)
+                data["dividend_events"] = updated["events"]
+                data["dividend_basis"] = DIVIDEND_BASIS if updated["events"] else None
+                data["warnings"] += updated["warnings"]
+                if price_version:
+                    _, raw, qfq = shared_projection(code, price_version, lease=True)
+                    data = financial_prices(data, raw, qfq)
+                return {**_financial_payload(data), "cached_stocks": cached_stocks(),
+                        "price_version": price_version}
+            reports = fundamentals.read(code).get("reports", [])
+            result = valuations.update(code, reports, refresh=refresh, full=full)
+            _, raw, qfq = shared_projection(code, price_version, lease=True)
+            result["warnings"] += []
+            return {**_p4_valuation_payload(result, raw=raw, qfq=qfq, events=dividends.read(code)),
+                    "price_version": price_version}
         if section == "financial":
             data = load_stock(code, refresh)
         else:
@@ -568,15 +688,25 @@ def render_page(code: str, refresh: bool) -> str:
     cache_warnings = []
     try:
         code = normalize_code(code)
-        data = _consumer_cache(CACHE / f"{code}.json", cache_warnings)
-        valuation = _consumer_cache(VALUATION_CACHE / f"{code}.json", cache_warnings)
+        if Path(DATABASE_PATH).exists():
+            fundamentals, dividends, valuations = p4_services()
+            data = fundamentals.read(code)
+            data["dividend_events"] = dividends.read(code)
+            data["dividend_basis"] = DIVIDEND_BASIS if data["dividend_events"] else None
+            valuation = valuations.read(code, data.get("reports", []))
+        else:
+            data = _consumer_cache(CACHE / f"{code}.json", cache_warnings)
+            valuation = _consumer_cache(VALUATION_CACHE / f"{code}.json", cache_warnings)
         payload.update(_financial_payload(data))
-        payload["valuation"] = _valuation_payload(valuation)
+        payload["valuation"] = (_p4_valuation_payload(valuation, events=data.get("dividend_events"))
+                                if Path(DATABASE_PATH).exists() else _valuation_payload(valuation))
         payload["loading"] = {"financial": _needs_financial(data),
                               "dividends": _needs_dividends(data),
                               "valuation": not valuation
                               or valuation.get("updated_on") != date.today().isoformat()
-                              or valuation.get("basis") != VALUATION_BASIS}
+                              or valuation.get("basis") not in (VALUATION_BASIS, "baidu_dense_observations_v1")}
+        if Path(DATABASE_PATH).exists():
+            payload["loading"] = p4_loading(code)
         payload["price_version"] = None
         payload["price_needs_update"] = True
         raw, qfq, sql_chips = [], [], None
@@ -594,7 +724,8 @@ def render_page(code: str, refresh: bool) -> str:
                           "report_date_basis": REPORT_DATE_BASIS} if data else {}
             if version:
                 payload.update(_financial_payload(financial_prices(normalized, raw, qfq)))
-                payload["valuation"] = _valuation_payload(valuation_prices(valuation, qfq)) if valuation else {"views": {}}
+                payload["valuation"] = _p4_valuation_payload(valuation, raw=raw, qfq=qfq,
+                                                            events=data.get("dividend_events"))
         for section in ("shareholders", "financing"):
             cached = sql_chips.cached(code, section) if sql_chips else {}
             if cached.get("stored_count") or cached.get("empty"):
@@ -666,7 +797,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(port: int = 8765, open_browser: bool = False):
-    # Chip facts migrate independently; financial/valuation JSON remains until P4.
+    # Import old snapshots once; normal requests read the SQLite facts.
     with instance_lock(DATABASE_PATH):
         address = ("127.0.0.1", port)
         server = ThreadingHTTPServer(address, Handler)
@@ -682,6 +813,8 @@ def serve(port: int = 8765, open_browser: bool = False):
                         chips.import_legacy(normalize_code(path.stem), section)
                     except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
                         print(f"{path.name} {section} 迁移未完成，原文件保留：{exc}", flush=True)
+            for warning in import_p4_legacy(db):
+                print(warning, flush=True)
             db.daily_backup()
             print(f"SQLite {runtime['sqlite_version']} / {runtime['journal_mode']} / "
                   f"结构版本 {runtime['schema_version']}；恢复中断任务 {recovered} 个", flush=True)

@@ -12,7 +12,7 @@ from quarterly_dashboard.chips import _fetch_chip_report
 from quarterly_dashboard.price_projection import chip_prices, financial_prices, valuation_prices
 from quarterly_dashboard.price_service import PriceService, PriceVersionUnavailable
 from quarterly_dashboard.sources import fetch_price_history, parse_price_history
-from quarterly_dashboard.storage import Database, SyncKey, instance_lock
+from quarterly_dashboard.storage import Database, SyncKey, SyncResult, instance_lock
 from quarterly_dashboard.update_service import ChipService, FINANCING_SOURCE, sync_state
 
 
@@ -135,6 +135,21 @@ def test_legacy_import_is_verified_idempotent_and_does_not_rewrite_original(db, 
     with db.connection() as conn:
         assert conn.execute("SELECT count(*) FROM financing_daily").fetchone()[0] == 2
         assert conn.execute("SELECT record_count FROM legacy_imports").fetchone()[0] == 2
+
+
+def test_legacy_import_query_is_dataset_qualified(db, tmp_path):
+    root = tmp_path / "chips"
+    path = root / "financing" / "600887.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(dict(code="600887", updated_on="2026-09-29",
+                                    records=[margin("2026-09-29")])), encoding="utf-8")
+    key = SyncKey(db.ensure_instrument("600887"), "shareholders", "legacy:shareholders")
+    run = db.start_sync(key, parser_version="test", methodology_version="test")
+    db.complete_sync(run, SyncResult(0, no_data=True),
+                     lambda conn: db.record_legacy_import(conn, key, run, str(path.resolve()), "older", 0))
+    assert ChipService(db, root).import_legacy("600887", "financing") is True
+    with db.connection() as conn:
+        assert {r[0] for r in conn.execute("SELECT dataset FROM legacy_imports")} == {"shareholders", "financing"}
 
 
 def test_bad_legacy_file_does_not_mark_import_or_prevent_valid_source_update(db, tmp_path):

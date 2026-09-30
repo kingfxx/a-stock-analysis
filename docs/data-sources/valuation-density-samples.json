@@ -1,0 +1,2583 @@
+{
+  "observed_at_utc": "20260930T132425Z",
+  "raw_directory": "data/verification/valuation-density-20260930T132425Z",
+  "series": {
+    "601919-pe": {
+      "windows": {
+        "近一年": {
+          "count": 366,
+          "unique_dates": 366,
+          "bounds": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 366,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 365
+          },
+          "weekend_points": 104,
+          "null_or_non_numeric": 0,
+          "response_bytes": 9754
+        },
+        "近三年": {
+          "count": 1097,
+          "unique_dates": 1097,
+          "bounds": [
+            "2023-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1097,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 1096
+          },
+          "weekend_points": 314,
+          "null_or_non_numeric": 0,
+          "response_bytes": 25886
+        },
+        "近五年": {
+          "count": 914,
+          "unique_dates": 914,
+          "bounds": [
+            "2021-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1827,
+          "missing_calendar_dates": 913,
+          "gap_days": {
+            "2": 913
+          },
+          "weekend_points": 261,
+          "null_or_non_numeric": 0,
+          "response_bytes": 21831
+        },
+        "近十年": {
+          "count": 731,
+          "unique_dates": 731,
+          "bounds": [
+            "2016-10-02",
+            "2026-09-30"
+          ],
+          "calendar_span": 3651,
+          "missing_calendar_dates": 2920,
+          "gap_days": {
+            "5": 730
+          },
+          "weekend_points": 209,
+          "null_or_non_numeric": 0,
+          "response_bytes": 18152
+        },
+        "全部": {
+          "count": 640,
+          "unique_dates": 640,
+          "bounds": [
+            "2007-07-03",
+            "2026-09-30"
+          ],
+          "calendar_span": 7030,
+          "missing_calendar_dates": 6390,
+          "gap_days": {
+            "11": 639
+          },
+          "weekend_points": 183,
+          "null_or_non_numeric": 0,
+          "response_bytes": 16331
+        }
+      },
+      "comparisons": [
+        {
+          "windows": [
+            "近一年",
+            "近三年"
+          ],
+          "common_dates": 366,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近五年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近十年"
+          ],
+          "common_dates": 74,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "全部"
+          ],
+          "common_dates": 34,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近五年"
+          ],
+          "common_dates": 549,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近十年"
+          ],
+          "common_dates": 220,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "全部"
+          ],
+          "common_dates": 100,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "近十年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "全部"
+          ],
+          "common_dates": 84,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近十年",
+            "全部"
+          ],
+          "common_dates": 67,
+          "differences": 0,
+          "examples": []
+        }
+      ]
+    },
+    "601919-pb": {
+      "windows": {
+        "近一年": {
+          "count": 366,
+          "unique_dates": 366,
+          "bounds": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 366,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 365
+          },
+          "weekend_points": 104,
+          "null_or_non_numeric": 0,
+          "response_bytes": 9718
+        },
+        "近三年": {
+          "count": 1097,
+          "unique_dates": 1097,
+          "bounds": [
+            "2023-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1097,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 1096
+          },
+          "weekend_points": 314,
+          "null_or_non_numeric": 0,
+          "response_bytes": 25801
+        },
+        "近五年": {
+          "count": 914,
+          "unique_dates": 914,
+          "bounds": [
+            "2021-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1827,
+          "missing_calendar_dates": 913,
+          "gap_days": {
+            "2": 913
+          },
+          "weekend_points": 261,
+          "null_or_non_numeric": 0,
+          "response_bytes": 21775
+        },
+        "近十年": {
+          "count": 731,
+          "unique_dates": 731,
+          "bounds": [
+            "2016-10-02",
+            "2026-09-30"
+          ],
+          "calendar_span": 3651,
+          "missing_calendar_dates": 2920,
+          "gap_days": {
+            "5": 730
+          },
+          "weekend_points": 209,
+          "null_or_non_numeric": 0,
+          "response_bytes": 17749
+        },
+        "全部": {
+          "count": 640,
+          "unique_dates": 640,
+          "bounds": [
+            "2007-07-03",
+            "2026-09-30"
+          ],
+          "calendar_span": 7030,
+          "missing_calendar_dates": 6390,
+          "gap_days": {
+            "11": 639
+          },
+          "weekend_points": 183,
+          "null_or_non_numeric": 0,
+          "response_bytes": 15755
+        }
+      },
+      "comparisons": [
+        {
+          "windows": [
+            "近一年",
+            "近三年"
+          ],
+          "common_dates": 366,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近五年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近十年"
+          ],
+          "common_dates": 74,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "全部"
+          ],
+          "common_dates": 34,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近五年"
+          ],
+          "common_dates": 549,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近十年"
+          ],
+          "common_dates": 220,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "全部"
+          ],
+          "common_dates": 100,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "近十年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "全部"
+          ],
+          "common_dates": 84,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近十年",
+            "全部"
+          ],
+          "common_dates": 67,
+          "differences": 0,
+          "examples": []
+        }
+      ]
+    },
+    "601919-market_cap": {
+      "windows": {
+        "近一年": {
+          "count": 366,
+          "unique_dates": 366,
+          "bounds": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 366,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 365
+          },
+          "weekend_points": 104,
+          "null_or_non_numeric": 0,
+          "response_bytes": 10837
+        },
+        "近三年": {
+          "count": 1097,
+          "unique_dates": 1097,
+          "bounds": [
+            "2023-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1097,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 1096
+          },
+          "weekend_points": 314,
+          "null_or_non_numeric": 0,
+          "response_bytes": 29112
+        },
+        "近五年": {
+          "count": 914,
+          "unique_dates": 914,
+          "bounds": [
+            "2021-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1827,
+          "missing_calendar_dates": 913,
+          "gap_days": {
+            "2": 913
+          },
+          "weekend_points": 261,
+          "null_or_non_numeric": 0,
+          "response_bytes": 24538
+        },
+        "近十年": {
+          "count": 731,
+          "unique_dates": 731,
+          "bounds": [
+            "2016-10-02",
+            "2026-09-30"
+          ],
+          "calendar_span": 3651,
+          "missing_calendar_dates": 2920,
+          "gap_days": {
+            "5": 730
+          },
+          "weekend_points": 209,
+          "null_or_non_numeric": 0,
+          "response_bytes": 19660
+        },
+        "全部": {
+          "count": 640,
+          "unique_dates": 640,
+          "bounds": [
+            "2007-07-03",
+            "2026-09-30"
+          ],
+          "calendar_span": 7030,
+          "missing_calendar_dates": 6390,
+          "gap_days": {
+            "11": 639
+          },
+          "weekend_points": 183,
+          "null_or_non_numeric": 0,
+          "response_bytes": 17355
+        }
+      },
+      "comparisons": [
+        {
+          "windows": [
+            "近一年",
+            "近三年"
+          ],
+          "common_dates": 366,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近五年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近十年"
+          ],
+          "common_dates": 74,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "全部"
+          ],
+          "common_dates": 34,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近五年"
+          ],
+          "common_dates": 549,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近十年"
+          ],
+          "common_dates": 220,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "全部"
+          ],
+          "common_dates": 100,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "近十年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "全部"
+          ],
+          "common_dates": 84,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近十年",
+            "全部"
+          ],
+          "common_dates": 67,
+          "differences": 0,
+          "examples": []
+        }
+      ]
+    },
+    "600887-pe": {
+      "windows": {
+        "近一年": {
+          "count": 366,
+          "unique_dates": 366,
+          "bounds": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 366,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 365
+          },
+          "weekend_points": 104,
+          "null_or_non_numeric": 0,
+          "response_bytes": 10113
+        },
+        "近三年": {
+          "count": 1097,
+          "unique_dates": 1097,
+          "bounds": [
+            "2023-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1097,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 1096
+          },
+          "weekend_points": 314,
+          "null_or_non_numeric": 0,
+          "response_bytes": 26926
+        },
+        "近五年": {
+          "count": 914,
+          "unique_dates": 914,
+          "bounds": [
+            "2021-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1827,
+          "missing_calendar_dates": 913,
+          "gap_days": {
+            "2": 913
+          },
+          "weekend_points": 261,
+          "null_or_non_numeric": 0,
+          "response_bytes": 22717
+        },
+        "近十年": {
+          "count": 731,
+          "unique_dates": 731,
+          "bounds": [
+            "2016-10-02",
+            "2026-09-30"
+          ],
+          "calendar_span": 3651,
+          "missing_calendar_dates": 2920,
+          "gap_days": {
+            "5": 730
+          },
+          "weekend_points": 209,
+          "null_or_non_numeric": 0,
+          "response_bytes": 18507
+        },
+        "全部": {
+          "count": 620,
+          "unique_dates": 620,
+          "bounds": [
+            "1996-03-29",
+            "2026-09-30"
+          ],
+          "calendar_span": 11143,
+          "missing_calendar_dates": 10523,
+          "gap_days": {
+            "18": 619
+          },
+          "weekend_points": 177,
+          "null_or_non_numeric": 0,
+          "response_bytes": 15987
+        }
+      },
+      "comparisons": [
+        {
+          "windows": [
+            "近一年",
+            "近三年"
+          ],
+          "common_dates": 366,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近五年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近十年"
+          ],
+          "common_dates": 74,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "全部"
+          ],
+          "common_dates": 21,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近五年"
+          ],
+          "common_dates": 549,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近十年"
+          ],
+          "common_dates": 220,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "全部"
+          ],
+          "common_dates": 61,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "近十年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "全部"
+          ],
+          "common_dates": 102,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近十年",
+            "全部"
+          ],
+          "common_dates": 41,
+          "differences": 0,
+          "examples": []
+        }
+      ]
+    },
+    "600887-pb": {
+      "windows": {
+        "近一年": {
+          "count": 366,
+          "unique_dates": 366,
+          "bounds": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 366,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 365
+          },
+          "weekend_points": 104,
+          "null_or_non_numeric": 0,
+          "response_bytes": 9719
+        },
+        "近三年": {
+          "count": 1097,
+          "unique_dates": 1097,
+          "bounds": [
+            "2023-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1097,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 1096
+          },
+          "weekend_points": 314,
+          "null_or_non_numeric": 0,
+          "response_bytes": 25801
+        },
+        "近五年": {
+          "count": 914,
+          "unique_dates": 914,
+          "bounds": [
+            "2021-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1827,
+          "missing_calendar_dates": 913,
+          "gap_days": {
+            "2": 913
+          },
+          "weekend_points": 261,
+          "null_or_non_numeric": 0,
+          "response_bytes": 21775
+        },
+        "近十年": {
+          "count": 731,
+          "unique_dates": 731,
+          "bounds": [
+            "2016-10-02",
+            "2026-09-30"
+          ],
+          "calendar_span": 3651,
+          "missing_calendar_dates": 2920,
+          "gap_days": {
+            "5": 730
+          },
+          "weekend_points": 209,
+          "null_or_non_numeric": 0,
+          "response_bytes": 17752
+        },
+        "全部": {
+          "count": 620,
+          "unique_dates": 620,
+          "bounds": [
+            "1996-03-29",
+            "2026-09-30"
+          ],
+          "calendar_span": 11143,
+          "missing_calendar_dates": 10523,
+          "gap_days": {
+            "18": 619
+          },
+          "weekend_points": 177,
+          "null_or_non_numeric": 0,
+          "response_bytes": 15317
+        }
+      },
+      "comparisons": [
+        {
+          "windows": [
+            "近一年",
+            "近三年"
+          ],
+          "common_dates": 366,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近五年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近十年"
+          ],
+          "common_dates": 74,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "全部"
+          ],
+          "common_dates": 21,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近五年"
+          ],
+          "common_dates": 549,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近十年"
+          ],
+          "common_dates": 220,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "全部"
+          ],
+          "common_dates": 61,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "近十年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "全部"
+          ],
+          "common_dates": 102,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近十年",
+            "全部"
+          ],
+          "common_dates": 41,
+          "differences": 0,
+          "examples": []
+        }
+      ]
+    },
+    "600887-market_cap": {
+      "windows": {
+        "近一年": {
+          "count": 366,
+          "unique_dates": 366,
+          "bounds": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 366,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 365
+          },
+          "weekend_points": 104,
+          "null_or_non_numeric": 0,
+          "response_bytes": 10838
+        },
+        "近三年": {
+          "count": 1097,
+          "unique_dates": 1097,
+          "bounds": [
+            "2023-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1097,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 1096
+          },
+          "weekend_points": 314,
+          "null_or_non_numeric": 0,
+          "response_bytes": 29112
+        },
+        "近五年": {
+          "count": 914,
+          "unique_dates": 914,
+          "bounds": [
+            "2021-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1827,
+          "missing_calendar_dates": 913,
+          "gap_days": {
+            "2": 913
+          },
+          "weekend_points": 261,
+          "null_or_non_numeric": 0,
+          "response_bytes": 24537
+        },
+        "近十年": {
+          "count": 731,
+          "unique_dates": 731,
+          "bounds": [
+            "2016-10-02",
+            "2026-09-30"
+          ],
+          "calendar_span": 3651,
+          "missing_calendar_dates": 2920,
+          "gap_days": {
+            "5": 730
+          },
+          "weekend_points": 209,
+          "null_or_non_numeric": 0,
+          "response_bytes": 19957
+        },
+        "全部": {
+          "count": 620,
+          "unique_dates": 620,
+          "bounds": [
+            "1996-03-29",
+            "2026-09-30"
+          ],
+          "calendar_span": 11143,
+          "missing_calendar_dates": 10523,
+          "gap_days": {
+            "18": 619
+          },
+          "weekend_points": 177,
+          "null_or_non_numeric": 0,
+          "response_bytes": 16535
+        }
+      },
+      "comparisons": [
+        {
+          "windows": [
+            "近一年",
+            "近三年"
+          ],
+          "common_dates": 366,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近五年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近十年"
+          ],
+          "common_dates": 74,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "全部"
+          ],
+          "common_dates": 21,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近五年"
+          ],
+          "common_dates": 549,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近十年"
+          ],
+          "common_dates": 220,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "全部"
+          ],
+          "common_dates": 61,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "近十年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "全部"
+          ],
+          "common_dates": 102,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近十年",
+            "全部"
+          ],
+          "common_dates": 41,
+          "differences": 0,
+          "examples": []
+        }
+      ]
+    },
+    "000001-pe": {
+      "windows": {
+        "近一年": {
+          "count": 366,
+          "unique_dates": 366,
+          "bounds": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 366,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 365
+          },
+          "weekend_points": 104,
+          "null_or_non_numeric": 0,
+          "response_bytes": 9743
+        },
+        "近三年": {
+          "count": 1097,
+          "unique_dates": 1097,
+          "bounds": [
+            "2023-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1097,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 1096
+          },
+          "weekend_points": 314,
+          "null_or_non_numeric": 0,
+          "response_bytes": 25826
+        },
+        "近五年": {
+          "count": 914,
+          "unique_dates": 914,
+          "bounds": [
+            "2021-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1827,
+          "missing_calendar_dates": 913,
+          "gap_days": {
+            "2": 913
+          },
+          "weekend_points": 261,
+          "null_or_non_numeric": 0,
+          "response_bytes": 21821
+        },
+        "近十年": {
+          "count": 731,
+          "unique_dates": 731,
+          "bounds": [
+            "2016-10-02",
+            "2026-09-30"
+          ],
+          "calendar_span": 3651,
+          "missing_calendar_dates": 2920,
+          "gap_days": {
+            "5": 730
+          },
+          "weekend_points": 209,
+          "null_or_non_numeric": 0,
+          "response_bytes": 17911
+        },
+        "全部": {
+          "count": 602,
+          "unique_dates": 602,
+          "bounds": [
+            "1992-03-11",
+            "2026-09-30"
+          ],
+          "calendar_span": 12622,
+          "missing_calendar_dates": 12020,
+          "gap_days": {
+            "21": 601
+          },
+          "weekend_points": 0,
+          "null_or_non_numeric": 0,
+          "response_bytes": 15272
+        }
+      },
+      "comparisons": [
+        {
+          "windows": [
+            "近一年",
+            "近三年"
+          ],
+          "common_dates": 366,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近五年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近十年"
+          ],
+          "common_dates": 74,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "全部"
+          ],
+          "common_dates": 18,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近五年"
+          ],
+          "common_dates": 549,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近十年"
+          ],
+          "common_dates": 220,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "全部"
+          ],
+          "common_dates": 53,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "近十年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "全部"
+          ],
+          "common_dates": 44,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近十年",
+            "全部"
+          ],
+          "common_dates": 35,
+          "differences": 0,
+          "examples": []
+        }
+      ]
+    },
+    "000001-pb": {
+      "windows": {
+        "近一年": {
+          "count": 366,
+          "unique_dates": 366,
+          "bounds": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 366,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 365
+          },
+          "weekend_points": 104,
+          "null_or_non_numeric": 0,
+          "response_bytes": 9718
+        },
+        "近三年": {
+          "count": 1097,
+          "unique_dates": 1097,
+          "bounds": [
+            "2023-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1097,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 1096
+          },
+          "weekend_points": 314,
+          "null_or_non_numeric": 0,
+          "response_bytes": 25800
+        },
+        "近五年": {
+          "count": 914,
+          "unique_dates": 914,
+          "bounds": [
+            "2021-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1827,
+          "missing_calendar_dates": 913,
+          "gap_days": {
+            "2": 913
+          },
+          "weekend_points": 261,
+          "null_or_non_numeric": 0,
+          "response_bytes": 21775
+        },
+        "近十年": {
+          "count": 731,
+          "unique_dates": 731,
+          "bounds": [
+            "2016-10-02",
+            "2026-09-30"
+          ],
+          "calendar_span": 3651,
+          "missing_calendar_dates": 2920,
+          "gap_days": {
+            "5": 730
+          },
+          "weekend_points": 209,
+          "null_or_non_numeric": 0,
+          "response_bytes": 17747
+        },
+        "全部": {
+          "count": 590,
+          "unique_dates": 590,
+          "bounds": [
+            "1991-04-09",
+            "2026-09-30"
+          ],
+          "calendar_span": 12959,
+          "missing_calendar_dates": 12369,
+          "gap_days": {
+            "22": 589
+          },
+          "weekend_points": 168,
+          "null_or_non_numeric": 0,
+          "response_bytes": 14720
+        }
+      },
+      "comparisons": [
+        {
+          "windows": [
+            "近一年",
+            "近三年"
+          ],
+          "common_dates": 366,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近五年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近十年"
+          ],
+          "common_dates": 74,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "全部"
+          ],
+          "common_dates": 17,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近五年"
+          ],
+          "common_dates": 549,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近十年"
+          ],
+          "common_dates": 220,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "全部"
+          ],
+          "common_dates": 50,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "近十年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "全部"
+          ],
+          "common_dates": 84,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近十年",
+            "全部"
+          ],
+          "common_dates": 34,
+          "differences": 0,
+          "examples": []
+        }
+      ]
+    },
+    "000001-market_cap": {
+      "windows": {
+        "近一年": {
+          "count": 366,
+          "unique_dates": 366,
+          "bounds": [
+            "2025-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 366,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 365
+          },
+          "weekend_points": 104,
+          "null_or_non_numeric": 0,
+          "response_bytes": 10838
+        },
+        "近三年": {
+          "count": 1097,
+          "unique_dates": 1097,
+          "bounds": [
+            "2023-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1097,
+          "missing_calendar_dates": 0,
+          "gap_days": {
+            "1": 1096
+          },
+          "weekend_points": 314,
+          "null_or_non_numeric": 0,
+          "response_bytes": 29113
+        },
+        "近五年": {
+          "count": 914,
+          "unique_dates": 914,
+          "bounds": [
+            "2021-09-30",
+            "2026-09-30"
+          ],
+          "calendar_span": 1827,
+          "missing_calendar_dates": 913,
+          "gap_days": {
+            "2": 913
+          },
+          "weekend_points": 261,
+          "null_or_non_numeric": 0,
+          "response_bytes": 24538
+        },
+        "近十年": {
+          "count": 731,
+          "unique_dates": 731,
+          "bounds": [
+            "2016-10-02",
+            "2026-09-30"
+          ],
+          "calendar_span": 3651,
+          "missing_calendar_dates": 2920,
+          "gap_days": {
+            "5": 730
+          },
+          "weekend_points": 209,
+          "null_or_non_numeric": 0,
+          "response_bytes": 19962
+        },
+        "全部": {
+          "count": 590,
+          "unique_dates": 590,
+          "bounds": [
+            "1991-04-09",
+            "2026-09-30"
+          ],
+          "calendar_span": 12959,
+          "missing_calendar_dates": 12369,
+          "gap_days": {
+            "22": 589
+          },
+          "weekend_points": 168,
+          "null_or_non_numeric": 0,
+          "response_bytes": 15968
+        }
+      },
+      "comparisons": [
+        {
+          "windows": [
+            "近一年",
+            "近三年"
+          ],
+          "common_dates": 366,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近五年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "近十年"
+          ],
+          "common_dates": 74,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近一年",
+            "全部"
+          ],
+          "common_dates": 17,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近五年"
+          ],
+          "common_dates": 549,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "近十年"
+          ],
+          "common_dates": 220,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近三年",
+            "全部"
+          ],
+          "common_dates": 50,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "近十年"
+          ],
+          "common_dates": 183,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近五年",
+            "全部"
+          ],
+          "common_dates": 84,
+          "differences": 0,
+          "examples": []
+        },
+        {
+          "windows": [
+            "近十年",
+            "全部"
+          ],
+          "common_dates": 34,
+          "differences": 0,
+          "examples": []
+        }
+      ]
+    }
+  },
+  "errors": [],
+  "calls": [
+    {
+      "name": "601919-pe-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9754,
+      "seconds": 1.25
+    },
+    {
+      "name": "601919-pe-近三年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近三年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 25886,
+      "seconds": 0.125
+    },
+    {
+      "name": "601919-pe-近五年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近五年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 21831,
+      "seconds": 0.093
+    },
+    {
+      "name": "601919-pe-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 18152,
+      "seconds": 0.11
+    },
+    {
+      "name": "601919-pe-全部",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "全部",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 16331,
+      "seconds": 0.312
+    },
+    {
+      "name": "601919-pb-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9718,
+      "seconds": 0.094
+    },
+    {
+      "name": "601919-pb-近三年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近三年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 25801,
+      "seconds": 0.156
+    },
+    {
+      "name": "601919-pb-近五年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近五年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 21775,
+      "seconds": 0.141
+    },
+    {
+      "name": "601919-pb-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 17749,
+      "seconds": 0.109
+    },
+    {
+      "name": "601919-pb-全部",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "全部",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 15755,
+      "seconds": 0.156
+    },
+    {
+      "name": "601919-market_cap-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 10837,
+      "seconds": 0.109
+    },
+    {
+      "name": "601919-market_cap-近三年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近三年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 29112,
+      "seconds": 0.094
+    },
+    {
+      "name": "601919-market_cap-近五年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近五年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 24538,
+      "seconds": 0.125
+    },
+    {
+      "name": "601919-market_cap-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 19660,
+      "seconds": 0.094
+    },
+    {
+      "name": "601919-market_cap-全部",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "全部",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 17355,
+      "seconds": 0.093
+    },
+    {
+      "name": "600887-pe-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 10113,
+      "seconds": 0.094
+    },
+    {
+      "name": "600887-pe-近三年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近三年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 26926,
+      "seconds": 0.109
+    },
+    {
+      "name": "600887-pe-近五年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近五年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 22717,
+      "seconds": 0.094
+    },
+    {
+      "name": "600887-pe-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 18507,
+      "seconds": 0.125
+    },
+    {
+      "name": "600887-pe-全部",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "全部",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 15987,
+      "seconds": 0.187
+    },
+    {
+      "name": "600887-pb-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9719,
+      "seconds": 0.157
+    },
+    {
+      "name": "600887-pb-近三年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近三年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 25801,
+      "seconds": 0.125
+    },
+    {
+      "name": "600887-pb-近五年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近五年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 21775,
+      "seconds": 0.11
+    },
+    {
+      "name": "600887-pb-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 17752,
+      "seconds": 0.093
+    },
+    {
+      "name": "600887-pb-全部",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "全部",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 15317,
+      "seconds": 0.188
+    },
+    {
+      "name": "600887-market_cap-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 10838,
+      "seconds": 0.094
+    },
+    {
+      "name": "600887-market_cap-近三年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近三年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 29112,
+      "seconds": 0.093
+    },
+    {
+      "name": "600887-market_cap-近五年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近五年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 24537,
+      "seconds": 0.11
+    },
+    {
+      "name": "600887-market_cap-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 19957,
+      "seconds": 0.094
+    },
+    {
+      "name": "600887-market_cap-全部",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "全部",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 16535,
+      "seconds": 0.109
+    },
+    {
+      "name": "000001-pe-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9743,
+      "seconds": 0.094
+    },
+    {
+      "name": "000001-pe-近三年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近三年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 25826,
+      "seconds": 0.109
+    },
+    {
+      "name": "000001-pe-近五年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近五年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 21821,
+      "seconds": 0.094
+    },
+    {
+      "name": "000001-pe-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 17911,
+      "seconds": 0.109
+    },
+    {
+      "name": "000001-pe-全部",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "全部",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 15272,
+      "seconds": 0.11
+    },
+    {
+      "name": "000001-pb-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9718,
+      "seconds": 0.093
+    },
+    {
+      "name": "000001-pb-近三年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近三年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 25800,
+      "seconds": 0.094
+    },
+    {
+      "name": "000001-pb-近五年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近五年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 21775,
+      "seconds": 0.094
+    },
+    {
+      "name": "000001-pb-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 17747,
+      "seconds": 0.093
+    },
+    {
+      "name": "000001-pb-全部",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "全部",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 14720,
+      "seconds": 0.094
+    },
+    {
+      "name": "000001-market_cap-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 10838,
+      "seconds": 0.093
+    },
+    {
+      "name": "000001-market_cap-近三年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近三年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 29113,
+      "seconds": 0.11
+    },
+    {
+      "name": "000001-market_cap-近五年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近五年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 24538,
+      "seconds": 0.094
+    },
+    {
+      "name": "000001-market_cap-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 19962,
+      "seconds": 0.109
+    },
+    {
+      "name": "000001-market_cap-全部",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "全部",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 15968,
+      "seconds": 0.109
+    }
+  ]
+}

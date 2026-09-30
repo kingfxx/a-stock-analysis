@@ -434,3 +434,149 @@ def test_maintenance_cli_requires_no_runtime_dependencies(db, tmp_path):
                              "--database", str(db.path), "--output", str(tmp_path / "cli.sqlite3")],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_p4_upgrade_preserves_legacy_imports_and_allows_same_path_new_dataset(tmp_path, monkeypatch):
+    path = tmp_path / "upgrade.sqlite3"
+    monkeypatch.setattr(storage, "MIGRATIONS", storage.MIGRATIONS[:2])
+    old = Database(path)
+    with instance_lock(path):
+        old.initialize()
+    key, run = sync(old)
+    commit_financing(old, key, run)
+    with old.connection(write=True) as conn:
+        conn.execute("INSERT INTO legacy_imports VALUES (?,?,?,?,?,?,?)",
+                     ("cache/000001.json", "hash", "financing", key.instrument_id, run, 1, utc_now()))
+    monkeypatch.undo()
+    upgraded = Database(path)
+    with instance_lock(path):
+        upgraded.initialize()
+    _, shareholder_run = sync(upgraded, dataset="shareholders")
+    with upgraded.connection(write=True) as conn:
+        assert dict(conn.execute("SELECT * FROM legacy_imports WHERE dataset='financing'").fetchone())["content_hash"] == "hash"
+        conn.execute("INSERT INTO legacy_imports VALUES (?,?,?,?,?,?,?)",
+                     ("cache/000001.json", "other", "shareholders", key.instrument_id, shareholder_run, 0, utc_now()))
+        assert conn.execute("SELECT count(*) FROM legacy_imports").fetchone()[0] == 2
+    upgraded.complete_sync(shareholder_run, SyncResult(0, no_data=True), lambda conn: None)
+    assert upgraded.check()["integrity"] == "ok"
+
+
+def test_p4_fact_tables_reject_wrong_dataset_and_keep_atomic_sync(db):
+    key, run = sync(db, dataset="financial:income", source="sina")
+    rows = [{"period": "2026-06-30", "publish_date": "2026-08-01", "raw_json": '{"x":1}'}]
+    db.complete_sync(run, SyncResult(1, "2026-06-30", "2026-06-30", "2026-06-30"),
+                     lambda conn: db.upsert_financial_reports(conn, key, run, rows))
+    assert db.financial_reports(key.instrument_id, "sina", "income")[0]["period"] == "2026-06-30"
+    wrong, wrong_run = sync(db, dataset="financial:cashflow", source="sina")
+    with pytest.raises(sqlite3.IntegrityError, match="provenance"):
+        db.complete_sync(wrong_run, SyncResult(1, "2026-09-30", "2026-09-30", "2026-09-30"),
+                         lambda conn: conn.execute(
+                             "INSERT INTO financial_reports(instrument_id,source,report_type,period,raw_json,content_hash,obtained_at,run_id) "
+                             "VALUES (?,?,?,?,?,?,?,?)",
+                             (key.instrument_id, "sina", "income", "2026-09-30", "{}", "hash", utc_now(), wrong_run)))
+    assert len(db.financial_reports(key.instrument_id, "sina", "income")) == 1
+
+
+def test_p4_backup_restores_facts_and_import_identity(db, tmp_path):
+    key, run = sync(db, dataset="financial:income", source="sina")
+    db.complete_sync(run, SyncResult(1, "2026-06-30", "2026-06-30", "2026-06-30"),
+                     lambda conn: db.upsert_financial_reports(conn, key, run,
+                         [{"period": "2026-06-30", "raw_json": '{"a":1}'}]))
+    with db.connection(write=True) as conn:
+        conn.execute("INSERT INTO legacy_imports VALUES (?,?,?,?,?,?,?)",
+                     ("cache/000001.json", "hash", "financial:income", key.instrument_id, run, 1, utc_now()))
+    restored = Database(restore_backup(db.backup(tmp_path / "copy.sqlite3"), tmp_path / "restored.sqlite3"))
+    assert restored.check()["integrity"] == "ok"
+    assert restored.financial_reports(key.instrument_id, "sina", "income")[0]["raw_json"] == '{"a":1}'
+    with restored.connection() as conn:
+        assert conn.execute("SELECT dataset FROM legacy_imports").fetchone()[0] == "financial:income"
+
+
+def test_p4_valuation_fact_keeps_window_provenance_and_revisions(db):
+    key, run = sync(db, dataset="valuation:pe", source="baidu")
+    row = {"observed_on": "2026-09-29", "value": 12.5, "source_windows": ["3y", "5y"],
+           "sampling_version": "observations-v1", "raw_json": {"date": "2026-09-29", "pe": 12.5}}
+    db.complete_sync(run, SyncResult(1, "2026-09-29", "2026-09-29", "2026-09-29"),
+                     lambda conn: db.upsert_valuation_observations(conn, key, run, [row]))
+    saved = db.valuation_observations(key.instrument_id, "baidu", "pe")
+    assert saved[0]["value"] == 12.5
+    assert json.loads(saved[0]["source_windows_json"]) == ["3y", "5y"]
+    _, next_run = sync(db, dataset="valuation:pe", source="baidu")
+    db.complete_sync(next_run, SyncResult(1, "2026-09-29", "2026-09-29", "2026-09-29"),
+                     lambda conn: db.upsert_valuation_observations(conn, key, next_run,
+                         [{**row, "value": 13.0, "source_windows_json": '["1y"]',
+                           "raw_json": {"pe": 13.0}}]))
+    latest = db.valuation_observations(key.instrument_id, "baidu", "pe")[0]
+    assert latest["value"] == 13.0
+    assert json.loads(latest["source_windows_json"]) == ["1y"]
+    assert db.check()["integrity"] == "ok"
+
+
+def test_p4_report_override_distinguishes_zero_and_null(db):
+    instrument = db.ensure_instrument("000001")
+    with db.connection(write=True) as conn:
+        conn.execute("INSERT INTO report_overrides(instrument_id,period,field_name,value_json,origin,updated_at) "
+                     "VALUES (?,?,?,?,?,?)", (instrument, "2026-06-30", "revenue", "0", "manual", utc_now()))
+        conn.execute("INSERT INTO report_overrides(instrument_id,period,field_name,value_json,origin,updated_at) "
+                     "VALUES (?,?,?,?,?,?)", (instrument, "2026-06-30", "profit", "null", "manual", utc_now()))
+    with db.connection() as conn:
+        values = {r["field_name"]: json.loads(r["value_json"]) for r in conn.execute("SELECT * FROM report_overrides")}
+    assert values == {"revenue": 0, "profit": None}
+
+
+def test_p4_integrity_check_detects_tampered_import_provenance(db):
+    key, run = sync(db, dataset="financial:income", source="sina")
+    db.complete_sync(run, SyncResult(1, "2026-06-30", "2026-06-30", "2026-06-30"),
+                     lambda conn: db.record_legacy_import(conn, key, run, "cache/000001.json", "hash", 1))
+    with sqlite3.connect(db.path) as conn:
+        conn.execute("UPDATE legacy_imports SET dataset='financial:balance' WHERE path='cache/000001.json'")
+    with pytest.raises(StorageError, match="relationships"):
+        db.check()
+
+
+def test_p4_dividend_repository_keeps_multiple_events_per_report_period(db):
+    key, run = sync(db, dataset="dividends", source="eastmoney")
+    rows = [
+        {"event_key": "2025-12-31|2026-04-01", "report_period": "2025-12-31",
+         "proposal_date": "2026-04-01", "notice_date": "2026-04-01", "status": "proposed",
+         "cash_per_ten": 2.0, "raw_json": {"id": 1}},
+        {"event_key": "2025-12-31|2026-07-01", "report_period": "2025-12-31",
+         "proposal_date": "2026-07-01", "notice_date": "2026-07-01", "status": "implemented",
+         "cash_per_ten": 1.0, "raw_json": {"id": 2}},
+    ]
+    db.complete_sync(run, SyncResult(2, "2025-12-31", "2026-07-01", "2026-07-01"),
+                     lambda conn: db.upsert_dividend_events(conn, key, run, rows))
+    saved = db.dividend_events(key.instrument_id, "eastmoney")
+    assert len(saved) == 2
+    assert {r["cash_per_ten"] for r in saved} == {1.0, 2.0}
+    assert db.check()["integrity"] == "ok"
+
+
+def test_p4_industry_snapshot_retains_prior_classification(db):
+    key, run = sync(db, dataset="industry", source="eastmoney")
+    db.complete_sync(run, SyncResult(1, "2026-09-29", "2026-09-29", "2026-09-29"),
+                     lambda conn: db.insert_industry_snapshot(conn, key, run,
+                         {"snapshot_at": "2026-09-29T00:00:00+00:00", "industry_name": "Shipping",
+                          "classification_basis": "v1", "raw_json": {"name": "Shipping"}}))
+    _, later = sync(db, dataset="industry", source="eastmoney")
+    db.complete_sync(later, SyncResult(1, "2026-09-29", "2026-09-30", "2026-09-30"),
+                     lambda conn: db.insert_industry_snapshot(conn, key, later,
+                         {"snapshot_at": "2026-09-30T00:00:00+00:00", "industry_name": "Logistics",
+                          "classification_basis": "v1", "raw_json": {"name": "Logistics"}}))
+    with db.connection() as conn:
+        assert [r[0] for r in conn.execute("SELECT industry_name FROM industry_snapshots ORDER BY snapshot_at")] == [
+            "Shipping", "Logistics"]
+
+
+def test_p4_legacy_monthly_snapshot_is_versioned_without_daily_facts(db):
+    key, run = sync(db, dataset="valuation_legacy", source="legacy")
+    db.complete_sync(run, SyncResult(1, "2025-12-31", "2025-12-31", "2025-12-31"),
+                     lambda conn: db.insert_legacy_valuation_snapshot(
+                         conn, key, run, "valuation/000001.json", "2025-12", "old-monthly-v1",
+                         {"date": "2025-12-31", "pe": 12.0}))
+    with db.connection() as conn:
+        row = conn.execute("SELECT * FROM legacy_valuation_snapshots").fetchone()
+        assert row["methodology_version"] == "old-monthly-v1"
+        assert json.loads(row["row_json"]) == {"date": "2025-12-31", "pe": 12.0}
+        assert conn.execute("SELECT count(*) FROM valuation_observations").fetchone()[0] == 0
+    assert db.check()["integrity"] == "ok"

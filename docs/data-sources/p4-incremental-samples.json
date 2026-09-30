@@ -1,0 +1,2021 @@
+{
+  "observed_at_utc": "20260930T131032Z",
+  "raw_directory": "data/verification/p4-incremental-20260930T131032Z",
+  "financial": {
+    "601919-lrb": {
+      "full_count": 82,
+      "reported_count": "82",
+      "full_complete": true,
+      "page1_periods": [
+        "20260630",
+        "20260331",
+        "20251231",
+        "20250930",
+        "20250630",
+        "20250331",
+        "20241231",
+        "20240930"
+      ],
+      "page2_periods": [
+        "20240630",
+        "20240331",
+        "20231231",
+        "20230930",
+        "20230630",
+        "20230331",
+        "20221231",
+        "20220930"
+      ],
+      "page1_matches_full": true,
+      "page2_matches_full": true,
+      "page_order_matches": true,
+      "all_have_update_time": true,
+      "response_bytes": [
+        1607889,
+        158411,
+        158524
+      ]
+    },
+    "601919-fzb": {
+      "full_count": 81,
+      "reported_count": "81",
+      "full_complete": true,
+      "page1_periods": [
+        "20260630",
+        "20260331",
+        "20251231",
+        "20250930",
+        "20250630",
+        "20250331",
+        "20241231",
+        "20240930"
+      ],
+      "page2_periods": [
+        "20240630",
+        "20240331",
+        "20231231",
+        "20230930",
+        "20230630",
+        "20230331",
+        "20221231",
+        "20220930"
+      ],
+      "page1_matches_full": true,
+      "page2_matches_full": true,
+      "page_order_matches": true,
+      "all_have_update_time": true,
+      "response_bytes": [
+        2735645,
+        270809,
+        270593
+      ]
+    },
+    "601919-llb": {
+      "full_count": 81,
+      "reported_count": "81",
+      "full_complete": true,
+      "page1_periods": [
+        "20260630",
+        "20260331",
+        "20251231",
+        "20250930",
+        "20250630",
+        "20250331",
+        "20241231",
+        "20240930"
+      ],
+      "page2_periods": [
+        "20240630",
+        "20240331",
+        "20231231",
+        "20230930",
+        "20230630",
+        "20230331",
+        "20221231",
+        "20220930"
+      ],
+      "page1_matches_full": true,
+      "page2_matches_full": true,
+      "page_order_matches": true,
+      "all_have_update_time": true,
+      "response_bytes": [
+        1473036,
+        145664,
+        145852
+      ]
+    },
+    "600887-lrb": {
+      "full_count": 114,
+      "reported_count": "114",
+      "full_complete": true,
+      "page1_periods": [
+        "20260630",
+        "20260331",
+        "20251231",
+        "20250930",
+        "20250630",
+        "20250331",
+        "20241231",
+        "20240930"
+      ],
+      "page2_periods": [
+        "20240630",
+        "20240331",
+        "20231231",
+        "20230930",
+        "20230630",
+        "20230331",
+        "20221231",
+        "20220930"
+      ],
+      "page1_matches_full": true,
+      "page2_matches_full": true,
+      "page_order_matches": true,
+      "all_have_update_time": true,
+      "response_bytes": [
+        2220977,
+        158420,
+        158431
+      ]
+    },
+    "600887-fzb": {
+      "full_count": 114,
+      "reported_count": "114",
+      "full_complete": true,
+      "page1_periods": [
+        "20260630",
+        "20260331",
+        "20251231",
+        "20250930",
+        "20250630",
+        "20250331",
+        "20241231",
+        "20240930"
+      ],
+      "page2_periods": [
+        "20240630",
+        "20240331",
+        "20231231",
+        "20230930",
+        "20230630",
+        "20230331",
+        "20221231",
+        "20220930"
+      ],
+      "page1_matches_full": true,
+      "page2_matches_full": true,
+      "page_order_matches": true,
+      "all_have_update_time": true,
+      "response_bytes": [
+        3823791,
+        270313,
+        270460
+      ]
+    },
+    "600887-llb": {
+      "full_count": 103,
+      "reported_count": "103",
+      "full_complete": true,
+      "page1_periods": [
+        "20260630",
+        "20260331",
+        "20251231",
+        "20250930",
+        "20250630",
+        "20250331",
+        "20241231",
+        "20240930"
+      ],
+      "page2_periods": [
+        "20240630",
+        "20240331",
+        "20231231",
+        "20230930",
+        "20230630",
+        "20230331",
+        "20221231",
+        "20220930"
+      ],
+      "page1_matches_full": true,
+      "page2_matches_full": true,
+      "page_order_matches": true,
+      "all_have_update_time": true,
+      "response_bytes": [
+        1862946,
+        145650,
+        145680
+      ]
+    },
+    "000001-lrb": {
+      "full_count": 123,
+      "reported_count": "123",
+      "full_complete": true,
+      "page1_periods": [
+        "20260630",
+        "20260331",
+        "20251231",
+        "20250930",
+        "20250630",
+        "20250331",
+        "20241231",
+        "20240930"
+      ],
+      "page2_periods": [
+        "20240630",
+        "20240331",
+        "20231231",
+        "20230930",
+        "20230630",
+        "20230331",
+        "20221231",
+        "20220930"
+      ],
+      "page1_matches_full": true,
+      "page2_matches_full": true,
+      "page_order_matches": true,
+      "all_have_update_time": true,
+      "response_bytes": [
+        2776590,
+        182618,
+        182596
+      ]
+    },
+    "000001-fzb": {
+      "full_count": 120,
+      "reported_count": "120",
+      "full_complete": true,
+      "page1_periods": [
+        "20260630",
+        "20260331",
+        "20251231",
+        "20250930",
+        "20250630",
+        "20250331",
+        "20241231",
+        "20240930"
+      ],
+      "page2_periods": [
+        "20240630",
+        "20240331",
+        "20231231",
+        "20230930",
+        "20230630",
+        "20230331",
+        "20221231",
+        "20220930"
+      ],
+      "page1_matches_full": true,
+      "page2_matches_full": true,
+      "page_order_matches": true,
+      "all_have_update_time": true,
+      "response_bytes": [
+        4099669,
+        273759,
+        273681
+      ]
+    },
+    "000001-llb": {
+      "full_count": 104,
+      "reported_count": "104",
+      "full_complete": true,
+      "page1_periods": [
+        "20260630",
+        "20260331",
+        "20251231",
+        "20250930",
+        "20250630",
+        "20250331",
+        "20241231",
+        "20240930"
+      ],
+      "page2_periods": [
+        "20240630",
+        "20240331",
+        "20231231",
+        "20230930",
+        "20230630",
+        "20230331",
+        "20221231",
+        "20220930"
+      ],
+      "page1_matches_full": true,
+      "page2_matches_full": true,
+      "page_order_matches": true,
+      "all_have_update_time": true,
+      "response_bytes": [
+        3041701,
+        234246,
+        234217
+      ]
+    }
+  },
+  "dividends": {
+    "601919": {
+      "full_count": 14,
+      "full_bytes": 12942,
+      "source_fields": [
+        "ASSIGN_PROGRESS",
+        "BASIC_EPS",
+        "BD10_CLOSE_ADJCHRATE",
+        "BONUS_IT_RATIO",
+        "BONUS_RATIO",
+        "BVPS",
+        "D10_CLOSE_ADJCHRATE",
+        "D30_CLOSE_ADJCHRATE",
+        "DIVIDENT_RATIO",
+        "EQUITY_RECORD_DATE",
+        "EX_DIVIDEND_DATE",
+        "EX_DIVIDEND_DAYS",
+        "IMPL_PLAN_PROFILE",
+        "IS_KCB",
+        "IT_RATIO",
+        "MARKET_TYPE",
+        "NOTICE_DATE",
+        "ORG_CODE",
+        "PER_CAPITAL_RESERVE",
+        "PER_UNASSIGN_PROFIT",
+        "PLAN_NOTICE_DATE",
+        "PNP_YOY_RATIO",
+        "PRETAX_BONUS_RMB",
+        "PUBLISH_DATE",
+        "REPORT_DATE",
+        "SECUCODE",
+        "SECURITY_CODE",
+        "SECURITY_INNER_CODE",
+        "SECURITY_NAME_ABBR",
+        "TOTAL_SHARES"
+      ],
+      "progress_values": [
+        "实施分配",
+        "董事会决议通过"
+      ],
+      "proposed_identity_unique": true,
+      "proposed_identity_has_null": false,
+      "windows": [
+        {
+          "column": "EX_DIVIDEND_DATE",
+          "start": "2025-01-01",
+          "count": 3,
+          "response_bytes": 2896,
+          "matches_full": true
+        },
+        {
+          "column": "NOTICE_DATE",
+          "start": "2025-01-01",
+          "count": 4,
+          "response_bytes": 3794,
+          "matches_full": true
+        },
+        {
+          "column": "PLAN_NOTICE_DATE",
+          "start": "2025-01-01",
+          "count": 4,
+          "response_bytes": 3794,
+          "matches_full": true
+        }
+      ]
+    },
+    "600887": {
+      "full_count": 30,
+      "full_bytes": 27157,
+      "source_fields": [
+        "ASSIGN_PROGRESS",
+        "BASIC_EPS",
+        "BD10_CLOSE_ADJCHRATE",
+        "BONUS_IT_RATIO",
+        "BONUS_RATIO",
+        "BVPS",
+        "D10_CLOSE_ADJCHRATE",
+        "D30_CLOSE_ADJCHRATE",
+        "DIVIDENT_RATIO",
+        "EQUITY_RECORD_DATE",
+        "EX_DIVIDEND_DATE",
+        "EX_DIVIDEND_DAYS",
+        "IMPL_PLAN_PROFILE",
+        "IS_KCB",
+        "IT_RATIO",
+        "MARKET_TYPE",
+        "NOTICE_DATE",
+        "ORG_CODE",
+        "PER_CAPITAL_RESERVE",
+        "PER_UNASSIGN_PROFIT",
+        "PLAN_NOTICE_DATE",
+        "PNP_YOY_RATIO",
+        "PRETAX_BONUS_RMB",
+        "PUBLISH_DATE",
+        "REPORT_DATE",
+        "SECUCODE",
+        "SECURITY_CODE",
+        "SECURITY_INNER_CODE",
+        "SECURITY_NAME_ABBR",
+        "TOTAL_SHARES"
+      ],
+      "progress_values": [
+        "实施分配"
+      ],
+      "proposed_identity_unique": true,
+      "proposed_identity_has_null": false,
+      "windows": [
+        {
+          "column": "EX_DIVIDEND_DATE",
+          "start": "2025-01-01",
+          "count": 3,
+          "response_bytes": 2888,
+          "matches_full": true
+        },
+        {
+          "column": "NOTICE_DATE",
+          "start": "2025-01-01",
+          "count": 3,
+          "response_bytes": 2888,
+          "matches_full": true
+        },
+        {
+          "column": "PLAN_NOTICE_DATE",
+          "start": "2025-01-01",
+          "count": 3,
+          "response_bytes": 2888,
+          "matches_full": true
+        }
+      ]
+    },
+    "000001": {
+      "full_count": 29,
+      "full_bytes": 26334,
+      "source_fields": [
+        "ASSIGN_PROGRESS",
+        "BASIC_EPS",
+        "BD10_CLOSE_ADJCHRATE",
+        "BONUS_IT_RATIO",
+        "BONUS_RATIO",
+        "BVPS",
+        "D10_CLOSE_ADJCHRATE",
+        "D30_CLOSE_ADJCHRATE",
+        "DIVIDENT_RATIO",
+        "EQUITY_RECORD_DATE",
+        "EX_DIVIDEND_DATE",
+        "EX_DIVIDEND_DAYS",
+        "IMPL_PLAN_PROFILE",
+        "IS_KCB",
+        "IT_RATIO",
+        "MARKET_TYPE",
+        "NOTICE_DATE",
+        "ORG_CODE",
+        "PER_CAPITAL_RESERVE",
+        "PER_UNASSIGN_PROFIT",
+        "PLAN_NOTICE_DATE",
+        "PNP_YOY_RATIO",
+        "PRETAX_BONUS_RMB",
+        "PUBLISH_DATE",
+        "REPORT_DATE",
+        "SECUCODE",
+        "SECURITY_CODE",
+        "SECURITY_INNER_CODE",
+        "SECURITY_NAME_ABBR",
+        "TOTAL_SHARES"
+      ],
+      "progress_values": [
+        "实施分配"
+      ],
+      "proposed_identity_unique": true,
+      "proposed_identity_has_null": false,
+      "windows": [
+        {
+          "column": "EX_DIVIDEND_DATE",
+          "start": "2025-01-01",
+          "count": 4,
+          "response_bytes": 3773,
+          "matches_full": true
+        },
+        {
+          "column": "NOTICE_DATE",
+          "start": "2025-01-01",
+          "count": 4,
+          "response_bytes": 3773,
+          "matches_full": true
+        },
+        {
+          "column": "PLAN_NOTICE_DATE",
+          "start": "2025-01-01",
+          "count": 4,
+          "response_bytes": 3773,
+          "matches_full": true
+        }
+      ]
+    }
+  },
+  "valuations": {
+    "601919-pe": {
+      "full_count": 731,
+      "recent_count": 366,
+      "full_bounds": [
+        "2016-10-02",
+        "2026-09-30"
+      ],
+      "recent_bounds": [
+        "2025-09-30",
+        "2026-09-30"
+      ],
+      "common_dates": 74,
+      "same_date_value_changes": 0,
+      "monthly_date_or_value_changes": 10,
+      "monthly_value_changes": 8,
+      "monthly_change_examples": [
+        {
+          "month": "2025-10",
+          "full": [
+            "2025-10-30",
+            "4.63"
+          ],
+          "recent": [
+            "2025-10-31",
+            "6.11"
+          ]
+        },
+        {
+          "month": "2025-11",
+          "full": [
+            "2025-11-29",
+            "5.95"
+          ],
+          "recent": [
+            "2025-11-30",
+            "5.95"
+          ]
+        },
+        {
+          "month": "2025-12",
+          "full": [
+            "2025-12-29",
+            "6.19"
+          ],
+          "recent": [
+            "2025-12-31",
+            "6.18"
+          ]
+        }
+      ],
+      "response_bytes": [
+        18153,
+        9752
+      ],
+      "advertised_windows": [
+        "近一年",
+        "近三年",
+        "近五年",
+        "近十年",
+        "全部"
+      ]
+    },
+    "601919-pb": {
+      "full_count": 731,
+      "recent_count": 366,
+      "full_bounds": [
+        "2016-10-02",
+        "2026-09-30"
+      ],
+      "recent_bounds": [
+        "2025-09-30",
+        "2026-09-30"
+      ],
+      "common_dates": 74,
+      "same_date_value_changes": 0,
+      "monthly_date_or_value_changes": 10,
+      "monthly_value_changes": 5,
+      "monthly_change_examples": [
+        {
+          "month": "2025-10",
+          "full": [
+            "2025-10-30",
+            "0.99"
+          ],
+          "recent": [
+            "2025-10-31",
+            "1.00"
+          ]
+        },
+        {
+          "month": "2025-11",
+          "full": [
+            "2025-11-29",
+            "0.97"
+          ],
+          "recent": [
+            "2025-11-30",
+            "0.97"
+          ]
+        },
+        {
+          "month": "2025-12",
+          "full": [
+            "2025-12-29",
+            "1.01"
+          ],
+          "recent": [
+            "2025-12-31",
+            "1.01"
+          ]
+        }
+      ],
+      "response_bytes": [
+        17749,
+        9719
+      ],
+      "advertised_windows": [
+        "近一年",
+        "近三年",
+        "近五年",
+        "近十年",
+        "全部"
+      ]
+    },
+    "601919-market_cap": {
+      "full_count": 731,
+      "recent_count": 366,
+      "full_bounds": [
+        "2016-10-02",
+        "2026-09-30"
+      ],
+      "recent_bounds": [
+        "2025-09-30",
+        "2026-09-30"
+      ],
+      "common_dates": 74,
+      "same_date_value_changes": 0,
+      "monthly_date_or_value_changes": 10,
+      "monthly_value_changes": 8,
+      "monthly_change_examples": [
+        {
+          "month": "2025-10",
+          "full": [
+            "2025-10-30",
+            "2304.88"
+          ],
+          "recent": [
+            "2025-10-31",
+            "2325.01"
+          ]
+        },
+        {
+          "month": "2025-11",
+          "full": [
+            "2025-11-29",
+            "2263.05"
+          ],
+          "recent": [
+            "2025-11-30",
+            "2263.05"
+          ]
+        },
+        {
+          "month": "2025-12",
+          "full": [
+            "2025-12-29",
+            "2355.99"
+          ],
+          "recent": [
+            "2025-12-31",
+            "2351.35"
+          ]
+        }
+      ],
+      "response_bytes": [
+        19661,
+        10838
+      ],
+      "advertised_windows": [
+        "近一年",
+        "近三年",
+        "近五年",
+        "近十年",
+        "全部"
+      ]
+    },
+    "600887-pe": {
+      "full_count": 731,
+      "recent_count": 366,
+      "full_bounds": [
+        "2016-10-02",
+        "2026-09-30"
+      ],
+      "recent_bounds": [
+        "2025-09-30",
+        "2026-09-30"
+      ],
+      "common_dates": 74,
+      "same_date_value_changes": 0,
+      "monthly_date_or_value_changes": 10,
+      "monthly_value_changes": 8,
+      "monthly_change_examples": [
+        {
+          "month": "2025-10",
+          "full": [
+            "2025-10-30",
+            "21.31"
+          ],
+          "recent": [
+            "2025-10-31",
+            "21.64"
+          ]
+        },
+        {
+          "month": "2025-11",
+          "full": [
+            "2025-11-29",
+            "23.20"
+          ],
+          "recent": [
+            "2025-11-30",
+            "23.20"
+          ]
+        },
+        {
+          "month": "2025-12",
+          "full": [
+            "2025-12-29",
+            "22.80"
+          ],
+          "recent": [
+            "2025-12-31",
+            "22.58"
+          ]
+        }
+      ],
+      "response_bytes": [
+        18507,
+        10113
+      ],
+      "advertised_windows": [
+        "近一年",
+        "近三年",
+        "近五年",
+        "近十年",
+        "全部"
+      ]
+    },
+    "600887-pb": {
+      "full_count": 731,
+      "recent_count": 366,
+      "full_bounds": [
+        "2016-10-02",
+        "2026-09-30"
+      ],
+      "recent_bounds": [
+        "2025-09-30",
+        "2026-09-30"
+      ],
+      "common_dates": 74,
+      "same_date_value_changes": 0,
+      "monthly_date_or_value_changes": 10,
+      "monthly_value_changes": 8,
+      "monthly_change_examples": [
+        {
+          "month": "2025-10",
+          "full": [
+            "2025-10-30",
+            "3.25"
+          ],
+          "recent": [
+            "2025-10-31",
+            "3.08"
+          ]
+        },
+        {
+          "month": "2025-11",
+          "full": [
+            "2025-11-29",
+            "3.30"
+          ],
+          "recent": [
+            "2025-11-30",
+            "3.30"
+          ]
+        },
+        {
+          "month": "2025-12",
+          "full": [
+            "2025-12-29",
+            "3.24"
+          ],
+          "recent": [
+            "2025-12-31",
+            "3.21"
+          ]
+        }
+      ],
+      "response_bytes": [
+        17751,
+        9719
+      ],
+      "advertised_windows": [
+        "近一年",
+        "近三年",
+        "近五年",
+        "近十年",
+        "全部"
+      ]
+    },
+    "600887-market_cap": {
+      "full_count": 731,
+      "recent_count": 366,
+      "full_bounds": [
+        "2016-10-02",
+        "2026-09-30"
+      ],
+      "recent_bounds": [
+        "2025-09-30",
+        "2026-09-30"
+      ],
+      "common_dates": 74,
+      "same_date_value_changes": 0,
+      "monthly_date_or_value_changes": 10,
+      "monthly_value_changes": 8,
+      "monthly_change_examples": [
+        {
+          "month": "2025-10",
+          "full": [
+            "2025-10-30",
+            "1730.62"
+          ],
+          "recent": [
+            "2025-10-31",
+            "1733.78"
+          ]
+        },
+        {
+          "month": "2025-11",
+          "full": [
+            "2025-11-29",
+            "1858.39"
+          ],
+          "recent": [
+            "2025-11-30",
+            "1858.39"
+          ]
+        },
+        {
+          "month": "2025-12",
+          "full": [
+            "2025-12-29",
+            "1826.13"
+          ],
+          "recent": [
+            "2025-12-31",
+            "1809.05"
+          ]
+        }
+      ],
+      "response_bytes": [
+        19957,
+        10837
+      ],
+      "advertised_windows": [
+        "近一年",
+        "近三年",
+        "近五年",
+        "近十年",
+        "全部"
+      ]
+    },
+    "000001-pe": {
+      "full_count": 731,
+      "recent_count": 366,
+      "full_bounds": [
+        "2016-10-02",
+        "2026-09-30"
+      ],
+      "recent_bounds": [
+        "2025-09-30",
+        "2026-09-30"
+      ],
+      "common_dates": 74,
+      "same_date_value_changes": 0,
+      "monthly_date_or_value_changes": 10,
+      "monthly_value_changes": 8,
+      "monthly_change_examples": [
+        {
+          "month": "2025-10",
+          "full": [
+            "2025-10-30",
+            "5.12"
+          ],
+          "recent": [
+            "2025-10-31",
+            "5.09"
+          ]
+        },
+        {
+          "month": "2025-11",
+          "full": [
+            "2025-11-29",
+            "5.23"
+          ],
+          "recent": [
+            "2025-11-30",
+            "5.23"
+          ]
+        },
+        {
+          "month": "2025-12",
+          "full": [
+            "2025-12-29",
+            "5.20"
+          ],
+          "recent": [
+            "2025-12-31",
+            "5.14"
+          ]
+        }
+      ],
+      "response_bytes": [
+        17910,
+        9744
+      ],
+      "advertised_windows": [
+        "近一年",
+        "近三年",
+        "近五年",
+        "近十年",
+        "全部"
+      ]
+    },
+    "000001-pb": {
+      "full_count": 731,
+      "recent_count": 366,
+      "full_bounds": [
+        "2016-10-02",
+        "2026-09-30"
+      ],
+      "recent_bounds": [
+        "2025-09-30",
+        "2026-09-30"
+      ],
+      "common_dates": 74,
+      "same_date_value_changes": 0,
+      "monthly_date_or_value_changes": 10,
+      "monthly_value_changes": 5,
+      "monthly_change_examples": [
+        {
+          "month": "2025-10",
+          "full": [
+            "2025-10-30",
+            "0.49"
+          ],
+          "recent": [
+            "2025-10-31",
+            "0.49"
+          ]
+        },
+        {
+          "month": "2025-11",
+          "full": [
+            "2025-11-29",
+            "0.50"
+          ],
+          "recent": [
+            "2025-11-30",
+            "0.50"
+          ]
+        },
+        {
+          "month": "2025-12",
+          "full": [
+            "2025-12-29",
+            "0.50"
+          ],
+          "recent": [
+            "2025-12-31",
+            "0.49"
+          ]
+        }
+      ],
+      "response_bytes": [
+        17748,
+        9719
+      ],
+      "advertised_windows": [
+        "近一年",
+        "近三年",
+        "近五年",
+        "近十年",
+        "全部"
+      ]
+    },
+    "000001-market_cap": {
+      "full_count": 731,
+      "recent_count": 366,
+      "full_bounds": [
+        "2016-10-02",
+        "2026-09-30"
+      ],
+      "recent_bounds": [
+        "2025-09-30",
+        "2026-09-30"
+      ],
+      "common_dates": 74,
+      "same_date_value_changes": 0,
+      "monthly_date_or_value_changes": 10,
+      "monthly_value_changes": 8,
+      "monthly_change_examples": [
+        {
+          "month": "2025-10",
+          "full": [
+            "2025-10-30",
+            "2208.39"
+          ],
+          "recent": [
+            "2025-10-31",
+            "2196.75"
+          ]
+        },
+        {
+          "month": "2025-11",
+          "full": [
+            "2025-11-29",
+            "2253.03"
+          ],
+          "recent": [
+            "2025-11-30",
+            "2253.03"
+          ]
+        },
+        {
+          "month": "2025-12",
+          "full": [
+            "2025-12-29",
+            "2243.32"
+          ],
+          "recent": [
+            "2025-12-31",
+            "2214.22"
+          ]
+        }
+      ],
+      "response_bytes": [
+        19963,
+        10837
+      ],
+      "advertised_windows": [
+        "近一年",
+        "近三年",
+        "近五年",
+        "近十年",
+        "全部"
+      ]
+    }
+  },
+  "errors": [],
+  "calls": [
+    {
+      "name": "601919-lrb-200-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh601919",
+        "source": "lrb",
+        "type": "0",
+        "page": 1,
+        "num": 200
+      },
+      "response_bytes": 1607889,
+      "seconds": 0.75
+    },
+    {
+      "name": "601919-lrb-8-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh601919",
+        "source": "lrb",
+        "type": "0",
+        "page": 1,
+        "num": 8
+      },
+      "response_bytes": 158411,
+      "seconds": 0.047
+    },
+    {
+      "name": "601919-lrb-8-2",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh601919",
+        "source": "lrb",
+        "type": "0",
+        "page": 2,
+        "num": 8
+      },
+      "response_bytes": 158524,
+      "seconds": 0.093
+    },
+    {
+      "name": "601919-fzb-200-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh601919",
+        "source": "fzb",
+        "type": "0",
+        "page": 1,
+        "num": 200
+      },
+      "response_bytes": 2735645,
+      "seconds": 0.407
+    },
+    {
+      "name": "601919-fzb-8-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh601919",
+        "source": "fzb",
+        "type": "0",
+        "page": 1,
+        "num": 8
+      },
+      "response_bytes": 270809,
+      "seconds": 0.11
+    },
+    {
+      "name": "601919-fzb-8-2",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh601919",
+        "source": "fzb",
+        "type": "0",
+        "page": 2,
+        "num": 8
+      },
+      "response_bytes": 270593,
+      "seconds": 0.343
+    },
+    {
+      "name": "601919-llb-200-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh601919",
+        "source": "llb",
+        "type": "0",
+        "page": 1,
+        "num": 200
+      },
+      "response_bytes": 1473036,
+      "seconds": 0.141
+    },
+    {
+      "name": "601919-llb-8-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh601919",
+        "source": "llb",
+        "type": "0",
+        "page": 1,
+        "num": 8
+      },
+      "response_bytes": 145664,
+      "seconds": 0.031
+    },
+    {
+      "name": "601919-llb-8-2",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh601919",
+        "source": "llb",
+        "type": "0",
+        "page": 2,
+        "num": 8
+      },
+      "response_bytes": 145852,
+      "seconds": 0.063
+    },
+    {
+      "name": "601919-dividend-full",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"601919\")",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 12942,
+      "seconds": 0.609
+    },
+    {
+      "name": "601919-dividend-EX_DIVIDEND_DATE",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"601919\")(EX_DIVIDEND_DATE>='2025-01-01')",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 2896,
+      "seconds": 0.078
+    },
+    {
+      "name": "601919-dividend-NOTICE_DATE",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"601919\")(NOTICE_DATE>='2025-01-01')",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 3794,
+      "seconds": 0.094
+    },
+    {
+      "name": "601919-dividend-PLAN_NOTICE_DATE",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"601919\")(PLAN_NOTICE_DATE>='2025-01-01')",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 3794,
+      "seconds": 0.094
+    },
+    {
+      "name": "601919-pe-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 18153,
+      "seconds": 1.219
+    },
+    {
+      "name": "601919-pe-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9752,
+      "seconds": 0.109
+    },
+    {
+      "name": "601919-pb-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 17749,
+      "seconds": 0.109
+    },
+    {
+      "name": "601919-pb-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9719,
+      "seconds": 0.11
+    },
+    {
+      "name": "601919-market_cap-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 19661,
+      "seconds": 0.14
+    },
+    {
+      "name": "601919-market_cap-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "601919",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 10838,
+      "seconds": 0.11
+    },
+    {
+      "name": "600887-lrb-200-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh600887",
+        "source": "lrb",
+        "type": "0",
+        "page": 1,
+        "num": 200
+      },
+      "response_bytes": 2220977,
+      "seconds": 0.297
+    },
+    {
+      "name": "600887-lrb-8-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh600887",
+        "source": "lrb",
+        "type": "0",
+        "page": 1,
+        "num": 8
+      },
+      "response_bytes": 158420,
+      "seconds": 0.063
+    },
+    {
+      "name": "600887-lrb-8-2",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh600887",
+        "source": "lrb",
+        "type": "0",
+        "page": 2,
+        "num": 8
+      },
+      "response_bytes": 158431,
+      "seconds": 0.078
+    },
+    {
+      "name": "600887-fzb-200-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh600887",
+        "source": "fzb",
+        "type": "0",
+        "page": 1,
+        "num": 200
+      },
+      "response_bytes": 3823791,
+      "seconds": 0.578
+    },
+    {
+      "name": "600887-fzb-8-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh600887",
+        "source": "fzb",
+        "type": "0",
+        "page": 1,
+        "num": 8
+      },
+      "response_bytes": 270313,
+      "seconds": 0.125
+    },
+    {
+      "name": "600887-fzb-8-2",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh600887",
+        "source": "fzb",
+        "type": "0",
+        "page": 2,
+        "num": 8
+      },
+      "response_bytes": 270460,
+      "seconds": 0.11
+    },
+    {
+      "name": "600887-llb-200-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh600887",
+        "source": "llb",
+        "type": "0",
+        "page": 1,
+        "num": 200
+      },
+      "response_bytes": 1862946,
+      "seconds": 0.218
+    },
+    {
+      "name": "600887-llb-8-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh600887",
+        "source": "llb",
+        "type": "0",
+        "page": 1,
+        "num": 8
+      },
+      "response_bytes": 145650,
+      "seconds": 0.109
+    },
+    {
+      "name": "600887-llb-8-2",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sh600887",
+        "source": "llb",
+        "type": "0",
+        "page": 2,
+        "num": 8
+      },
+      "response_bytes": 145680,
+      "seconds": 0.078
+    },
+    {
+      "name": "600887-dividend-full",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"600887\")",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 27157,
+      "seconds": 0.094
+    },
+    {
+      "name": "600887-dividend-EX_DIVIDEND_DATE",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"600887\")(EX_DIVIDEND_DATE>='2025-01-01')",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 2888,
+      "seconds": 0.062
+    },
+    {
+      "name": "600887-dividend-NOTICE_DATE",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"600887\")(NOTICE_DATE>='2025-01-01')",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 2888,
+      "seconds": 0.094
+    },
+    {
+      "name": "600887-dividend-PLAN_NOTICE_DATE",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"600887\")(PLAN_NOTICE_DATE>='2025-01-01')",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 2888,
+      "seconds": 0.063
+    },
+    {
+      "name": "600887-pe-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 18507,
+      "seconds": 0.094
+    },
+    {
+      "name": "600887-pe-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 10113,
+      "seconds": 0.078
+    },
+    {
+      "name": "600887-pb-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 17751,
+      "seconds": 0.094
+    },
+    {
+      "name": "600887-pb-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9719,
+      "seconds": 0.093
+    },
+    {
+      "name": "600887-market_cap-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 19957,
+      "seconds": 0.172
+    },
+    {
+      "name": "600887-market_cap-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "600887",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 10837,
+      "seconds": 0.094
+    },
+    {
+      "name": "000001-lrb-200-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sz000001",
+        "source": "lrb",
+        "type": "0",
+        "page": 1,
+        "num": 200
+      },
+      "response_bytes": 2776590,
+      "seconds": 0.375
+    },
+    {
+      "name": "000001-lrb-8-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sz000001",
+        "source": "lrb",
+        "type": "0",
+        "page": 1,
+        "num": 8
+      },
+      "response_bytes": 182618,
+      "seconds": 0.078
+    },
+    {
+      "name": "000001-lrb-8-2",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sz000001",
+        "source": "lrb",
+        "type": "0",
+        "page": 2,
+        "num": 8
+      },
+      "response_bytes": 182596,
+      "seconds": 0.078
+    },
+    {
+      "name": "000001-fzb-200-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sz000001",
+        "source": "fzb",
+        "type": "0",
+        "page": 1,
+        "num": 200
+      },
+      "response_bytes": 4099669,
+      "seconds": 0.594
+    },
+    {
+      "name": "000001-fzb-8-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sz000001",
+        "source": "fzb",
+        "type": "0",
+        "page": 1,
+        "num": 8
+      },
+      "response_bytes": 273759,
+      "seconds": 0.063
+    },
+    {
+      "name": "000001-fzb-8-2",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sz000001",
+        "source": "fzb",
+        "type": "0",
+        "page": 2,
+        "num": 8
+      },
+      "response_bytes": 273681,
+      "seconds": 0.109
+    },
+    {
+      "name": "000001-llb-200-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sz000001",
+        "source": "llb",
+        "type": "0",
+        "page": 1,
+        "num": 200
+      },
+      "response_bytes": 3041701,
+      "seconds": 0.344
+    },
+    {
+      "name": "000001-llb-8-1",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sz000001",
+        "source": "llb",
+        "type": "0",
+        "page": 1,
+        "num": 8
+      },
+      "response_bytes": 234246,
+      "seconds": 0.047
+    },
+    {
+      "name": "000001-llb-8-2",
+      "url": "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022",
+      "params": {
+        "paperCode": "sz000001",
+        "source": "llb",
+        "type": "0",
+        "page": 2,
+        "num": 8
+      },
+      "response_bytes": 234217,
+      "seconds": 0.094
+    },
+    {
+      "name": "000001-dividend-full",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"000001\")",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 26334,
+      "seconds": 0.078
+    },
+    {
+      "name": "000001-dividend-EX_DIVIDEND_DATE",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"000001\")(EX_DIVIDEND_DATE>='2025-01-01')",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 3773,
+      "seconds": 0.093
+    },
+    {
+      "name": "000001-dividend-NOTICE_DATE",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"000001\")(NOTICE_DATE>='2025-01-01')",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 3773,
+      "seconds": 0.235
+    },
+    {
+      "name": "000001-dividend-PLAN_NOTICE_DATE",
+      "url": "https://datacenter-web.eastmoney.com/api/data/v1/get",
+      "params": {
+        "reportName": "RPT_SHAREBONUS_DET",
+        "columns": "ALL",
+        "filter": "(SECURITY_CODE=\"000001\")(PLAN_NOTICE_DATE>='2025-01-01')",
+        "pageNumber": 1,
+        "pageSize": 200,
+        "sortTypes": "-1",
+        "sortColumns": "EX_DIVIDEND_DATE",
+        "source": "WEB",
+        "client": "WEB"
+      },
+      "response_bytes": 3773,
+      "seconds": 0.078
+    },
+    {
+      "name": "000001-pe-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 17910,
+      "seconds": 0.094
+    },
+    {
+      "name": "000001-pe-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市盈率(TTM)",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市盈率(TTM)",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9744,
+      "seconds": 0.109
+    },
+    {
+      "name": "000001-pb-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 17748,
+      "seconds": 0.14
+    },
+    {
+      "name": "000001-pb-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "市净率",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "市净率",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 9719,
+      "seconds": 0.11
+    },
+    {
+      "name": "000001-market_cap-近十年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近十年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 19963,
+      "seconds": 0.14
+    },
+    {
+      "name": "000001-market_cap-近一年",
+      "url": "https://gushitong.baidu.com/opendata",
+      "params": {
+        "openapi": "1",
+        "dspName": "iphone",
+        "tn": "tangram",
+        "client": "app",
+        "query": "总市值",
+        "code": "000001",
+        "word": "",
+        "resource_id": "51171",
+        "market": "ab",
+        "tag": "总市值",
+        "chart_select": "近一年",
+        "industry_select": "",
+        "skip_industry": "1",
+        "finClientType": "pc"
+      },
+      "response_bytes": 10837,
+      "seconds": 0.094
+    }
+  ]
+}

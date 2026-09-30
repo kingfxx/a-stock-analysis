@@ -1,0 +1,17 @@
+{
+  "Result": [
+    {
+      "DisplayData": {
+        "resultData": {
+          "tplData": {
+            "result": {
+              "chartInfo": [
+                {"header": ["市盈率(TTM)"], "type": "近一年", "body": [["2025-09-30", "4.46"], ["2026-09-30", "9.34"]]}
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}
