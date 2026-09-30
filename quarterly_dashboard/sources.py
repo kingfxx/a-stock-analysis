@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from decimal import Decimal
 from datetime import date, timedelta
 
 import requests
@@ -298,3 +299,74 @@ def fetch_daily_prices(code: str, session: requests.Session, adjust: str,
     else:
         raise ValueError("腾讯日 K 历史分页超过 50 次")
     return [prices[key] for key in sorted(prices)]
+
+
+def parse_price_history(payload: dict, symbol: str, adjust: str) -> list[dict]:
+    """Full source record, including OHLC; adjusted history may be nonpositive."""
+    if adjust not in ("", "qfq"):
+        raise ValueError("不支持的复权口径")
+    if payload.get("code") != 0:
+        raise ValueError("腾讯行情响应失败")
+    raw = (payload.get("data") or {}).get(symbol, {}).get(f"{adjust}day")
+    if not isinstance(raw, list):
+        raise ValueError("腾讯未返回正确股票/口径的日行情")
+    rows = []
+    seen = set()
+    for record in raw:
+        if not isinstance(record, list) or len(record) < 6:
+            raise ValueError("腾讯日行情字段缺失")
+        day = date.fromisoformat(record[0]).isoformat()
+        values = [_number(v) for v in record[1:6]]
+        if day in seen or any(v is None for v in values):
+            raise ValueError("腾讯日行情存在重复日期或无效值")
+        if values[4] < 0 or (not adjust and any(v <= 0 for v in values[:4])):
+            raise ValueError("腾讯未复权价格或成交量无效")
+        seen.add(day)
+        rows.append(dict(date=day, open=values[0], close=values[1], high=values[2],
+                         low=values[3], volume=values[4], raw=record))
+    return sorted(rows, key=lambda r: r["date"])
+
+
+def price_equal(first: dict, second: dict) -> bool:
+    return all(Decimal(str(first[k])).quantize(Decimal("0.0001")) ==
+               Decimal(str(second[k])).quantize(Decimal("0.0001"))
+               for k in ("open", "close", "high", "low"))
+
+
+def fetch_price_history(code, session, adjust, start="1990-01-01", end=None):
+    """Backward pages deliberately overlap 20 trades and validate their basis.
+
+    Return only the requested date range. A short final page is source exhaustion,
+    not a claim that every calendar date is a trade or that pre-listing data exists.
+    """
+    end = end or date.today().isoformat()
+    date.fromisoformat(start)
+    date.fromisoformat(end)
+    if start > end:
+        raise ValueError("行情请求范围颠倒")
+    symbol = symbol_for(code)
+    prices, previous, request_end = {}, None, end
+    for _ in range(50):
+        response = session.get(TENCENT_URL, params={
+            "param": f"{symbol},day,,{request_end},640,{adjust}"},
+            headers={"Referer": "https://gu.qq.com/"}, timeout=18)
+        response.raise_for_status()
+        batch = parse_price_history(response.json(), symbol, adjust)
+        if not batch:
+            if previous is not None:
+                raise ValueError("腾讯历史分页缺页")
+            raise ValueError("腾讯未返回日行情")
+        if batch[-1]["date"] > request_end:
+            raise ValueError("腾讯忽略了行情结束日期")
+        if previous is not None:
+            overlap = [row for row in batch if row["date"] in previous]
+            if len(overlap) < 20 or any(not price_equal(row, previous[row["date"]]) for row in overlap):
+                raise ValueError("腾讯分页重叠不足或复权基准发生变化")
+            if batch[0]["date"] >= min(previous):
+                raise ValueError("腾讯历史分页未推进")
+        prices.update({r["date"]: r for r in batch})
+        if batch[0]["date"] <= start or len(batch) < 640:
+            return [prices[d] for d in sorted(prices) if start <= d <= end]
+        previous = {r["date"]: r for r in batch}
+        request_end = batch[19]["date"]
+    raise ValueError("腾讯历史分页超过上限")

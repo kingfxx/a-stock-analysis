@@ -104,6 +104,9 @@ def chip_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE", tmp_path / "no-financial-data")
     monkeypatch.setattr(server, "fetch_daily_prices", lambda *args: [
         {"date": "2026-06-30", "close": 24}, {"date": "2026-09-15", "close": 25}])
+    chips, _ = server.services()
+    chips.fetcher = lambda code, section, source, **bounds: (
+        [] if source == "RPT_HOLDERNUM_DET" else server.fetch_chip_records(code, section, None))
     return tmp_path
 
 
@@ -111,21 +114,24 @@ def test_chip_endpoint_is_independent_and_preserves_full_raw_daily_records(chip_
     monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [margin("2024-01-01"), margin()])
     monkeypatch.setattr(server, "load_stock", lambda *args: pytest.fail("finance should not be needed"))
     result = server.load_chart_data("600887", "financing")
-    stored = json.loads((chip_cache / "financing" / "600887.json").read_text())
-    assert len(stored["records"]) == 2
-    assert stored["records"][0]["RQMCL"] == 67900
+    with server.services()[0].db.connection() as conn:
+        stored = conn.execute("SELECT raw_json FROM financing_daily ORDER BY trade_date").fetchall()
+    assert len(stored) == 2
+    assert json.loads(stored[0][0])["RQMCL"] == 67900
+    assert not (chip_cache / "financing" / "600887.json").exists()
     assert result["stored_count"] == 2
     assert len(result["rows"]) == 1
     monkeypatch.setattr(server, "fetch_chip_records", lambda *args: pytest.fail("same-day cache must be reused"))
     assert server.load_chart_data("600887", "financing")["stored_count"] == 2
 
 
-@pytest.mark.parametrize("outcome", ["missing_date", "missing_price", "empty", "failure"])
+@pytest.mark.parametrize("outcome", ["missing_date", "missing_required", "empty", "failure"])
 def test_partial_refresh_does_not_overwrite_or_backup_good_cache(chip_cache, monkeypatch, outcome):
     monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [margin("2026-09-28"), margin()])
     server.load_chart_data("600887", "financing")
-    path = chip_cache / "financing" / "600887.json"
-    original = path.read_bytes()
+    db = server.services()[0].db
+    with db.connection() as conn:
+        original = [tuple(r) for r in conn.execute("SELECT * FROM financing_daily")]
     def fetch(*args):
         if outcome == "failure":
             raise ValueError("offline")
@@ -133,24 +139,28 @@ def test_partial_refresh_does_not_overwrite_or_backup_good_cache(chip_cache, mon
             return []
         if outcome == "missing_date":
             return [margin()]
-        return [margin("2026-09-28"), {**margin(), "SPJ": None}]
+        return [margin("2026-09-28"), {**margin(), "RZYE": None}]
     monkeypatch.setattr(server, "fetch_chip_records", fetch)
     result = server.load_chart_data("600887", "financing", True)
     assert result["warnings"]
     assert result["stored_count"] == 2
-    assert path.read_bytes() == original
-    assert not path.with_suffix(".json.bak").exists()
+    with db.connection() as conn:
+        assert [tuple(r) for r in conn.execute("SELECT * FROM financing_daily")] == original
 
 
 def test_successful_refresh_keeps_backup_and_old_dates(chip_cache, monkeypatch):
     monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [holder()])
     server.load_chart_data("600887", "shareholders")
-    path = chip_cache / "shareholders" / "600887.json"
-    original = path.read_bytes()
+    db = server.services()[0].db
+    original = db.backup(chip_cache / "before-refresh.sqlite3")
     monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [holder(), holder("2026-09-15", 9000)])
     result = server.load_chart_data("600887", "shareholders", True)
     assert result["stored_count"] == 2
-    assert path.with_suffix(".json.bak").read_bytes() == original
+    from quarterly_dashboard.storage import Database
+    with Database(original).connection() as conn:
+        assert conn.execute("SELECT count(*) FROM shareholder_observations").fetchone()[0] == 1
+    with db.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM shareholder_observations").fetchone()[0] == 2
 
 
 def test_shareholder_price_never_uses_future_trades_or_long_suspension_prices():

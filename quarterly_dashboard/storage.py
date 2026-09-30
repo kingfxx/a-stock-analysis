@@ -12,6 +12,7 @@ import json
 import os
 import sqlite3
 import tempfile
+from uuid import uuid4
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -20,7 +21,7 @@ from typing import Callable, Iterator
 
 DEFAULT_DATABASE = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.sqlite3"
 APPLICATION_ID = 0x4153544B  # ASTK; refuse an unrelated SQLite file.
-MIGRATIONS = ((1, "001_initial.sql"),)
+MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"))
 
 
 class StorageError(RuntimeError):
@@ -96,6 +97,7 @@ class SyncResult:
     no_data: bool = False
     active_price_version_id: int | None = None
     next_full_audit_at: str | None = None
+    checked_at: str | None = None  # Legacy import preserves its original source check time.
 
     def validate(self):
         if type(self.record_count) is not int or self.record_count < 0:
@@ -113,8 +115,10 @@ class SyncResult:
             raise ValueError("No-data result cannot contain records, a watermark or a price version")
         if not self.no_data and (self.coverage_start is None or self.data_watermark is None):
             raise ValueError("Successful data result requires coverage and a data watermark")
-        if self.next_full_audit_at is not None:
-            timestamp = datetime.fromisoformat(self.next_full_audit_at.replace("Z", "+00:00"))
+        for value in (self.next_full_audit_at, self.checked_at):
+            if value is None:
+                continue
+            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
             if timestamp.utcoffset() != timedelta(0):
                 raise ValueError("Audit timestamps must use UTC")
 
@@ -294,7 +298,7 @@ class Database:
                     "last_success_run_id=?, active_price_version_id=? WHERE "
                     "instrument_id=? AND dataset=? AND source=? AND adjustment=?",
                     ("no_data" if result.no_data else "data", result.coverage_start, result.coverage_end,
-                     result.data_watermark, now, now, result.next_full_audit_at, run_id,
+                     result.data_watermark, result.checked_at or now, now, result.next_full_audit_at, run_id,
                      result.active_price_version_id if result.active_price_version_id is not None
                      else state["active_price_version_id"], *key))
         except Exception as exc:
@@ -308,9 +312,12 @@ class Database:
     def recover_interrupted_runs(self) -> int:
         """Only on startup under the exclusive instance lock, before any workers."""
         with self.connection(write=True) as conn:
-            return conn.execute("UPDATE sync_runs SET status='failed', finished_at=?, "
-                                "error='Application exited before synchronization completed' "
-                                "WHERE status='running'", (utc_now(),)).rowcount
+            recovered = conn.execute("UPDATE sync_runs SET status='failed', finished_at=?, "
+                                     "error='Application exited before synchronization completed' "
+                                     "WHERE status='running'", (utc_now(),)).rowcount
+            conn.execute("DELETE FROM adjusted_price_versions WHERE status='candidate' AND run_id IN "
+                         "(SELECT id FROM sync_runs WHERE status IN ('failed','superseded'))")
+            return recovered
 
     def check(self, *, current=True):
         conn = self._open("ro")
@@ -388,13 +395,17 @@ class Database:
                 source.close()
             temporary.unlink(missing_ok=True)
 
-    def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None) -> Path:
+    def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None, replace=False) -> Path:
         if type(keep) is not int or keep < 1:
             raise ValueError("keep must be positive")
         day = day or datetime.now(timezone.utc).date()
         directory = Path(directory).resolve() if directory else self.path.parent / "backups"
         path = directory / f"{self.path.stem}-daily-{day.isoformat()}.sqlite3"
-        if not path.exists():
+        if replace and path.exists():
+            candidate = directory / f".daily-candidate-{uuid4().hex}.sqlite3"
+            self.backup(candidate)
+            candidate.replace(path)
+        elif not path.exists():
             self.backup(path)
         else:
             Database(path, journal_mode="delete").check(current=False)

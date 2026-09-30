@@ -37,15 +37,23 @@ def _date(value):
     return result
 
 
-def _fetch_chip_report(code, section, session, report_override=None):
+def _fetch_chip_report(code, section, session, report_override=None, *, start_date=None, end_date=None):
     """Read every page; reject incomplete or changing pagination before caching."""
     report, code_field, date_field = REPORTS[section]
     report = report_override or report
     code = normalize_code(code)
+    filters = f'({code_field}="{code}")'
+    for bound, operator in ((start_date, ">="), (end_date, "<=")):
+        if bound is not None:
+            if date.fromisoformat(bound).isoformat() != bound:
+                raise ValueError("筹码日期必须为 YYYY-MM-DD")
+            filters += f"({date_field}{operator}'{bound}')"
+    if start_date and end_date and start_date > end_date:
+        raise ValueError("筹码请求日期范围颠倒")
     records, expected_count, expected_pages = [], None, None
     for page in range(1, 101):
         response = session.get(DATA_URL, params={
-            "reportName": report, "columns": "ALL", "filter": f'({code_field}="{code}")',
+            "reportName": report, "columns": "ALL", "filter": filters,
             "pageNumber": page, "pageSize": 500, "sortTypes": "-1",
             "sortColumns": date_field, "source": "WEB", "client": "WEB",
         }, headers={"Referer": "https://data.eastmoney.com/"}, timeout=20)
@@ -66,6 +74,9 @@ def _fetch_chip_report(code, section, session, report_override=None):
             raise ValueError("东方财富筹码分页发生变化或缺页，请重试")
         if any(not isinstance(row, dict) or row.get(code_field) != code for row in batch):
             raise ValueError("东方财富筹码数据股票代码不匹配")
+        if any((start_date and _date(row.get(date_field)) < start_date)
+               or (end_date and _date(row.get(date_field)) > end_date) for row in batch):
+            raise ValueError("东方财富未遵守筹码日期范围")
         records.extend(batch)
         if page == pages:
             if len(records) != count:

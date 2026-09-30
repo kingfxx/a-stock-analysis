@@ -6,6 +6,7 @@ import html
 import json
 import shutil
 import time
+import sqlite3
 import webbrowser
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,13 +19,18 @@ from plotly.offline import get_plotlyjs
 
 from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
 from .network import create_data_session
-from .storage import DEFAULT_DATABASE, Database, instance_lock
+from .storage import DEFAULT_DATABASE, Database, StorageError, instance_lock
+from .price_service import PriceService, PriceVersionUnavailable, month_closes
+from .price_projection import chip_prices, financial_prices, valuation_prices
+from .update_service import ChipService, instrument_id, sync_state, recently_checked
+from .storage import SyncKey
 from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
                     shareholder_price_snapshots)
-from .sources import (fetch_cash_flow_reports, fetch_daily_prices, fetch_financial_reports,
-                      fetch_monthly_prices, fetch_stock_name, normalize_code, normalize_report_dates)
-from .valuation import (fetch_dividend_events, fetch_dividend_yields, fetch_industry_snapshot, fetch_valuation_series,
-                        merge_adjusted_prices, merge_dividend_yields, monthly_valuation, valuation_summary)
+from .sources import (fetch_cash_flow_reports, fetch_financial_reports,
+                      fetch_stock_name, normalize_code, normalize_report_dates)
+from .valuation import (fetch_dividend_events, fetch_industry_snapshot, fetch_valuation_series,
+                        merge_adjusted_prices, merge_dividend_yields, monthly_valuation, valuation_summary,
+                        monthly_dividend_yields)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +38,7 @@ CACHE = ROOT / "data" / "fundamentals"
 VALUATION_CACHE = ROOT / "data" / "valuation"
 CHIP_CACHE = ROOT / "data" / "chips"
 DATABASE_PATH = DEFAULT_DATABASE
+_SERVICES, _SERVICE_LOCK = {}, Lock()
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
@@ -423,46 +430,91 @@ def _valuation_payload(data: dict) -> dict:
         "warnings": data.get("warnings", [])}
 
 
-def load_chips(code: str, section: str, refresh: bool = False) -> dict:
-    """Cache full raw histories independently; only the response is windowed."""
-    path = CHIP_CACHE / section / f"{code}.json"
-    old = _read_cache(path)
-    today = date.today().isoformat()
-    if old.get("updated_on") == today and old.get("basis") == CHIP_BASIS and not refresh:
-        return chip_payload(old, section)
-    try:
-        with create_data_session() as session:
-            records = fetch_chip_records(code, section, session)
-            prices = []
-            if section == "shareholders" and records:
-                dates = sorted(row["END_DATE"][:10] for row in records)
-                earliest = (date.fromisoformat(dates[0]) - timedelta(days=15)).isoformat()
-                daily = fetch_daily_prices(code, session, "", earliest, dates[-1])
-                if not daily:
-                    raise ValueError("腾讯未返回股东人数对应的未复权价格")
-                prices = shareholder_price_snapshots(records, daily)
-        fresh = chip_rows(records, section, prices)
-        old_rows = chip_rows(old.get("records", []), section, old.get("prices"))
-        if section == "shareholders" and old.get("basis") != CHIP_BASIS:
-            # Prototype caches used the detail table's price without a trading
-            # date. It is not comparable to the current 15-day snapshot rule.
-            old_rows = [{**row, "close": None} for row in old_rows]
-        missing = missing_chip_history(old_rows, fresh, section)
-        if missing:
-            raise ValueError(f"历史覆盖不足（{len(missing)} 个日期）")
-    except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
-        if old:
-            return chip_payload(_keep_old(old, f"筹码更新失败，保留原缓存：{exc}"), section)
-        raise ValueError(f"无法获取 {code} 的筹码数据：{exc}") from exc
-    data = {"code": code, "basis": CHIP_BASIS, "records": records,
-            "updated_on": today, "empty": not records, "warnings": []}
-    if section == "shareholders":
-        data["prices"] = prices
-    _save_cache(path, data)
-    return chip_payload(data, section)
+def services(*, initialized=False):
+    key = (str(Path(DATABASE_PATH).resolve()), str(CHIP_CACHE.resolve()))
+    with _SERVICE_LOCK:
+        if key not in _SERVICES:
+            db = Database(DATABASE_PATH)
+            if not initialized:
+                with instance_lock(db.path):
+                    db.initialize()
+            _SERVICES[key] = (ChipService(db, CHIP_CACHE), PriceService(db))
+        return _SERVICES[key]
 
 
-def load_chart_data(code: str, section: str, refresh: bool = False) -> dict:
+def fetch_daily_prices(code, session, adjust, earliest_date, latest_date):
+    """All production consumers share the same stored daily source history."""
+    prices = services()[1]
+    result = prices.ensure(code, adjust or "raw")
+    if result["warnings"]:
+        raise ValueError("；".join(result["warnings"]))
+    start = (date.fromisoformat(earliest_date) - timedelta(days=180)).isoformat()
+    end = min(date.today(), date.fromisoformat(latest_date) + timedelta(days=180)).isoformat()
+    return prices.read(code, adjust or "raw", start=start, end=end)
+
+
+def fetch_monthly_prices(code, session, adjust="qfq"):
+    prices = services()[1]
+    result = prices.ensure(code, adjust or "raw")
+    if result["warnings"]:
+        raise ValueError("；".join(result["warnings"]))
+    return month_closes(prices.read(code, adjust or "raw"))
+
+
+def fetch_dividend_yields(code, session):
+    # Dividend facts remain in their existing source path until P4.
+    events = fetch_dividend_events(code, session)
+    end = date.today()
+    start = (end - timedelta(days=3660)).isoformat()
+    return monthly_dividend_yields(fetch_daily_prices(code, session, "", start, end.isoformat()), events)
+
+
+def shared_projection(code, version=None, *, lease=False):
+    chips, prices = services()
+    version = prices.current_version(code) if version is None else version
+    raw = prices.read(code, "raw")
+    qfq = prices.read(code, "qfq", version=version or 0, lease=lease)
+    return version, raw, qfq
+
+
+def load_chips(code: str, section: str, refresh: bool = False, *, full=False, price_version=None) -> dict:
+    chips, prices = services()
+    data = chips.update(code, section, refresh=refresh, full=full)
+    version, raw, qfq = shared_projection(code, price_version, lease=True)
+    return {**chip_prices(data, section, raw, qfq, version),
+            "price_validated_at": prices.version_info(code, version).get("validated_at")}
+
+
+def price_bundle(code, *, refresh=False, full=False, version=None):
+    code = normalize_code(code)
+    chips, prices = services()
+    warnings = []
+    if version is None:
+        for adjustment in ("raw", "qfq"):
+            try:
+                warnings += prices.ensure(code, adjustment, refresh=refresh, full=full)["warnings"]
+            except ValueError as exc:
+                warnings.append(str(exc))
+    version, raw, qfq = shared_projection(code, version, lease=True)
+    financial = _consumer_cache(CACHE / f"{code}.json", warnings)
+    if financial and financial.get("report_date_basis") != REPORT_DATE_BASIS:
+        financial = {**financial, "reports": normalize_report_dates(financial.get("reports", [])),
+                     "report_date_basis": REPORT_DATE_BASIS}
+    valuation = _consumer_cache(VALUATION_CACHE / f"{code}.json", warnings)
+    if not version:
+        warnings.append("共享前复权尚未就绪，财务和估值的已有价格快照暂按缓存展示。")
+    price_meta = prices.version_info(code, version)
+    holders = chip_prices(chips.cached(code, "shareholders"), "shareholders", raw, qfq, version)
+    financing = chip_prices(chips.cached(code, "financing"), "financing", raw, qfq, version)
+    for data in (holders, financing):
+        data["price_validated_at"] = price_meta.get("validated_at")
+    return dict(price_version=version, price_context=price_meta, warnings=warnings,
+                financial=_financial_payload(financial_prices(financial, raw, qfq) if version else financial),
+                valuation=_valuation_payload(valuation_prices(valuation, qfq) if version else valuation) if valuation else {"views": {}},
+                shareholders=holders, financing=financing)
+
+
+def load_chart_data(code: str, section: str, refresh: bool = False, *, price_version=None, full=False) -> dict:
     """Network work runs in separate requests; serialize writes to each stock cache."""
     code = normalize_code(code)
     if section not in {"financial", "dividends", "valuation", "shareholders", "financing"}:
@@ -470,7 +522,7 @@ def load_chart_data(code: str, section: str, refresh: bool = False) -> dict:
     lock_key = section + ":" + code
     with _DATA_LOCKS.setdefault(lock_key, Lock()):
         if section in {"shareholders", "financing"}:
-            return load_chips(code, section, refresh)
+            return load_chips(code, section, refresh, price_version=price_version, full=full)
         if section == "financial":
             data = load_stock(code, refresh)
         else:
@@ -481,23 +533,43 @@ def load_chart_data(code: str, section: str, refresh: bool = False) -> dict:
                 reports = data.get("reports", [])
                 if data.get("report_date_basis") != REPORT_DATE_BASIS:
                     reports = normalize_report_dates(reports)
-                return _valuation_payload(load_valuation(code, reports, refresh))
+                valuation = load_valuation(code, reports, refresh)
+                if price_version:
+                    _, _, qfq = shared_projection(code, price_version, lease=True)
+                    valuation = valuation_prices(valuation, qfq)
+                return {**_valuation_payload(valuation), "price_version": price_version}
             events, warnings = load_dividends(data, refresh)
             data = _read_cache(CACHE / f"{code}.json") or data
             data = {**data, "dividend_events": events,
                     "warnings": data.get("warnings", []) + warnings}
-        return {**_financial_payload(data), "cached_stocks": cached_stocks()}
+        if price_version:
+            _, raw, qfq = shared_projection(code, price_version, lease=True)
+            data = financial_prices(data, raw, qfq)
+        return {**_financial_payload(data), "cached_stocks": cached_stocks(), "price_version": price_version}
+
+
+def _consumer_cache(path, warnings):
+    """One damaged legacy consumer must not hide independent SQLite facts."""
+    try:
+        data = _read_cache(path)
+        if not isinstance(data, dict):
+            raise ValueError("缓存不是对象")
+        return data
+    except (ValueError, OSError) as exc:
+        warnings.append(f"{path.parent.name} 缓存不可用，原文件保留：{exc}")
+        return {}
 
 
 def render_page(code: str, refresh: bool) -> str:
     """Return cached charts immediately, without making any external requests."""
     payload = {"code": code, "views": {}, "warnings": [], "valuation": {"views": {}},
                "loading": {"financial": True, "dividends": True, "valuation": True},
-               "refresh_requested": refresh}
+               "refresh_requested": refresh, "price_version": None, "price_needs_update": True}
+    cache_warnings = []
     try:
         code = normalize_code(code)
-        data = _read_cache(CACHE / f"{code}.json")
-        valuation = _read_cache(VALUATION_CACHE / f"{code}.json")
+        data = _consumer_cache(CACHE / f"{code}.json", cache_warnings)
+        valuation = _consumer_cache(VALUATION_CACHE / f"{code}.json", cache_warnings)
         payload.update(_financial_payload(data))
         payload["valuation"] = _valuation_payload(valuation)
         payload["loading"] = {"financial": _needs_financial(data),
@@ -505,12 +577,38 @@ def render_page(code: str, refresh: bool) -> str:
                               "valuation": not valuation
                               or valuation.get("updated_on") != date.today().isoformat()
                               or valuation.get("basis") != VALUATION_BASIS}
+        payload["price_version"] = None
+        payload["price_needs_update"] = True
+        raw, qfq, sql_chips = [], [], None
+        if Path(DATABASE_PATH).exists():
+            sql_chips, price_service = services()
+            version, raw, qfq = shared_projection(code)
+            payload["price_version"] = version
+            # Read-only inspection: a page visit never creates stocks or leases.
+            identity = instrument_id(sql_chips.db, code)
+            if identity:
+                payload["price_needs_update"] = any(not recently_checked(sync_state(sql_chips.db,
+                    SyncKey(identity, dataset, "tencent", adjustment))) for dataset, adjustment in
+                    (("prices_raw", "raw"), ("prices_adjusted", "qfq")))
+            normalized = {**data, "reports": normalize_report_dates(data.get("reports", [])),
+                          "report_date_basis": REPORT_DATE_BASIS} if data else {}
+            if version:
+                payload.update(_financial_payload(financial_prices(normalized, raw, qfq)))
+                payload["valuation"] = _valuation_payload(valuation_prices(valuation, qfq)) if valuation else {"views": {}}
         for section in ("shareholders", "financing"):
-            chips = _read_cache(CHIP_CACHE / section / f"{code}.json")
-            payload[section] = chip_payload(chips, section)
-            payload["loading"][section] = (not chips or chips.get("updated_on") != date.today().isoformat()
-                                            or chips.get("basis") != CHIP_BASIS)
-        error = ""
+            cached = sql_chips.cached(code, section) if sql_chips else {}
+            if cached.get("stored_count") or cached.get("empty"):
+                payload[section] = chip_prices(cached, section, raw, qfq, payload["price_version"])
+                payload["loading"][section] = cached.get("needs_update", True)
+            else:
+                try:
+                    chips = _read_cache(CHIP_CACHE / section / f"{code}.json")
+                    fallback = chip_payload(chips, section)
+                except (ValueError, KeyError, TypeError, OSError) as exc:
+                    chips, fallback = {}, {"rows": [], "warnings": [f"旧缓存不可用：{exc}"]}
+                payload[section] = chip_prices(fallback, section, raw, qfq, payload["price_version"])
+                payload["loading"][section] = bool(chips) or not cached.get("empty")
+        error = "；".join(cache_warnings)
     except (ValueError, KeyError, json.JSONDecodeError) as exc:
         error = str(exc)
     payload["cached_stocks"] = cached_stocks()
@@ -533,13 +631,22 @@ class Handler(BaseHTTPRequestHandler):
             body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
             content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/api/financial", "/api/dividends", "/api/valuation",
-                             "/api/shareholders", "/api/financing"}:
+                             "/api/shareholders", "/api/financing", "/api/prices"}:
             query = parse_qs(parsed.query)
             try:
-                data = load_chart_data(query.get("code", ["601919"])[0],
-                                       parsed.path.rsplit("/", 1)[-1],
-                                       query.get("refresh") == ["1"])
-            except (requests.RequestException, ValueError, KeyError, TypeError, OSError) as exc:
+                code = query.get("code", ["601919"])[0]
+                version_key = "version" if parsed.path == "/api/prices" else "price_version"
+                version = int(query[version_key][0]) if version_key in query else None
+                if version is not None and version < 0:
+                    raise ValueError("价格版本无效")
+                if parsed.path == "/api/prices":
+                    data = price_bundle(code, refresh=query.get("refresh") == ["1"], full=query.get("full") == ["1"], version=version)
+                else:
+                    data = load_chart_data(code, parsed.path.rsplit("/", 1)[-1], query.get("refresh") == ["1"],
+                                           price_version=version, full=query.get("full") == ["1"])
+            except PriceVersionUnavailable as exc:
+                status, data = 409, {"error": str(exc), "price_version_expired": True}
+            except (requests.RequestException, ValueError, KeyError, TypeError, OSError, StorageError, sqlite3.DatabaseError) as exc:
                 status = 503
                 data = {"error": str(exc)}
             body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8")
@@ -559,7 +666,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(port: int = 8765, open_browser: bool = False):
-    # P1 initializes infrastructure only. Business loaders still read/write JSON.
+    # Chip facts migrate independently; financial/valuation JSON remains until P4.
     with instance_lock(DATABASE_PATH):
         address = ("127.0.0.1", port)
         server = ThreadingHTTPServer(address, Handler)
@@ -568,6 +675,13 @@ def serve(port: int = 8765, open_browser: bool = False):
             runtime = db.initialize()
             db.check()
             recovered = db.recover_interrupted_runs()
+            chips, _ = services(initialized=True)
+            for section in ("financing", "shareholders"):
+                for path in sorted((CHIP_CACHE / section).glob("*.json")):
+                    try:
+                        chips.import_legacy(normalize_code(path.stem), section)
+                    except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
+                        print(f"{path.name} {section} 迁移未完成，原文件保留：{exc}", flush=True)
             db.daily_backup()
             print(f"SQLite {runtime['sqlite_version']} / {runtime['journal_mode']} / "
                   f"结构版本 {runtime['schema_version']}；恢复中断任务 {recovered} 个", flush=True)

@@ -237,3 +237,58 @@ def test_live_data_failure_returns_json_error_without_affecting_page(http_server
     assert "source unavailable" in json.load(failure.value)["error"]
     with urlopen(http_server + "/?code=601600", timeout=5) as response:
         assert payload(response.read().decode("utf-8"))["views"] == {}
+
+
+def test_live_shared_price_context_pins_all_consumers_and_rejects_missing_version(http_server):
+    chips, prices = server.services()
+    days = ["2026-01-05", "2026-06-30", "2026-09-29"]
+    rows = [dict(date=day, open=20, close=21, high=22, low=19, volume=100,
+                 raw=[day,"20","21","22","19","100"]) for day in days]
+    prices.fetcher = lambda code, adjustment, start, end: [r for r in rows if start <= r["date"] <= end]
+    prices.ensure("601600", "raw")
+    version = prices.ensure("601600")["version"]
+    stock_data = stock()
+    stock_data["reports"][0]["publish_date"] = days[0]
+    (server.CACHE / "601600.json").write_text(json.dumps(stock_data), encoding="utf-8")
+    (server.VALUATION_CACHE / "601600.json").write_text(json.dumps({
+        "rows":[{"date":"2026-06-30","pe":9}],"basis":server.VALUATION_BASIS,
+        "updated_on":server.date.today().isoformat()}), encoding="utf-8")
+    chips.fetcher = lambda code, section, source, **kw: (
+        [dict(SCODE=code,DATE=days[-1],RZYE=100,SPJ=21)] if section == "financing" else
+        [dict(SECURITY_CODE=code,END_DATE=days[1],HOLDER_TOTAL_NUM=100)])
+    for section in ("financing", "shareholders"):
+        chips.update("601600", section)
+    # Publish a different complete generation, then request the earlier pinned one.
+    prices.fetcher = lambda *a: [dict(r,open=-10,close=-9,high=-8,low=-11,
+                                    raw=[r["date"],"-10","-9","-8","-11","100"]) for r in rows]
+    current = prices.ensure("601600", full=True)["version"]
+    assert current != version
+    with urlopen(http_server + f"/api/prices?code=601600&version={version}") as response:
+        result = json.load(response)
+    assert result["price_version"] == version
+    assert result["financial"]["views"]["year"][0]["qfq_price"] == 21
+    assert result["valuation"]["views"]["10"]["pe"]["rows"][0]["qfq_close"] == 21
+    assert result["shareholders"]["price_version"] == version
+    assert result["financing"]["rows"][0]["qfq_close"] == 21
+    for section in ("financial", "valuation", "shareholders", "financing"):
+        with urlopen(http_server + f"/api/{section}?code=601600&price_version={version}") as response:
+            assert json.load(response)["price_version"] == version
+    with pytest.raises(HTTPError) as failure:
+        urlopen(http_server + "/api/prices?code=601600&version=999999")
+    assert failure.value.code == 409
+    assert json.load(failure.value)["price_version_expired"] is True
+
+
+def test_bad_financial_json_does_not_hide_sqlite_chip_facts(cache):
+    chips, _ = server.services()
+    chips.fetcher = lambda code, section, source, **kw: [dict(SCODE=code,DATE="2026-09-29",RZYE=100,SPJ=20)]
+    chips.update("601600", "financing")
+    path = server.CACHE / "601600.json"
+    path.write_text("broken JSON", encoding="utf-8")
+    page = server.render_page("601600", False)
+    assert payload(page)["financing"]["stored_count"] == 1
+    assert "fundamentals 缓存不可用" in page
+    bundle = server.price_bundle("601600", version=0)
+    assert bundle["financing"]["stored_count"] == 1
+    assert bundle["warnings"]
+    assert path.read_text(encoding="utf-8") == "broken JSON"

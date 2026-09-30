@@ -9,11 +9,11 @@ assert.ok(start >= 0, 'The page must support background chart loading');
 const source = page.slice(start, page.lastIndexOf("  if (typeof Plotly !== 'undefined') { render(); renderValuation(); }"));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function setup(loading, views = {quarter:[{profit:10}]}) {
+function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
   const pending = new Map(), elements = new Map(), rendered = [];
   const context = {
     state: {code:'601600', views, valuation:{views:{old:true}}, loading,
-      warnings:[], cached_stocks:[]},
+      warnings:[], cached_stocks:[], ...extra},
     error: {textContent:'', classList:{remove() {}}},
     Plotly: {}, render: () => rendered.push('financial'),
     renderValuation: () => rendered.push('valuation'), renderChips: section => rendered.push(section), renderCachedStocks() {},
@@ -27,10 +27,10 @@ function setup(loading, views = {quarter:[{profit:10}]}) {
   };
   vm.createContext(context);
   vm.runInContext(source, context);
-  function respond(section, data, ok = true) {
+  function respond(section, data, ok = true, status = ok ? 200 : 503) {
     const key = [...pending.keys()].find(url => url.includes('/api/' + section));
     assert.ok(key, 'Expected a request for ' + section);
-    pending.get(key)({ok, json:async () => data});
+    pending.get(key)({ok, status, json:async () => data});
     pending.delete(key);
   }
   return {context, pending, elements, rendered, respond};
@@ -93,5 +93,61 @@ function setup(loading, views = {quarter:[{profit:10}]}) {
   fixture.respond('financial', {error:'offline'}, false);
   await completion;
   assert.equal(fixture.context.state.financing.stored_count, 300);
+
+  // Facts remain independently visible while every price consumer waits for one bundle.
+  fixture = setup({financial:false,dividends:false,valuation:false,shareholders:false,financing:false},
+    {quarter:[{period:'2026-06-30',profit:10,qfq_close:11}]}, {price_version:1,price_needs_update:true});
+  completion = fixture.context.loadDashboard(true);
+  assert.equal(fixture.pending.size, 4);
+  assert.ok([...fixture.pending.keys()].filter(url => !url.includes('/prices')).every(url => url.includes('price_version=1')));
+  fixture.respond('prices', {price_version:2,warnings:[]});
+  fixture.respond('financial', {error:'offline'}, false);
+  fixture.respond('shareholders', {price_version:1,rows:[{holders:120,qfq_close:11}],stored_count:1,warnings:[]});
+  fixture.respond('financing', {price_version:1,rows:[{margin_balance:100,qfq_close:11}],stored_count:1,warnings:[]});
+  await tick();
+  assert.equal(fixture.context.state.price_version, 1);
+  assert.equal(fixture.context.state.shareholders.rows[0].holders, 120);
+  assert.match([...fixture.pending.keys()][0], /version=2/);
+  const bundle = {price_version:2,financial:{views:{quarter:[{period:'2026-06-30',profit:10,qfq_close:22}]}},
+    valuation:{views:{'10':{pe:{rows:[{qfq_close:22}]}}}},
+    shareholders:{price_version:2,rows:[{holders:120,qfq_close:22}]},
+    financing:{price_version:2,rows:[{margin_balance:100,qfq_close:22}]}};
+  function verifyCoherent() {
+    const state = fixture.context.state;
+    assert.equal(state.price_version, 2);
+    assert.equal(state.views.quarter[0].qfq_close, 22);
+    assert.equal(state.valuation.views['10'].pe.rows[0].qfq_close, 22);
+    assert.equal(state.shareholders.price_version, 2);
+    assert.equal(state.financing.price_version, 2);
+  }
+  fixture.context.render = fixture.context.renderValuation = fixture.context.renderChips = verifyCoherent;
+  fixture.respond('prices', bundle);
+  await completion;
+  verifyCoherent();
+
+  // Expired contexts explicitly reload a checked generation instead of mixing versions.
+  fixture = setup({financial:false,dividends:false,valuation:false}, undefined,
+    {price_version:1,price_needs_update:false});
+  completion = fixture.context.loadDashboard();
+  await tick();
+  fixture.respond('prices', {error:'expired'}, false, 409);
+  await tick();
+  assert.ok([...fixture.pending.keys()][0].includes('/api/prices?code='));
+  assert.ok(![...fixture.pending.keys()][0].includes('&version='));
+  fixture.respond('prices', bundle);
+  await completion;
+  assert.equal(fixture.context.state.price_version, 2);
+
+  // Responses for a previous stock cannot overwrite the newly selected stock.
+  fixture = setup({financial:true,dividends:false,valuation:false}, undefined,
+    {price_version:1,price_needs_update:true});
+  completion = fixture.context.loadDashboard();
+  fixture.context.state.code = '000001';
+  fixture.respond('financial', {name:'previous stock',views:{quarter:[{profit:99}]}});
+  fixture.respond('prices', bundle);
+  await completion;
+  assert.equal(fixture.context.state.views.quarter[0].profit, 10);
+  assert.equal(fixture.context.state.price_version, 1);
+  assert.equal(fixture.pending.size, 0);
   console.log('Independent chart loading, failure retention and PS dependency passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

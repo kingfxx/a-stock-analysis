@@ -237,7 +237,7 @@
   </section>
   <div class="below">
     <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。新浪部分历史披露日期错位，按上一年同报告期记录校正；无法可靠推断则留空。股价取校正披露日或此前最近交易日的收盘价。相隔超过 15 天的价格不算披露日价格；若处于有前后交易记录的长间隔内，以空心圆点标出最近收盘参考值，与相邻价格点之间用虚线连接。悬停可查看实际交易日。</p></section>
-    <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的未复权及前复权价格来自腾讯日 K，只缓存每份报告对应的价格快照及长间隔参考点。市值为披露日价格×报告期末股本的估算值；缺少正式价格或股本时正式值留空。</p></section>
+    <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的不复权及前复权价格来自腾讯日 K。日线统一存储、供各图表复用，财务图按披露日期匹配价格快照及长间隔参考点。市值为披露日价格×报告期末股本的估算值；缺少正式价格或股本时正式值留空。</p></section>
   </div>
   <section class="panel valuation-panel" aria-label="估值与历史分位">
     <div class="panel-head">
@@ -279,31 +279,36 @@
   </section>
   <section class="chip-region" aria-label="筹码评估">
     <h2>筹码评估</h2>
+    <p id="prices-status" class="note" role="status" aria-live="polite"></p>
+    <button id="full-audit" type="button">全量核对历史数据</button>
     <p class="sub">对照股东人数、融资资金与股价变化，观察持有结构和杠杆资金的趋势。</p>
     <section class="panel chip-panel" aria-label="股东人数与股价趋势">
       <div class="panel-head">
-        <div><h3>股东人数与股价</h3><p>按股东人数实际更新频率采样 · 青色为股东人数，红色为未复权收盘价</p></div>
+        <div><h3>股东人数与股价</h3><p>按实际统计频率采样 · 青色为股东人数，红色为所选口径股价</p></div>
         <div class="valuation-controls"><label for="shareholders-range">时间范围</label>
           <select id="shareholders-range"><option value="all">全部时间</option><option value="10">最近 10 年</option><option value="5">最近 5 年</option></select>
+          <label for="shareholders-series">人数来源</label><select id="shareholders-series"></select>
+          <label for="shareholders-adjustment">股价口径</label><select id="shareholders-adjustment"><option value="qfq">前复权</option><option value="raw">不复权</option></select>
         </div>
       </div>
       <div id="shareholders-summary" class="chip-summary">等待股东人数数据…</div>
       <p id="shareholders-status" class="note" role="status" aria-live="polite"></p>
-      <div id="shareholders-chart" class="chip-chart" role="img" aria-label="股东人数与未复权股价双轴趋势图"></div>
-      <p class="note">横轴为股东人数统计截止日，不是公告日；悬停可查看公告日和实际价格日期。人数采用东方财富 F10 总股东户数口径，A/H 股公司不一定仅含 A 股股东。股价取腾讯未复权日 K 在截止日或此前最近交易日的收盘价，相隔超过 15 天时留空。股东人数不补成日度数据，连线仅用于对照趋势。</p>
+      <div id="shareholders-chart" class="chip-chart" role="img" aria-label="股东人数与股价双轴趋势图"></div>
+      <p class="note">横轴为统计截止日，公告日单独保留。总人数不一定仅含 A 股股东；不同来源/口径分别展示，未知口径不与总人数拼接。价格取统计日或此前最近交易日，相隔超过 15 天留空。前复权使用当前调整后的历史价格，可能为负值。</p>
       <p id="shareholders-note" class="note"></p>
     </section>
     <section class="panel chip-panel" aria-label="融资与股价趋势">
       <div class="panel-head">
-        <div><h3>融资与股价 · 最近一年</h3><p>按交易日展示 · 绿色为融资指标，红色为未复权收盘价</p></div>
+        <div><h3>融资与股价 · 最近一年</h3><p>按交易日展示 · 绿色为融资指标，红色为所选口径股价</p></div>
         <div class="valuation-controls"><label for="financing-metric">融资指标</label>
           <select id="financing-metric"><option value="margin_balance">融资余额</option><option value="total_balance">融资融券余额</option><option value="net_buy">融资净买入</option></select>
+          <label for="financing-adjustment">股价口径</label><select id="financing-adjustment"><option value="qfq">前复权</option><option value="raw">不复权</option></select>
         </div>
       </div>
       <div id="financing-summary" class="chip-summary">等待融资数据…</div>
       <p id="financing-status" class="note" role="status" aria-live="polite"></p>
-      <div id="financing-chart" class="chip-chart" role="img" aria-label="最近一年融资与未复权股价双轴趋势图"></div>
-      <p class="note">融资余额是尚未偿还的融资金额；融资融券余额包含融券余额；融资净买入＝融资买入额－融资偿还额，可为负。金额显示为亿元，原始记录按日保存、金额保留元。股价为同日未复权收盘价，除权除息可能造成跳变。</p>
+      <div id="financing-chart" class="chip-chart" role="img" aria-label="最近一年融资与股价双轴趋势图"></div>
+      <p class="note">融资余额是尚未偿还的融资金额，融资融券余额包含融券余额；净买入可为负。日度历史保留原始单位元，图表显示亿元。价格与同一交易日对齐，默认前复权，可切换不复权。</p>
       <p id="financing-note" class="note"></p>
     </section>
   </section>
@@ -610,7 +615,10 @@
       valuationMetric, valuationRange:valuationRange.value,
       valuationPriceOverlay:valuationPriceOverlay.getAttribute('aria-pressed') === 'true',
       shareholdersRange:document.getElementById('shareholders-range').value,
-      financingMetric:document.getElementById('financing-metric').value
+      financingMetric:document.getElementById('financing-metric').value,
+      shareholdersSeries:document.getElementById('shareholders-series').value,
+      shareholdersAdjustment:document.getElementById('shareholders-adjustment').value,
+      financingAdjustment:document.getElementById('financing-adjustment').value
     };
     try { sessionStorage.setItem(selectionsKey, JSON.stringify(selections)); }
     catch { /* Storage may be unavailable; the page still works with defaults. */ }
@@ -697,10 +705,31 @@
   const financingMetricSelect = document.getElementById('financing-metric');
   if (['all','10','5'].includes(savedSelections.shareholdersRange)) shareholdersRange.value = savedSelections.shareholdersRange;
   if (Object.hasOwn(financingNames, savedSelections.financingMetric)) financingMetricSelect.value = savedSelections.financingMetric;
+  for (const section of ['shareholders','financing']) {
+    const selection = savedSelections[section + 'Adjustment'];
+    if (['raw','qfq'].includes(selection)) document.getElementById(section + '-adjustment').value = selection;
+    document.getElementById(section + '-adjustment').addEventListener('change', () => { saveSelections(); renderChips(section); });
+  }
+  const holderSeriesSelect = document.getElementById('shareholders-series');
+  let holderSeriesExplicit = Boolean(savedSelections.shareholdersSeries);
+  holderSeriesSelect.addEventListener('change', () => { holderSeriesExplicit = true; saveSelections(); renderChips('shareholders'); });
   function renderChips(section) {
     const financing = section === 'financing';
     const data = state[section] || {};
     let rows = data.rows || [];
+    if (!financing && data.series?.length) {
+      const selected = holderSeriesExplicit ? holderSeriesSelect.value || savedSelections.shareholdersSeries : data.series[0].id;
+      holderSeriesSelect.replaceChildren(...data.series.map(series => {
+        const option = document.createElement('option'); option.value = series.id;
+        const scope = {total:'总人数',a_share:'A 股人数',unknown:'口径未知'}[series.scope];
+        option.textContent = `${scope} · ${series.source.includes('legacy:') ? '旧缓存' : series.source.endsWith('DET') ? '明细' : 'F10'}`;
+        return option;
+      }));
+      holderSeriesSelect.value = data.series.some(s => s.id === selected) ? selected : data.series[0].id;
+      rows = data.series.find(s => s.id === holderSeriesSelect.value).rows;
+    }
+    const adjustment = document.getElementById(section + '-adjustment').value || 'qfq';
+    const priceName = adjustment === 'qfq' ? '前复权收盘价' : '不复权收盘价';
     if (!financing && shareholdersRange.value !== 'all') {
       const cutoff = new Date();
       cutoff.setFullYear(cutoff.getFullYear() - Number(shareholdersRange.value));
@@ -711,14 +740,14 @@
     const name = financing ? financingNames[metric] : '股东人数';
     const divisor = financing ? 1e8 : 1e4;
     const unit = financing ? '亿元' : '万户';
-    const latest = data.latest;
+    const latest = financing ? rows.find(row => row.date === data.latest?.date) || data.latest : rows.at(-1);
     const latestValue = latest?.[metric];
     const valueText = latestValue == null ? '—' : financing ? (latestValue/divisor).toFixed(2) + ' 亿元' : Number(latestValue).toLocaleString('zh-CN') + ' 户';
     document.getElementById(section + '-summary').textContent = latest
-      ? `${latest.date} · ${name} ${valueText} · 收盘价 ${latest.close == null ? '—' : latest.close.toFixed(2) + ' 元/股'}`
+      ? `${latest.date} · ${name} ${valueText} · ${priceName} ${latest[adjustment + '_close'] == null ? '—' : latest[adjustment + '_close'].toFixed(2) + ' 元/股'}`
       : data.empty ? (financing ? '数据源暂无该股票的融资记录。' : '数据源暂无该股票的股东人数记录。') : '暂无可用数据';
     document.getElementById(section + '-note').textContent =
-      `来源：东方财富 · 本地更新 ${data.updated_on || '—'} · 已保存 ${data.stored_count || 0} 条${financing ? '日度' : '股东人数'}记录，当前显示 ${rows.length} 条。` + (data.warnings || []).join(' ');
+      `来源：东方财富 · 本地更新 ${data.updated_on || '—'} · 已保存 ${data.stored_count || 0} 条${financing ? '日度' : '各来源'}记录，当前显示 ${rows.length} 条 · 股价：${priceName} · 前复权版本 ${data.price_version || '待加载'}。` + (data.warnings || []).join(' ');
     const dates = rows.map(row => row.date);
     const traces = [{type:financing && metric === 'net_buy' ? 'bar' : 'scatter',
       mode:financing ? 'lines' : 'lines+markers',name,x:dates,
@@ -728,11 +757,11 @@
       marker:{color:financing ? '#8ecb49' : '#38c4dc',size:5},
       hovertemplate:financing ? `%{x|%Y-%m-%d}<br>${name}：%{y:.3f} 亿元<extra></extra>`
         : '统计截止日：%{x|%Y-%m-%d}<br>股东人数：%{customdata[1]:,} 户<br>公告日：%{customdata[0]}<extra></extra>'},
-      {type:'scatter',mode:financing ? 'lines' : 'lines+markers',name:'未复权收盘价',
-       x:dates,y:rows.map(row => row.close),yaxis:'y2',connectgaps:false,
-       customdata:rows.map(row => row.price_date || row.date),
+      {type:'scatter',mode:financing ? 'lines' : 'lines+markers',name:priceName,
+       x:dates,y:rows.map(row => row[adjustment + '_close'] ?? null),yaxis:'y2',connectgaps:false,
+       customdata:rows.map(row => row[adjustment + '_price_date'] || '无价格'),
        line:{color:'#ed8180',width:2},marker:{size:4},
-       hovertemplate:'%{x|%Y-%m-%d}<br>未复权收盘价：%{y:.2f} 元/股<br>价格日期：%{customdata}<extra></extra>'}];
+       hovertemplate:`%{x|%Y-%m-%d}<br>${priceName}：%{y:.2f} 元/股<br>价格日期：%{customdata}<extra></extra>`}];
     Plotly.react(section + '-chart', traces, {
       paper_bgcolor:'#1a2227',plot_bgcolor:'#1a2227',font:{color:'#edf4f4'},
       margin:{l:80,r:80,t:25,b:80},hovermode:'x unified',
@@ -757,7 +786,17 @@
   function sectionStatus(section, message) {
     document.getElementById(section + '-status').textContent = sectionNames[section] + '：' + message;
   }
-  function applyFinancial(data) {
+  function applyFinancial(data, coherent = false, renderCharts = true) {
+    if (!coherent && Object.hasOwn(state, 'price_version') && !state.price_version && data.views) {
+      // Keep legacy prices visible until a checked shared generation is available.
+      for (const [period, rows] of Object.entries(data.views)) {
+        const previous = new Map((state.views?.[period] || []).map(row => [row.period,row]));
+        for (const row of rows) {
+          for (const key of Object.keys(row).filter(key => key.startsWith('qfq_'))) delete row[key];
+          for (const [key,value] of Object.entries(previous.get(row.period) || {})) if (key.startsWith('qfq_')) row[key] = value;
+        }
+      }
+    }
     for (const key of ['name','updated_at','views','warnings','cached_stocks']) {
       if (Object.hasOwn(data, key)) state[key] = data[key];
     }
@@ -767,20 +806,32 @@
     state.loading.dividends = Boolean(data.needs_dividends);
     renderCachedStocks();
     renderWarnings();
-    if (typeof Plotly !== 'undefined') render();
+    if (renderCharts && typeof Plotly !== 'undefined') render();
   }
-  async function requestSection(section, force) {
+  async function requestSection(section, force, full = false) {
+    const requestCode = state.code;
     const hasCache = section === 'valuation'
       ? Object.keys(state.valuation?.views || {}).length > 0
       : ['shareholders','financing'].includes(section) ? Boolean(state[section]?.stored_count)
       : Object.keys(state.views || {}).length > 0;
     sectionStatus(section, hasCache ? '显示已有数据，后台更新中…' : '正在加载…');
     try {
-      const response = await fetch('/api/' + section + '?code=' + encodeURIComponent(state.code) +
-        (force ? '&refresh=1' : ''), {cache:'no-store'});
+      const response = await fetch('/api/' + section + '?code=' + encodeURIComponent(requestCode) +
+        (force ? '&refresh=1' : '') + (full ? '&full=1' : '') +
+        (Object.hasOwn(state, 'price_version') ? '&price_version=' + (state.price_version || 0) : ''), {cache:'no-store'});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '请求失败');
+      if (state.code !== requestCode) return false;
       if (section === 'valuation') {
+        if (Object.hasOwn(state, 'price_version') && !state.price_version) {
+          for (const [years, metrics] of Object.entries(data.views || {})) for (const [metric, summary] of Object.entries(metrics)) {
+            const previous = new Map((state.valuation?.views?.[years]?.[metric]?.rows || []).map(row => [row.date.slice(0,7),row]));
+            for (const row of summary.rows || []) {
+              for (const key of Object.keys(row).filter(key => key.startsWith('qfq_'))) delete row[key];
+              for (const [key,value] of Object.entries(previous.get(row.date.slice(0,7)) || {})) if (key.startsWith('qfq_')) row[key] = value;
+            }
+          }
+        }
         state.valuation = data;
         if (typeof Plotly !== 'undefined') renderValuation();
       } else if (['shareholders','financing'].includes(section)) {
@@ -793,16 +844,45 @@
       sectionStatus(section, data.warnings?.length ? '更新未全部完成，已显示可用数据，请留意提示。' : '数据已就绪');
       return true;
     } catch (exception) {
+      if (state.code !== requestCode) return false;
       sectionStatus(section, '加载失败，' + (hasCache ? '保留已有数据。' : '可点击“刷新数据”重试。') + ' ' + exception.message);
       return false;
     }
   }
-  async function loadDashboard(force = false) {
+  async function requestPrices(force, full, version) {
+    const requestCode = state.code;
+    const versionQuery = version === undefined ? '' : '&version=' + version;
+    const response = await fetch('/api/prices?code=' + encodeURIComponent(requestCode) + versionQuery +
+      (force ? '&refresh=1' : '') + (full ? '&full=1' : ''), {cache:'no-store'});
+    const data = await response.json();
+    if (state.code !== requestCode) return null;
+    if (response.status === 409 && version !== undefined) return requestPrices(false, false);
+    if (!response.ok) throw new Error(data.error || '价格获取失败');
+    return state.code === requestCode ? data : null;
+  }
+  function applyPriceBundle(data) {
+    if (!data) return;
+    state.price_version = data.price_version;
+    if (Object.keys(data.financial?.views || {}).length) applyFinancial(data.financial, true, false);
+    if (Object.keys(data.valuation?.views || {}).length) state.valuation = data.valuation;
+    for (const section of ['shareholders','financing']) {
+      state[section] = {...data[section], warnings:[...new Set([...(state[section]?.warnings || []), ...(data[section]?.warnings || [])])]};
+    }
+    if (typeof Plotly !== 'undefined') { render(); renderValuation(); renderChips('shareholders'); renderChips('financing'); }
+  }
+  async function loadDashboard(force = false, full = false) {
     if (dashboardUpdating) return;
     dashboardUpdating = true;
     const refresh = document.getElementById('refresh');
     refresh.setAttribute('aria-disabled', 'true');
     refresh.textContent = '更新中…';
+    const coordinated = Object.hasOwn(state, 'price_version');
+    const requestCode = state.code;
+    const prices = coordinated && (force || state.price_needs_update)
+      ? requestPrices(force, full).catch(exception => {
+        if (state.code === requestCode) document.getElementById('prices-status').textContent = '股价更新失败，保留已有版本。' + exception.message;
+        return null;
+      }) : Promise.resolve(null);
     const hasReports = Boolean(state.views?.quarter?.length);
     const needsFinancial = force || state.loading.financial;
     const needsValuation = force || state.loading.valuation;
@@ -820,8 +900,19 @@
         sectionStatus('valuation', '财务加载失败，保留已有数据');
       });
     const chips = ['shareholders','financing'].map(section => force || state.loading[section]
-      ? requestSection(section, force) : Promise.resolve(sectionStatus(section, '已显示本地缓存')));
-    try { await Promise.all([financial, dividends, valuation, ...chips]); }
+      ? requestSection(section, force, full) : Promise.resolve(sectionStatus(section, '已显示本地缓存')));
+    try {
+      const results = await Promise.all([financial, dividends, valuation, ...chips, prices]);
+      if (coordinated && requestCode === state.code) {
+        const initial = results.at(-1);
+        const bundle = await requestPrices(false, false, initial?.price_version || state.price_version || 0);
+        applyPriceBundle(bundle);
+        document.getElementById('prices-status').textContent =
+          `共享股价 · 前复权版本 ${state.price_version || '暂无'}。` + [...new Set([...(initial?.warnings || []), ...(bundle?.warnings || [])])].join(' ');
+      }
+    } catch (exception) {
+      if (state.code === requestCode) document.getElementById('prices-status').textContent = '价格同步未完成，保留已展示数据。' + exception.message;
+    }
     finally {
       dashboardUpdating = false;
       refresh.setAttribute('aria-disabled', 'false');
@@ -832,6 +923,7 @@
     event.preventDefault();
     loadDashboard(true);
   });
+  document.getElementById('full-audit').addEventListener('click', () => loadDashboard(true, true));
   if (typeof Plotly !== 'undefined') { render(); renderValuation(); }
   if (typeof Plotly !== 'undefined') { renderChips('shareholders'); renderChips('financing'); }
   loadDashboard(Boolean(state.refresh_requested));

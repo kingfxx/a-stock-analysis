@@ -72,7 +72,7 @@ def test_schema_is_idempotent_preserves_text_codes_and_closes_connections(db):
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
         assert conn.execute("SELECT code, name FROM instruments").fetchone()[:] == ("000001", "平安银行")
-        assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == len(storage.MIGRATIONS)
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
             conn.execute("DELETE FROM instruments")
     with pytest.raises(sqlite3.ProgrammingError, match="closed"):
@@ -101,27 +101,30 @@ def test_unrelated_future_or_modified_migration_database_is_rejected(tmp_path, d
 
 
 def test_migration_checksums_survive_git_lf_crlf_checkout(db, tmp_path, monkeypatch):
-    sql = (Path(storage.__file__).parent / "migrations" / "001_initial.sql").read_text(encoding="utf-8")
+    original_directory = Path(storage.__file__).parent / "migrations"
     directory = tmp_path / "alternate-checkout" / "migrations"
     directory.mkdir(parents=True)
-    (directory / "001_initial.sql").write_bytes(sql.replace("\n", "\r\n").encode("utf-8"))
+    for _, name in storage.MIGRATIONS:
+        sql = (original_directory / name).read_text(encoding="utf-8")
+        (directory / name).write_bytes(sql.replace("\n", "\r\n").encode("utf-8"))
     monkeypatch.setattr(storage, "__file__", str(directory.parent / "storage.py"))
     with instance_lock(db.path):
         db.initialize()
-    assert db.check()["schema_version"] == 1
+    assert db.check()["schema_version"] == storage.MIGRATIONS[-1][0]
 
 
 def test_failed_schema_upgrade_rolls_back_ddl_and_keeps_pre_migration_backup(db, monkeypatch):
     original = list(storage._migration_files())
-    original.append((2, "002_fault.sql", "test-checksum",
+    baseline_version = original[-1][0]
+    original.append((baseline_version + 1, "fault.sql", "test-checksum",
                      "CREATE TABLE should_rollback(value TEXT);\nINSERT INTO nonexistent VALUES (1);\n"))
     monkeypatch.setattr(storage, "_migration_files", lambda: iter(original))
     with pytest.raises(sqlite3.OperationalError):
         with instance_lock(db.path):
             db.initialize()
     with sqlite3.connect(db.path) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
-        assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == baseline_version
+        assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == len(original) - 1
         assert conn.execute("SELECT name FROM sqlite_master WHERE name='should_rollback'").fetchone() is None
     backups = list((db.path.parent / "backups").glob("pre-migration-*.sqlite3"))
     assert len(backups) == 1
