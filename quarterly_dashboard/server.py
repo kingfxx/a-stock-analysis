@@ -454,10 +454,6 @@ def _p4_valuation_payload(data, *, raw=None, qfq=None, events=None):
     rows = merge_adjusted_prices(rows, month_closes(qfq)) if qfq else rows
     observation_rows = [dict(row) for row in data.get("observation_rows", [])]
     qfq_by_day = {row["date"]: row["close"] for row in qfq}
-    for row in observation_rows:
-        if row["date"] in qfq_by_day:
-            row["qfq_close"] = qfq_by_day[row["date"]]
-            row["qfq_close_date"] = row["date"]
     trading_dates = [row["date"] for row in raw]
     views = {}
     for years in (3, 5, 10):
@@ -472,6 +468,34 @@ def _p4_valuation_payload(data, *, raw=None, qfq=None, events=None):
         yield_summary["rows_by_frequency"] = {frequency: yield_summary["rows"] for frequency in ("day", "week", "month")}
         yield_summary["frequency"] = {3: "day", 5: "week", 10: "month"}[years]
         views[str(years)]["dividend_yield"] = yield_summary
+    if raw or qfq:
+        def price_period(day, frequency):
+            if frequency == "week":
+                day = date.fromisoformat(day)
+                return (day - timedelta(days=day.weekday())).isoformat()
+            return day[:7] if frequency == "month" else day
+        trading_periods = {frequency: {price_period(day, frequency) for day in trading_dates}
+                           for frequency in ("day", "week", "month")}
+        price_dates = sorted({row["date"] for row in raw + qfq if row["date"] <= date.today().isoformat()})
+        last_trades = {frequency: {price_period(day, frequency): day for day in price_dates}
+                       for frequency in ("day", "week", "month")}
+        for metrics in views.values():
+            for metric, summary in metrics.items():
+                for frequency, items in summary.get("rows_by_frequency", {}).items():
+                    projected = []
+                    for row in items:
+                        point = dict(row)
+                        period = price_period(row["date"], frequency)
+                        if metric != "dividend_yield":
+                            trade_day = last_trades[frequency].get(period)
+                            point["qfq_close"] = qfq_by_day.get(trade_day)
+                            point["qfq_close_date"] = trade_day if point["qfq_close"] is not None else None
+                        if trading_dates:
+                            point["qfq_no_trades"] = period not in trading_periods[frequency]
+                        projected.append(point)
+                    summary["rows_by_frequency"][frequency] = projected
+                if summary.get("frequency"):
+                    summary["rows"] = summary["rows_by_frequency"][summary["frequency"]]
     return {"views": views, "updated_on": data.get("updated_on"),
             "peer_count": data.get("industry", {}).get("peer_count"),
             "sampling_version": data.get("basis"),

@@ -677,7 +677,7 @@
     if (view?.sparse_hint) note.textContent += ' ' + view.sparse_hint;
     else if (frequency === 'day' && Number(years) > 3) note.textContent += ' 较早段可能只有稀疏观察；图中仅显示已有日期，不插值。';
     const showPrice = valuationPriceOverlay.getAttribute('aria-pressed') === 'true';
-    if (showPrice) note.textContent += ' 前复权股价取共享日 K 对应展示周期最后交易日收盘价，显示于右轴；缺失周期留空。';
+    if (showPrice) note.textContent += ' 前复权股价取共享日 K 对应展示周期最后交易日收盘价，显示于右轴；整周期休市时连接前后已有价格点，有交易但缺少股价的周期留空。';
     const xs = rows.map(row => row.date);
     const ys = rows.map(row => row[valuationMetric]);
     const observedDates = rows.map(row => row[valuationMetric + '_date'] || row.observation_date || row.date);
@@ -691,8 +691,9 @@
         x:[first,last],y:[view[key],view[key]],hoverinfo:'skip',
         line:{color,width:1.6,dash:'dash'}});
     }
+    const priceRows = rows.filter(row => row.qfq_close != null || !row.qfq_no_trades);
     if (showPrice) traces.push({type:'scatter',mode:'lines',name:'前复权股价',yaxis:'y2',
-      x:xs,y:rows.map(row => row.qfq_close ?? null),customdata:rows.map(row => [row.qfq_close_date || row.date]),
+      x:priceRows.map(row => row.date),y:priceRows.map(row => row.qfq_close ?? null),customdata:priceRows.map(row => [row.qfq_close_date || row.date]),
       connectgaps:false,line:{color:'#f4d35e',width:2.5},
       hovertemplate:'展示日期：%{x|%Y-%m-%d}<br>实际交易日：%{customdata[0]}<br>前复权股价：%{y:.2f} 元/股<extra></extra>'});
     Plotly.react('valuation-chart', traces, {

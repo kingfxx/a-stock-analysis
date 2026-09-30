@@ -421,7 +421,11 @@ def valuation_summary_observations(rows, metric, years, industry, *, as_of=None,
         display["day"] = [row for row in display["day"] if row["date"] in known_trade_dates]
     observed_dates = {row["date"] for row in valid}
     dense = bool(known_trade_dates) and known_trade_dates <= observed_dates
-    if dense:
+    if years == 5:
+        weekly_rows = [row for row in valid if not known_trade_dates or row["date"] in known_trade_dates]
+        sample = aggregate_valuation_rows(weekly_rows, "week", as_of=end.isoformat())
+        sample_frequency = "week"
+    elif dense:
         sample = [row for row in valid if row["date"] in known_trade_dates]
         sample_frequency = "trading_day"
     else:
@@ -436,7 +440,7 @@ def valuation_summary_observations(rows, metric, years, industry, *, as_of=None,
         "rows": display[frequency], "rows_by_frequency": display, "frequency": frequency,
         "count": len(values), "sample_count": len(values),
         "sample_frequency": sample_frequency, "percentile_frequency": sample_frequency,
-        "percentile_methodology_version": "uniform_trade_or_month_v1",
+        "percentile_methodology_version": "uniform_trade_week_or_month_v2",
         "sparse": not dense,
         "sparse_hint": ("较早段观测较稀疏；请以悬浮提示中的实际日期为准。" if not dense else None),
         "current": current,

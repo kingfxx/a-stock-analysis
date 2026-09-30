@@ -63,7 +63,41 @@ for (const [range, expectedDate] of [['3','2026-09-28'],['5','2026-09-29'],['10'
   assert.equal(ui.plots.at(-1).traces[0].x[0], expectedDate);
 }
 
+// Five-year weekly percentile samples stay fixed when the chart frequency changes.
+{
+  const weeklyUi = fixture('5');
+  weeklyUi.context.state.valuation.views['5'].pe.percentile_frequency = 'week';
+  weeklyUi.render();
+  const history = weeklyUi.element('valuation-history').textContent;
+  assert.match(history, /周样本（24 个）/);
+  for (const frequency of ['day','month','week']) {
+    weeklyUi.change('valuation-frequency', frequency);
+    assert.equal(weeklyUi.element('valuation-history').textContent, history);
+    assert.equal(weeklyUi.element('valuation-high').textContent, '30.00 倍');
+  }
+  assert.equal(weeklyUi.requests.length, 0);
+}
+
 // Manual changes use the in-memory response, preserve percentile values, and survive a reload.
+{
+  const priceUi = fixture('5');
+  priceUi.element('valuation-price-overlay').setAttribute('aria-pressed', 'true');
+  priceUi.context.state.valuation.views['5'].pe.rows_by_frequency.week = [
+    {date:'2026-02-15',pe:6,qfq_close:13.87,qfq_close_date:'2026-02-13',qfq_no_trades:false},
+    {date:'2026-02-22',pe:6,qfq_close:null,qfq_no_trades:true},
+    {date:'2026-03-01',pe:6,qfq_close:14.57,qfq_close_date:'2026-02-27',qfq_no_trades:false},
+    {date:'2026-03-08',pe:6,qfq_close:null,qfq_no_trades:false}
+  ];
+  priceUi.render();
+  const traces = priceUi.plots.at(-1).traces;
+  const price = traces.find(trace => trace.name === '前复权股价');
+  assert.deepEqual(Array.from(price.x), ['2026-02-15','2026-03-01','2026-03-08']);
+  assert.deepEqual(Array.from(price.y), [13.87,14.57,null]);
+  assert.equal(price.connectgaps, false);
+  assert.equal(price.customdata[0][0], '2026-02-13');
+  assert.equal(traces[0].x.length, 4);
+}
+
 let ui = fixture('3');
 ui.render();
 ui.change('valuation-frequency', 'month');
