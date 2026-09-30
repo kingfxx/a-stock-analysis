@@ -11,12 +11,12 @@
 | 新浪财报三表 | 利润表 `lrb`：累计营收、归母净利润、合并净利润、营业成本、利润总额、所得税费用、费用化利息及财务费用项下利息收入 | 收入／利润、同比、利润率、ROE、ROIC 的利润输入 | `sources.fetch_financial_reports()` |
 | 新浪财报三表 | 资产负债表 `fzb`：报告期末股本、归母净资产、合并所有者权益、货币资金及债务组成科目 | 披露日估算市值、ROE、ROIC、有息负债与净现金 | 同上，与利润表按报告期合并 |
 | 新浪财报三表 | 现金流量表 `llb`：累计经营活动现金流净额、购建长期资产支付的现金 | 经营现金流、CapEx、简化自由现金流 | `sources.fetch_cash_flow_reports()` |
-| 腾讯行情 | 股票名称；未复权、前复权日 K；前复权月 K | 缓存股票名称、财报披露日前股价快照、市值；估值图的股价叠加；股息率的价格分母 | `sources.fetch_stock_name()`、`fetch_daily_prices()`、`fetch_monthly_prices()` |
+| 腾讯行情 | 股票名称；未复权、前复权日 K | 共享日价服务供财务、估值和筹码取价；不复权价格供市值与股息率计算 | `sources.fetch_stock_name()`、`fetch_price_history()`、`price_service.PriceService` |
 | 百度股市通 | 历史 PE(TTM)、PB、总市值序列 | 估值图的月度 PE／PB；总市值用于计算 PS(TTM) | `valuation.fetch_valuation_series()` |
 | 东方财富分红数据 | 已实施分红的归属报告期、除权日、税前每股派息、数据源总股本 | 财务图的估算现金分红、年度悬停分红率，以及估值图近 12 个月股息率 | `valuation.fetch_dividend_events()`、`fetch_dividend_yields()` |
 | 东方财富同行估值 | 当前同行业 PE／PB／PS 均值、样本数量 | 当前同行对照，只有当前快照，不是历史行业曲线 | `valuation.fetch_industry_snapshot()` |
-| 东方财富 F10／股东户数详情 | 总股东户数、统计截止日、公告日；F10 优先，详情补充日期 | 股东人数趋势；价格另取腾讯日 K 并保留实际采样日期 | `chips.fetch_chip_records()`、`shareholder_price_snapshots()` |
-| 东方财富融资融券 | 全部可获取的日度原始字段，包括融资／融资融券余额、净买入及同日未复权收盘价 | 最近一年融资与股价对照 | `chips.fetch_chip_records()`、`chip_payload()` |
+| 东方财富 F10／股东户数详情 | 股东人数、统计截止日、公告日及人数口径 | 独立保存各来源事实；价格由共享服务匹配 | `chips._fetch_chip_report()`、`update_service.ChipService` |
+| 东方财富融资融券 | 日期范围内的日度原始字段，包括融资／融资融券余额、净买入 | 逐日增量入库；最近一年融资与共享价格对照 | `chips._fetch_chip_report()`、`update_service.ChipService` |
 
 代码中的接口地址：
 
@@ -39,7 +39,11 @@ PS(TTM)、ROIC、ROE、自由现金流、分红率、股息率及分位统计并
 |---|---|
 | [app.py](../app.py) | 命令行入口，解析 `--port`、`--open-browser`，启动本地服务。 |
 | [start_dashboard.bat](../start_dashboard.bat) | Windows 本机启动脚本，切换到仓库目录、运行 Python 并打开浏览器。 |
-| [quarterly_dashboard/server.py](../quarterly_dashboard/server.py) | 本地 HTTP 服务；生成缓存页面与五个后台接口；组织财报、分红、估值、股东人数及融资加载；缓存迁移、历史覆盖检查、备份及同股票写入协调。 |
+| [quarterly_dashboard/server.py](../quarterly_dashboard/server.py) | 本地 HTTP 服务；组织财报、分红、估值、筹码和 `/api/prices`，使各异步接口使用固定价格版本。 |
+| [quarterly_dashboard/storage.py](../quarterly_dashboard/storage.py) | SQLite 连接、两版结构迁移、同步事务、实例锁、完整性检查和一致备份。 |
+| [quarterly_dashboard/update_service.py](../quarterly_dashboard/update_service.py) | 融资及股东来源事实、旧筹码 JSON 导入、增量更新和失败保留。 |
+| [quarterly_dashboard/price_service.py](../quarterly_dashboard/price_service.py) | 共享日价抓取、重叠/锚点核对、前复权版本发布、租约与清理。 |
+| [quarterly_dashboard/price_projection.py](../quarterly_dashboard/price_projection.py) | 财务、估值和筹码图表的共享价格日期匹配。 |
 | [quarterly_dashboard/chips.py](../quarterly_dashboard/chips.py) | 筹码数据适配、完整分页检查、股东人数价格快照匹配、融资一年窗口和历史覆盖保护。 |
 | [quarterly_dashboard/network.py](../quarterly_dashboard/network.py) | 统一数据源 Session，默认直连，可通过 `DASHBOARD_USE_SYSTEM_PROXY=1` 启用系统／环境代理。 |
 | [quarterly_dashboard/sources.py](../quarterly_dashboard/sources.py) | 新浪／腾讯适配层：请求数据、解析数值、统一字段名称和利息费用符号、校正历史披露日期、分段获取行情。 |
@@ -53,19 +57,19 @@ PS(TTM)、ROIC、ROE、自由现金流、分红率、股息率及分位统计并
 | [experiments/source_probe/](../experiments/source_probe/) | 独立数据源实验，不是生产页面的调用路径。 |
 | [requirements.txt](../requirements.txt)、[.gitignore](../.gitignore)、[LICENSE](../LICENSE) | 运行依赖版本、本地数据忽略规则、项目许可证。 |
 
-页面的数据流为：`数据源适配 → 本地 JSON 缓存 → 财务／估值计算 → 页面 JSON → Plotly 图表`。财报字段映射的更改通常在 `sources.py`；计算公式的更改在 `core.py`／`roic.py`／`valuation.py`；图表显示与交互的更改在 `web/index.html`。
+页面的数据流为：`来源适配 → SQLite 筹码事实/共享价格 + 财务/分红/估值 JSON → 计算与日期匹配 → 页面 JSON → Plotly 图表`。筹码事实更新不等待取价；页面先读取缓存，再在后台协调价格版本和各模块响应。财报字段映射在 `sources.py`，计算公式在 `core.py`／`roic.py`／`valuation.py`，图表交互在 `web/index.html`。
 
 ## 数据存储方式
 
 ### 文件布局
 
-业务数据仍采用本地 UTF-8 JSON 文件，按六位股票代码分文件保存。P1 已接入 SQLite 结构初始化、事务与备份基础；业务表尚未迁入数据，正常图表加载继续使用 JSON。路径相对于仓库根目录，首次需要写入时创建。
+P2/P3 的融资、股东和共享日价使用 SQLite；财报、分红、估值及手工修正仍使用 UTF-8 JSON，留待 P4。路径相对于仓库根目录，首次需要写入时创建。
 
 ```text
 data/
-├── stock_analysis.sqlite3     # P1 数据库基础，业务迁移从 P2 开始
+├── stock_analysis.sqlite3     # 融资、股东、共享日价与同步状态
 ├── stock_analysis.sqlite3.lock # 应用实例锁；退出后 OS 自动释放
-├── backups/                  # SQLite 在线一致备份
+├── backups/                  # SQLite 在线一致备份及迁移前备份
 ├── fundamentals/
 │   ├── 300750.json             # 财报、名称、披露日价格快照、分红事件
 │   └── 300750.json.bak         # 该文件上一次成功写入前的版本
@@ -73,8 +77,8 @@ data/
 │   ├── 300750.json             # 已整理的月度估值及当前行业快照
 │   └── 300750.json.bak
 ├── chips/
-│   ├── shareholders/300750.json # 股东人数原始记录与统计日期价格快照
-│   └── financing/300750.json    # 全部原始日度融资数据，不截成一年
+│   ├── shareholders/300750.json # 旧缓存，仅供首次导入并保留原文件
+│   └── financing/300750.json    # 旧缓存，仅供首次导入并保留原文件
 └── verification/              # 人工核验的官方财报 PDF、截图等资料
 ```
 
@@ -97,7 +101,7 @@ data/
 | `*_basis` | 披露日、价格、财报字段、现金流、分红等处理口径的版本标记；程序据此识别需补齐或迁移的旧缓存。 |
 | `warnings` | 缓存中的获取／处理警告；部分失败警告只随当次响应返回，不一定落盘。 |
 
-日 K 在获取过程中用于匹配披露日前的收盘价，但财务缓存只留下正式快照和参考点，不保存完整日线。财务金额在计算时使用元，前端显示“亿元”时再除以 `1e8`。
+共享日 K 在 SQLite 中保存完整历史；财务 JSON 缓存只留下披露日前的正式快照和参考点。财务金额在计算时使用元，前端显示“亿元”时再除以 `1e8`。
 
 单季度、TTM、同比、ROE、ROIC、利润率、有息负债、净现金、分红金额及年度分红率在生成页面数据时计算，**不写入这份原始字段缓存**。两个 ROIC 扩展字段可以保存在报告记录中：`excess_cash` 为期末超额现金，`non_operating_adjustments_ytd` 为累计税前非经营性调整；自动迁移及手动刷新会保留已有值。JSON 的 `null` 对应 Python `None`，表示未知，不能当作零。
 
@@ -114,28 +118,47 @@ data/
 
 PE／PB／PS 的单位为倍，股息率存百分数（例如 `3.5` 表示 `3.5%`），股价为元／股。百度总市值按亿元转为元后计算 PS；当前月度缓存不保留该总市值输入序列。完整日线和原始接口响应也不写入该文件。历史分位数及摘要在读取月度缓存后按所选年限重新计算。
 
-### 筹码缓存：`data/chips/<类型>/<代码>.json`
+### 筹码事实与旧缓存
 
-`shareholders` 和 `financing` 分别保存股东人数及日度融资历史。`records[]` 保留接口原始记录与单位；股东人数另有 `prices[]` 保存统计截止日、实际价格日期及未复权收盘价。`code`、`basis`、`updated_on`、`empty`、`warnings` 记录代码、口径、更新日期与状态。
+`data/chips/<类型>/<代码>.json` 在迁移后保留原样，并按路径和哈希幂等导入 SQLite；正常筹码读写不再使用它们。导入前另存原文件副本和数据库备份。
 
-融资初次及更新均拉取全部分页，原始历史不按展示窗口截断。`chip_payload()` 仅将响应中的融资记录筛选为当前日期前 365 天，包含实际交易日期，不按月采样、不补零。股东人数按统计日期显示，记录公告日期；F10 总股东户数不能一概视为 A 股户数。腾讯价格匹配取截止日或此前最多 15 天的最近交易日，不用 F10 `PRICE` 替代。详细字段见 [README](../README.md#筹码数据与存储)。
+`financing_daily` 按来源、股票、交易日保留完整历史；30 个自然日回看窗口 UPSERT，展示查询仅取最近 365 天。`shareholder_observations` 保存统计日、公告日、来源和人数口径，不把不同口径混为一条曲线。价格来自共享日价服务；股东取统计日或之前最多 15 天的最近交易日。详细字段见 [README](../README.md#筹码数据与存储)。
 
-`/api/shareholders` 与 `/api/financing` 独立于财务／估值接口，可以在财报失败时继续加载。两份缓存同日复用、跨日更新，手动刷新强制重新取数；覆盖检查和 `.json.bak` 规则与其他缓存相同。首次无记录仅在接口明确返回无数据时保存空状态，网络或分页错误不会记作无数据。
+`/api/shareholders` 与 `/api/financing` 独立更新事实，失败保留旧记录；首次明确无数据才保存空状态。旧 JSON 不再日常改写。可选字段缺失时沿用已验证值及来源记录，来源明确置空时保存未知；融资历史缺口不被当作删除。
 
 ### 加载、更新与备份
 
-1. **打开或切换股票**：根页面和“已缓存股票”列表只读本地文件，不等待外部网络；先显示已有数据。
+1. **打开或切换股票**：根页面从 JSON 与 SQLite 读取已有数据，不等待外部网络；先显示已有图表。
 2. **后台补齐**：首次查询或口径版本落后时，`/api/financial?code=<代码>` 加载／迁移财报和必要价格。旧财报字段补齐通常只重取相关报表，不重抓价格；披露日期或价格口径迁移需要重新匹配价格。
 3. **分红**：`/api/dividends?code=<代码>` 独立补充已实施分红，写回财务缓存。已有有效分红缓存通常直接复用；缺少或空分红会重试。财务图无需等待它即可显示。
-4. **估值**：`/api/valuation?code=<代码>` 在缺缓存、跨日或口径变化时更新月度估值；需要先加载财报时，等财报就绪以计算 PS，不等待财务图分红任务。估值任务会另外获取股息率所需的分红和价格数据。
+4. **估值**：`/api/valuation?code=<代码>` 在缺缓存、跨日或口径变化时更新月度估值；需要先加载财报时，等财报就绪以计算 PS，不等待财务图分红任务。股息率使用分红事件和共享不复权日价。
 5. **手动刷新**：点击“刷新数据”在后台请求更新，保留已有图表和选择。普通打开不会按财报缓存日期自动刷新全部财报，查看新财报或新实施分红时可主动刷新。
 6. **覆盖保护**：更新前检查原有报告期、非空财报字段、价格快照及估值月份等覆盖情况。接口报错或历史不完整时保留原缓存，并在页面显示原因。
-7. **写入与备份**：每次通过检查并覆盖已有 JSON 前，先把旧文件备份为同目录的 `.json.bak`，再用临时文件替换主文件。每份缓存只有最近一个备份，后续迁移、分红更新或刷新都可能覆盖它，不是完整版本历史；首次创建没有备份。
+7. **筹码与价格**：`/api/prices` 协调不复权和前复权历史；财务、估值、股东、融资图在同一轮异步加载中固定读取其前复权版本。前复权更新比较 20 个已有交易日与两个旧锚点，30 天到期或检测变化时全量核对；失败保留当前有效版本。图表默认前复权，可切换不复权；旧版本过期返回 409 供前端重新协调。
+8. **写入与备份**：SQLite 业务事实与同步水位在同一事务提交，成功后刷新当日 Backup API 备份。仍使用 JSON 的财报和估值通过临时文件替换，写入前备份为同目录 `.json.bak`。
 
 浏览器中的图表选择使用 `sessionStorage`，与磁盘财报／估值缓存无关。它保存当前标签页的指标、周期、时间范围和图形形式，切换股票或刷新页面时复用，不会因此向 Git 写入数据。
 
-### SQLite 基础与后续迁移
+### SQLite 与后续迁移
 
-`quarterly_dashboard/storage.py` 管理连接、迁移、同步事务及在线备份，结构在 `quarterly_dashboard/migrations/001_initial.sql`。启动时获取数据库实例锁后建库、核验并恢复中断任务；网络请求不占写事务。成功业务记录、水位和运行日志一起提交，失败回滚后独立记日志；修订号阻止旧任务覆盖新成功结果。
+`data/stock_analysis.sqlite3` 目前有以下 11 张应用表。记录数是 2026-09-30 对本机数据库的一次只读查询快照；打开其他股票或刷新页面后会变化。`sqlite_sequence` 等 SQLite 内部表不计入。
 
-当前运行时自动使用 DELETE journal；只有实际 SQLite 版本含已认可的 WAL-reset 修复时才允许 WAL。前复权候选版本表已具备完整性与活动指针保护，实际抓取和共享消费留待 P3。详细契约和维护命令见 [SQLite 存储基础](sqlite-storage.md)，来源观察见 [P0 数据源验证](data-sources/storage-upgrade-p0.md)。
+| 表 | 快照记录数 | 存储内容 |
+|---|---:|---|
+| `instruments` | 2 | 股票身份：交易所、六位代码、名称和创建时间；当前为 `600887`、`601919`，名称字段尚为空。 |
+| `financing_daily` | 7,198 | 按股票、来源、交易日保存融资余额、融券余额、两融余额、融资净买入，以及来源原始字段、沿用字段的来源记录。 |
+| `shareholder_observations` | 476 | 股东人数、统计日、公告日、来源和人数口径；旧缓存与在线来源各自留存，因此记录数不等于去重后的统计日期数。 |
+| `raw_daily_prices` | 11,804 | 不复权日行情的开高低收、成交量、原始记录及获取来源。 |
+| `adjusted_price_versions` | 2 | 前复权快照的版本身份、所属股票、覆盖日期、记录数、来源基准与校验状态；当前每只股票各有一个完成版本。 |
+| `adjusted_daily_prices` | 11,806 | 按 `version_id` 关联前复权版本的每日收盘价及来源原始记录；同一交易日可属于不同版本。 |
+| `price_version_leases` | 2 | 价格版本的读取租约及到期时间，使仍被页面引用的旧版本延迟清理。 |
+| `sync_state` | 12 | 每只股票、数据集、来源和复权口径的成功水位、覆盖范围、最近检查时间及活动前复权版本。 |
+| `sync_runs` | 31 | 每次同步的请求范围、时间、状态、记录数与错误摘要；快照中的运行均为成功。 |
+| `legacy_imports` | 4 | 旧筹码 JSON 的文件路径、内容哈希、导入批次和记录数，用于防止重复导入。 |
+| `schema_migrations` | 2 | 已应用的结构迁移编号、文件名、内容校验哈希及应用时间。 |
+
+其中 `financing_daily`、`shareholder_observations`、`raw_daily_prices` 和 `adjusted_daily_prices` 保存业务事实或行情；其余表主要管理股票身份、版本、迁移和同步过程。
+
+`quarterly_dashboard/storage.py` 管理连接、迁移、同步事务及在线备份，结构在 `001_initial.sql` 和 `002_shared_data.sql`。启动时获取数据库实例锁后建库、核验并恢复中断任务；失败运行的候选前复权版本一并清理。网络请求不占写事务。事实、水位和成功运行日志原子提交，修订号阻止旧任务覆盖新结果。
+
+当前 Python 3.11.9 / SQLite 3.45.1 自动使用 DELETE journal；只有实际 SQLite 版本含已认可的 WAL-reset 修复时才允许 WAL。详细契约和维护命令见 [SQLite 存储说明](sqlite-storage.md)，来源观察见 [P0 数据源验证](data-sources/storage-upgrade-p0.md)。财务、分红、估值事实迁移及修复版 WAL 验收分别属于 P4、P5。

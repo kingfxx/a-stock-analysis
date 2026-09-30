@@ -243,6 +243,21 @@ def test_crash_recovery_fails_running_runs_only_without_advancing_watermark(db):
         assert conn.execute("SELECT status FROM sync_runs WHERE id=?", (interrupted,)).fetchone()[0] == "failed"
 
 
+def test_startup_recovery_removes_interrupted_price_candidate(db):
+    key, run = sync(db, dataset="prices_adjusted", source="qq", adjustment="qfq")
+    with db.connection(write=True) as conn:
+        candidate = price_candidate(conn, key, run, [("2026-09-29", -1.5)])
+
+    with instance_lock(db.path):
+        assert db.recover_interrupted_runs() == 1
+
+    with db.connection() as conn:
+        assert conn.execute("SELECT status FROM sync_runs WHERE id=?", (run,)).fetchone()[0] == "failed"
+        assert conn.execute("SELECT 1 FROM adjusted_price_versions WHERE id=?", (candidate,)).fetchone() is None
+        assert conn.execute("SELECT count(*) FROM adjusted_daily_prices").fetchone()[0] == 0
+    assert db.check()["integrity"] == "ok"
+
+
 def test_parallel_thread_connections_serialize_atomic_commits(db):
     def update(code):
         key, run = sync(db, code)

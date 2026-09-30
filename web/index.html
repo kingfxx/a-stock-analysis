@@ -657,7 +657,7 @@
     note.textContent = sourceNote + ' 每月取最后一条可用记录；无效指标不纳入走势与分位。高/中/低线分别为所选区间有效月度值的 80%/50%/20% 分位。' + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
       (state.valuation?.updated_on || '未知') + '。' + (state.valuation?.warnings || []).join(' ');
     const showPrice = valuationPriceOverlay.getAttribute('aria-pressed') === 'true';
-    if (showPrice) note.textContent += ' 前复权股价取腾讯月 K 每月最后交易日收盘价，显示于右轴；缺失月份留空。';
+    if (showPrice) note.textContent += ' 前复权股价取共享日 K 每月最后交易日收盘价，显示于右轴；缺失月份留空。';
     const xs = rows.map(row => isYield ? row.dividend_yield_date || row.date : row.date);
     const ys = rows.map(row => row[valuationMetric]);
     const first = xs[0], last = xs.at(-1);

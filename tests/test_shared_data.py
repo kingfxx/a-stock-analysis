@@ -379,3 +379,48 @@ def test_overlapping_full_audits_share_one_fetch_but_later_audit_runs(db, monkey
     assert len({r["version"] for r in results}) == 1
     service.ensure("600887", full=True)
     assert len(source.calls) == 2
+
+
+def test_concurrent_failed_price_refresh_reuses_failure_and_valid_version(db, monkeypatch):
+    from quarterly_dashboard import price_service
+
+    source = Prices(history())
+    service = PriceService(db, fetcher=source)
+    original = service.ensure("600887")["version"]
+    expire(db)
+
+    started, queued, release = Event(), Event(), Event()
+    original_lock = price_service.data_lock
+    entrants = 0
+    guard = Lock()
+
+    def observed_lock(*args):
+        nonlocal entrants
+        with guard:
+            entrants += 1
+            if entrants == 2:
+                queued.set()
+        return original_lock(*args)
+
+    def failed_fetch(*args):
+        started.set()
+        assert release.wait(3)
+        raise ValueError("source unavailable")
+
+    monkeypatch.setattr(price_service, "data_lock", observed_lock)
+    service.fetcher = failed_fetch
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(service.ensure, "600887", refresh=True)
+        assert started.wait(3)
+        follower = pool.submit(service.ensure, "600887", refresh=True)
+        assert queued.wait(3)
+        release.set()
+        results = [first.result(), follower.result()]
+
+    assert all(r["version"] == original and "source unavailable" in r["warnings"][0]
+               for r in results)
+    assert entrants == 2
+    assert service.current_version("600887") == original
+    with db.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM sync_runs WHERE dataset='prices_adjusted' "
+                            "AND status='failed'").fetchone()[0] == 1
