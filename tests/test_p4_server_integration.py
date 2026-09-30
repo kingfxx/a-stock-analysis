@@ -19,12 +19,16 @@ def test_render_page_reads_imported_financial_fact_without_json(tmp_path, monkey
     db = Database(server.DATABASE_PATH)
     db.initialize()
     FundamentalService(db, root).import_legacy("601919")
+    updated_at = FundamentalService(db, root).read("601919")["updated_at"]
+    assert updated_at
     cache.unlink()
 
     page = server.render_page("601919", False)
     assert '"name": "中远海控"' in page
     assert "987654321" in page
     assert '"code": "601919"' in page
+    assert f'"updated_at": "{updated_at}"' in page
+    assert server.price_bundle("601919", version=0)["financial"]["updated_at"] == updated_at
 
 
 def test_financial_api_keeps_sqlite_history_when_source_fails(tmp_path, monkeypatch):
@@ -38,6 +42,7 @@ def test_financial_api_keeps_sqlite_history_when_source_fails(tmp_path, monkeypa
     db = Database(server.DATABASE_PATH)
     db.initialize()
     FundamentalService(db, root).import_legacy("601919")
+    updated_at = FundamentalService(db, root).read("601919")["updated_at"]
     cache.unlink()
     monkeypatch.setattr(FundamentalService, "_fetch_page", staticmethod(
         lambda *args: (_ for _ in ()).throw(ValueError("offline"))))
@@ -46,6 +51,7 @@ def test_financial_api_keeps_sqlite_history_when_source_fails(tmp_path, monkeypa
 
     response = server.load_chart_data("601919", "financial")
     assert response["views"]["quarter"][0]["revenue"] == 987654321
+    assert response["updated_at"] == updated_at
     assert any("保留已存事实" in warning for warning in response["warnings"])
 
 

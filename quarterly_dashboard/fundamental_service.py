@@ -132,11 +132,17 @@ class FundamentalService:
         with self.db.connection() as conn:
             overrides = conn.execute("SELECT period,field_name,value_json FROM report_overrides "
                                      "WHERE instrument_id=?", (instrument["id"],)).fetchall()
+            updated_at = conn.execute(
+                "SELECT MAX(succeeded_at) FROM sync_state WHERE instrument_id=? AND data_status='data' "
+                "AND ((source=? AND dataset IN ('financial:lrb','financial:fzb','financial:llb')) "
+                "OR (source='legacy' AND dataset='financial:merged'))",
+                (instrument["id"], SOURCE)).fetchone()[0]
         by_period = {report["period"]: report for report in reports}
         for override in overrides:
             if override["period"] in by_period:
                 by_period[override["period"]][override["field_name"]] = json.loads(override["value_json"])
         return {"code": code, "name": instrument["name"], "reports": reports,
+                "updated_at": updated_at if reports else None,
                 "prices": {}, "price_basis": "disclosure", "report_date_basis": "sina_same_period_shift_v1",
                 "cash_flow_basis": "sina_cash_flow_ytd_v1" if rows["llb"] else None,
                 "financial_fields_basis": "sina_margin_debt_roic_inputs_v2",

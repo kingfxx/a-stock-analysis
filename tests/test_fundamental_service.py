@@ -1,9 +1,47 @@
 """Financial facts are refreshed by report type and recomputed from saved history."""
 
 import json
+from datetime import datetime, timedelta, timezone
 
 from quarterly_dashboard.fundamental_service import FundamentalService
 from quarterly_dashboard.storage import Database
+
+
+def test_cache_timestamp_tracks_successful_financial_commits(tmp_path, monkeypatch):
+    db = Database(tmp_path / "facts.sqlite3")
+    db.initialize()
+    now = [datetime.now(timezone.utc).isoformat()]
+    monkeypatch.setattr("quarterly_dashboard.storage.utc_now", lambda: now[0])
+    failed_types = set()
+
+    def fetch(code, kind, num, page):
+        if kind in failed_types:
+            raise ValueError("source unavailable")
+        row = _record("20260630", 100, "2026-08-30") if kind == "lrb" else {
+            "publish_date": "20260830", "data": []}
+        return {"records": {"20260630": row}, "total": 1}
+
+    service = FundamentalService(db, tmp_path / "legacy", fetch_page=fetch)
+    assert service.update("600519")["updated_at"] == now[0]
+    first_update = now[0]
+    now[0] = (datetime.fromisoformat(now[0]) + timedelta(hours=1)).isoformat()
+    assert service.read("600519")["updated_at"] == first_update
+    assert service.update("600519")["updated_at"] == first_update
+    assert service.update("600519", refresh=True)["updated_at"] == now[0]
+
+    last_success = now[0]
+    now[0] = (datetime.fromisoformat(now[0]) + timedelta(hours=1)).isoformat()
+    failed_types.update(("lrb", "fzb", "llb"))
+    failed = service.update("600519", refresh=True)
+    assert failed["warnings"]
+    assert failed["updated_at"] == last_success
+    assert failed["reports"][0]["revenue_ytd"] == 100
+
+    failed_types.remove("llb")
+    partial = service.update("600519", refresh=True)
+    assert partial["warnings"]
+    assert partial["updated_at"] == now[0]
+    assert FundamentalService(db, tmp_path / "legacy").read("600519")["updated_at"] == now[0]
 
 
 def _record(period, revenue, published):
