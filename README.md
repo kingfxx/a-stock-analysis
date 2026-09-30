@@ -12,7 +12,7 @@
 
 ## 启动
 
-项目在 Python 3.11 上开发和验证。在仓库根目录安装依赖并启动：
+项目支持 Python 3.10 及以上版本。在仓库根目录安装依赖并启动：
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -21,7 +21,18 @@ python app.py --port 8766 --open-browser
 
 上述命令打开 [http://127.0.0.1:8766/](http://127.0.0.1:8766/)。省略 `--port` 时默认端口为 `8765`；省略 `--open-browser` 时需手动打开页面。指定股票可访问 `http://127.0.0.1:8766/?code=300750`，不指定时使用程序默认标的。退出时在启动窗口按 `Ctrl+C`。服务只监听 `127.0.0.1`。
 
-Windows 也可双击 [start_dashboard.bat](start_dashboard.bat)。该脚本固定使用 `C:\Users\HINATA\AppData\Local\Programs\Python\Python311\python.exe`，并启动默认 `8765` 端口；其他电脑需修改脚本中的 `PYTHON_EXE`，或直接使用上面的命令。关闭脚本窗口即停止服务。
+Windows 也可双击 [start_dashboard.bat](start_dashboard.bat)。该脚本依次使用用户设置的 `PYTHON_EXE`、项目 `.venv`、PATH 中的 `python` 或 Windows `py -3`，检查 Python 版本和依赖后启动默认 `8765` 端口。可传入 `--port` 等启动参数。关闭脚本窗口即停止服务。
+
+数据源请求默认直连，不自动继承环境变量或 Windows 系统代理，避免本地代理造成 `ProxyError` / `SSLEOFError`。HTTPS 证书验证保持启用。需要代理时，可在同一个 PowerShell 窗口显式启用，并使用正确的 HTTP 代理地址（HTTPS 目标也可以通过 HTTP 代理的 CONNECT 隧道访问）：
+
+```powershell
+$env:DASHBOARD_USE_SYSTEM_PROXY = "1"
+$env:HTTP_PROXY = "http://127.0.0.1:7890"
+$env:HTTPS_PROXY = "http://127.0.0.1:7890"
+python app.py --open-browser
+```
+
+修改连接设置后需重启服务。换电脑时 `data/` 下的下载缓存不会随 Git 同步，首次打开会重新取数；财务加载失败时，依赖财务数据的分红加载也会提示失败。
 
 依赖版本见 [requirements.txt](requirements.txt)：运行依赖是 `requests` 和 `plotly`，测试另需 `pytest`，部分前端回归测试需要 Node.js。Plotly 脚本由本地 Python 包提供，页面不依赖 CDN；首次取数和后续更新仍需要访问外部数据源。
 

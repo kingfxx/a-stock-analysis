@@ -17,6 +17,7 @@ import requests
 from plotly.offline import get_plotlyjs
 
 from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
+from .network import create_data_session
 from .sources import (fetch_cash_flow_reports, fetch_daily_prices, fetch_financial_reports,
                       fetch_monthly_prices, fetch_stock_name, normalize_code, normalize_report_dates)
 from .valuation import (fetch_dividend_events, fetch_dividend_yields, fetch_industry_snapshot, fetch_valuation_series,
@@ -117,8 +118,7 @@ def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dic
     today = date.today().isoformat()
     if old.get("updated_on") == today and old.get("basis") == VALUATION_BASIS and not refresh:
         return old
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0"})
+    session = create_data_session()
     warnings = []
     try:
         rows = monthly_valuation(fetch_valuation_series(code, session), reports)
@@ -266,8 +266,7 @@ def load_stock(code: str, refresh: bool = False) -> dict:
     code = normalize_code(code)
     path = CACHE / f"{code}.json"
     old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0"})
+    session = create_data_session()
     if old and not refresh:
         return _migrate_cached(code, old, path, session)
     try:
@@ -338,7 +337,7 @@ def load_dividends(data: dict, refresh: bool = False) -> tuple[list[dict] | None
     old_events = data.get("dividend_events")
     if data.get("dividend_basis") == DIVIDEND_BASIS and old_events and not refresh:
         return old_events, []
-    session = requests.Session()
+    session = create_data_session()
     try:
         events = fetch_dividend_events(data["code"], session)
     except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
