@@ -83,11 +83,24 @@ def test_financing_window_does_not_trim_storage_or_fill_missing_trading_days():
     data = {"records": [margin("2024-01-01"), margin("2025-09-29"), margin("2025-09-30"),
                         margin("2026-09-29"), margin("2026-10-01")]}
     result = chip_payload(data, "financing", today=date(2026, 9, 30))
-    assert [row["date"] for row in result["rows"]] == ["2025-09-30", "2026-09-29"]
+    assert [row["date"] for row in result["rows"]] == ["2024-01-01", "2025-09-29", "2025-09-30", "2026-09-29"]
+    assert result["window_start"] == "2021-09-30"
     assert result["stored_count"] == 5
     assert len(data["records"]) == 5
     assert result["rows"][-1]["net_buy"] == -3e7
     assert result["latest"]["date"] == "2026-09-29"
+
+
+def test_financing_range_browser_controls():
+    import shutil
+    import subprocess
+    from pathlib import Path
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is needed to exercise financing controls")
+    result = subprocess.run([node, str(Path(__file__).with_name("financing_ui.cjs"))],
+                            capture_output=True, text=True, encoding="utf-8")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_zero_balances_and_negative_net_buy_are_valid_but_missing_prices_stay_missing():
@@ -120,7 +133,7 @@ def test_chip_endpoint_is_independent_and_preserves_full_raw_daily_records(chip_
     assert json.loads(stored[0][0])["RQMCL"] == 67900
     assert not (chip_cache / "financing" / "600887.json").exists()
     assert result["stored_count"] == 2
-    assert len(result["rows"]) == 1
+    assert len(result["rows"]) == 2
     monkeypatch.setattr(server, "fetch_chip_records", lambda *args: pytest.fail("same-day cache must be reused"))
     assert server.load_chart_data("600887", "financing")["stored_count"] == 2
 

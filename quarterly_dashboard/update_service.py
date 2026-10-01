@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 
-from .chips import _fetch_chip_report, _number, chip_rows
+from .chips import _fetch_chip_report, _number, chip_rows, financing_window_start
 from .network import create_data_session
 from .financing_storage import effective_fields, NUMERIC_FIELDS
 from .sources import normalize_code
@@ -288,7 +288,7 @@ class ChipService:
             result["needs_update"] = any(not recently_checked(live_states.get(source, {})) for source in live_sources)
             result["empty"] = bool(states) and all(s["data_status"] == "no_data" for s in states)
             if section == "financing":
-                start, end = (today - timedelta(days=365)).isoformat(), today.isoformat()
+                start, end = financing_window_start(today), today.isoformat()
                 result.update(window_start=start, window_end=end)
                 result["stored_count"] = conn.execute("SELECT count(*) FROM financing_daily WHERE instrument_id=?", (identity,)).fetchone()[0]
                 result["rows"] = [dict(date=r["trade_date"], margin_balance=r["margin_balance"], total_balance=r["total_balance"],

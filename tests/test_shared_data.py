@@ -82,6 +82,24 @@ def test_financing_first_full_then_incremental_keeps_old_history_and_revision(db
     assert db.check()["integrity"] == "ok"
 
 
+def test_financing_cached_returns_five_calendar_years_without_trimming_storage(db, tmp_path):
+    rows = [margin(day) for day in ("2021-09-30", "2021-10-01", "2023-10-01", "2025-10-01", "2026-10-01")]
+    service = ChipService(db, tmp_path, fetcher=lambda *a, **kw: copy.deepcopy(rows))
+    data = service.update("600887", "financing", today=date(2026, 10, 1))
+    assert data["window_start"] == "2021-10-01"
+    assert data["window_end"] == "2026-10-01"
+    assert data["stored_count"] == 5
+    assert [row["date"] for row in data["rows"]] == ["2021-10-01", "2023-10-01", "2025-10-01", "2026-10-01"]
+    with db.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM financing_daily").fetchone()[0] == 5
+
+
+def test_financing_five_year_window_handles_leap_day(db, tmp_path):
+    service = ChipService(db, tmp_path, fetcher=lambda *a, **kw: [margin("2024-02-29")])
+    data = service.update("600887", "financing", today=date(2024, 2, 29))
+    assert data["window_start"] == "2019-02-28"
+
+
 def test_financing_missing_optional_and_explicit_null_have_distinct_provenance(db, tmp_path):
     rows = [margin("2026-09-29")]
     service = ChipService(db, tmp_path, fetcher=lambda *a, **kw: copy.deepcopy(rows))

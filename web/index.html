@@ -293,7 +293,7 @@
     <p class="sub">对照股东人数、融资资金与股价变化，观察持有结构和杠杆资金的趋势。</p>
     <section class="panel chip-panel" aria-label="股东人数与股价趋势">
       <div class="panel-head">
-        <div><h3>股东人数与股价</h3><p>按实际统计频率采样 · 青色为股东人数，红色为所选口径股价</p></div>
+        <div><h3>股东人数与股价</h3><p>按实际统计频率采样 · 青色为股东人数，黄色为所选口径股价</p></div>
         <div class="valuation-controls"><label for="shareholders-range">时间范围</label>
           <select id="shareholders-range"><option value="all">全部时间</option><option value="10">最近 10 年</option><option value="5">最近 5 年</option></select>
           <label for="shareholders-series">人数来源</label><select id="shareholders-series"></select>
@@ -308,15 +308,17 @@
     </section>
     <section class="panel chip-panel" aria-label="融资与股价趋势">
       <div class="panel-head">
-        <div><h3>融资与股价 · 最近一年</h3><p>按交易日展示 · 绿色为融资指标，红色为所选口径股价</p></div>
-        <div class="valuation-controls"><label for="financing-metric">融资指标</label>
+        <div><h3 id="financing-title">融资与股价 · 最近 1 年</h3><p id="financing-description">按交易日展示 · 绿色为融资指标，黄色为所选口径股价</p></div>
+        <div class="valuation-controls"><label for="financing-range">时间范围</label>
+          <select id="financing-range"><option value="1" selected>1年</option><option value="3">3年</option><option value="5">5年</option></select>
+          <label for="financing-metric">融资指标</label>
           <select id="financing-metric"><option value="margin_balance">融资余额</option><option value="total_balance">融资融券余额</option><option value="net_buy">融资净买入</option></select>
           <label for="financing-adjustment">股价口径</label><select id="financing-adjustment"><option value="qfq">前复权</option><option value="raw">不复权</option></select>
         </div>
       </div>
       <div id="financing-summary" class="chip-summary">等待融资数据…</div>
       <p id="financing-status" class="note" role="status" aria-live="polite"></p>
-      <div id="financing-chart" class="chip-chart" role="img" aria-label="最近一年融资与股价双轴趋势图"></div>
+      <div id="financing-chart" class="chip-chart" role="img" aria-label="融资与股价双轴趋势图"></div>
       <p class="note">融资余额是尚未偿还的融资金额，融资融券余额包含融券余额；净买入可为负。日度历史保留原始单位元，图表显示亿元。价格与同一交易日对齐，默认前复权，可切换不复权。</p>
       <p id="financing-note" class="note"></p>
     </section>
@@ -631,6 +633,7 @@
       valuationPriceOverlay:valuationPriceOverlay.getAttribute('aria-pressed') === 'true',
       shareholdersRange:document.getElementById('shareholders-range').value,
       financingMetric:document.getElementById('financing-metric').value,
+      financingRange:document.getElementById('financing-range').value,
       shareholdersSeries:document.getElementById('shareholders-series').value,
       shareholdersAdjustment:document.getElementById('shareholders-adjustment').value,
       financingAdjustment:document.getElementById('financing-adjustment').value
@@ -732,6 +735,8 @@
   const financingNames = {margin_balance:'融资余额',total_balance:'融资融券余额',net_buy:'融资净买入'};
   const shareholdersRange = document.getElementById('shareholders-range');
   const financingMetricSelect = document.getElementById('financing-metric');
+  const financingRangeSelect = document.getElementById('financing-range');
+  if (['1','3','5'].includes(savedSelections.financingRange)) financingRangeSelect.value = savedSelections.financingRange;
   if (['all','10','5'].includes(savedSelections.shareholdersRange)) shareholdersRange.value = savedSelections.shareholdersRange;
   if (Object.hasOwn(financingNames, savedSelections.financingMetric)) financingMetricSelect.value = savedSelections.financingMetric;
   for (const section of ['shareholders','financing']) {
@@ -742,10 +747,41 @@
   const holderSeriesSelect = document.getElementById('shareholders-series');
   let holderSeriesExplicit = Boolean(savedSelections.shareholdersSeries);
   holderSeriesSelect.addEventListener('change', () => { holderSeriesExplicit = true; saveSelections(); renderChips('shareholders'); });
+  function financingView(data, years) {
+    const now = new Date();
+    const end = data.window_end || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    const cutoff = new Date(end + 'T00:00:00Z');
+    const month = cutoff.getUTCMonth();
+    cutoff.setUTCFullYear(cutoff.getUTCFullYear() - Number(years));
+    if (cutoff.getUTCMonth() !== month) cutoff.setUTCDate(0);
+    const start = cutoff.toISOString().slice(0,10);
+    let rows = (data.rows || []).filter(row => row.date >= start && row.date <= end);
+    if (years === '5') {
+      const weeks = new Map();
+      for (const row of rows) {
+        const monday = new Date(row.date + 'T00:00:00Z');
+        monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay()+6)%7);
+        const week = monday.toISOString().slice(0,10);
+        const previous = weeks.get(week);
+        const netBuy = previous ? previous.net_buy == null || row.net_buy == null ? null : previous.net_buy + row.net_buy : row.net_buy;
+        weeks.set(week, {...row, week_start:week, net_buy:netBuy});
+      }
+      rows = [...weeks.values()];
+    }
+    return {rows, start, end};
+  }
   function renderChips(section) {
     const financing = section === 'financing';
     const data = state[section] || {};
     let rows = data.rows || [];
+    const years = financingRangeSelect.value || '1';
+    const weekly = financing && years === '5';
+    const financingData = financing ? financingView(data, years) : null;
+    if (financing) {
+      rows = financingData.rows;
+      document.getElementById('financing-title').textContent = `融资与股价 · 最近 ${years} 年`;
+      document.getElementById('financing-description').textContent = `${weekly ? '按周展示' : '按交易日展示'} · 绿色为融资指标，黄色为所选口径股价`;
+    }
     if (!financing && data.series?.length) {
       const selected = holderSeriesExplicit ? holderSeriesSelect.value || savedSelections.shareholdersSeries : data.series[0].id;
       holderSeriesSelect.replaceChildren(...data.series.map(series => {
@@ -766,49 +802,51 @@
       rows = rows.filter(row => row.date >= day);
     }
     const metric = financing ? financingMetricSelect.value : 'holders';
-    const name = financing ? financingNames[metric] : '股东人数';
+    const name = financing ? financingNames[metric] + (weekly && metric === 'net_buy' ? '（周合计）' : '') : '股东人数';
     const divisor = financing ? 1e8 : 1e4;
     const unit = financing ? '亿元' : '万户';
-    const latest = financing ? rows.find(row => row.date === data.latest?.date) || data.latest : rows.at(-1);
+    const latest = rows.at(-1);
     const latestValue = latest?.[metric];
     const valueText = latestValue == null ? '—' : financing ? (latestValue/divisor).toFixed(2) + ' 亿元' : Number(latestValue).toLocaleString('zh-CN') + ' 户';
     document.getElementById(section + '-summary').textContent = latest
       ? `${latest.date} · ${name} ${valueText} · ${priceName} ${latest[adjustment + '_close'] == null ? '—' : latest[adjustment + '_close'].toFixed(2) + ' 元/股'}`
       : data.empty ? (financing ? '数据源暂无该股票的融资记录。' : '数据源暂无该股票的股东人数记录。') : '暂无可用数据';
     document.getElementById(section + '-note').textContent =
-      `来源：东方财富 · 本地更新 ${data.updated_on || '—'} · 已保存 ${data.stored_count || 0} 条${financing ? '日度' : '各来源'}记录，当前显示 ${rows.length} 条 · 股价：${priceName}。` + (data.warnings || []).join(' ');
+      `来源：东方财富 · 本地更新 ${data.updated_on || '—'} · 已保存 ${data.stored_count || 0} 条${financing ? '日度' : '各来源'}记录，当前显示 ${rows.length} 条${financing ? weekly ? '周度' : '日度' : ''}记录 · 股价：${priceName}。` +
+      (weekly ? '周度余额及股价取当周最后一条记录，净买入为所选范围内当周日度合计；存在缺失值时周合计留空。' : '') + (data.warnings || []).join(' ');
     const dates = rows.map(row => row.date);
     const traces = [{type:financing && metric === 'net_buy' ? 'bar' : 'scatter',
       mode:financing ? 'lines' : 'lines+markers',name,x:dates,
       y:rows.map(row => row[metric] == null ? null : row[metric]/divisor),
-      customdata:rows.map(row => [row.announced_on || '未提供',row.holders]),
+      customdata:rows.map(row => financing ? [row.week_start || row.date,row.date] : [row.announced_on || '未提供',row.holders]),
       connectgaps:false,line:{color:financing ? '#8ecb49' : '#38c4dc',width:2},
       marker:{color:financing ? '#8ecb49' : '#38c4dc',size:5},
-      hovertemplate:financing ? `%{x|%Y-%m-%d}<br>${name}：%{y:.3f} 亿元<extra></extra>`
+      hovertemplate:financing ? `${weekly ? '周起始：%{customdata[0]}<br>截至：' : ''}%{x|%Y-%m-%d}<br>${name}：%{y:.3f} 亿元<extra></extra>`
         : '统计截止日：%{x|%Y-%m-%d}<br>股东人数：%{customdata[1]:,} 户<br>公告日：%{customdata[0]}<extra></extra>'},
       {type:'scatter',mode:financing ? 'lines' : 'lines+markers',name:priceName,
        x:dates,y:rows.map(row => row[adjustment + '_close'] ?? null),yaxis:'y2',connectgaps:false,
        customdata:rows.map(row => row[adjustment + '_price_date'] || '无价格'),
-       line:{color:'#ed8180',width:2},marker:{size:4},
+       line:{color:'#f4d35e',width:2},marker:{color:'#f4d35e',size:4},
        hovertemplate:`%{x|%Y-%m-%d}<br>${priceName}：%{y:.2f} 元/股<br>价格日期：%{customdata}<extra></extra>`}];
     Plotly.react(section + '-chart', traces, {
       paper_bgcolor:'#1a2227',plot_bgcolor:'#1a2227',font:{color:'#edf4f4'},
       margin:{l:80,r:80,t:25,b:80},hovermode:'x unified',
       legend:{orientation:'h',x:0,y:-.2},
       xaxis:{type:'date',tickformat:financing ? '%Y-%m' : '%Y-%m-%d',
-        ...(financing && data.window_start ? {range:[data.window_start,data.window_end],dtick:'M2'} : {}),
+        ...(financing ? {range:[financingData.start,financingData.end],dtick:years === '1' ? 'M2' : years === '3' ? 'M6' : 'M12'} : {}),
         gridcolor:'#304049',zeroline:false,automargin:true},
       yaxis:{title:{text:`${name}（${unit}）`},gridcolor:'#304049',zeroline:metric === 'net_buy',
         zerolinecolor:'#9aadb3',rangemode:'tozero',automargin:true},
-      yaxis2:{title:{text:'收盘价（元/股）'},overlaying:'y',side:'right',showgrid:false,
-        zeroline:false,automargin:true,tickfont:{color:'#ed8180'}},
+      yaxis2:{title:{text:'收盘价（元/股）',font:{color:'#f4d35e'}},overlaying:'y',side:'right',showgrid:false,
+        zeroline:false,automargin:true,tickfont:{color:'#f4d35e'}},
       annotations:rows.length && rows.some(row => row[metric] != null || row.close != null) ? [] :
-        [{text:financing && data.stored_count ? '最近一年暂无记录' : '暂无可用数据',xref:'paper',yref:'paper',x:.5,y:.5,
+        [{text:financing && data.stored_count ? `最近 ${years} 年暂无记录` : '暂无可用数据',xref:'paper',yref:'paper',x:.5,y:.5,
           showarrow:false,font:{color:'#9aadb3',size:17}}]
     }, {responsive:true,displaylogo:false,locale:'zh-CN'});
   }
   shareholdersRange.addEventListener('change', () => { saveSelections(); renderChips('shareholders'); });
   financingMetricSelect.addEventListener('change', () => { saveSelections(); renderChips('financing'); });
+  financingRangeSelect.addEventListener('change', () => { saveSelections(); renderChips('financing'); });
   // Background data loading.
   let dashboardUpdating = false;
   const sectionNames = {financial:'财务', dividends:'分红', valuation:'估值',shareholders:'股东人数',financing:'融资'};

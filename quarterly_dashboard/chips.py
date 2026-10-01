@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_right
-from datetime import date, timedelta
+from datetime import date
 
 from .sources import normalize_code
 
@@ -156,12 +156,19 @@ def missing_chip_history(old, fresh, section):
                    for field in VALUE_FIELDS[section])]
 
 
+def financing_window_start(today):
+    try:
+        return today.replace(year=today.year - 5).isoformat()
+    except ValueError:
+        return today.replace(year=today.year - 5, day=28).isoformat()
+
+
 def chip_payload(data, section, today=None):
     today = today or date.today()
     rows = chip_rows(data.get("records", []), section, data.get("prices"))
     latest = next((row for row in reversed(rows) if row["date"] <= today.isoformat()), None)
     stored_count = len(rows)
-    start = (today - timedelta(days=365)).isoformat()
+    start = financing_window_start(today)
     if section == "financing":
         rows = [row for row in rows if start <= row["date"] <= today.isoformat()]
     return {"rows": rows, "latest": latest, "stored_count": stored_count,
