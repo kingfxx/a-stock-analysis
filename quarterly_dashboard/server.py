@@ -25,7 +25,7 @@ from .price_projection import chip_prices, financial_prices, valuation_prices
 from .fundamental_service import FundamentalService
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
-from .update_service import ChipService, instrument_id, sync_state, recently_checked, audit_due
+from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due
 from .storage import SyncKey
 from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
                     shareholder_price_snapshots)
@@ -549,7 +549,7 @@ def p4_loading(code):
                               for metric in ("pe", "pb", "market_cap")]
                 + [("industry", "eastmoney:RPT_PCF10_INDUSTRY_CVALUE")]}
     return {section: any((not (state := sync_state(db, SyncKey(identity, dataset, source)))
-                           or not recently_checked(state, seconds=86400) or audit_due(state))
+                           or not recently_checked(state, seconds=86400) or audit_due(state, dataset))
                           for dataset, source in keys)
             for section, keys in datasets.items()}
 
@@ -741,8 +741,8 @@ def render_page(code: str, refresh: bool) -> str:
             # Read-only inspection: a page visit never creates stocks or leases.
             identity = instrument_id(sql_chips.db, code)
             if identity:
-                payload["price_needs_update"] = any(not recently_checked(sync_state(sql_chips.db,
-                    SyncKey(identity, dataset, "tencent", adjustment))) for dataset, adjustment in
+                payload["price_needs_update"] = any(not checked_today(state := sync_state(sql_chips.db,
+                    SyncKey(identity, dataset, "tencent", adjustment))) or audit_due(state, dataset) for dataset, adjustment in
                     (("prices_raw", "raw"), ("prices_adjusted", "qfq")))
             normalized = {**data, "reports": normalize_report_dates(data.get("reports", [])),
                           "report_date_basis": REPORT_DATE_BASIS} if data else {}

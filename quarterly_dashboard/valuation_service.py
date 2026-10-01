@@ -6,6 +6,7 @@ import json
 import hashlib
 import math
 from datetime import date, timedelta
+from calendar import monthrange
 from pathlib import Path
 
 from .network import create_data_session
@@ -63,7 +64,7 @@ class ValuationService:
             return [], False
         key = SyncKey(identity, "industry", INDUSTRY_SOURCE)
         state = sync_state(self.db, key)
-        if state and not (refresh or full or audit_due(state)
+        if state and not (refresh or full
                           or not recently_checked(state, seconds=86400)):
             return [], False
         run = self.db.start_sync(key, parser_version="eastmoney_peer_v1",
@@ -79,7 +80,7 @@ class ValuationService:
             changed = latest is None or json.loads(latest[0]) != raw
             today = date.today().isoformat()
             result = SyncResult(1 if changed else 0, state.get("coverage_start") or today,
-                                today, today, next_full_audit_at=next_audit())
+                                today, today, next_full_audit_at=None)
             def write(conn):
                 if changed:
                     self.db.insert_industry_snapshot(conn, key, run, {
@@ -222,10 +223,10 @@ class ValuationService:
                 key = SyncKey(identity, f"valuation:{metric}", SOURCE)
                 state = sync_state(self.db, key)
                 saved = self.db.valuation_observations(identity, SOURCE, metric)
-                if saved and not (refresh or full or audit_due(state)
+                if saved and not (refresh or full or audit_due(state, "valuation")
                                   or not recently_checked(state, seconds=86400)):
                     continue
-                full_metric = full or not saved or audit_due(state)
+                full_metric = full or not saved or audit_due(state, "valuation")
                 windows = INITIAL_WINDOWS if full_metric else ("近一年",)
                 if not full_metric and saved:
                     last = date.fromisoformat(saved[-1]["observed_on"])
@@ -251,10 +252,20 @@ class ValuationService:
                             candidate_days = {row["observed_on"] for row in candidates}
                         if not saved_days & candidate_days:
                             raise ValueError("估值窗口与已保存尾部没有共同观察日，未标记连续覆盖")
+                    if saved and not full_metric:
+                        today = date.today()
+                        month_index = today.year * 12 + today.month - 1 - 3
+                        year, month = divmod(month_index, 12)
+                        recent_start = date(year, month + 1, min(today.day, monthrange(year, month + 1)[1]))
+                        cutoff = min(recent_start.isoformat(), saved[-1]["observed_on"])
+                        candidates = [row for row in candidates if row["observed_on"] >= cutoff]
+                        required = {row["observed_on"] for row in saved if row["observed_on"] >= cutoff}
+                        if not candidates or required - {row["observed_on"] for row in candidates}:
+                            raise ValueError("估值增量响应缺少回看范围内已知观察日，保留旧事实")
                     all_days = sorted({r["observed_on"] for r in saved} |
                                       {r["observed_on"] for r in candidates})
                     result = SyncResult(len(candidates), all_days[0], all_days[-1], all_days[-1],
-                                        next_full_audit_at=next_audit() if full_metric else state.get("next_full_audit_at"))
+                                        next_full_audit_at=next_audit("valuation") if full_metric else state.get("next_full_audit_at"))
                     # Retain provenance when a narrower window observes an existing date.
                     old = {r["observed_on"]: r for r in saved}
                     for row in candidates:

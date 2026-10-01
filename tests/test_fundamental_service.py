@@ -50,7 +50,7 @@ def _record(period, revenue, published):
                      {"item_title": "归属于母公司所有者的净利润", "item_value": "10"}]}
 
 
-def test_refresh_uses_eight_period_window_and_keeps_old_report(tmp_path):
+def test_refresh_uses_two_period_window_and_keeps_old_report(tmp_path):
     db = Database(tmp_path / "facts.sqlite3")
     db.initialize()
     periods = {"20250331": _record("20250331", 100, "2025-04-30"),
@@ -74,7 +74,7 @@ def test_refresh_uses_eight_period_window_and_keeps_old_report(tmp_path):
     requested.clear()
     periods["20250331"] = _record("20250331", 120, "2025-04-30")
     second = service.update("601919", refresh=True)
-    assert {num for _, num, _ in requested} == {8}
+    assert {num for _, num, _ in requested} == {2}
     assert [row["revenue_ytd"] for row in second["reports"]] == [80, 120]
     assert second["reports"][0]["period"] == "2024-12-31"
 
@@ -203,3 +203,23 @@ def test_full_history_keeps_sparse_ancient_income_without_blocking_recent_report
     assert any("1990-12-31" in warning for warning in result["warnings"])
     assert not any("更新失败" in warning for warning in result["warnings"])
     assert not any("更新失败" in warning for warning in service.update("000001", refresh=True)["warnings"])
+
+
+def test_two_period_refresh_pages_back_to_existing_history_after_long_gap(tmp_path):
+    db = Database(tmp_path / "facts.sqlite3")
+    db.initialize()
+    periods = ["20240331", "20240630", "20240930", "20241231", "20250331", "20250630"]
+    calls = []
+    def fetch(code, kind, num, page):
+        calls.append((kind, num, page))
+        ordered = sorted(periods, reverse=True)
+        return {"records": {p: _record(p, 100, "2026-08-30") for p in ordered[(page-1)*num:page*num]}, "total":len(ordered)}
+    service = FundamentalService(db, tmp_path, fetch_page=fetch)
+    assert len(service.update("600887")["reports"]) == 6
+    periods.extend(["20250930", "20251231", "20260331", "20260630"])
+    calls.clear()
+    data = service.update("600887", refresh=True)
+    assert not data["warnings"] and len(data["reports"]) == 10
+    assert {num for _,num,_ in calls} == {2}
+    assert max(page for _,_,page in calls) == 3
+    assert sum(page==1 for _,_,page in calls) == 6  # Recheck each source's first page.

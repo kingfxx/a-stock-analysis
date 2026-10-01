@@ -37,10 +37,16 @@ def _date(value):
     return result
 
 
-def _fetch_chip_report(code, section, session, report_override=None, *, start_date=None, end_date=None):
+def _fetch_chip_report(code, section, session, report_override=None, *, start_date=None, end_date=None, date_field=None):
     """Read every page; reject incomplete or changing pagination before caching."""
-    report, code_field, date_field = REPORTS[section]
+    report, code_field, record_date_field = REPORTS[section]
     report = report_override or report
+    date_field = date_field or record_date_field
+    allowed = {record_date_field}
+    if section == "shareholders":
+        allowed.add("NOTICE_DATE" if report == "RPT_F10_EH_HOLDERNUM" else "HOLD_NOTICE_DATE")
+    if date_field not in allowed:
+        raise ValueError("不支持的筹码日期过滤字段")
     code = normalize_code(code)
     filters = f'({code_field}="{code}")'
     for bound, operator in ((start_date, ">="), (end_date, "<=")):
@@ -83,7 +89,7 @@ def _fetch_chip_report(code, section, session, report_override=None, *, start_da
                 raise ValueError(f"东方财富筹码历史不完整：{len(records)}/{count} 条")
             # Date uniqueness and required values are checked before returning.
             chip_rows(records, section)
-            return sorted(records, key=lambda row: row[date_field])
+            return sorted(records, key=lambda row: row[record_date_field])
     raise ValueError("东方财富筹码分页超过上限")
 
 

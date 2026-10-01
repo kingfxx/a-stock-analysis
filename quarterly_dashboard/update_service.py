@@ -19,6 +19,10 @@ HOLDER_SOURCES = ("RPT_F10_EH_HOLDERNUM", "RPT_HOLDERNUM_DET")
 _LOCKS, _LOCKS_GUARD = {}, Lock()
 
 
+class FinancingHistoryGap(ValueError):
+    """A response omitted already stored dates in the requested overlap."""
+
+
 def data_lock(db, dataset, code):
     with _LOCKS_GUARD:
         return _LOCKS.setdefault((str(db.path), dataset, code), Lock())
@@ -50,12 +54,28 @@ def recently_checked(state, seconds=600):
     return bool(checked and (datetime.now(timezone.utc) - datetime.fromisoformat(checked)).total_seconds() < seconds)
 
 
-def audit_due(state):
+def checked_today(state):
+    """Daily source checks follow the Shanghai calendar, not a rolling TTL."""
+    checked = state.get("checked_at")
+    if not checked:
+        return False
+    local = timezone(timedelta(hours=8))
+    stamp = datetime.fromisoformat(checked.replace("Z", "+00:00"))
+    return stamp.astimezone(local).date() == datetime.now(local).date()
+
+
+AUDIT_DAYS = {"financial": 180, "valuation": 90, "prices_adjusted": 30}
+
+
+def audit_due(state, dataset="prices_adjusted"):
+    if dataset.split(":", 1)[0] not in AUDIT_DAYS:
+        return False
     return not state.get("next_full_audit_at") or state["next_full_audit_at"] <= utc_now()
 
 
-def next_audit():
-    return (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+def next_audit(dataset="prices_adjusted"):
+    days = AUDIT_DAYS.get(dataset.split(":", 1)[0])
+    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat() if days else None
 
 
 def mark_failed(db, run, exc):
@@ -127,12 +147,11 @@ class ChipService:
         fresh_dates = {r["date"] for r in rows}
         required = {d for d in old if (not start or d >= start) and (not end or d <= end)}
         if required - fresh_dates:
-            raise ValueError(f"融资历史缺少已知日期 {len(required - fresh_dates)} 条")
+            raise FinancingHistoryGap(f"融资历史缺少已知日期 {len(required - fresh_dates)} 条")
         all_days = sorted(set(old) | fresh_dates | {d for d in existing if d})
-        state = sync_state(self.db, key)
         result = SyncResult(len(rows), all_days[0] if all_days else None, all_days[-1] if all_days else None,
                             all_days[-1] if all_days else None, no_data=not all_days,
-                            next_full_audit_at=next_audit() if full else state.get("next_full_audit_at"),
+                            next_full_audit_at=None,
                             checked_at=import_meta.get("checked_at") if import_meta else None)
         def write(conn):
             for row in rows:
@@ -155,12 +174,12 @@ class ChipService:
         self.db.complete_sync(run, result, write)
         return warnings
 
-    def _save_holders(self, code, key, run, records, import_meta=None):
+    def _save_holders(self, code, key, run, records, import_meta=None, *, full=True):
         parsed = chip_rows(records, "shareholders")
         with self.db.connection() as conn:
             known = {r[0] for r in conn.execute("SELECT stat_date FROM shareholder_observations "
                                               "WHERE instrument_id=? AND source=?", (key.instrument_id, key.source))}
-        if known - {r["date"] for r in parsed}:
+        if full and known - {r["date"] for r in parsed}:
             raise ValueError("股东历史缺少已知日期")
         days = sorted(known | {r["date"] for r in parsed})
         def write(conn):
@@ -179,7 +198,7 @@ class ChipService:
             if import_meta:
                 self._import_record(conn, key, run, len(parsed), import_meta)
         self.db.complete_sync(run, SyncResult(len(parsed), days[0] if days else None, days[-1] if days else None,
-                                              days[-1] if days else None, no_data=not days, next_full_audit_at=next_audit(),
+                                              days[-1] if days else None, no_data=not days, next_full_audit_at=None,
                                               checked_at=import_meta.get("checked_at") if import_meta else None), write)
 
     @staticmethod
@@ -249,20 +268,36 @@ class ChipService:
             for source in sources:
                 key = SyncKey(identity, section, source)
                 state = sync_state(self.db, key)
-                if not refresh and not full and recently_checked(state):
+                if not refresh and not full and checked_today(state):
                     continue
-                complete = full or not state.get("data_watermark") or audit_due(state) or section == "shareholders"
-                start = None if complete else (date.fromisoformat(state["data_watermark"]) - timedelta(days=30)).isoformat()
+                complete = full or (not state.get("data_watermark") if section == "financing"
+                                   else state.get("data_status") not in {"data", "no_data"})
+                bounds = {}
+                if section == "financing":
+                    start = None if complete else (date.fromisoformat(state["data_watermark"]) - timedelta(days=14)).isoformat()
+                else:
+                    checked = datetime.fromisoformat(state["checked_at"]) if state.get("checked_at") else None
+                    start = None if complete else (checked.date() - timedelta(days=30)).isoformat()
+                    if not complete:
+                        bounds["date_field"] = "NOTICE_DATE" if source.endswith("RPT_F10_EH_HOLDERNUM") else "HOLD_NOTICE_DATE"
                 end = today.isoformat()
                 run = self.db.start_sync(key, parser_version="eastmoney-facts-v1", methodology_version="source-fields-v1",
                                          trigger_reason="full_audit" if complete else "incremental",
                                          requested_start=start, requested_end=end)
                 try:
-                    records = self.fetcher(code, section, source.split(":", 1)[1], start_date=start, end_date=end)
+                    records = self.fetcher(code, section, source.split(":", 1)[1], start_date=start, end_date=end, **bounds)
                     if section == "financing":
-                        warnings += self._save_financing(code, key, run, records, start=start, end=end, full=complete)
+                        try:
+                            warnings += self._save_financing(code, key, run, records, start=start, end=end, full=complete)
+                        except FinancingHistoryGap:
+                            if complete:
+                                raise
+                            records = self.fetcher(code, section, source.split(":", 1)[1], start_date=None, end_date=end)
+                            with self.db.connection(write=True) as conn:
+                                conn.execute("UPDATE sync_runs SET trigger_reason='historical_gap',requested_start=NULL WHERE id=?", (run,))
+                            warnings += self._save_financing(code, key, run, records, end=end, full=True)
                     else:
-                        self._save_holders(code, key, run, records)
+                        self._save_holders(code, key, run, records, full=complete)
                 except Exception as exc:
                     mark_failed(self.db, run, exc)
                     warnings.append(f"{source} 更新失败，保留已有记录：{exc}")
@@ -282,7 +317,7 @@ class ChipService:
             result["updated_on"] = max((s["checked_at"][:10] for s in states if s["checked_at"]), default=None)
             live_sources = (FINANCING_SOURCE,) if section == "financing" else tuple("eastmoney:" + s for s in HOLDER_SOURCES)
             live_states = {s["source"]: s for s in states if s["source"] in live_sources}
-            result["needs_update"] = any(not recently_checked(live_states.get(source, {})) for source in live_sources)
+            result["needs_update"] = any(not checked_today(live_states.get(source, {})) for source in live_sources)
             result["empty"] = bool(states) and all(s["data_status"] == "no_data" for s in states)
             if section == "financing":
                 start, end = financing_window_start(today), today.isoformat()

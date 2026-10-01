@@ -85,7 +85,7 @@ def test_repeated_absence_and_reappearance_clear_old_origins(tmp_path):
 
 
 @pytest.mark.parametrize('audit_due', [False, True])
-def test_two_month_gap_fetches_from_watermark_or_full_audit(tmp_path, audit_due):
+def test_two_month_gap_fetches_from_watermark_despite_old_audit_deadline(tmp_path, audit_due):
     db = Database(tmp_path/'gap.sqlite3'); db.initialize()
     rows = [{'SCODE':'600887','DATE':'2026-07-31','RZYE':100}]
     calls = []
@@ -99,5 +99,5 @@ def test_two_month_gap_fetches_from_watermark_or_full_audit(tmp_path, audit_due)
                      ('2026-07-31T00:00:00+00:00','2000-01-01T00:00:00+00:00' if audit_due else '2099-01-01T00:00:00+00:00'))
     rows.extend([{'SCODE':'600887','DATE':day,'RZYE':100} for day in ('2026-08-03','2026-09-30')])
     data = service.update('600887','financing',today=date(2026,10,1))
-    assert calls[-1] == {'start_date':None if audit_due else '2026-07-01','end_date':'2026-10-01'}
+    assert calls[-1] == {'start_date':'2026-07-17','end_date':'2026-10-01'}
     assert data['stored_count'] == 3 and not data['warnings']

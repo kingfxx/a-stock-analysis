@@ -132,3 +132,69 @@ def test_long_offline_gap_expands_beyond_three_year_window(tmp_path):
     calls.clear()
     service.update("601919", [], refresh=True)
     assert "近十年" in calls
+
+
+def test_normal_valuation_only_merges_three_months_and_full_still_corrects_old_dates(tmp_path, monkeypatch):
+    from datetime import date
+    from quarterly_dashboard import valuation_service
+    class Clock(date):
+        @classmethod
+        def today(cls): return date(2026, 10, 1)
+    monkeypatch.setattr(valuation_service, "date", Clock)
+    db = Database(tmp_path / "facts.sqlite3"); db.initialize()
+    rows = [{"date": d, "value": 10} for d in ["2026-01-01", "2026-06-30", "2026-07-01", "2026-09-30"]]
+    service = ValuationService(db, tmp_path, fetch_indicator=lambda *args: list(rows))
+    service.update("600887", [])
+    original = {r["observed_on"]: r for r in service.observations("600887", "pe")}
+    rows[:] = [{"date": r["date"], "value": 20} for r in rows] + [{"date":"2026-10-01", "value":20}]
+    data = service.update("600887", [], refresh=True)
+    assert not data["warnings"]
+    saved = {r["observed_on"]: r for r in service.observations("600887", "pe")}
+    assert saved["2026-06-30"]["value"] == 10
+    assert saved["2026-06-30"]["run_id"] == original["2026-06-30"]["run_id"]
+    assert saved["2026-07-01"]["value"] == 20
+    assert saved["2026-10-01"]["value"] == 20
+    service.update("600887", [], full=True)
+    saved = {r["observed_on"]: r for r in service.observations("600887", "pe")}
+    assert saved["2026-06-30"]["value"] == 20
+
+
+def test_valuation_long_gap_expands_source_and_merges_back_to_saved_watermark(tmp_path, monkeypatch):
+    from datetime import date
+    from quarterly_dashboard import valuation_service
+    class Clock(date):
+        @classmethod
+        def today(cls): return date(2026, 10, 1)
+    monkeypatch.setattr(valuation_service, "date", Clock)
+    db = Database(tmp_path / "facts.sqlite3"); db.initialize()
+    calls = []
+    rows = [{"date":"2024-01-01", "value":10}]
+    def fetch(code, metric, window):
+        calls.append(window)
+        return list(rows)
+    service = ValuationService(db, tmp_path, fetch_indicator=fetch)
+    service.update("600887", [])
+    rows.extend([{"date":"2025-01-01", "value":11}, {"date":"2026-09-30", "value":12}])
+    calls.clear()
+    data = service.update("600887", [], refresh=True)
+    assert not data["warnings"] and calls == ["近三年"] * 3
+    assert [r["observed_on"] for r in service.observations("600887", "pe")] == ["2024-01-01", "2025-01-01", "2026-09-30"]
+
+
+def test_valuation_missing_known_recent_date_does_not_advance_watermark(tmp_path, monkeypatch):
+    from datetime import date
+    from quarterly_dashboard import valuation_service
+    class Clock(date):
+        @classmethod
+        def today(cls): return date(2026, 10, 1)
+    monkeypatch.setattr(valuation_service, "date", Clock)
+    db = Database(tmp_path / "facts.sqlite3"); db.initialize()
+    rows = [{"date":"2026-07-01", "value":10}, {"date":"2026-09-30", "value":11}]
+    service = ValuationService(db, tmp_path, fetch_indicator=lambda *args:list(rows))
+    service.update("600887", [])
+    rows[:] = [{"date":"2026-07-01", "value":20}, {"date":"2026-10-01", "value":12}]
+    data = service.update("600887", [], refresh=True)
+    assert any("已知观察日" in w for w in data["warnings"])
+    assert [r["value"] for r in service.observations("600887", "pe")] == [10, 11]
+    with db.connection() as conn:
+        assert conn.execute("SELECT data_watermark FROM sync_state WHERE dataset='valuation:pe'").fetchone()[0] == "2026-09-30"

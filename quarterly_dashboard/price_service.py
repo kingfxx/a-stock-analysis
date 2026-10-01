@@ -9,7 +9,7 @@ from .network import create_data_session
 from .sources import fetch_price_history, normalize_code, price_equal
 from .storage import Database, SyncKey, SyncResult, StorageError, utc_now
 from .update_service import (audit_due, data_lock, digest, encoded, instrument_id, mark_failed,
-                             next_audit, recently_checked, sync_state, backup_before_update)
+                             next_audit, recently_checked, checked_today, sync_state, backup_before_update)
 
 SOURCE = "tencent"
 
@@ -118,11 +118,12 @@ class PriceService:
                                          (state["last_success_run_id"],)).fetchone()
                 if prior and prior[0] == "1990-01-01":
                     return dict(version=state.get("active_price_version_id"), warnings=[], changed=False)
-            if not full and recently_checked(state, 5 if refresh else 600):
+            if not full and (recently_checked(state, 5) if refresh else
+                             checked_today(state) and not audit_due(state, key.dataset)):
                 return dict(version=state.get("active_price_version_id"), warnings=[], changed=False)
             old = self.read(code, adjustment, lease=False)
             old_by_day = {r["date"]: r for r in old}
-            rebuild = full or not old or audit_due(state)
+            rebuild = full or not old or audit_due(state, key.dataset)
             start = "1990-01-01" if rebuild else old[max(0, len(old) - (30 if adjustment == "raw" else 20))]["date"]
             end = today.isoformat()
             run = self.db.start_sync(key, parser_version="tencent-ohlc-v1", methodology_version="current-adjustment-v1",
@@ -136,7 +137,11 @@ class PriceService:
                     expected = {d for d in old_by_day if d >= start}
                     missing = expected - {r["date"] for r in rows}
                     if missing and adjustment == "raw":
-                        raise ValueError("价格增量响应缺少已知交易日期")
+                        rebuild = True
+                        rows = self.fetcher(code, adjustment, "1990-01-01", end)
+                        self._validate(rows, "1990-01-01", end)
+                        with self.db.connection(write=True) as conn:
+                            conn.execute("UPDATE sync_runs SET trigger_reason='historical_gap',requested_start='1990-01-01' WHERE id=?", (run,))
                     if adjustment == "qfq":
                         rebuild = bool(missing) or len(overlap) < min(20, len(old)) or any(not price_equal(r, old_by_day[r["date"]]) for r in overlap)
                         # Two older anchors cost one window request each, never a hidden full download.
@@ -158,7 +163,7 @@ class PriceService:
                 merged = fresh if rebuild else {**old_by_day, **fresh}
                 ordered = [merged[d] for d in sorted(merged)]
                 coverage = (ordered[0]["date"], ordered[-1]["date"], ordered[-1]["date"])
-                next_full = next_audit() if rebuild else state.get("next_full_audit_at")
+                next_full = (next_audit(key.dataset) if rebuild else state.get("next_full_audit_at")) if adjustment == "qfq" else None
                 changed = bool(set(merged) != set(old_by_day) or any(
                     d in old_by_day and not price_equal(r, old_by_day[d]) for d, r in fresh.items()))
                 warnings = []

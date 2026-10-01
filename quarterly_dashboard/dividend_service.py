@@ -10,8 +10,8 @@ from pathlib import Path
 from .network import create_data_session
 from .sources import normalize_code
 from .storage import Database, SyncKey, SyncResult
-from .update_service import (audit_due, backup_before_update, data_lock, mark_failed,
-                             next_audit, recently_checked, sync_state)
+from .update_service import (backup_before_update, data_lock, mark_failed,
+                             recently_checked, sync_state)
 from .valuation import fetch_dividend_event_page
 
 
@@ -164,10 +164,10 @@ class DividendService:
             state = sync_state(self.db, key)
             old = self.db.dividend_events(identity, SOURCE)
             known = bool(old) or state.get("data_status") == "no_data"
-            if known and not (refresh or full or audit_due(state)
+            if known and not (refresh or full
                             or not recently_checked(state, seconds=86400)):
                 return {"events": self.read(code), "warnings": []}
-            full_fetch = full or not known or audit_due(state)
+            full_fetch = full or not known
             checked = state.get("checked_at")
             since = ((datetime.fromisoformat(checked.replace("Z", "+00:00")).date()
                       if checked else datetime.now(timezone.utc).date()) - timedelta(days=30)).isoformat()
@@ -223,7 +223,7 @@ class DividendService:
                 result = SyncResult(len(candidates), anchors[0] if anchors else None,
                                     anchors[-1] if anchors else None, anchors[-1] if anchors else None,
                                     no_data=not anchors,
-                                    next_full_audit_at=next_audit() if full_fetch else state.get("next_full_audit_at"))
+                                    next_full_audit_at=None)
                 def write(conn):
                     for old_key, new_key in renames:
                         conn.execute("UPDATE dividend_events SET event_key=? WHERE instrument_id=? "

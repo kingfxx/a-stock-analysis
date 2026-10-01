@@ -385,8 +385,10 @@ def fetch_price_history(code, session, adjust, start="1990-01-01", end=None):
     symbol = symbol_for(code)
     prices, previous, request_end = {}, None, end
     for _ in range(50):
+        remaining_days = (date.fromisoformat(request_end) - date.fromisoformat(start)).days + 1
+        page_size = min(640, max(21 if previous is not None else 1, remaining_days))
         response = session.get(TENCENT_URL, params={
-            "param": f"{symbol},day,,{request_end},640,{adjust}"},
+            "param": f"{symbol},day,,{request_end},{page_size},{adjust}"},
             headers={"Referer": "https://gu.qq.com/"}, timeout=18)
         response.raise_for_status()
         batch = parse_price_history(response.json(), symbol, adjust)
@@ -403,7 +405,7 @@ def fetch_price_history(code, session, adjust, start="1990-01-01", end=None):
             if batch[0]["date"] >= min(previous):
                 raise ValueError("腾讯历史分页未推进")
         prices.update({r["date"]: r for r in batch})
-        if batch[0]["date"] <= start or len(batch) < 640:
+        if batch[0]["date"] <= start or len(batch) < page_size:
             return [prices[d] for d in sorted(prices) if start <= d <= end]
         previous = {r["date"]: r for r in batch}
         request_end = batch[19]["date"]

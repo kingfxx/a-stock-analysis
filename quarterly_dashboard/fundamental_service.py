@@ -50,8 +50,8 @@ class FundamentalService:
         return FundamentalService._iso_period(str(value)[:10])
 
     def _collect(self, code, kind, *, full, saved):
-        size = 200 if full else 8
-        expected_overlap = {row["period"] for row in (saved if full else saved[-8:])}
+        size = 200 if full else 2
+        expected_overlap = {row["period"] for row in (saved if full else saved[-2:])}
         by_period, first_page, page, total = {}, None, 1, None
         while True:
             response = self.fetch_page(code, kind, size, page)
@@ -220,10 +220,10 @@ class FundamentalService:
                 key = SyncKey(identity, f"financial:{kind}", SOURCE)
                 state = sync_state(self.db, key)
                 saved = self.db.financial_reports(identity, SOURCE, kind)
-                if saved and not (refresh or full or audit_due(state)
+                if saved and not (refresh or full or audit_due(state, "financial")
                                   or not recently_checked(state, seconds=86400)):
                     continue
-                full_kind = full or not saved or audit_due(state)
+                full_kind = full or not saved or audit_due(state, "financial")
                 run = self.db.start_sync(key, parser_version="sina_reports_v1",
                                          methodology_version="raw_facts_v1",
                                          trigger_reason="full" if full_kind else "refresh")
@@ -235,7 +235,7 @@ class FundamentalService:
                         raise ValueError(f"新浪{kind}无财报记录")
                     result = SyncResult(len(candidates), all_periods[0], all_periods[-1],
                                         all_periods[-1],
-                                        next_full_audit_at=next_audit() if full_kind else state.get("next_full_audit_at"))
+                                        next_full_audit_at=next_audit("financial") if full_kind else state.get("next_full_audit_at"))
                     self.db.complete_sync(run, result,
                         lambda conn: self.db.upsert_financial_reports(conn, key, run, candidates))
                     if kind == "lrb" and full_kind:

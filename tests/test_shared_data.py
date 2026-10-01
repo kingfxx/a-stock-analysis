@@ -75,7 +75,7 @@ def test_financing_first_full_then_incremental_keeps_old_history_and_revision(db
     data = service.update("600887", "financing", refresh=True)
     assert data["stored_count"] == 4 and len(data["rows"]) == 3
     assert calls[0]["start_date"] is None
-    assert calls[1]["start_date"] == "2026-08-30"
+    assert calls[1]["start_date"] == "2026-09-15"
     assert data["rows"][0]["margin_balance"] == 90
     with db.connection() as conn:
         assert conn.execute("SELECT margin_balance FROM financing_daily WHERE trade_date='2020-01-02'").fetchone()[0] == 100
@@ -510,3 +510,223 @@ def test_concurrent_failed_price_refresh_reuses_failure_and_valid_version(db, mo
     with db.connection() as conn:
         assert conn.execute("SELECT count(*) FROM sync_runs WHERE dataset='prices_adjusted' "
                             "AND status='failed'").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("section", ["financing", "shareholders"])
+def test_chip_checks_once_per_shanghai_day(db, tmp_path, monkeypatch, section):
+    from datetime import datetime, timezone
+    from quarterly_dashboard import update_service
+    local = timezone(timedelta(hours=8))
+    now = datetime.now(local)
+    class Clock(datetime):
+        offset = timedelta()
+        @classmethod
+        def now(cls, tz=None):
+            return (now + cls.offset).astimezone(tz)
+    monkeypatch.setattr(update_service, "datetime", Clock)
+    calls = []
+    def fetch(*args, **kwargs):
+        calls.append(kwargs)
+        return [margin("2026-09-29")] if section == "financing" else [holder("2026-06-30")]
+    service = ChipService(db, tmp_path, fetcher=fetch)
+    service.update("600887", section)
+    count = len(calls)
+    Clock.offset = timedelta(minutes=11)
+    # Stay in the same calendar day regardless of the test execution time.
+    if Clock.now(local).date() != now.date():
+        Clock.offset = timedelta(minutes=-11)
+    service.update("600887", section)
+    assert len(calls) == count
+    assert not service.cached("600887", section)["needs_update"]
+    Clock.offset = timedelta(days=1)
+    assert service.cached("600887", section)["needs_update"]
+    service.update("600887", section)
+    assert len(calls) == count * 2
+
+
+@pytest.mark.parametrize("adjustment", ["raw", "qfq"])
+def test_price_checks_once_per_day_but_manual_refresh_bypasses(db, monkeypatch, adjustment):
+    from datetime import datetime, timezone
+    from quarterly_dashboard import update_service
+    now = datetime.now(timezone.utc)
+    class Clock(datetime):
+        offset = timedelta()
+        @classmethod
+        def now(cls, tz=None):
+            return (now + cls.offset).astimezone(tz)
+    monkeypatch.setattr(update_service, "datetime", Clock)
+    source = Prices(history())
+    service = PriceService(db, fetcher=source)
+    service.ensure("600887", adjustment)
+    count = len(source.calls)
+    Clock.offset = timedelta(minutes=11)
+    if Clock.now(timezone(timedelta(hours=8))).date() != now.astimezone(timezone(timedelta(hours=8))).date():
+        Clock.offset = timedelta(minutes=-11)
+    service.ensure("600887", adjustment)
+    assert len(source.calls) == count
+    Clock.offset = timedelta(hours=1)
+    service.ensure("600887", adjustment, refresh=True)
+    assert len(source.calls) > count
+    count = len(source.calls)
+    Clock.offset = timedelta(days=1)
+    service.ensure("600887", adjustment)
+    assert len(source.calls) > count
+
+
+def test_daily_check_boundary_is_shanghai_midnight(monkeypatch):
+    from datetime import datetime, timezone
+    from quarterly_dashboard import update_service
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 2, 0, 1, tzinfo=timezone(timedelta(hours=8))).astimezone(tz)
+    monkeypatch.setattr(update_service, "datetime", Clock)
+    assert not update_service.checked_today({"checked_at": "2026-10-01T15:59:00+00:00"})
+    assert update_service.checked_today({"checked_at": "2026-10-01T16:00:00+00:00"})
+
+
+@pytest.mark.parametrize("dataset, days", [("financial:lrb", 180), ("valuation:pe", 90),
+    ("prices_adjusted", 30), ("financing", None), ("prices_raw", None),
+    ("shareholders", None), ("dividends", None), ("industry", None)])
+def test_audit_policy_by_dataset(dataset, days):
+    from datetime import datetime, timezone
+    from quarterly_dashboard.update_service import audit_due, next_audit
+    due = audit_due({"next_full_audit_at": "2000-01-01T00:00:00+00:00"}, dataset)
+    assert due == (days is not None)
+    deadline = next_audit(dataset)
+    if days is None:
+        assert deadline is None
+    else:
+        assert abs((datetime.fromisoformat(deadline) - datetime.now(timezone.utc)).total_seconds() - days * 86400) < 2
+
+
+def test_raw_prices_do_not_rebuild_for_old_audit_deadline(db):
+    source = Prices(history())
+    service = PriceService(db, fetcher=source)
+    service.ensure("600887", "raw")
+    expire(db)
+    with db.connection(write=True) as conn:
+        conn.execute("UPDATE sync_state SET next_full_audit_at='2000-01-01T00:00:00+00:00'")
+    service.ensure("600887", "raw")
+    assert source.calls[-1][1] != "1990-01-01"
+
+
+def test_financing_overlap_gap_retries_full_once(db, tmp_path):
+    rows = [margin("2026-09-28"), margin("2026-09-29")]
+    calls = []
+    def fetch(*args, **bounds):
+        calls.append(bounds)
+        return rows if bounds["start_date"] is None else rows[-1:]
+    service = ChipService(db, tmp_path, fetcher=fetch)
+    service.update("600887", "financing")
+    result = service.update("600887", "financing", refresh=True)
+    assert not result["warnings"]
+    assert len(calls) == 3 and calls[-1]["start_date"] is None
+    with db.connection() as conn:
+        assert conn.execute("SELECT trigger_reason FROM sync_runs ORDER BY id DESC LIMIT 1").fetchone()[0] == "historical_gap"
+
+
+def test_raw_price_overlap_gap_retries_full_once(db):
+    rows = history()
+    calls = []
+    def fetch(code, adjustment, start, end):
+        calls.append(start)
+        return rows if start == "1990-01-01" else rows[-1:]
+    service = PriceService(db, fetcher=fetch)
+    service.ensure("600887", "raw")
+    expire(db)
+    result = service.ensure("600887", "raw")
+    assert not result["warnings"]
+    assert len(calls) == 3 and calls[-1] == "1990-01-01"
+    assert len(service.read("600887", "raw")) == len(rows)
+
+
+def test_p4_page_ignores_old_dividend_and_industry_audit_dates(db, monkeypatch):
+    from types import SimpleNamespace
+    from quarterly_dashboard.storage import utc_now
+    monkeypatch.setattr(server, "services", lambda: (SimpleNamespace(db=db), None))
+    monkeypatch.setattr(server, "instrument_id", lambda *args: 1)
+    def state(db, key):
+        return {"checked_at": utc_now(), "next_full_audit_at":
+            "2000-01-01T00:00:00+00:00" if key.dataset in {"industry", "dividends"}
+            else "2099-01-01T00:00:00+00:00"}
+    monkeypatch.setattr(server, "sync_state", state)
+    assert server.p4_loading("600887") == {"financial": False, "dividends": False, "valuation": False}
+
+
+@pytest.mark.parametrize("span, expected_counts", [(1, [1]), (20, [26]), (650, [640, 40])])
+def test_tencent_requests_only_needed_rows_and_keeps_page_overlap(span, expected_counts):
+    rows = history(1000)
+    counts = []
+    class Session:
+        def get(self, url, params, **kwargs):
+            parts = params["param"].split(",")
+            count, end = int(parts[4]), parts[3]
+            counts.append(count)
+            batch = [row["raw"] for row in rows if row["date"] <= end][-count:]
+            return Response({"code": 0, "data": {"sh600887": {"qfqday": batch}}})
+    result = fetch_price_history("600887", Session(), "qfq", start=rows[-span]["date"], end=rows[-1]["date"])
+    assert len(result) == span
+    assert counts == expected_counts
+
+
+@pytest.mark.parametrize("report, field", [("RPT_F10_EH_HOLDERNUM", "NOTICE_DATE"),
+                                           ("RPT_HOLDERNUM_DET", "HOLD_NOTICE_DATE")])
+def test_shareholder_adapter_filters_announcement_not_statistical_date(report, field):
+    raw = holder("2020-06-30")
+    raw.pop("NOTICE_DATE")
+    raw[field] = "2026-09-30"
+    class Session:
+        def get(self, url, params, **kwargs):
+            assert params["sortColumns"] == field
+            assert f"({field}>='2026-09-01')" in params["filter"]
+            assert "END_DATE>=" not in params["filter"]
+            return Response({"success": True, "result": {"count": 1, "pages": 1, "data": [raw]}})
+    result = _fetch_chip_report("600887", "shareholders", Session(), report,
+        start_date="2026-09-01", end_date="2026-10-01", date_field=field)
+    assert result == [raw]
+    raw[field] = "2026-08-31"
+    with pytest.raises(ValueError, match="日期范围"):
+        _fetch_chip_report("600887", "shareholders", Session(), report,
+            start_date="2026-09-01", end_date="2026-10-01", date_field=field)
+
+
+def test_shareholder_increment_keeps_history_accepts_late_old_stat_and_empty_check(db, tmp_path):
+    stage = [0]
+    calls = []
+    def fetch(code, section, source, **bounds):
+        calls.append((source, bounds))
+        if stage[0] == 0:
+            return [holder("2020-06-30", 100), holder("2026-06-30", 200)]
+        if stage[0] == 1:
+            row = holder("2020-06-30", 150)
+            row["NOTICE_DATE"] = "2026-09-30"
+            return [row]
+        return []
+    service = ChipService(db, tmp_path, fetcher=fetch)
+    service.update("600887", "shareholders")
+    stage[0] = 1
+    data = service.update("600887", "shareholders", refresh=True)
+    assert not data["warnings"] and data["stored_count"] == 4
+    for source, bounds in calls[-2:]:
+        assert bounds["start_date"] is not None
+        assert bounds["date_field"] == ("NOTICE_DATE" if "F10" in source else "HOLD_NOTICE_DATE")
+    with db.connection() as conn:
+        assert {r[0] for r in conn.execute("SELECT holders FROM shareholder_observations WHERE stat_date='2020-06-30'")} == {150}
+    stage[0] = 2
+    data = service.update("600887", "shareholders", refresh=True)
+    assert not data["warnings"] and data["stored_count"] == 4
+    assert not data["needs_update"] and not data["empty"]
+    assert db.check()["integrity"] == "ok"
+
+
+def test_empty_shareholder_source_checks_incrementally_after_initial_check(db, tmp_path):
+    calls = []
+    def fetch(*args, **bounds):
+        calls.append(bounds)
+        return []
+    service = ChipService(db, tmp_path, fetcher=fetch)
+    service.update("600887", "shareholders")
+    service.update("600887", "shareholders", refresh=True)
+    assert all(b["start_date"] is None for b in calls[:2])
+    assert all(b["start_date"] is not None for b in calls[2:])
