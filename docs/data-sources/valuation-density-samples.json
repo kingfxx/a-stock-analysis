@@ -1,6 +1,6 @@
 {
   "observed_at_utc": "20260930T132425Z",
-  "raw_directory": "data/verification/valuation-density-20260930T132425Z",
+  "raw_directory": "data/verification/samples/valuation-density-20260930T132425Z",
   "series": {
     "601919-pe": {
       "windows": {

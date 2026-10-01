@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main(codes):
     started = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    output = ROOT / "data" / "verification" / f"p4-integration-{started}"
+    output = ROOT / "data" / "verification" / "reports" / f"p4-integration-{started}"
     output.mkdir(parents=True)
     candidate = output / "candidate.sqlite3"
     Database(DEFAULT_DATABASE).backup(candidate)

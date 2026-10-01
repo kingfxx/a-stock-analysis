@@ -121,7 +121,7 @@ def main():
     parser.add_argument('--output', type=Path, default=Path('docs/data-sources/p4-incremental-samples.json'))
     args = parser.parse_args()
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    raw_dir = Path('data/verification') / ('p4-incremental-' + stamp)
+    raw_dir = Path('data/verification/samples') / ('p4-incremental-' + stamp)
     raw_dir.mkdir(parents=True, exist_ok=False)
     probe = Probe(raw_dir)
     report = dict(observed_at_utc=stamp, raw_directory=raw_dir.as_posix(), financial={}, dividends={}, valuations={}, errors=[])

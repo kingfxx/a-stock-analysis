@@ -93,8 +93,8 @@ def test_financing_missing_optional_and_explicit_null_have_distinct_provenance(d
     with db.connection() as conn:
         row = conn.execute("SELECT * FROM financing_daily").fetchone()
         assert "RQMCL" not in json.loads(row["raw_json"])
-        assert json.loads(row["canonical_extra_json"])["RQMCL"] == 67900
-        assert json.loads(row["field_provenance_json"])["RQMCL"] != row["run_id"]
+        assert json.loads(row["retained_fields_json"])["RQMCL"]["value"] == 67900
+        assert json.loads(row["retained_fields_json"])["RQMCL"]["run_id"] != row["run_id"]
         assert row["total_balance"] == 103
     rows[0]["RZRQYE"] = None
     service.update("600887", "financing", refresh=True)

@@ -10,6 +10,7 @@ from threading import Lock
 
 from .chips import _fetch_chip_report, _number, chip_rows
 from .network import create_data_session
+from .financing_storage import effective_fields, NUMERIC_FIELDS
 from .sources import normalize_code
 from .storage import Database, SyncKey, SyncResult, utc_now
 
@@ -85,21 +86,28 @@ class ChipService:
     def _financing_candidates(self, code, records, old):
         chart_rows = chip_rows(records, "financing")
         rows, warnings = [], []
-        fields = {"RZYE": "margin_balance", "RQYE": "short_balance", "RZRQYE": "total_balance",
-                  "RZJME": "net_buy", "SPJ": "close"}
+        fields = NUMERIC_FIELDS
         by_day = {r["DATE"][:10]: r for r in records}
         for item in chart_rows:
             raw = by_day[item["date"]]
             if raw.get("SCODE") != code:
                 raise ValueError("融资记录股票不匹配")
             previous = old.get(item["date"], {})
-            provenance = json.loads(previous.get("field_provenance_json", "{}"))
+            if previous:
+                _, previous_retained, previous_fields = effective_fields(previous)
+            else:
+                previous_retained, previous_fields = {}, {}
+            retained = {
+                field: {"value": value, "run_id": previous_retained[field]["run_id"]
+                        if field in previous_retained else previous["run_id"]}
+                for field, value in previous_fields.items() if field not in raw
+            }
+            if retained:
+                warnings.append("来源缺少字段，沿用旧值并保留来源记录")
             values = {}
             for source_field, column in fields.items():
-                if source_field not in raw and column in previous:
+                if source_field not in raw and source_field in previous_fields:
                     values[column] = previous[column]
-                    provenance[source_field] = provenance.get(source_field, previous["run_id"])
-                    warnings.append("来源缺少可选字段，沿用旧值并保留来源记录")
                 else:
                     value = _number(raw.get(source_field), 0 if column.endswith("balance") else None)
                     if column == "close" and value is not None and value <= 0:
@@ -107,13 +115,7 @@ class ChipService:
                     if raw.get(source_field) is not None and value is None:
                         raise ValueError(f"融资字段无效：{source_field}")
                     values[column] = value  # Explicit null is unknown, not an implicit old value.
-                    provenance.pop(source_field, None)
-            extra = json.loads(previous.get("canonical_extra_json", "{}"))
-            for key in set(extra) - set(raw):
-                provenance[key] = provenance.get(key, previous.get("run_id"))
-                warnings.append("来源缺少扩展字段，原始响应与沿用字段分别保存")
-            extra.update(raw)
-            rows.append(dict(date=item["date"], raw=raw, values=values, extra=extra, provenance=provenance))
+            rows.append(dict(date=item["date"], raw=raw, values=values, retained=retained))
         return rows, list(dict.fromkeys(warnings))
 
     def _save_financing(self, code, key, run, records, *, start=None, end=None, full=False, import_meta=None):
@@ -137,20 +139,19 @@ class ChipService:
                             checked_at=import_meta.get("checked_at") if import_meta else None)
         def write(conn):
             for row in rows:
-                provenance = {**{k: run for k in row["raw"]}, **row["provenance"]}
                 v = row["values"]
                 conn.execute("INSERT INTO financing_daily(instrument_id,source,trade_date,margin_balance,short_balance,"
-                             "total_balance,net_buy,close,raw_json,canonical_extra_json,field_provenance_json,"
-                             "content_hash,obtained_at,run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                             "total_balance,net_buy,close,raw_json,retained_fields_json,"
+                             "content_hash,obtained_at,run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
                              "ON CONFLICT(instrument_id,source,trade_date) DO UPDATE SET "
                              "margin_balance=excluded.margin_balance,short_balance=excluded.short_balance,"
                              "total_balance=excluded.total_balance,net_buy=excluded.net_buy,close=excluded.close,"
-                             "raw_json=excluded.raw_json,canonical_extra_json=excluded.canonical_extra_json,"
-                             "field_provenance_json=excluded.field_provenance_json,content_hash=excluded.content_hash,"
+                             "raw_json=excluded.raw_json,retained_fields_json=excluded.retained_fields_json,"
+                             "content_hash=excluded.content_hash,"
                              "obtained_at=excluded.obtained_at,run_id=excluded.run_id",
                              (key.instrument_id, key.source, row["date"], *(v[c] for c in (
                                  "margin_balance", "short_balance", "total_balance", "net_buy", "close")),
-                              encoded(row["raw"]), encoded(row["extra"]), encoded(provenance),
+                              encoded(row["raw"]), encoded(row["retained"]),
                               digest(row["raw"]), utc_now(), run))
             if import_meta:
                 self._import_record(conn, key, run, len(rows), import_meta)

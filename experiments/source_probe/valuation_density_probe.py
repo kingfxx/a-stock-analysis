@@ -12,7 +12,7 @@ from quarterly_dashboard.valuation import BAIDU_URL, BAIDU_INDICATORS
 
 def main():
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    raw = Path('data/verification') / ('valuation-density-' + stamp)
+    raw = Path('data/verification/samples') / ('valuation-density-' + stamp)
     raw.mkdir(parents=True, exist_ok=False)
     probe = Probe(raw)
     report = dict(observed_at_utc=stamp, raw_directory=raw.as_posix(), series={}, errors=[])

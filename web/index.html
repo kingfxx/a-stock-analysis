@@ -32,6 +32,8 @@
     button { cursor:pointer; border:0; background:var(--cyan); color:#071418; border-radius:7px; padding:11px 17px; font-weight:700; }
     .refresh { color:var(--muted); text-decoration:none; font-size:13px; padding:9px; }
     .refresh:hover { color:var(--ink); }
+    button.refresh { background:transparent; font-weight:400; white-space:nowrap; }
+    button.refresh:disabled { opacity:.5; cursor:wait; }
     .context { display:flex; gap:24px; flex-wrap:wrap; margin:21px 0 25px; color:var(--muted); font-size:13px; }
     .context strong { color:var(--ink); font-weight:600; }
     .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
@@ -122,6 +124,7 @@
         <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
         <button type="submit">查看</button>
         <a id="refresh" class="refresh" href="#">刷新数据</a>
+        <button id="full-audit" class="refresh" type="button">全量刷新</button>
       </form>
     </div>
   </header>
@@ -287,7 +290,6 @@
   <section class="chip-region" aria-label="筹码评估">
     <h2>筹码评估</h2>
     <p id="prices-status" class="note" role="status" aria-live="polite"></p>
-    <button id="full-audit" type="button">全量核对历史数据</button>
     <p class="sub">对照股东人数、融资资金与股价变化，观察持有结构和杠杆资金的趋势。</p>
     <section class="panel chip-panel" aria-label="股东人数与股价趋势">
       <div class="panel-head">
@@ -774,7 +776,7 @@
       ? `${latest.date} · ${name} ${valueText} · ${priceName} ${latest[adjustment + '_close'] == null ? '—' : latest[adjustment + '_close'].toFixed(2) + ' 元/股'}`
       : data.empty ? (financing ? '数据源暂无该股票的融资记录。' : '数据源暂无该股票的股东人数记录。') : '暂无可用数据';
     document.getElementById(section + '-note').textContent =
-      `来源：东方财富 · 本地更新 ${data.updated_on || '—'} · 已保存 ${data.stored_count || 0} 条${financing ? '日度' : '各来源'}记录，当前显示 ${rows.length} 条 · 股价：${priceName} · 前复权版本 ${data.price_version || '待加载'}。` + (data.warnings || []).join(' ');
+      `来源：东方财富 · 本地更新 ${data.updated_on || '—'} · 已保存 ${data.stored_count || 0} 条${financing ? '日度' : '各来源'}记录，当前显示 ${rows.length} 条 · 股价：${priceName}。` + (data.warnings || []).join(' ');
     const dates = rows.map(row => row.date);
     const traces = [{type:financing && metric === 'net_buy' ? 'bar' : 'scatter',
       mode:financing ? 'lines' : 'lines+markers',name,x:dates,
@@ -906,11 +908,18 @@
   }
   async function loadDashboard(force = false, full = false) {
     if (dashboardUpdating) return;
+    const coordinated = Object.hasOwn(state, 'price_version');
+    if (!force && !full && !Object.values(state.loading).some(Boolean) &&
+        !(coordinated && state.price_needs_update)) {
+      for (const section of Object.keys(sectionNames)) sectionStatus(section, '已显示本地缓存');
+      return;
+    }
     dashboardUpdating = true;
     const refresh = document.getElementById('refresh');
+    const fullRefresh = document.getElementById('full-audit');
+    fullRefresh.disabled = true;
     refresh.setAttribute('aria-disabled', 'true');
     refresh.textContent = '更新中…';
-    const coordinated = Object.hasOwn(state, 'price_version');
     const requestCode = state.code;
     const prices = coordinated && (force || state.price_needs_update)
       ? requestPrices(force, full).catch(exception => {
@@ -920,17 +929,17 @@
     const hasReports = Boolean(state.views?.quarter?.length);
     const needsFinancial = force || state.loading.financial;
     const needsValuation = force || state.loading.valuation;
-    const financial = needsFinancial ? requestSection('financial', force) : Promise.resolve(true);
+    const financial = needsFinancial ? requestSection('financial', force, full) : Promise.resolve(true);
     if (!needsFinancial) sectionStatus('financial', '已显示本地缓存');
     const dividends = financial.then(ok => {
       if (!ok) { sectionStatus('dividends', '财务加载失败，保留已有数据'); return; }
-      if (force || state.loading.dividends) return requestSection('dividends', force);
+      if (force || state.loading.dividends) return requestSection('dividends', force, full);
       sectionStatus('dividends', '已显示本地缓存');
     });
     const valuation = !needsValuation ? Promise.resolve(sectionStatus('valuation', '已显示本地缓存'))
       : !needsFinancial && hasReports ? requestSection('valuation', false)
       : financial.then(ok => {
-        if (ok) return requestSection('valuation', force);
+        if (ok) return requestSection('valuation', force, full);
         sectionStatus('valuation', '财务加载失败，保留已有数据');
       });
     const chips = ['shareholders','financing'].map(section => force || state.loading[section]
@@ -942,13 +951,14 @@
         const bundle = await requestPrices(false, false, initial?.price_version || state.price_version || 0);
         applyPriceBundle(bundle);
         document.getElementById('prices-status').textContent =
-          `共享股价 · 前复权版本 ${state.price_version || '暂无'}。` + [...new Set([...(initial?.warnings || []), ...(bundle?.warnings || [])])].join(' ');
+          [...new Set([...(initial?.warnings || []), ...(bundle?.warnings || [])])].join(' ');
       }
     } catch (exception) {
       if (state.code === requestCode) document.getElementById('prices-status').textContent = '价格同步未完成，保留已展示数据。' + exception.message;
     }
     finally {
       dashboardUpdating = false;
+      fullRefresh.disabled = false;
       refresh.setAttribute('aria-disabled', 'false');
       refresh.textContent = '刷新数据';
     }
@@ -957,7 +967,12 @@
     event.preventDefault();
     loadDashboard(true);
   });
-  document.getElementById('full-audit').addEventListener('click', () => loadDashboard(true, true));
+  document.getElementById('full-audit').addEventListener('click', () => {
+    if (dashboardUpdating) return;
+    const stock = state.code + (state.name ? ' · ' + state.name : '');
+    if (!confirm(`全量刷新 ${stock}\n\n将重新获取数据源可提供的财务、分红、估值、股东人数、融资和股价历史，核对并更新本地数据。\n\n仅刷新当前股票，不会刷新其他缓存股票。请求较多，耗时通常比普通刷新更长；获取失败的数据项会保留已有记录。\n\n是否继续？`)) return;
+    return loadDashboard(true, true);
+  });
   if (typeof Plotly !== 'undefined') { render(); renderValuation(); }
   if (typeof Plotly !== 'undefined') { renderChips('shareholders'); renderChips('financing'); }
   loadDashboard(Boolean(state.refresh_requested));

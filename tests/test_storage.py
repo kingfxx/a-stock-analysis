@@ -445,6 +445,10 @@ def test_p4_upgrade_preserves_legacy_imports_and_allows_same_path_new_dataset(tm
     key, run = sync(old)
     commit_financing(old, key, run)
     with old.connection(write=True) as conn:
+        raw = json.dumps({"RQMCL": 67900, "RZYE": 0, "RZJME": -30})
+        conn.execute("UPDATE financing_daily SET raw_json=?,canonical_extra_json=?,field_provenance_json=?",
+                     (raw, raw, json.dumps({field: run for field in json.loads(raw)})))
+    with old.connection(write=True) as conn:
         conn.execute("INSERT INTO legacy_imports VALUES (?,?,?,?,?,?,?)",
                      ("cache/000001.json", "hash", "financing", key.instrument_id, run, 1, utc_now()))
     monkeypatch.undo()

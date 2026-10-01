@@ -29,7 +29,7 @@
 - 可复现命令：`python -m experiments.source_probe.p4_incremental_probe`
 - [脚本](../../experiments/source_probe/p4_incremental_probe.py)
 - [完整参数、记录数、比较结果与响应大小](p4-incremental-samples.json)
-- 完整原始响应存于本机忽略目录 `data/verification/p4-incremental-20260930T131032Z`；不随 Git 分发。后续契约测试须从中提取小型固定样本。
+- 完整原始响应存于本机忽略目录 `data/verification/samples/p4-incremental-20260930T131032Z`；不随 Git 分发。后续契约测试须从中提取小型固定样本。
 
 以下字节数来自 `response.content`，是解压后响应体大小，不代表线上压缩流量；不作固定耗时承诺。它们是一次来源快照的观察，并非供应商稳定性保证。
 

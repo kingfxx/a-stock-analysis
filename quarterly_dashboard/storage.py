@@ -21,7 +21,8 @@ from typing import Callable, Iterator
 
 DEFAULT_DATABASE = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.sqlite3"
 APPLICATION_ID = 0x4153544B  # ASTK; refuse an unrelated SQLite file.
-MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_facts.sql"))
+MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_facts.sql"),
+              (4, "004_financing_compact.sql"))
 
 
 class StorageError(RuntimeError):
@@ -195,6 +196,13 @@ class Database:
                 for version, name, checksum, sql in migrations[applied:]:
                     for statement in _sql_statements(sql):
                         conn.execute(statement)
+                    if version == 4:
+                        from .financing_storage import migrate_financing
+                        audit = migrate_financing(conn)
+                        if audit["conflicts"]:
+                            audit_path = self.path.parent / "backups" / f"financing-migration-audit-{uuid4().hex}.json"
+                            audit_path.parent.mkdir(parents=True, exist_ok=True)
+                            audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
                     conn.execute("INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
                                  (version, name, checksum, utc_now()))
                     conn.execute(f"PRAGMA user_version={version}")
@@ -509,6 +517,12 @@ class Database:
                 ).fetchone()[0]
             if invalid_runs or invalid_versions or invalid_active or invalid_provenance:
                 raise StorageError("Successful synchronization/price version relationships are inconsistent")
+            if schema_count >= 4:
+                from .financing_storage import check_retained_fields
+                try:
+                    check_retained_fields(conn)
+                except ValueError as exc:
+                    raise StorageError(str(exc)) from exc
             result = {"path": str(self.path), "sqlite_version": sqlite3.sqlite_version,
                     "schema_version": conn.execute("PRAGMA user_version").fetchone()[0],
                     "journal_mode": conn.execute("PRAGMA journal_mode").fetchone()[0],

@@ -1,6 +1,6 @@
 {
   "observed_at_utc": "20260930T131032Z",
-  "raw_directory": "data/verification/p4-incremental-20260930T131032Z",
+  "raw_directory": "data/verification/samples/p4-incremental-20260930T131032Z",
   "financial": {
     "601919-lrb": {
       "full_count": 82,

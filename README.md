@@ -75,7 +75,7 @@ python app.py --open-browser
 
 ## 检查
 
-P0–P4 已实现；P4 在隔离库通过本机验收，原运行库会在新版首次启动时执行结构版本 3 迁移。启动会检查结构、恢复中断任务并生成一致备份；成功业务更新后刷新当日备份。当前 Python 3.11.9 / SQLite 3.45.1 使用 DELETE journal。WAL 修复版和另一台电脑的恢复演练仍属于 P5 待验收项。维护命令见 [SQLite 存储说明](docs/sqlite-storage.md)，实测和限制见 [P4/P5 验收记录](docs/data-sources/p4-acceptance.md)。
+P0–P4 已实现；P4 在隔离库通过本机验收，本机运行库已升级结构版本 4，融资去除重复 JSON，数值、原始响应和必要沿用来源保留；其他旧库在新版首次启动时自动迁移。启动会检查结构、恢复中断任务并生成一致备份；成功业务更新后刷新当日备份。当前 Python 3.11.9 / SQLite 3.45.1 使用 DELETE journal。WAL 修复版和另一台电脑的恢复演练仍属于 P5 待验收项。维护命令见 [SQLite 存储说明](docs/sqlite-storage.md)，实测和限制见 [P4/P5 验收记录](docs/data-sources/p4-acceptance.md)。
 
 测试依赖需另行安装；前端悬停、轴范围和后台加载回归还需要系统中可执行的 `node`，未安装时对应测试会跳过。
 

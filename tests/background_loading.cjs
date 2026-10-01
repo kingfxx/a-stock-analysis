@@ -6,6 +6,9 @@ const path = require('node:path');
 const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
 const start = page.indexOf('  // Background data loading.');
 assert.ok(start >= 0, 'The page must support background chart loading');
+const header = page.slice(page.indexOf('<header>'), page.indexOf('</header>'));
+assert.match(header, /刷新数据[\s\S]*id="full-audit"[^>]*type="button">全量刷新/);
+assert.equal((page.match(/id="full-audit"/g) || []).length, 1);
 const source = page.slice(start, page.lastIndexOf("  if (typeof Plotly !== 'undefined') { render(); renderValuation(); }"));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -19,10 +22,12 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
     renderValuation: () => rendered.push('valuation'), renderChips: section => rendered.push(section), renderCachedStocks() {},
     renderWarnings() {},
     document: {getElementById: id => {
-      if (!elements.has(id)) elements.set(id, {textContent:'',
-        setAttribute() {}, addEventListener() {}, replaceChildren() {}});
+      if (!elements.has(id)) elements.set(id, {textContent:id === 'refresh' ? '刷新数据' : '', attributes:{}, listeners:{},
+        setAttribute(name, value) { this.attributes[name] = value; },
+        addEventListener(name, handler) { this.listeners[name] = handler; }, replaceChildren() {}});
       return elements.get(id);
     }},
+    confirm: () => false,
     fetch: url => new Promise(resolve => pending.set(url, resolve))
   };
   vm.createContext(context);
@@ -37,6 +42,23 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
 }
 
 (async () => {
+  // Switching to a fully fresh stock neither flashes "updating" nor reloads prices.
+  const fresh = {financial:false,dividends:false,valuation:false,shareholders:false,financing:false};
+  for (const extra of [{}, {price_version:1,price_needs_update:false}]) {
+    const cached = setup(fresh, undefined, extra);
+    const button = cached.context.document.getElementById('refresh');
+    const loaded = cached.context.loadDashboard();
+    assert.equal(button.textContent, '刷新数据');
+    assert.equal(button.attributes['aria-disabled'], undefined);
+    assert.equal(cached.pending.size, 0);
+    await loaded;
+    assert.equal(cached.pending.size, 0);
+    assert.equal(cached.rendered.length, 0);
+    for (const section of Object.keys(fresh)) {
+      assert.match(cached.elements.get(section + '-status').textContent, /已显示本地缓存/);
+    }
+  }
+
   // A slow valuation source cannot hold the financial chart hostage.
   let fixture = setup({financial:true, dividends:false, valuation:true});
   let completion = fixture.context.loadDashboard();
@@ -125,10 +147,60 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
   await completion;
   verifyCoherent();
 
+  // Cancellation starts no work; confirmation fully refreshes every current-stock dataset.
+  fixture = setup(fresh, undefined, {price_version:1,price_needs_update:false,name:'中国铝业'});
+  const fullButton = fixture.elements.get('full-audit');
+  let confirmations = 0;
+  fixture.context.confirm = message => {
+    confirmations++;
+    assert.match(message, /601600 · 中国铝业/);
+    assert.match(message, /仅刷新当前股票/);
+    assert.match(message, /更新本地数据/);
+    return false;
+  };
+  fullButton.listeners.click();
+  assert.equal(confirmations, 1);
+  assert.equal(fixture.pending.size, 0);
+  fixture.context.confirm = () => { confirmations++; return true; };
+  completion = fullButton.listeners.click();
+  assert.equal(fullButton.disabled, true);
+  assert.equal(fixture.pending.size, 4);
+  assert.ok([...fixture.pending.keys()].every(url => url.includes('code=601600') && url.includes('&refresh=1&full=1')));
+  fullButton.listeners.click();
+  assert.equal(confirmations, 2, 'An active update must not open another confirmation');
+  fixture.respond('prices', {price_version:2,warnings:[]});
+  fixture.respond('financial', {views:{quarter:[{profit:20}]},needs_dividends:true,warnings:[]});
+  fixture.respond('shareholders', {rows:[],warnings:[]});
+  fixture.respond('financing', {rows:[],warnings:[]});
+  await tick();
+  assert.equal(fixture.pending.size, 2);
+  assert.ok([...fixture.pending.keys()].every(url => url.includes('&refresh=1&full=1')));
+  fixture.respond('dividends', {views:{quarter:[{profit:20}]},needs_dividends:false,warnings:[]});
+  fixture.respond('valuation', {views:{},warnings:[]});
+  await tick();
+  fixture.respond('prices', bundle);
+  await completion;
+  assert.equal(fullButton.disabled, false);
+
+  // Stale prices still refresh even when every other dataset is fresh.
+  fixture = setup(fresh, undefined, {price_version:1,price_needs_update:true});
+  completion = fixture.context.loadDashboard();
+  assert.equal(fixture.pending.size, 1);
+  assert.equal(fixture.elements.get('refresh').textContent, '更新中…');
+  fixture.respond('prices', {price_version:2,warnings:[]});
+  await tick();
+  assert.match([...fixture.pending.keys()][0], /version=2/);
+  fixture.respond('prices', bundle);
+  await completion;
+  assert.equal(fixture.context.state.price_version, 2);
+  assert.equal(fixture.elements.get('refresh').textContent, '刷新数据');
+  assert.equal(fixture.elements.get('refresh').attributes['aria-disabled'], 'false');
+
   // Expired contexts explicitly reload a checked generation instead of mixing versions.
-  fixture = setup({financial:false,dividends:false,valuation:false}, undefined,
+  fixture = setup({...fresh,shareholders:true}, undefined,
     {price_version:1,price_needs_update:false});
   completion = fixture.context.loadDashboard();
+  fixture.respond('shareholders', {rows:[],warnings:[]});
   await tick();
   fixture.respond('prices', {error:'expired'}, false, 409);
   await tick();
