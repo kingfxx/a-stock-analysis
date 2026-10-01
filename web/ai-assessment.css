@@ -33,6 +33,10 @@
 .ai-dialog select { width:100%; box-sizing:border-box; padding:10px; background:#1a2227; color:#edf4f4; border:1px solid #304049; }
 .ai-dialog a { color:#38c4dc; }
 .ai-history-item { display:block; width:100%; text-align:left; margin:10px 0; line-height:1.7; }
+.ai-history-row { display:flex; gap:12px; align-items:center; }
+.ai-history-row .ai-history-item { flex:1; min-width:0; white-space:pre-line; overflow-wrap:anywhere; }
+.ai-history-select { flex:none; width:18px; height:18px; accent-color:#38c4dc; }
+.ai-history-select:focus-visible { outline:2px solid #38c4dc; outline-offset:3px; }
 @media(max-width:800px) {
   .ai-dialog { width:100%; border:0; padding:18px; }
   .ai-context-actions { flex-basis:100%; margin-left:0; }

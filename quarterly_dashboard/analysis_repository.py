@@ -1,4 +1,4 @@
-"""Append-only reports, immutable snapshots and transactional task admission."""
+"""Reports, immutable snapshots and transactional task admission/deletion."""
 from uuid import uuid4
 import json
 
@@ -127,3 +127,24 @@ class AnalysisRepository:
                 args.extend(anchor)
             rows = [dict(r) for r in conn.execute(sql + " ORDER BY r.created_at DESC,r.id DESC LIMIT 21", args)]
         return {"items": rows[:20], "next_cursor": rows[19]["id"] if len(rows) > 20 else None}
+
+    def delete_history(self, code, run_ids):
+        if (not isinstance(run_ids, list) or not 1 <= len(run_ids) <= 200
+                or any(not isinstance(value, str) or len(value) != 32 for value in run_ids)
+                or len(set(run_ids)) != len(run_ids)):
+            raise ValueError("请选择 1–200 条不同的历史记录")
+        placeholders = ','.join('?' for _ in run_ids)
+        with self.db.connection(write=True) as conn:
+            rows = conn.execute("SELECT r.id,r.status,r.snapshot_id FROM ai_analysis_runs r "
+                "JOIN instruments i ON i.id=r.instrument_id WHERE i.code=? AND r.id IN (" + placeholders + ")",
+                [code, *run_ids]).fetchall()
+            if len(rows) != len(run_ids):
+                raise ValueError("部分记录已不存在或不属于当前股票，请刷新历史记录")
+            if any(row['status'] in ACTIVE for row in rows):
+                raise ValueError("不能删除正在分析或等待中的任务，请先取消分析")
+            snapshots = list({row['snapshot_id'] for row in rows})
+            conn.execute("DELETE FROM ai_analysis_runs WHERE id IN (" + placeholders + ")", run_ids)
+            removed = conn.execute("DELETE FROM ai_analysis_snapshots WHERE id IN (" +
+                ','.join('?' for _ in snapshots) + ") AND NOT EXISTS "
+                "(SELECT 1 FROM ai_analysis_runs r WHERE r.snapshot_id=ai_analysis_snapshots.id)", snapshots).rowcount
+        return {"deleted_runs": len(rows), "deleted_snapshots": removed}

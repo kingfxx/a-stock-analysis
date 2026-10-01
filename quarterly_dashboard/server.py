@@ -876,6 +876,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/analysis":
                 data = service.create(command)
                 status = 202 if data.get("accepted") else 200
+            elif path == "/api/analysis/history/delete":
+                if set(command) != {'code', 'run_ids'}:
+                    raise ValueError("历史删除请求字段无效")
+                data = service.repository.delete_history(normalize_code(command['code']), command['run_ids'])
             elif path == "/api/ai/connect":
                 data = service.provider.connect(self.server.server_port)
             elif path == "/api/ai/disconnect":

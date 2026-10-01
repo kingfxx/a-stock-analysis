@@ -13,6 +13,8 @@ window.initAIAssessment = function(state) {
   const date = value => value ? new Date(value).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'}) : '—';
   let overview = {}, status = {}, currentReport = null, timer = null, loginTimer = null, epoch = 0;
   let updating = false, openedBy = null, historyCursor = null, pollingDelay = 800, view = 'report';
+  const selectedHistory = new Set();
+  let historyDeleteButton = null, historyCount = null, deletingHistory = false;
   const actions = el('span', undefined, 'ai-context-actions');
   const entry = button('AI 研判', openReport);
   const settingsEntry = button('AI 设置', openSettings);
@@ -105,19 +107,22 @@ window.initAIAssessment = function(state) {
     node.append(details);
   }
   function evidenceLinks(node, ids, report) {
-    for (const id of ids || []) node.append(button('依据', () => {
+    for (const id of new Set(ids || [])) {
       const evidence = report.input.evidence.find(item => item.id === id);
-      const details = el('details'); details.open = true;
-      const labels={revenue:'营业收入',profit:'归母净利润',revenue_growth:'营收同比',profit_growth:'利润同比',gross_margin:'毛利率',net_margin:'净利率',roe:'ROE',roic:'ROIC',operating_cash_flow:'经营现金流',capex:'资本开支',free_cash_flow:'简化自由现金流',cash_dividend:'已实施分红',dividend_payout_ratio:'已实施分红率',monetary_funds:'货币资金',interest_bearing_debt:'简化有息负债',net_cash:'净现金',pe:'PE',pb:'PB',ps:'PS',dividend_yield:'股息率',pe_raw:'原始PE',holders:'股东人数',close:'收盘价',financing:'融资摘要',price_trend:'前复权价格趋势'};
+      if (!evidence) continue;
+      const details = el('details', undefined, 'ai-evidence');
+      details.dataset.evidenceId = id;
+      const labels={financial_period:'财务指标',revenue:'营业收入',profit:'归母净利润',revenue_growth:'营收同比',profit_growth:'利润同比',gross_margin:'毛利率',net_margin:'净利率',roe:'ROE',roic:'ROIC',operating_cash_flow:'经营现金流',capex:'资本开支',free_cash_flow:'简化自由现金流',cash_dividend:'已实施分红',dividend_payout_ratio:'已实施分红率',monetary_funds:'货币资金',interest_bearing_debt:'简化有息负债',net_cash:'净现金',pe:'PE',pb:'PB',ps:'PS',dividend_yield:'股息率',pe_raw:'原始PE',holders:'股东人数',close:'收盘价',financing:'融资摘要',price_trend:'前复权价格趋势'};
       const period={quarter:'单季',ttm:'TTM',year:'年度'};
-      details.append(el('summary',(labels[evidence.metric] || '财务指标') + (evidence.period_type ? ' · ' + period[evidence.period_type] : '') + (evidence.years ? ' · '+evidence.years+'年历史' : '')));
+      details.append(el('summary',(labels[evidence.metric] || '财务指标') + (evidence.period_type ? ' · ' + (period[evidence.period_type] || evidence.period_type) : '') + (evidence.years ? ' · '+evidence.years+'年历史' : '') + (evidence.observed_on ? ' · '+evidence.observed_on : '')));
       details.append(el('p','实际观察日期：'+(evidence.observed_on || '缺失')+' · 来源：'+(evidence.source || '未知'),'ai-meta'));
       const number=value => value===null ? '资料缺失' : new Intl.NumberFormat('zh-CN',{maximumFractionDigits:4}).format(value);
       if (evidence.metric==='financial_period') {
         const table=el('table',undefined,'ai-fact-table');
         for (const [key,value] of Object.entries(evidence.value)) {
           const row=el('tr'); const ratio=['revenue_growth','profit_growth','gross_margin','net_margin','roe','roic','dividend_payout_ratio'].includes(key);
-          row.append(el('th',labels[key]),el('td',number(value)+(value===null ? '' : ratio ? '%' : ' 元'))); table.append(row);
+          const text=key==='dividend_payout_ratio' && evidence.period_type!=='year' ? '仅年度提供' : number(value)+(value===null ? '' : ratio ? '%' : ' 元');
+          row.append(el('th',labels[key]),el('td',text)); table.append(row);
         }
         details.append(table);
       } else if (typeof evidence.value==='number' || evidence.value===null) {
@@ -128,7 +133,7 @@ window.initAIAssessment = function(state) {
       if (evidence.methodology) details.append(el('p',evidence.methodology,'ai-meta'));
       const raw=el('details'); raw.append(el('summary','查看完整证据记录'),el('pre',JSON.stringify(evidence,null,2))); details.append(raw);
       node.append(details);
-    }));
+    }
   }
   function renderReport() {
     dialog.replaceChildren(); header(dialog, 'AI 综合研判 · ' + (state.name || '') + ' ' + state.code);
@@ -152,6 +157,9 @@ window.initAIAssessment = function(state) {
         ? '尚未开始分析：数据更新中，完成后请点击“重新分析”。'
         : '尚无成功报告。点击“重新分析”生成；账号和模型可在 AI 设置中查看。'), button('AI 设置',openSettings));
       dataRange(dialog); return;
+    }
+    if (report.input.calculation_version === 'stock_assessment_calc_v1') {
+      dialog.append(el('p','此报告使用旧版债务口径，可能将已有有息负债和净现金误标为缺失。请点击“重新分析”使用修正后的数据生成结论。','ai-message'));
     }
     const result = report.result;
     dialog.append(badge(result.verdict), el('p',result.summary), el('p','分析视角：价值投资 · 中长期 1–3 年','ai-meta'));
@@ -204,23 +212,63 @@ window.initAIAssessment = function(state) {
     }, pollingDelay);
   }
   async function openHistory() {
-    view='history'; open(dialog); historyCursor=null; dialog.replaceChildren(); header(dialog,'研判历史 · ' + state.code);
-    dialog.append(button('本次报告',() => {view='report'; currentReport=overview.report; renderReport();}));
+    view='history'; open(dialog); historyCursor=null; selectedHistory.clear(); dialog.replaceChildren(); header(dialog,'研判历史 · ' + state.code);
+    const toolbar=el('div',undefined,'ai-toolbar');
+    historyCount=el('span','已选 0 条','ai-meta');
+    historyDeleteButton=button('删除所选',deleteHistory);
+    toolbar.append(button('本次报告',() => {view='report'; currentReport=overview.report; renderReport();}),
+      button('全选已加载',() => {
+        for (const checkbox of dialog.querySelectorAll('.ai-history-select:not(:disabled)')) {
+          checkbox.checked=true; selectedHistory.add(checkbox.value);
+        }
+        updateHistorySelection();
+      }),button('清空选择',() => {
+        selectedHistory.clear();
+        for (const checkbox of dialog.querySelectorAll('.ai-history-select')) checkbox.checked=false;
+        updateHistorySelection();
+      }),historyDeleteButton,historyCount);
+    dialog.append(toolbar,el('p','删除会移除本地数据库中的报告、任务记录及不再被其他报告引用的数据快照。正在分析的任务须先取消。','ai-meta'));
+    updateHistorySelection();
     await moreHistory();
+  }
+  function updateHistorySelection() {
+    historyCount.textContent='已选 '+selectedHistory.size+' 条';
+    historyDeleteButton.disabled=deletingHistory || !selectedHistory.size;
+  }
+  async function deleteHistory() {
+    if (deletingHistory || !selectedHistory.size) return;
+    const code=state.code, ids=[...selectedHistory];
+    if (!window.confirm('删除 '+code+' 的 '+ids.length+' 条研判记录？\n将从本地数据库中删除，无法在页面撤销。')) return;
+    deletingHistory=true; updateHistorySelection();
+    try {
+      await api('/api/analysis/history/delete',{code,run_ids:ids});
+      if (state.code!==code) return;
+      await refresh(); currentReport=overview.report;
+      if (dialog.open && view==='history') await openHistory();
+      else if (dialog.open && view==='report') renderReport();
+    } finally { deletingHistory=false; if (view==='history') updateHistorySelection(); }
   }
   async function moreHistory() {
     const code = state.code;
     const data = await api('/api/analysis/history?code=' + encodeURIComponent(code) + (historyCursor ? '&cursor=' + historyCursor : ''));
-    if (code !== state.code || !dialog.open) return;
+    if (code !== state.code || !dialog.open || view!=='history') return;
     dialog.querySelector('[data-more-history]')?.remove();
     if (!data.items.length && !historyCursor) dialog.append(el('p','暂无研判记录'));
     for (const item of data.items) {
+      const row=el('div',undefined,'ai-history-row');
+      const checkbox=el('input',undefined,'ai-history-select'); checkbox.type='checkbox'; checkbox.value=item.id;
+      checkbox.setAttribute('aria-label','选择记录 '+date(item.created_at)+' '+item.id);
+      checkbox.disabled=['queued','running','validating'].includes(item.status);
+      checkbox.addEventListener('change',() => {
+        if (checkbox.checked) selectedHistory.add(item.id); else selectedHistory.delete(item.id);
+        updateHistorySelection();
+      });
       const node = button(date(item.created_at) + ' · ' + (item.verdict || taskText(item)) + ' · ' + item.model + '\n' + (item.summary || ''), async () => {
         const report = await api('/api/analysis/runs/' + item.id);
         if (report.code !== state.code) return;
         view='report'; currentReport=report; renderReport();
         if (report.error) dialog.append(el('p',report.error,'ai-message'));
-      }); node.classList.add('ai-history-item'); dialog.append(node);
+      }); node.classList.add('ai-history-item'); row.append(checkbox,node); dialog.append(row);
     }
     historyCursor=data.next_cursor;
     if (historyCursor) {const more=button('更多历史',moreHistory); more.dataset.moreHistory='true'; dialog.append(more);}

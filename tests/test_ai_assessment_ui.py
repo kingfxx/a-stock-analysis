@@ -8,7 +8,8 @@ from http.server import ThreadingHTTPServer
 import pytest
 
 from quarterly_dashboard import server
-from test_ai_assessment import database, service
+from test_ai_assessment import database, service, wait_terminal
+from uuid import uuid4
 
 
 @pytest.mark.parametrize('fresh_cache',[False,True])
@@ -65,8 +66,19 @@ def test_ai_drawer_history_settings_keyboard_and_width(database, monkeypatch, tm
                 drawer.get_by_role('button',name='本次报告',exact=True).wait_for()
                 assert item.provider.calls==1
                 drawer.get_by_role('button',name='本次报告',exact=True).click()
-                drawer.get_by_role('button',name='依据',exact=True).first.click()
-                assert drawer.locator('details[open]').count()>=1
+                evidence=drawer.locator('.ai-evidence').first
+                title=evidence.locator(':scope > summary')
+                assert '财务指标 · 单季 · ' in title.inner_text()
+                count=drawer.locator('.ai-evidence').count()
+                for _ in range(3):
+                    title.click()
+                    assert evidence.evaluate('(node)=>node.open')
+                    title.click()
+                    assert not evidence.evaluate('(node)=>node.open')
+                    assert drawer.locator('.ai-evidence').count()==count
+                title.focus()
+                page.keyboard.press('Enter')
+                assert evidence.evaluate('(node)=>node.open')
                 for width in (1280,1600,390):
                     page.set_viewport_size({'width':width,'height':900})
                     page.wait_for_timeout(100)
@@ -90,6 +102,35 @@ def test_ai_drawer_history_settings_keyboard_and_width(database, monkeypatch, tm
                 settings.get_by_role('button',name='关闭',exact=True).click()
                 page.get_by_role('button',name='查看报告',exact=True).click()
                 assert item.provider.calls==1
+                run=item.create({'code':'600900','request_key':uuid4().hex,'force':True})
+                assert wait_terminal(item,run['id'])['status']=='succeeded'
+                if item.worker: item.worker.join(3)
+                drawer.get_by_role('button',name='历史记录',exact=True).click()
+                page.wait_for_function("document.querySelectorAll('.ai-history-select').length===2")
+                delete=drawer.get_by_role('button',name='删除所选',exact=True)
+                assert delete.is_disabled()
+                drawer.locator('.ai-history-select').first.check()
+                assert '已选 1 条' in drawer.inner_text()
+                drawer.get_by_role('button',name='全选已加载',exact=True).click()
+                assert '已选 2 条' in drawer.inner_text()
+                for width in (1280,390):
+                    page.set_viewport_size({'width':width,'height':900})
+                    assert drawer.evaluate('(node)=>node.scrollWidth<=node.clientWidth+1')
+                    page.screenshot(path=str(tmp_path/f'ai-history-{width}.png'))
+                drawer.get_by_role('button',name='清空选择',exact=True).click()
+                assert delete.is_disabled()
+                drawer.get_by_role('button',name='全选已加载',exact=True).click()
+                page.once('dialog',lambda confirm:confirm.dismiss())
+                delete.click()
+                assert len(item.repository.history('600900')['items'])==2
+                page.once('dialog',lambda confirm:confirm.accept())
+                delete.click()
+                page.wait_for_function("document.querySelector('dialog[open]').textContent.includes('暂无研判记录')")
+                assert item.repository.history('600900')['items']==[]
+                with database.connection() as conn:
+                    assert conn.execute('SELECT count(*) FROM ai_analysis_snapshots').fetchone()[0]==0
+                assert item.provider.calls==2
+                assert '经营稳定' not in page.locator('.ai-summary').inner_text()
                 assert not errors, errors
     finally:
         if item.worker: item.worker.join(3)

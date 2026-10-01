@@ -6,7 +6,7 @@ import json
 from datetime import date
 from pathlib import Path
 
-from .core import build_period_rows, view_rows, DEBT_COMPONENTS
+from .core import build_period_rows, view_rows
 from .fundamental_service import FundamentalService
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
@@ -16,7 +16,7 @@ from .sources import normalize_code
 from .storage import utc_now
 
 INPUT_VERSION = "stock_assessment_input_v1"
-CALCULATION_VERSION = "stock_assessment_calc_v1"
+CALCULATION_VERSION = "stock_assessment_calc_v2"
 PROFILE = {"style": "value", "horizon": "1_to_3_years"}
 
 
@@ -87,13 +87,10 @@ def capture(db, code, *, as_of=None):
     for period, limit in (("quarter", 12), ("ttm", 8), ("year", 5)):
         for row in view_rows(all_rows, period)[-limit:]:
             values = {field: row.get(field) for field in fields}
-            # core treats absent debt components as zero; analysis cannot assume that.
-            if any(row.get(field) is None for field in DEBT_COMPONENTS):
-                values["interest_bearing_debt"] = values["net_cash"] = None
             add(f"financial.{period}.{row['period']}", "financial_period", values, "金额:元;比率:%",
                 row["period"], "sina/legacy/manual", period_type=period,
                 published_on=row.get("publish_date"),
-                methodology="单季拆分/TTM/ROE/ROIC复用现有计算；自由现金流和债务为简化口径，时点值不加总")
+                methodology="单季拆分/TTM/ROE/ROIC复用现有计算；自由现金流和债务为简化口径，时点值不加总；债务科目齐全且列示空值时按零处理，缺科目不计算；净现金可为负（净负债）；已实施分红率仅年度提供")
     observation_rows = valuation.get("observation_rows") or valuation.get("rows", [])
     yield_rows = merge_dividend_yields([], monthly_dividend_yields(raw, dividends))
     for metric in ("pe", "pb", "ps", "dividend_yield"):

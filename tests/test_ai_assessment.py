@@ -266,6 +266,48 @@ def test_success_reuse_failure_keeps_report_and_no_network_reads(database,monkey
     assert item.overview('600900')['report']['id']==run['id']
 
 
+def test_delete_history_shared_snapshot_fallback_and_orphan_cleanup(database):
+    item=service(database)
+    ids=[]
+    for _ in range(2):
+        run=item.create({'code':'600900','request_key':uuid4().hex,'force':True})
+        assert wait_terminal(item,run['id'])['status']=='succeeded'
+        if item.worker: item.worker.join(3)
+        ids.append(run['id'])
+    with database.connection() as conn:
+        facts=conn.execute('SELECT count(*) FROM financial_reports').fetchone()[0]
+        assert conn.execute('SELECT count(*) FROM ai_analysis_snapshots').fetchone()[0]==1
+    assert item.repository.delete_history('600900',[ids[1]])=={'deleted_runs':1,'deleted_snapshots':0}
+    assert item.overview('600900')['report']['id']==ids[0]
+    with pytest.raises(ValueError): item.repository.run(ids[1])
+    assert item.repository.delete_history('600900',[ids[0]])=={'deleted_runs':1,'deleted_snapshots':1}
+    assert item.overview('600900')['report'] is None
+    assert item.repository.history('600900')['items']==[]
+    with database.connection() as conn:
+        assert conn.execute('SELECT count(*) FROM ai_analysis_runs').fetchone()[0]==0
+        assert conn.execute('SELECT count(*) FROM ai_analysis_snapshots').fetchone()[0]==0
+        assert conn.execute('SELECT count(*) FROM financial_reports').fetchone()[0]==facts
+
+
+@pytest.mark.parametrize('active_status',['queued','running','validating'])
+def test_delete_history_rejects_active_wrong_stock_missing_and_invalid_ids(database,active_status):
+    repo=AnalysisRepository(database)
+    finished=repo.enqueue(snapshot(database),uuid4().hex,'test-model','account',prompt())
+    repo.transition(finished['id'],'queued','failed')
+    active=repo.enqueue(snapshot(database),uuid4().hex,'test-model','account',prompt())
+    if active_status!='queued': repo.claim()
+    if active_status=='validating': repo.transition(active['id'],'running','validating')
+    for code,ids in [('600900',[finished['id'],active['id']]),('000001',[finished['id']]),
+                     ('600900',[finished['id'],'0'*32]),('600900',[]),('600900','bad'),
+                     ('600900',[finished['id'],finished['id']]),('600900',[None])]:
+        with pytest.raises(ValueError): repo.delete_history(code,ids)
+        assert repo.run(finished['id'])['status']=='failed'
+        assert repo.run(active['id'])['status']==active_status
+    assert repo.delete_history('600900',[finished['id']])['deleted_snapshots']==0
+    repo.cancel(active['id'])
+    assert repo.delete_history('600900',[active['id']])['deleted_snapshots']==1
+
+
 def test_cancel_late_success_restart_and_queue_limit(database):
     provider=FakeProvider(); provider.release.clear()
     item=service(database,provider)
@@ -459,8 +501,40 @@ def test_http_cross_site_token_host_history_and_no_model_reads(database,monkeypa
         headers={'Origin':'https://malicious.example','X-Local-Session':status['session_token']}
         assert requests.post(base+'/api/analysis',json=command,headers=headers).status_code==403
         headers['Origin']=base
-        assert requests.post(base+'/api/analysis',json=command,headers=headers).status_code==202
+        created=requests.post(base+'/api/analysis',json=command,headers=headers)
+        assert created.status_code==202
+        run=wait_terminal(item,created.json()['id'])
+        deletion={'code':'600900','run_ids':[run['id']]}
+        assert requests.post(base+'/api/analysis/history/delete',json=deletion).status_code==403
+        malicious={**headers,'Origin':'https://malicious.example'}
+        assert requests.post(base+'/api/analysis/history/delete',json=deletion,headers=malicious).status_code==403
+        assert requests.post(base+'/api/analysis/history/delete',json={**deletion,'code':'000001'},headers=headers).status_code==400
+        deleted=requests.post(base+'/api/analysis/history/delete',json=deletion,headers=headers)
+        assert deleted.status_code==200 and deleted.json()=={'deleted_runs':1,'deleted_snapshots':1}
+        assert requests.get(base+'/api/analysis/runs/'+run['id']).status_code==400
         assert requests.get(base+'/api/ai/status',headers={'Host':'malicious.example'}).status_code==400
     finally:
         if item.worker: item.worker.join(3)
         http.shutdown(); http.server_close(); thread.join(3)
+
+
+@pytest.mark.parametrize('missing_component',[False,True])
+@pytest.mark.parametrize('period',['2025-12-31','2026-06-30'])
+def test_snapshot_debt_matches_dashboard_with_empty_reported_components(database, missing_component, period):
+    from quarterly_dashboard.core import DEBT_COMPONENTS
+    with database.connection(write=True) as conn:
+        stored=conn.execute("SELECT period,raw_json FROM financial_reports WHERE period=?",(period,)).fetchone()
+        report=json.loads(stored['raw_json'])
+        report.update({field:None for field in DEBT_COMPONENTS})
+        report['short_term_borrowings']=150
+        report['lease_liabilities']=0
+        if missing_component:
+            del report['bonds_payable']
+        conn.execute('UPDATE financial_reports SET raw_json=? WHERE period=?',(encoded(report),stored['period']))
+    data=snapshot(database)['input']
+    assert data['calculation_version']=='stock_assessment_calc_v2'
+    latest=[e for e in data['evidence'] if e['metric']=='financial_period' and e['observed_on']==period]
+    assert {e['period_type'] for e in latest}==({'quarter','ttm','year'} if period.endswith('12-31') else {'quarter','ttm'})
+    for evidence in latest:
+        assert evidence['value']['interest_bearing_debt']==(None if missing_component else 150)
+        assert evidence['value']['net_cash']==(None if missing_component else -50)
