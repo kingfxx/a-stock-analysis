@@ -44,6 +44,8 @@
     .comparison-panel .panel-head { display:block; }
     .comparison-panel .controls { margin-top:18px; }
     .controls { display:flex; flex-wrap:wrap; align-items:end; gap:10px; }
+    .comparison-range-control { display:flex; align-items:center; gap:10px; max-width:100%; }
+    .comparison-range-control label { white-space:nowrap; }
     .metric-choice { display:flex; flex-direction:column; gap:6px; min-width:170px; }
     .metric-choice-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
     .metric-choice-name { color:var(--muted); font-size:12px; font-weight:700; white-space:nowrap; }
@@ -64,6 +66,7 @@
     .chart-scroll { overflow-x:auto; }
     .chart-scroll-hint { display:none; }
     .note { margin:0; padding:0 27px 23px; color:var(--muted); font-size:13px; line-height:1.6; }
+    .note[role="status"]:empty { display:none; }
     .below { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
     .mini { padding:20px 23px; background:#172026; border:1px solid var(--line); border-radius:10px; }
     .mini h3 { margin:0 0 9px; font-size:14px; color:#d8e6e9; }
@@ -108,8 +111,8 @@
   <header>
     <div>
       <div class="eyebrow">A 股 · 本地研究</div>
-      <h1>季度经营对照</h1>
-      <p class="sub">一张图，对照经营成果与财报披露时的市场价格</p>
+      <h1>公司经营与市场表现</h1>
+      <p class="sub">结合财务、估值、股东人数与融资变化，观察公司基本面和市场表现。</p>
     </div>
     <div class="lookup">
       <details class="cached-picker" id="cached-picker">
@@ -224,12 +227,14 @@
           <button type="button" data-period="year">年度</button>
           <button type="button" data-period="ttm">TTM</button>
         </div>
-        <label for="comparison-range">时间范围</label>
-        <select id="comparison-range" aria-label="财务图时间范围">
-          <option value="all" selected>全部时间</option>
-          <option value="10">最近 10 年</option>
-          <option value="5">最近 5 年</option>
-        </select>
+        <div class="comparison-range-control">
+          <label for="comparison-range">时间范围</label>
+          <select id="comparison-range" aria-label="财务图时间范围">
+            <option value="all" selected>全部时间</option>
+            <option value="10">最近 10 年</option>
+            <option value="5">最近 5 年</option>
+          </select>
+        </div>
       </div>
     </div>
     <p id="chart-scroll-hint" class="chart-scroll-hint" hidden>向右滑动可查看其他纵轴与完整图表</p>
@@ -850,8 +855,8 @@
   // Background data loading.
   let dashboardUpdating = false;
   const sectionNames = {financial:'财务', dividends:'分红', valuation:'估值',shareholders:'股东人数',financing:'融资'};
-  function sectionStatus(section, message) {
-    document.getElementById(section + '-status').textContent = sectionNames[section] + '：' + message;
+  function sectionStatus(section, message = '') {
+    document.getElementById(section + '-status').textContent = message ? sectionNames[section] + '：' + message : '';
   }
   function applyFinancial(data, coherent = false, renderCharts = true) {
     if (!coherent && Object.hasOwn(state, 'price_version') && !state.price_version && data.views) {
@@ -915,7 +920,7 @@
         if (section === 'dividends') data.warnings = [...new Set([...(state.warnings || []), ...(data.warnings || [])])];
         applyFinancial(data);
       }
-      sectionStatus(section, data.warnings?.length ? '更新未全部完成，已显示可用数据，请留意提示。' : '数据已就绪');
+      sectionStatus(section, data.warnings?.length ? '更新未全部完成，已显示可用数据，请留意提示。' : '');
       return true;
     } catch (exception) {
       if (state.code !== requestCode) return false;
@@ -949,7 +954,7 @@
     const coordinated = Object.hasOwn(state, 'price_version');
     if (!force && !full && !Object.values(state.loading).some(Boolean) &&
         !(coordinated && state.price_needs_update)) {
-      for (const section of Object.keys(sectionNames)) sectionStatus(section, '已显示本地缓存');
+      for (const section of Object.keys(sectionNames)) sectionStatus(section);
       return;
     }
     dashboardUpdating = true;
@@ -968,20 +973,20 @@
     const needsFinancial = force || state.loading.financial;
     const needsValuation = force || state.loading.valuation;
     const financial = needsFinancial ? requestSection('financial', force, full) : Promise.resolve(true);
-    if (!needsFinancial) sectionStatus('financial', '已显示本地缓存');
+    if (!needsFinancial) sectionStatus('financial');
     const dividends = financial.then(ok => {
       if (!ok) { sectionStatus('dividends', '财务加载失败，保留已有数据'); return; }
       if (force || state.loading.dividends) return requestSection('dividends', force, full);
-      sectionStatus('dividends', '已显示本地缓存');
+      sectionStatus('dividends');
     });
-    const valuation = !needsValuation ? Promise.resolve(sectionStatus('valuation', '已显示本地缓存'))
+    const valuation = !needsValuation ? Promise.resolve(sectionStatus('valuation'))
       : !needsFinancial && hasReports ? requestSection('valuation', false)
       : financial.then(ok => {
         if (ok) return requestSection('valuation', force, full);
         sectionStatus('valuation', '财务加载失败，保留已有数据');
       });
     const chips = ['shareholders','financing'].map(section => force || state.loading[section]
-      ? requestSection(section, force, full) : Promise.resolve(sectionStatus(section, '已显示本地缓存')));
+      ? requestSection(section, force, full) : Promise.resolve(sectionStatus(section)));
     try {
       const results = await Promise.all([financial, dividends, valuation, ...chips, prices]);
       if (coordinated && requestCode === state.code) {

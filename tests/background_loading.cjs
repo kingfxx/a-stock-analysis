@@ -55,7 +55,7 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
     assert.equal(cached.pending.size, 0);
     assert.equal(cached.rendered.length, 0);
     for (const section of Object.keys(fresh)) {
-      assert.match(cached.elements.get(section + '-status').textContent, /已显示本地缓存/);
+      assert.equal(cached.elements.get(section + '-status').textContent, '');
     }
   }
 
@@ -63,6 +63,7 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
   let fixture = setup({financial:true, dividends:false, valuation:true});
   let completion = fixture.context.loadDashboard();
   assert.equal(fixture.pending.size, 1);
+  assert.match(fixture.elements.get('financial-status').textContent, /后台更新中/);
   fixture.respond('financial', {code:'601600', name:'中国铝业',
     updated_at:'2026-09-28', views:{quarter:[{profit:20}]}, warnings:[],
     cached_stocks:[], needs_dividends:false});
@@ -74,6 +75,8 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
   fixture.respond('valuation', {views:{new:true}, updated_on:'2026-09-28', warnings:[]});
   await completion;
   assert.ok(fixture.context.state.valuation.views.new);
+  assert.equal(fixture.elements.get('financial-status').textContent, '');
+  assert.equal(fixture.elements.get('valuation-status').textContent, '');
 
   // Failed refreshes keep both existing charts and clearly indicate failure.
   fixture = setup({financial:false, dividends:false, valuation:false});
@@ -86,6 +89,11 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
   assert.deepEqual(fixture.context.state.valuation.views, {old:true});
   assert.match(fixture.elements.get('financial-status').textContent, /失败/);
   assert.match(fixture.elements.get('valuation-status').textContent, /保留/);
+  completion = fixture.context.requestSection('financial', true);
+  assert.match(fixture.elements.get('financial-status').textContent, /后台更新中/);
+  fixture.respond('financial', {views:{quarter:[{profit:20}]},warnings:[],needs_dividends:false});
+  await completion;
+  assert.equal(fixture.elements.get('financial-status').textContent, '');
 
   // A cold stock must supply financial reports before computing valuation PS.
   fixture = setup({financial:true, dividends:true, valuation:true}, {});
@@ -96,6 +104,7 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
   await tick();
   assert.equal(fixture.pending.size, 2);
   assert.ok(fixture.rendered.includes('financial'));
+  assert.match(fixture.elements.get('financial-status').textContent, /更新未全部完成/);
   fixture.respond('dividends', {code:'601600', views:{quarter:[{profit:30,cash_dividend:8}]},
     warnings:[], cached_stocks:[], needs_dividends:false});
   fixture.respond('valuation', {views:{pe:true}, warnings:[]});
