@@ -27,6 +27,7 @@ from .dividend_service import DividendService
 from .valuation_service import ValuationService
 from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due
 from .storage import SyncKey
+from .stock_library import StockLibrary
 from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
                     shareholder_price_snapshots)
 from .sources import (fetch_cash_flow_reports, fetch_financial_reports,
@@ -767,6 +768,7 @@ def render_page(code: str, refresh: bool) -> str:
     except (ValueError, KeyError, json.JSONDecodeError) as exc:
         error = str(exc)
     payload["cached_stocks"] = cached_stocks()
+    payload["stock_library"] = StockLibrary(services()[0].db).read() if Path(DATABASE_PATH).exists() else {}
     embedded = json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     return (TEMPLATE.replace("__PAYLOAD__", embedded)
             .replace("__CODE__", html.escape(code, quote=True))
@@ -774,12 +776,44 @@ def render_page(code: str, refresh: bool) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if urlparse(self.path).path != "/api/stock-groups":
+            self.send_error(404)
+            return
+        status = 200
+        try:
+            allowed = {f"http://127.0.0.1:{self.server.server_port}", f"http://localhost:{self.server.server_port}"}
+            if self.headers.get("Origin") and self.headers["Origin"] not in allowed:
+                raise ValueError("不允许跨站修改分组")
+            if self.headers.get_content_type() != "application/json":
+                raise ValueError("请使用 JSON 操作分组")
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= 65536:
+                raise ValueError("分组请求大小无效")
+            command = json.loads(self.rfile.read(size).decode("utf-8"))
+            data = StockLibrary(services()[0].db).change(command)
+        except (ValueError, TypeError, OSError, StorageError, sqlite3.DatabaseError) as exc:
+            status, data = 400, {"error": str(exc)}
+        body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         status = 200
         if parsed.path == "/plotly.min.js":
             body = get_plotlyjs().encode("utf-8")
             content_type = "text/javascript; charset=utf-8"
+        elif parsed.path == "/stock-picker.js":
+            body = (ROOT / "web" / "stock-picker.js").read_bytes()
+            content_type = "text/javascript; charset=utf-8"
+        elif parsed.path == "/api/stock-groups":
+            body = json.dumps(StockLibrary(services()[0].db).read(), ensure_ascii=False).encode("utf-8")
+            content_type = "application/json; charset=utf-8"
         elif parsed.path == "/":
             query = parse_qs(parsed.query)
             code = query.get("code", ["601919"])[0]

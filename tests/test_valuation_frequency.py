@@ -156,3 +156,36 @@ def test_period_end_price_missing_on_known_trade_does_not_use_earlier_close():
         assert row["qfq_close"] is None
         assert row["qfq_close_date"] is None
         assert row["qfq_no_trades"] is False
+
+
+def test_negative_pe_ranges_keep_raw_values_and_do_not_change_chart_or_percentiles():
+    series = {"pe": [{"date": day, "value": value} for day, value in (
+        ("2025-07-31", 225.51), ("2025-08-21", 254.93), ("2025-08-22", -144.76),
+        ("2025-09-30", -299.55), ("2026-02-27", -591.08), ("2026-02-28", 84.35))]}
+    rows = valuation_observation_rows(series, [])
+    assert rows[2]["pe"] is None and rows[2]["pe_raw"] == -144.76
+    baseline = [{key: value for key, value in row.items() if key != "pe_raw"} for row in rows]
+    payload = server._p4_valuation_payload({"observation_rows": rows})
+    for years in (3, 5, 10):
+        summary = payload["views"][str(years)]["pe"]
+        assert summary["negative_pe_ranges"] == [{"start": "2025-08-22", "end": "2026-02-27"}]
+        reference = valuation_summary_observations(baseline, "pe", years, {})
+        for key in ("count", "percentile", "high", "median", "low", "current", "current_date"):
+            assert summary[key] == reference[key]
+        for frequency in ("day", "week", "month"):
+            assert summary["rows_by_frequency"][frequency] == reference["rows_by_frequency"][frequency]
+        assert payload["views"][str(years)]["pb"]["negative_pe_ranges"] == []
+
+
+def test_negative_pe_ranges_clip_to_selected_window_and_distinguish_missing_and_zero():
+    series = {"pe": [{"date": day, "value": value} for day, value in (
+        ("2022-01-01", -10), ("2025-01-01", -20), ("2025-02-01", None),
+        ("2025-03-01", -30), ("2025-04-01", 0), ("2025-05-01", -40),
+        ("2025-06-01", 10), ("2027-01-01", -50))],
+        "pb": [{"date": "2025-01-15", "value": 2}]}
+    rows = valuation_observation_rows(series, [])
+    summary = valuation_summary_observations(rows, "pe", 3, {}, as_of="2026-10-01")
+    assert summary["negative_pe_ranges"] == [
+        {"start": day, "end": day} for day in ("2025-01-01", "2025-03-01", "2025-05-01")]
+    summary = valuation_summary_observations(rows, "pe", 10, {}, as_of="2026-10-01")
+    assert summary["negative_pe_ranges"][0] == {"start": "2022-01-01", "end": "2025-01-01"}

@@ -348,6 +348,8 @@ def valuation_observation_rows(series: dict[str, list[dict]], reports: list[dict
             if metric in ("pe", "pb"):
                 row[metric] = _positive(point.get("value"))
                 row[f"{metric}_date"] = day
+                if metric == "pe":
+                    row["pe_raw"] = _finite_number(point.get("value"))
                 continue
             row["ps_date"] = day
             index = bisect_right(disclosures, day) - 1
@@ -411,6 +413,21 @@ def valuation_summary_observations(rows, metric, years, industry, *, as_of=None,
         start = end.replace(year=end.year - years, day=28)
     window = sorted((row for row in rows if start.isoformat() <= row["date"] <= end.isoformat()),
                     key=lambda row: row["date"])
+    negative_pe_ranges = []
+    if metric == "pe":
+        active = None
+        for row in window:
+            if "pe_raw" not in row:
+                continue
+            value = row["pe_raw"]
+            if value is not None and value < 0:
+                if active is None:
+                    active = {"start": row["date"], "end": row["date"]}
+                    negative_pe_ranges.append(active)
+                else:
+                    active["end"] = row["date"]
+            else:
+                active = None
     valid_number = _nonnegative if metric == "dividend_yield" else _positive
     valid = [row for row in window if valid_number(row.get(metric)) is not None]
     known_trade_dates = {day for day in (trading_dates or [])
@@ -438,6 +455,7 @@ def valuation_summary_observations(rows, metric, years, industry, *, as_of=None,
     frequency = {3: "day", 5: "week", 10: "month"}[years]
     return {
         "rows": display[frequency], "rows_by_frequency": display, "frequency": frequency,
+        "negative_pe_ranges": negative_pe_ranges,
         "count": len(values), "sample_count": len(values),
         "sample_frequency": sample_frequency, "percentile_frequency": sample_frequency,
         "percentile_methodology_version": "uniform_trade_week_or_month_v2",

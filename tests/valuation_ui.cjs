@@ -120,6 +120,39 @@ assert.equal(trace.customdata[0][1], '（本周期未完结）');
 assert.match(trace.hovertemplate, /实际观察日：%\{customdata\[0\]\}/);
 assert.match(ui.element('valuation-note').textContent, /较早段观测较稀疏/);
 
+// Negative PE periods stay marked across frequencies and clear when another metric is selected.
+{
+  const negativeUi = fixture('3');
+  const peView = negativeUi.context.state.valuation.views['3'].pe;
+  peView.negative_pe_ranges = [{start:'2025-08-22',end:'2026-02-27'}];
+  peView.rows_by_frequency.day = [
+    {date:'2025-08-21',pe:254.93}, {date:'2025-08-22',pe:null},
+    {date:'2026-02-27',pe:null}, {date:'2026-02-28',pe:84.35}];
+  negativeUi.render();
+  const plot = negativeUi.plots.at(-1);
+  assert.deepEqual(Array.from(plot.traces[0].y), [254.93,null,null,84.35]);
+  assert.equal(plot.traces[0].connectgaps, false);
+  assert.equal(plot.layout.shapes[0].x0, '2025-08-22');
+  assert.equal(plot.layout.shapes[0].x1, '2026-02-27');
+  const message = negativeUi.element('valuation-negative-note').textContent;
+  assert.match(message, /2025-08-22 至 2026-02-27/);
+  assert.match(message, /不参与走势与估值分位计算/);
+  for (const frequency of ['week','month','day']) {
+    negativeUi.change('valuation-frequency', frequency);
+    assert.equal(negativeUi.element('valuation-negative-note').textContent, message);
+    assert.equal(negativeUi.element('valuation-high').textContent, '30.00 倍');
+  }
+  negativeUi.context.state.valuation.views['3'].pb = structuredClone(peView);
+  vm.runInContext("valuationMetric = 'pb'; renderValuation();", negativeUi.context);
+  assert.equal(negativeUi.element('valuation-negative-note').textContent, '');
+  assert.equal(negativeUi.plots.at(-1).layout.shapes.length, 0);
+  peView.negative_pe_ranges = [];
+  vm.runInContext("valuationMetric = 'pe'; renderValuation();", negativeUi.context);
+  assert.equal(negativeUi.element('valuation-negative-note').textContent, '');
+  assert.equal(negativeUi.plots.at(-1).layout.shapes.length, 0);
+  assert.equal(negativeUi.requests.length, 0);
+}
+
 // Delayed API responses render the current frequency, while responses from the old stock are ignored.
 (async () => {
   ui = fixture('3');
