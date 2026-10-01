@@ -12,7 +12,7 @@ from .sources import (PROFIT_KEYS, fetch_financial_report_page, normalize_code,
                       normalize_report_dates, parse_cash_flow_reports,
                       parse_financial_reports)
 from .storage import Database, SyncKey, SyncResult, utc_now
-from .update_service import (audit_due, backup_after_update, data_lock, mark_failed,
+from .update_service import (audit_due, backup_before_update, data_lock, mark_failed,
                              next_audit, recently_checked, sync_state)
 
 
@@ -212,10 +212,10 @@ class FundamentalService:
 
     def update(self, code, *, refresh=False, full=False):
         code = normalize_code(code)
+        backup_before_update(self.db)
         with data_lock(self.db, "financial", code):
             identity = self.db.ensure_instrument(code)
             warnings = []
-            committed = False
             for kind in REPORT_TYPES:
                 key = SyncKey(identity, f"financial:{kind}", SOURCE)
                 state = sync_state(self.db, key)
@@ -238,7 +238,6 @@ class FundamentalService:
                                         next_full_audit_at=next_audit() if full_kind else state.get("next_full_audit_at"))
                     self.db.complete_sync(run, result,
                         lambda conn: self.db.upsert_financial_reports(conn, key, run, candidates))
-                    committed = True
                     if kind == "lrb" and full_kind:
                         sparse = [row["period"] for row in candidates
                                   if not all(_income_fields(row["raw_json"]))]
@@ -248,8 +247,6 @@ class FundamentalService:
                 except Exception as exc:
                     mark_failed(self.db, run, exc)
                     warnings.append(f"{kind} 财报更新失败，保留已存事实：{exc}")
-            if committed:
-                warnings.extend(backup_after_update(self.db))
             data = self.read(code)
             data["warnings"] = warnings
             return data

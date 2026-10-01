@@ -564,17 +564,15 @@ class Database:
                 source.close()
             temporary.unlink(missing_ok=True)
 
-    def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None, replace=False) -> Path:
+    def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None, verify_existing=True) -> Path:
         if type(keep) is not int or keep < 1:
             raise ValueError("keep must be positive")
         day = day or datetime.now(timezone.utc).date()
         directory = Path(directory).resolve() if directory else self.path.parent / "backups"
         path = directory / f"{self.path.stem}-daily-{day.isoformat()}.sqlite3"
-        if replace and path.exists():
-            candidate = directory / f".daily-candidate-{uuid4().hex}.sqlite3"
-            self.backup(candidate)
-            candidate.replace(path)
-        elif not path.exists():
+        if path.exists() and not verify_existing:
+            return path
+        if not path.exists():
             self.backup(path)
         else:
             Database(path, journal_mode="delete").check(current=False)

@@ -11,7 +11,7 @@ from pathlib import Path
 from .network import create_data_session
 from .sources import normalize_code
 from .storage import Database, SyncKey, SyncResult, utc_now
-from .update_service import (audit_due, backup_after_update, data_lock, mark_failed,
+from .update_service import (audit_due, backup_before_update, data_lock, mark_failed,
                              next_audit, recently_checked, sync_state)
 from .valuation import (fetch_industry_snapshot_details, fetch_valuation_indicator,
                         monthly_valuation, valuation_observation_rows)
@@ -214,10 +214,10 @@ class ValuationService:
 
     def update(self, code, reports, *, refresh=False, full=False):
         code = normalize_code(code)
+        backup_before_update(self.db)
         with data_lock(self.db, "valuation", code):
             identity = self.db.ensure_instrument(code)
             warnings = []
-            committed = False
             for metric in METRICS:
                 key = SyncKey(identity, f"valuation:{metric}", SOURCE)
                 state = sync_state(self.db, key)
@@ -264,15 +264,12 @@ class ValuationService:
                             row["source_windows"] = list(dict.fromkeys(windows_seen + row["source_windows"]))
                     self.db.complete_sync(run, result,
                         lambda conn: self.db.upsert_valuation_observations(conn, key, run, candidates))
-                    committed = True
                 except Exception as exc:
                     mark_failed(self.db, run, exc)
                     warnings.append(f"{metric} 估值更新失败，保留已存事实：{exc}")
-            industry_warnings, industry_committed = self._update_industry(
+            industry_warnings, _ = self._update_industry(
                 code, identity, refresh=refresh, full=full)
             warnings.extend(industry_warnings)
-            if committed or industry_committed:
-                warnings.extend(backup_after_update(self.db))
             result = self.read(code, reports)
             result["warnings"] = warnings
             return result

@@ -10,7 +10,7 @@ from pathlib import Path
 from .network import create_data_session
 from .sources import normalize_code
 from .storage import Database, SyncKey, SyncResult
-from .update_service import (audit_due, backup_after_update, data_lock, mark_failed,
+from .update_service import (audit_due, backup_before_update, data_lock, mark_failed,
                              next_audit, recently_checked, sync_state)
 from .valuation import fetch_dividend_event_page
 
@@ -157,6 +157,7 @@ class DividendService:
 
     def update(self, code, *, refresh=False, full=False):
         code = normalize_code(code)
+        backup_before_update(self.db)
         with data_lock(self.db, "dividends", code):
             identity = self.db.ensure_instrument(code)
             key = SyncKey(identity, "dividends", SOURCE)
@@ -229,7 +230,6 @@ class DividendService:
                                      "AND source=? AND event_key=?", (new_key, identity, SOURCE, old_key))
                     self.db.upsert_dividend_events(conn, key, run, list(candidates.values()))
                 self.db.complete_sync(run, result, write)
-                warnings.extend(backup_after_update(self.db))
             except Exception as exc:
                 mark_failed(self.db, run, exc)
                 warnings.append(f"分红更新失败，保留已存事实：{exc}")

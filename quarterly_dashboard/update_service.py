@@ -65,13 +65,10 @@ def mark_failed(db, run, exc):
         db.fail_sync(run, str(exc))
 
 
-def backup_after_update(db):
-    try:
-        with data_lock(db, "backup", "daily"):
-            db.daily_backup(replace=True)
-        return []
-    except Exception as exc:
-        return [f"数据已提交，但日备份更新失败：{exc}"]
+def backup_before_update(db):
+    """Keep the first daily snapshot; serialize concurrent first updates."""
+    with data_lock(db, "backup", "daily"):
+        db.daily_backup(verify_existing=False)
 
 
 class ChipService:
@@ -240,6 +237,7 @@ class ChipService:
 
     def update(self, code, section, *, refresh=False, full=False, today=None):
         code, today = normalize_code(code), today or date.today()
+        backup_before_update(self.db)
         warnings = []
         with data_lock(self.db, section, code):
             try:
@@ -269,7 +267,6 @@ class ChipService:
                     mark_failed(self.db, run, exc)
                     warnings.append(f"{source} 更新失败，保留已有记录：{exc}")
         result = self.cached(code, section, today=today)
-        warnings += backup_after_update(self.db)
         result["warnings"] = list(dict.fromkeys(warnings))
         return result
 

@@ -291,12 +291,65 @@ def test_daily_and_monthly_disclosure_consumers_share_values_without_future_fill
     assert valuation_prices({"rows": [{"date": "2026-06-30", "pe": 10}]}, qfq)["rows"][0]["qfq_close"] == -.99
 
 
-def test_daily_backup_replaces_current_day_after_successful_update(db, tmp_path):
-    path = db.daily_backup()
+def test_daily_backup_preserves_state_before_first_update(db, tmp_path, monkeypatch):
+    service = ChipService(db, tmp_path, fetcher=lambda *a, **kw: [margin("2026-09-29")])
+    calls = []
+    original = db.backup
+    def backup(path):
+        calls.append(path)
+        return original(path)
+    monkeypatch.setattr(db, "backup", backup)
+    service.update("600887", "financing")
+    path = next((tmp_path / "backups").glob("shared-daily-*.sqlite3"))
+    snapshot = path.read_bytes()
     assert Database(path).check()["instruments"] == 0
+    service.update("300750", "financing", refresh=True)
+    assert path.read_bytes() == snapshot
+    assert len(calls) == 1
+    assert db.check()["instruments"] == 2
+
+
+def test_daily_backup_rolls_over_without_restart(db, tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from quarterly_dashboard import storage
+    class Clock(datetime):
+        day = 1
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, cls.day, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr(storage, "datetime", Clock)
     service = ChipService(db, tmp_path, fetcher=lambda *a, **kw: [margin("2026-09-29")])
     service.update("600887", "financing")
-    assert Database(path).check()["instruments"] == 1
+    Clock.day = 2
+    service.update("300750", "financing")
+    previous = Database(tmp_path / "backups/shared-daily-2026-10-01.sqlite3")
+    current = Database(tmp_path / "backups/shared-daily-2026-10-02.sqlite3")
+    assert previous.check()["instruments"] == 0
+    assert current.check()["instruments"] == 1
+    assert db.check()["instruments"] == 2
+
+
+def test_concurrent_daily_backup_is_created_once(db, monkeypatch):
+    from quarterly_dashboard.update_service import backup_before_update
+    calls = []
+    original = db.backup
+    def backup(path):
+        calls.append(path)
+        return original(path)
+    monkeypatch.setattr(db, "backup", backup)
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        list(pool.map(lambda _: backup_before_update(db), range(10)))
+    assert len(calls) == 1
+
+
+def test_daily_backup_failure_prevents_update(db, tmp_path, monkeypatch):
+    def fail(*args, **kwargs):
+        raise OSError("backup unavailable")
+    monkeypatch.setattr(db, "backup", fail)
+    service = ChipService(db, tmp_path, fetcher=lambda *a, **kw: pytest.fail("source requested"))
+    with pytest.raises(OSError, match="backup unavailable"):
+        service.update("600887", "financing")
+    assert db.check()["instruments"] == 0
 
 
 class Response:

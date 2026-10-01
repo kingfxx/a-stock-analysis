@@ -9,7 +9,7 @@ from .network import create_data_session
 from .sources import fetch_price_history, normalize_code, price_equal
 from .storage import Database, SyncKey, SyncResult, StorageError, utc_now
 from .update_service import (audit_due, data_lock, digest, encoded, instrument_id, mark_failed,
-                             next_audit, recently_checked, sync_state, backup_after_update)
+                             next_audit, recently_checked, sync_state, backup_before_update)
 
 SOURCE = "tencent"
 
@@ -95,6 +95,7 @@ class PriceService:
 
     def ensure(self, code, adjustment="qfq", *, refresh=False, full=False, today=None):
         code, today = normalize_code(code), today or date.today()
+        backup_before_update(self.db)
         requested_at = utc_now()
         with data_lock(self.db, "prices:" + adjustment, code):
             identity = self.db.ensure_instrument(code)
@@ -199,7 +200,7 @@ class PriceService:
                         self.prune(code)
                     except Exception as exc:
                         warnings.append(f"新价格版本已提交，旧版本清理失败：{exc}")
-                return dict(version=version, warnings=warnings + backup_after_update(self.db), changed=changed)
+                return dict(version=version, warnings=warnings, changed=changed)
             except Exception as exc:
                 mark_failed(self.db, run, exc)
                 with self.db.connection(write=True) as conn:

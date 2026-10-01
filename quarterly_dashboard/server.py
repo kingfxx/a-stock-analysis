@@ -829,6 +829,7 @@ def serve(port: int = 8765, open_browser: bool = False):
             db = Database(DATABASE_PATH)
             runtime = db.initialize()
             db.check()
+            db.daily_backup()
             recovered = db.recover_interrupted_runs()
             chips, _ = services(initialized=True)
             for section in ("financing", "shareholders"):
@@ -839,7 +840,6 @@ def serve(port: int = 8765, open_browser: bool = False):
                         print(f"{path.name} {section} 迁移未完成，原文件保留：{exc}", flush=True)
             for warning in import_p4_legacy(db):
                 print(warning, flush=True)
-            db.daily_backup()
             print(f"SQLite {runtime['sqlite_version']} / {runtime['journal_mode']} / "
                   f"结构版本 {runtime['schema_version']}；恢复中断任务 {recovered} 个", flush=True)
             url = f"http://127.0.0.1:{port}/"
