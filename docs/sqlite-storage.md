@@ -63,7 +63,7 @@
 
 版本 6 在 `stock_group_members` 增加 `position`，保存每只股票在对应自建组中的顺序，按 `position` 从小到大读取。同一只股票在不同组中可有不同位置；新成员追加在组末尾，重复加入不改变原位置。升级时按此前的代码顺序初始化，保留所有分组和归属。
 
-版本 7 增加三张 AI 研判表：`ai_analysis_snapshots` 保存不可修改的分析输入与来源快照，`ai_analysis_runs` 追加保存任务状态和成功报告，`ai_analysis_preferences` 保存默认模型等非敏感设置。凭据仅在 Windows DPAPI 保护的忽略目录保存，不随数据库备份恢复。成功报告提交后更新当天备份，启动将 AI 活动任务记为中断而不自动重新调用模型。详见 [AI 使用与凭据说明](ai-stock-assessment.md)。
+版本 7 增加三张 AI 研判表：`ai_analysis_snapshots` 保存不可修改的分析输入与来源快照，`ai_analysis_runs` 追加保存任务状态和成功报告，`ai_analysis_preferences` 保存默认模型等非敏感设置。凭据仅在 Windows DPAPI 保护的忽略目录保存，不随数据库备份恢复。AI 分析不单独触发备份，沿用第 5 节的日备份规则；启动将 AI 活动任务记为中断而不自动重新调用模型。详见 [AI 使用与凭据说明](ai-stock-assessment.md)。
 
 `sqlite_schema` 是 SQLite 自身的结构目录，表空间统计可能列出它，但它不计入上述 24 张应用表。`legacy_imports_new` 和 `financing_daily_compact` 是迁移中的临时表，成功迁移后不会保留为额外业务表。
 

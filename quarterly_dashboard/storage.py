@@ -576,20 +576,13 @@ class Database:
                 source.close()
             temporary.unlink(missing_ok=True)
 
-    def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None, verify_existing=True, refresh=False) -> Path:
+    def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None, verify_existing=True) -> Path:
         if type(keep) is not int or keep < 1:
             raise ValueError("keep must be positive")
         day = day or datetime.now(timezone.utc).date()
         directory = Path(directory).resolve() if directory else self.path.parent / "backups"
         path = directory / f"{self.path.stem}-daily-{day.isoformat()}.sqlite3"
-        if refresh:
-            staged = directory / f".daily-refresh-{uuid4().hex}.sqlite3"
-            try:
-                self.backup(staged)
-                staged.replace(path)
-            finally:
-                staged.unlink(missing_ok=True)
-        if path.exists() and not verify_existing and not refresh:
+        if path.exists() and not verify_existing:
             return path
         if not path.exists():
             self.backup(path)

@@ -92,12 +92,10 @@ class AnalysisService:
                 if event.is_set() or not self.repository.transition(run["id"], "running", "validating"):
                     continue
                 result = validate_output(output["text"], json.loads(run["input_json"]))
-                committed = self.repository.transition(run["id"], "validating", "succeeded", result_json=encoded(result),
+                self.repository.transition(run["id"], "validating", "succeeded", result_json=encoded(result),
                     verdict=result["verdict"], summary=result["summary"], validation_json=encoded({"version": "v1", "valid": True,
                         "provider": output.get("diagnostic")}),
                     response_id=output.get("response_id"), resolved_model=output.get("model"), usage_json=encoded(output.get("usage")))
-                if committed:
-                    self.db.daily_backup(refresh=True)
             except Exception as exc:
                 # Do not persist arbitrary exception strings (may contain network tokens).
                 message = str(exc) if isinstance(exc, (ProviderError, ValueError)) and len(str(exc)) < 300 else "分析失败，请手动重试"

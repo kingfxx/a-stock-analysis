@@ -216,7 +216,7 @@ def test_repository_atomic_dedup_state_foreign_key_and_backup(database,tmp_path)
         conn.execute('UPDATE ai_analysis_runs SET instrument_id=? WHERE id=?',(other,run['id']))
     with pytest.raises(sqlite3.IntegrityError), database.connection(write=True) as conn:
         conn.execute("UPDATE ai_analysis_snapshots SET input_json='{}'")
-    backed=database.daily_backup(refresh=True)
+    backed=database.daily_backup()
     restored=restore_backup(backed,tmp_path/'restored.sqlite3')
     assert AnalysisRepository(Database(restored)).run(run['id'])['status']=='cancelled'
     with pytest.raises(sqlite3.IntegrityError), database.connection(write=True) as conn:
@@ -239,14 +239,20 @@ def test_output_rejects_invalid_reports(database,fault):
         validate_output('not-json' if fault=='invalid_json' else encoded(result),data)
 
 
-def test_success_reuse_failure_keeps_report_and_no_network_reads(database):
+def test_success_reuse_failure_keeps_report_and_no_network_reads(database,monkeypatch):
+    old_backup=database.daily_backup()
+    backup_before=old_backup.stat()
+    def unexpected_backup(*args,**kwargs):
+        pytest.fail('AI analysis must not trigger a backup')
+    monkeypatch.setattr(database,'daily_backup',unexpected_backup)
     item=service(database)
     run=item.create({'code':'600900','request_key':uuid4().hex})
     succeeded=wait_terminal(item,run['id'])
     assert succeeded['status']=='succeeded'
     if item.worker: item.worker.join(3)
-    old_backup=database.daily_backup()
-    assert AnalysisRepository(Database(old_backup)).run(run['id'])['status']=='succeeded'
+    assert old_backup.stat().st_mtime_ns==backup_before.st_mtime_ns
+    assert old_backup.stat().st_size==backup_before.st_size
+    assert AnalysisRepository(Database(old_backup)).history('600900')['items']==[]
     for _ in range(2):
         item.overview('600900')
         item.repository.history('600900')
