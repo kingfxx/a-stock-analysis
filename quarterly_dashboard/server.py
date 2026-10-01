@@ -25,7 +25,7 @@ from .price_projection import chip_prices, financial_prices, valuation_prices
 from .fundamental_service import FundamentalService
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
-from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due
+from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update
 from .storage import SyncKey
 from .stock_library import StockLibrary
 from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
@@ -194,7 +194,7 @@ def load_valuation(code: str, reports: list[dict], refresh: bool = False) -> dic
 
 
 def _add_missing_name(data: dict, path: Path, session: requests.Session) -> dict:
-    if "name" not in data:
+    if not (data.get("name") or "").strip():
         try:
             name = fetch_stock_name(data["code"], session)
         except (requests.RequestException, ValueError, KeyError):
@@ -202,6 +202,21 @@ def _add_missing_name(data: dict, path: Path, session: requests.Session) -> dict
         data = {**data, "name": name}
         _save_cache(path, data)
     return data
+
+
+def _add_sqlite_missing_name(db: Database, data: dict) -> dict:
+    if (data.get("name") or "").strip():
+        return data
+    try:
+        with create_data_session() as session:
+            name = fetch_stock_name(data["code"], session)
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("名称响应为空")
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        return {**data, "warnings": [*data.get("warnings", []), f"股票名称获取失败，暂可按代码查找：{exc}"]}
+    backup_before_update(db)
+    db.ensure_instrument(data["code"], name.strip())
+    return {**data, "name": name.strip()}
 
 
 def _disclosure_prices(code: str, reports: list[dict], session: requests.Session,
@@ -406,7 +421,7 @@ def _read_cache(path: Path) -> dict:
 
 
 def _needs_financial(data: dict) -> bool:
-    return (not data or "name" not in data
+    return (not data or not (data.get("name") or "").strip()
             or data.get("financial_fields_basis") != FINANCIAL_FIELDS_BASIS
             or data.get("cash_flow_basis") != CASH_FLOW_BASIS
             or data.get("report_date_basis") != REPORT_DATE_BASIS
@@ -549,10 +564,14 @@ def p4_loading(code):
                 "valuation": [(f"valuation:{metric}", "baidu:opendata")
                               for metric in ("pe", "pb", "market_cap")]
                 + [("industry", "eastmoney:RPT_PCF10_INDUSTRY_CVALUE")]}
-    return {section: any((not (state := sync_state(db, SyncKey(identity, dataset, source)))
+    loading = {section: any((not (state := sync_state(db, SyncKey(identity, dataset, source)))
                            or not recently_checked(state, seconds=86400) or audit_due(state, dataset))
                           for dataset, source in keys)
             for section, keys in datasets.items()}
+    with db.connection() as conn:
+        name = conn.execute("SELECT name FROM instruments WHERE id=?", (identity,)).fetchone()[0]
+    loading["financial"] = loading["financial"] or not (name or "").strip()
+    return loading
 
 
 def fetch_daily_prices(code, session, adjust, earliest_date, latest_date):
@@ -644,6 +663,7 @@ def load_chart_data(code: str, section: str, refresh: bool = False, *, price_ver
             fundamentals, dividends, valuations = p4_services()
             if section == "financial":
                 data = fundamentals.update(code, refresh=refresh, full=full)
+                data = _add_sqlite_missing_name(fundamentals.db, data)
                 data["dividend_events"] = dividends.read(code)
                 data["dividend_basis"] = DIVIDEND_BASIS if data["dividend_events"] else None
                 if price_version:

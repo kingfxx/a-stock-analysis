@@ -158,6 +158,22 @@ def test_period_end_price_missing_on_known_trade_does_not_use_earlier_close():
         assert row["qfq_no_trades"] is False
 
 
+def test_yield_summary_uses_last_yield_observation_when_baidu_has_a_later_month():
+    data={'rows':[{'date':'2026-09-30','pe':19.29},{'date':'2026-10-01','pb':3.23}]}
+    raw=[{'date':'2026-08-31','close':28.09},{'date':'2026-09-30','close':28.54}]
+    events=[{'date':'2026-07-15','per_share':1}]
+    result=server._p4_valuation_payload(data,raw=raw,events=events)
+    for years in ('3','5','10'):
+        summary=result['views'][years]['dividend_yield']
+        assert summary['current']==pytest.approx(1/28.54*100)
+        assert summary['current_date']=='2026-09-30'
+        assert summary['count']==2 and summary['percentile']==0
+        for frequency in ('day','week','month'):
+            rows=summary['rows_by_frequency'][frequency]
+            assert rows[-1]['date']=='2026-10-01' and 'dividend_yield' not in rows[-1]
+            assert rows[-2]['dividend_yield']==summary['current']
+
+
 def test_negative_pe_ranges_keep_raw_values_and_do_not_change_chart_or_percentiles():
     series = {"pe": [{"date": day, "value": value} for day, value in (
         ("2025-07-31", 225.51), ("2025-08-21", 254.93), ("2025-08-22", -144.76),

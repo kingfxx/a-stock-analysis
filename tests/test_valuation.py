@@ -90,6 +90,35 @@ def test_zero_dividend_yield_is_valid_but_has_no_industry_comparison():
     assert summary["industry"] is None
 
 
+@pytest.mark.parametrize('metric',['dividend_yield','pe','pb','ps'])
+def test_latest_metric_value_and_date_ignore_newer_rows_for_other_metrics(metric):
+    value = 3.50385423966363 if metric=='dividend_yield' else 20
+    rows = [
+        {'date':'2026-10-01','qfq_close':28.54},
+        {'date':'2026-09-30',metric:value,f'{metric}_date':'2026-09-29','dividend_yield_date':'2026-09-28'},
+        {'date':'2026-08-31',metric:value-1},
+        {'date':'2026-10-02',metric:999},
+    ]
+    if metric=='dividend_yield': rows[1]['dividend_yield_date']='2026-09-29'
+    result=valuation_summary(rows,metric,3,{},as_of='2026-10-01')
+    assert result['current']==value
+    assert result['current_date']=='2026-09-29'
+    assert result['count']==2 and result['percentile']==50
+    assert [row['date'] for row in result['rows']]==['2026-08-31','2026-09-30','2026-10-01']
+
+
+def test_latest_zero_yield_is_valid_and_missing_yields_do_not_manufacture_a_current_value():
+    rows=[{'date':'2026-08-31','dividend_yield':3},
+          {'date':'2026-09-30','dividend_yield':0,'dividend_yield_date':'2026-09-30'},
+          {'date':'2026-10-01','pb':3.23}]
+    result=valuation_summary(rows,'dividend_yield',3,{},as_of='2026-10-01')
+    assert result['current']==0 and result['current_date']=='2026-09-30'
+    assert result['percentile']==0 and result['count']==2
+    result=valuation_summary([rows[-1]],'dividend_yield',3,{},as_of='2026-10-01')
+    assert result['current'] is None and result['current_date'] is None and result['percentile'] is None
+    assert result['count']==0
+
+
 def test_adjusted_prices_join_by_month_and_keep_actual_trade_date():
     rows = [{"date": "2026-02-25", "pe": 9}, {"date": "2026-03-31", "pe": 10}]
     prices = [{"date": "2026-02-27", "close": 12.5},

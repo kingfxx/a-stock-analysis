@@ -46,6 +46,7 @@ def test_financial_api_keeps_sqlite_history_when_source_fails(tmp_path, monkeypa
     cache.unlink()
     monkeypatch.setattr(FundamentalService, "_fetch_page", staticmethod(
         lambda *args: (_ for _ in ()).throw(ValueError("offline"))))
+    monkeypatch.setattr(server, "fetch_stock_name", lambda *args: (_ for _ in ()).throw(ValueError("offline")))
     monkeypatch.setattr(server, "load_stock", lambda *args: (_ for _ in ()).throw(
         AssertionError("legacy JSON path called")))
 

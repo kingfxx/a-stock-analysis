@@ -645,7 +645,7 @@ def test_p4_page_ignores_old_dividend_and_industry_audit_dates(db, monkeypatch):
     from types import SimpleNamespace
     from quarterly_dashboard.storage import utc_now
     monkeypatch.setattr(server, "services", lambda: (SimpleNamespace(db=db), None))
-    monkeypatch.setattr(server, "instrument_id", lambda *args: 1)
+    db.ensure_instrument('600887', '伊利股份')
     def state(db, key):
         return {"checked_at": utc_now(), "next_full_audit_at":
             "2000-01-01T00:00:00+00:00" if key.dataset in {"industry", "dividends"}

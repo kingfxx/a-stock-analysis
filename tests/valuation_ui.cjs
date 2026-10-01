@@ -120,6 +120,86 @@ assert.equal(trace.customdata[0][1], '（本周期未完结）');
 assert.match(trace.hovertemplate, /实际观察日：%\{customdata\[0\]\}/);
 assert.match(ui.element('valuation-note').textContent, /较早段观测较稀疏/);
 
+// A later row for another metric must not clear the yield card; unavailable percentiles never print null%.
+{
+  const yieldUi = fixture('3');
+  const yieldView = structuredClone(yieldUi.context.state.valuation.views['3'].pe);
+  Object.assign(yieldView,{current:3.50385423966363,current_date:'2026-09-30',high:3.56,median:3.42,low:3,
+    count:36,percentile:66.7,industry:null});
+  const rows=[{date:'2026-09-30',dividend_yield:3.50385423966363,dividend_yield_date:'2026-09-30'},
+    {date:'2026-10-01',pb:3.23}];
+  yieldView.rows_by_frequency={day:rows,week:rows,month:rows};
+  yieldUi.context.state.valuation.views['3'].dividend_yield=yieldView;
+  vm.runInContext("valuationMetric='dividend_yield';renderValuation();",yieldUi.context);
+  assert.equal(yieldUi.element('valuation-current').textContent,'3.50%');
+  assert.equal(yieldUi.element('valuation-current-date').textContent,'2026-09-30');
+  const history=yieldUi.element('valuation-history').textContent;
+  assert.match(history,/66.7%/);
+  for(const frequency of ['week','month','day']){
+    yieldUi.change('valuation-frequency',frequency);
+    assert.equal(yieldUi.element('valuation-current').textContent,'3.50%');
+    assert.equal(yieldUi.element('valuation-history').textContent,history);
+  }
+  yieldView.current=null;yieldView.current_date=null;yieldView.percentile=null;
+  yieldUi.render();
+  assert.equal(yieldUi.element('valuation-current').textContent,'—');
+  assert.match(yieldUi.element('valuation-history').textContent,/暂无法计算当前分位/);
+  assert.doesNotMatch(yieldUi.element('valuation-history').textContent,/null%|undefined%|NaN/);
+  yieldView.current=0;yieldView.current_date='2026-09-30';yieldView.percentile=0;
+  yieldUi.render();
+  assert.equal(yieldUi.element('valuation-current').textContent,'0.00%');
+  assert.match(yieldUi.element('valuation-history').textContent,/0%/);
+  assert.equal(yieldUi.requests.length,0);
+}
+
+// Historical position follows the selected metric/range, including exact boundaries and zero yield.
+{
+  const positionUi = fixture('3');
+  const cases = [[0,0],[20,0],[20.1,1],[39.9,1],[40,2],[50,2],[60,2],[60.1,3],[79.9,3],[80,4],[100,4]];
+  for (const metric of ['pe','pb','ps','dividend_yield']) {
+    const view = structuredClone(positionUi.context.state.valuation.views['3'].pe);
+    positionUi.context.state.valuation.views['3'][metric] = view;
+    const labels = metric === 'dividend_yield' ? ['低息','偏低','中值','偏高','高息'] : ['低位','偏低','中值','偏高','高位'];
+    for (const [percentile,band] of cases) {
+      view.percentile = percentile;
+      vm.runInContext(`valuationMetric='${metric}';renderValuation();`,positionUi.context);
+      assert.equal(positionUi.element('valuation-position').textContent,labels[band]);
+      assert.equal(positionUi.element('valuation-position-basis').textContent,`近 3 年 · 历史分位 ${percentile.toFixed(1)}%`);
+      const tone = band === 2 ? 'middle' : (metric === 'dividend_yield' ? band > 2 : band < 2) ? 'low' : 'high';
+      assert.equal(positionUi.element('valuation-position').getAttribute('data-tone'),tone);
+    }
+    assert.equal(positionUi.plots.at(-1).traces[1].line.color,metric === 'dividend_yield' ? '#6ac9aa' : '#ed8180');
+    assert.equal(positionUi.plots.at(-1).traces[3].line.color,metric === 'dividend_yield' ? '#ed8180' : '#6ac9aa');
+    assert.equal(positionUi.element('valuation-high-dot').getAttribute('style'),'--level-color:' + positionUi.plots.at(-1).traces[1].line.color);
+    assert.equal(positionUi.element('valuation-low-dot').getAttribute('style'),'--level-color:' + positionUi.plots.at(-1).traces[3].line.color);
+  }
+  const view = positionUi.context.state.valuation.views['3'].dividend_yield;
+  view.current = 0;view.percentile = 0;
+  positionUi.render();
+  assert.equal(positionUi.element('valuation-position').textContent,'低息');
+  assert.equal(positionUi.element('valuation-current').textContent,'0.00%');
+  for (const change of [{percentile:null},{percentile:NaN},{percentile:-1},{percentile:101},{count:0},{current:null}]) {
+    Object.assign(view,{current:0,count:24,percentile:0},change);
+    positionUi.render();
+    assert.equal(positionUi.element('valuation-position').textContent,'待判断');
+    assert.equal(positionUi.element('valuation-position').getAttribute('data-tone'),'');
+    assert.match(positionUi.element('valuation-position-basis').textContent,/暂无有效分位/);
+  }
+  Object.assign(view,{current:3.5,count:36,percentile:72.2});
+  positionUi.context.state.valuation.views['5'].dividend_yield = {...view,percentile:50};
+  positionUi.context.state.valuation.views['10'].dividend_yield = {...view,percentile:18};
+  for (const [range,label] of [['3','偏高'],['5','中值'],['10','低息']]) {
+    positionUi.change('valuation-range',range);
+    assert.equal(positionUi.element('valuation-position').textContent,label);
+    assert.match(positionUi.element('valuation-position-basis').textContent,new RegExp(`近 ${range} 年`));
+    for (const frequency of ['day','week','month','auto']) {
+      positionUi.change('valuation-frequency',frequency);
+      assert.equal(positionUi.element('valuation-position').textContent,label);
+    }
+  }
+  assert.equal(positionUi.requests.length,0);
+}
+
 // Negative PE periods stay marked across frequencies and clear when another metric is selected.
 {
   const negativeUi = fixture('3');

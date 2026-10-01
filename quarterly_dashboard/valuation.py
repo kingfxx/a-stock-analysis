@@ -312,16 +312,17 @@ def valuation_summary(rows: list[dict], metric: str, years: int, industry: dict,
         start = end.replace(year=end.year - years)
     except ValueError:  # February 29
         start = end.replace(year=end.year - years, day=28)
-    window = [row for row in rows if start.isoformat() <= row["date"] <= end.isoformat()]
+    window = sorted((row for row in rows if start.isoformat() <= row["date"] <= end.isoformat()),
+                    key=lambda row: row["date"])
     valid_number = _nonnegative if metric == "dividend_yield" else _positive
     valid = [row for row in window if valid_number(row.get(metric)) is not None]
     values = sorted(float(row[metric]) for row in valid)
-    current = valid_number(window[-1].get(metric)) if window else None
+    latest = valid[-1] if valid else None
+    current = valid_number(latest.get(metric)) if latest else None
     benchmark = _positive(industry.get(metric))
     return {
         "rows": window, "count": len(values), "current": current,
-        "current_date": window[-1].get("dividend_yield_date", window[-1]["date"])
-        if current is not None else None,
+        "current_date": (latest.get(f"{metric}_date") or latest["date"]) if latest else None,
         "high": _percentile(values, .8) if values else None,
         "median": _percentile(values, .5) if values else None,
         "low": _percentile(values, .2) if values else None,
