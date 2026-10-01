@@ -16,6 +16,13 @@ from uuid import uuid4
 def test_ai_drawer_history_settings_keyboard_and_width(database, monkeypatch, tmp_path, fresh_cache):
     playwright = pytest.importorskip('playwright.sync_api')
     item=service(database)
+    import test_ai_assessment
+    original_result=test_ai_assessment.valid_result
+    def result_with_chips(input_data):
+        result=original_result(input_data)
+        result['dimensions']['chips']['evidence_ids']=['shareholders.price.latest_reports','financing.price.3m']
+        return result
+    monkeypatch.setattr(test_ai_assessment,'valid_result',result_with_chips)
     monkeypatch.setattr(server,'DATABASE_PATH',database.path)
     monkeypatch.setattr(server,'ai_service',lambda:item)
     if fresh_cache:
@@ -76,6 +83,15 @@ def test_ai_drawer_history_settings_keyboard_and_width(database, monkeypatch, tm
                     title.click()
                     assert not evidence.evaluate('(node)=>node.open')
                     assert drawer.locator('.ai-evidence').count()==count
+                assert '核心判断' in drawer.inner_text() and '最强反证' in drawer.inner_text()
+                assert '后续验证' in drawer.inner_text() and '观察窗口：' in drawer.inner_text()
+                drawer.locator('.ai-dimension-details > summary').click()
+                chip=drawer.locator('[data-evidence-id="shareholders.price.latest_reports"]')
+                assert chip.locator(':scope > summary').inner_text()=='股东人数与股价 · 最近两个财报期'
+                chip.locator(':scope > summary').click()
+                assert '无法检验：' in chip.inner_text()
+                assert '个人分析框架' in chip.inner_text()
+                assert '半年–1年' in drawer.inner_text()
                 title.focus()
                 page.keyboard.press('Enter')
                 assert evidence.evaluate('(node)=>node.open')

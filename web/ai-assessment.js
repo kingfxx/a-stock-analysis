@@ -112,12 +112,25 @@ window.initAIAssessment = function(state) {
       if (!evidence) continue;
       const details = el('details', undefined, 'ai-evidence');
       details.dataset.evidenceId = id;
-      const labels={financial_period:'财务指标',revenue:'营业收入',profit:'归母净利润',revenue_growth:'营收同比',profit_growth:'利润同比',gross_margin:'毛利率',net_margin:'净利率',roe:'ROE',roic:'ROIC',operating_cash_flow:'经营现金流',capex:'资本开支',free_cash_flow:'简化自由现金流',cash_dividend:'已实施分红',dividend_payout_ratio:'已实施分红率',monetary_funds:'货币资金',interest_bearing_debt:'简化有息负债',net_cash:'净现金',pe:'PE',pb:'PB',ps:'PS',dividend_yield:'股息率',pe_raw:'原始PE',holders:'股东人数',close:'收盘价',financing:'融资摘要',price_trend:'前复权价格趋势'};
+      const labels={holders_price:'股东人数与股价',financing_price:'融资余额与股价',financial_period:'财务指标',revenue:'营业收入',profit:'归母净利润',revenue_growth:'营收同比',profit_growth:'利润同比',gross_margin:'毛利率',net_margin:'净利率',roe:'ROE',roic:'ROIC',operating_cash_flow:'经营现金流',capex:'资本开支',free_cash_flow:'简化自由现金流',cash_dividend:'已实施分红',dividend_payout_ratio:'已实施分红率',monetary_funds:'货币资金',interest_bearing_debt:'简化有息负债',net_cash:'净现金',pe:'PE',pb:'PB',ps:'PS',dividend_yield:'股息率',pe_raw:'原始PE',holders:'股东人数',close:'收盘价',financing:'融资摘要',price_trend:'前复权价格趋势'};
       const period={quarter:'单季',ttm:'TTM',year:'年度'};
-      details.append(el('summary',(labels[evidence.metric] || '财务指标') + (evidence.period_type ? ' · ' + (period[evidence.period_type] || evidence.period_type) : '') + (evidence.years ? ' · '+evidence.years+'年历史' : '') + (evidence.observed_on ? ' · '+evidence.observed_on : '')));
+      details.append(el('summary',(evidence.label || labels[evidence.metric] || '财务指标') + (evidence.period_type ? ' · ' + (period[evidence.period_type] || evidence.period_type) : '') + (evidence.years ? ' · '+evidence.years+'年历史' : '') + (evidence.comparison ? ' · '+({level:'时点值',qoq:'环比',yoy:'同比',coverage:'覆盖倍数'}[evidence.comparison] || evidence.comparison) : '') + (evidence.window_label ? ' · '+evidence.window_label : '') + (evidence.observed_on ? ' · '+evidence.observed_on : '')));
       details.append(el('p','实际观察日期：'+(evidence.observed_on || '缺失')+' · 来源：'+(evidence.source || '未知'),'ai-meta'));
       const number=value => value===null ? '资料缺失' : new Intl.NumberFormat('zh-CN',{maximumFractionDigits:4}).format(value);
-      if (evidence.metric==='financial_period') {
+      if (evidence.metric==='calculated_fact') {
+        details.append(el('p','程序计算：'+number(evidence.value)+' '+evidence.unit+' · '+({positive:'正值',negative:'负值',zero:'零',up:'上升',down:'下降',flat:'不变'}[evidence.direction] || evidence.direction)));
+        if (evidence.baseline_on) details.append(el('p','比较基期：'+evidence.baseline_on+' · 基期值：'+number(evidence.baseline_value)+' · 当期值：'+number(evidence.current_value),'ai-meta'));
+      } else if (['holders_price','financing_price'].includes(evidence.metric)) {
+        const facts=evidence.value;
+        if (!facts.usable) details.append(el('p','无法检验：'+facts.unavailable_reason,'ai-message'));
+        details.append(el('p','实际区间：'+(facts.start_on || '缺失')+' 至 '+(facts.end_on || '缺失'),'ai-meta'));
+        details.append(el('p','起点 '+number(facts.start_value)+' → 终点 '+number(facts.end_value)+' '+evidence.unit));
+        details.append(el('p','区间变化：'+number(facts.change_pct)+(facts.change_pct===null ? '' : '%')));
+        details.append(el('p','同期前复权股价变化：'+number(facts.price_change_pct)+(facts.price_change_pct===null ? '' : '%')));
+        details.append(el('p','股价日期：'+(facts.price_start_on || '缺失')+' 至 '+(facts.price_end_on || '缺失'),'ai-meta'));
+        if (facts.scope) details.append(el('p','股东口径：'+({total:'总股东人数',a_share:'A股股东人数',unknown:'未知'}[facts.scope] || facts.scope)+' · 最新公告日期：'+(facts.end_announced_on || '缺失'),'ai-meta'));
+        details.append(el('p','个人分析框架：主力出货与踩踏属于待验证假设，以上为区间事实。','ai-meta'));
+      } else if (evidence.metric==='financial_period') {
         const table=el('table',undefined,'ai-fact-table');
         for (const [key,value] of Object.entries(evidence.value)) {
           const row=el('tr'); const ratio=['revenue_growth','profit_growth','gross_margin','net_margin','roe','roic','dividend_payout_ratio'].includes(key);
@@ -162,24 +175,55 @@ window.initAIAssessment = function(state) {
       dialog.append(el('p','此报告使用旧版债务口径，可能将已有有息负债和净现金误标为缺失。请点击“重新分析”使用修正后的数据生成结论。','ai-message'));
     }
     const result = report.result;
-    dialog.append(badge(result.verdict), el('p',result.summary), el('p','分析视角：价值投资 · 中长期 1–3 年','ai-meta'));
+    dialog.append(badge(result.verdict), el('p',result.summary), el('p','分析视角：价值投资 · 中长期 1–3 年' + (report.input.analysis_profile?.chips_framework ? '；筹码/融资：个人框架 · 半年–1年' : ''),'ai-meta'));
     dialog.append(el('p','生成时间 ' + date(report.completed_at) + ' · 数据状态：' + (report.quality.limited ? '部分' : '完整'),'ai-meta'));
     const dates = report.quality.dates;
     dialog.append(el('p', dataDates(report) + ' / 价格截至 ' + (dates.price || '缺失'), 'ai-meta'));
+    function argumentBlock(label,item) {
+      dialog.append(el('h3',label)); const node=el('section',undefined,'ai-argument');
+      node.append(el('p',item.explanation)); evidenceLinks(node,item.evidence_ids,report); dialog.append(node);
+    }
+    function followUp() {
+      dialog.append(el('h3','后续验证')); const list=el('ul');
+      for (const item of result.change_conditions) {
+        const node=el('li',item.direction+'：'+item.condition+'（'+item.indicator+'）');
+        node.append(el('p','比较基准：'+item.baseline+'；观察窗口：'+item.window,'ai-meta'),el('p','判断影响：'+item.impact));
+        evidenceLinks(node,item.evidence_ids,report);list.append(node);
+      }
+      dialog.append(list);
+    }
+    if (result.thesis) {
+      argumentBlock('核心判断',result.thesis.core_judgment);
+      argumentBlock('关键矛盾',result.thesis.key_conflict);
+      dialog.append(el('h3','关键论据')); const reasons=el('ol');
+      for (const item of result.thesis.key_evidence) {const node=el('li',item.explanation);evidenceLinks(node,item.evidence_ids,report);reasons.append(node);}
+      dialog.append(reasons);
+      argumentBlock('最强反证',result.thesis.strongest_counterargument);
+      argumentBlock('估值要求',result.thesis.valuation_requirements);
+      if (result.hypotheses.length) {
+        dialog.append(el('h3','原因假设 · 尚未证实'));
+        for (const item of result.hypotheses) {const node=el('section');node.append(el('p',item.explanation),el('p','验证方法：'+item.verification,'ai-meta'));evidenceLinks(node,item.evidence_ids,report);dialog.append(node);}
+      }
+      const checked=el('details');checked.append(el('summary','核对关键事实 · 程序计算并校验'));
+      evidenceLinks(checked,result.fact_claims.map(item=>item.fact_id),report);dialog.append(checked);
+      followUp();
+    }
     const names = {business:'经营趋势', quality:'盈利质量', financial_risk:'财务风险', valuation:'估值', chips:'筹码'};
     const dimensions = el('div',undefined,'ai-dimensions');
     for (const [name, dimension] of Object.entries(result.dimensions)) {
       const node = el('div',undefined,'ai-dimension'); node.append(el('strong',names[name] + '：' + dimension.status),el('p',dimension.explanation));
       evidenceLinks(node,dimension.evidence_ids,report); dimensions.append(node);
     }
-    dialog.append(dimensions);
+    if (result.thesis) {
+      const supplementary=el('details',undefined,'ai-dimension-details');supplementary.append(el('summary','五个维度 · 补充分析'),dimensions);dialog.append(supplementary);
+    } else dialog.append(dimensions);
     for (const [key,label] of [['supporting_factors','支持因素'],['risks','风险与反面证据']]) {
       dialog.append(el('h3',label)); const list = el('ul');
       for (const item of result[key]) { const node = el('li',item.explanation); evidenceLinks(node,item.evidence_ids,report); list.append(node); }
       if (!result[key].length) list.append(el('li','已有资料未提供足够依据')); dialog.append(list);
     }
-    dialog.append(el('h3','改变判断的条件')); const conditions = el('ul');
-    for (const item of result.change_conditions) conditions.append(el('li',item.direction + '：' + item.condition + '（' + item.indicator + '）'));
+    if (!result.thesis) dialog.append(el('h3','改变判断的条件')); const conditions = el('ul');
+    for (const item of result.thesis ? [] : result.change_conditions) conditions.append(el('li',item.direction + '：' + item.condition + '（' + item.indicator + '）'));
     dialog.append(conditions,el('h3','待核实事项')); const unknowns = el('ul');
     for (const item of result.unknowns) unknowns.append(el('li',item)); dialog.append(unknowns);
     const facts = el('details'); facts.append(el('summary','展开数据依据与口径'),el('pre',JSON.stringify(report.input,null,2))); dialog.append(facts);

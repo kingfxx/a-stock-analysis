@@ -56,12 +56,17 @@ def snapshot(db):
 
 def valid_result(input_data, **changes):
     evidence = input_data['evidence'][0]['id']
+    fact=next(e for e in input_data['evidence'] if e['metric']=='calculated_fact')
+    argument={'explanation':'已有事实形成当前判断，关键未知可能改变结论。','evidence_ids':[evidence]}
     result = {'schema_version':OUTPUT_VERSION,'code':'600900','verdict':'观察','summary':'经营稳定，仍需核实估值适用性。',
+        'thesis':{**{key:copy.deepcopy(argument) for key in ('core_judgment','key_conflict','strongest_counterargument','valuation_requirements')},'key_evidence':[copy.deepcopy(argument)]},
+        'hypotheses':[],
+        'fact_claims':[{'fact_id':fact['id'],'value':fact['value'],'direction':fact['direction']}],
         'dimensions':{name:{'status':statuses[-1],'explanation':'相关维度需要核实。','evidence_ids':[evidence]}
                       for name,statuses in DIMENSIONS.items()},
         'supporting_factors':[{'explanation':'经营数据可供进一步核实。','evidence_ids':[evidence]}],
         'risks':[{'explanation':'行业适用性尚待核实。','evidence_ids':[evidence]}],
-        'change_conditions':[{'direction':'核实','condition':'确认后续现金流与利润变化一致','indicator':'下一期经营现金流和净利润'}],
+        'change_conditions':[{'direction':'核实','condition':'确认后续现金流与利润变化一致','indicator':'下一期经营现金流和净利润','baseline':'当前TTM现金流与利润','window':'下一份季报','impact':'现金兑现改善则增强当前判断','evidence_ids':[evidence]}],
         'unknowns':['重大公告和竞争优势需要另行核实。']}
     return {**result, **changes}
 
@@ -229,7 +234,7 @@ def test_output_rejects_invalid_reports(database,fault):
     result=valid_result(data)
     if fault=='unknown_evidence': result['risks'][0]['evidence_ids']=['invented']
     if fault=='wrong_code': result['code']='000001'
-    if fault=='too_long': result['summary']='长'*181
+    if fault=='too_long': result['summary']='长'*4001
     if fault=='candidate': result['verdict']='买入候选'
     if fault=='trade': result['summary']='目标价必涨'
     if fault=='negative_pe': result['summary']='负PE意味着低估'
@@ -532,9 +537,82 @@ def test_snapshot_debt_matches_dashboard_with_empty_reported_components(database
             del report['bonds_payable']
         conn.execute('UPDATE financial_reports SET raw_json=? WHERE period=?',(encoded(report),stored['period']))
     data=snapshot(database)['input']
-    assert data['calculation_version']=='stock_assessment_calc_v2'
+    assert data['calculation_version']=='stock_assessment_calc_v4'
     latest=[e for e in data['evidence'] if e['metric']=='financial_period' and e['observed_on']==period]
     assert {e['period_type'] for e in latest}==({'quarter','ttm','year'} if period.endswith('12-31') else {'quarter','ttm'})
     for evidence in latest:
         assert evidence['value']['interest_bearing_debt']==(None if missing_component else 150)
         assert evidence['value']['net_cash']==(None if missing_component else -50)
+
+
+@pytest.mark.parametrize('fault,field',[('unknown','thesis.core_judgment.evidence_ids'),('missing','thesis.core_judgment.evidence_ids'),('too_many','thesis.core_judgment.evidence_ids'),('wrong_number','fact_claims[0]'),('wrong_direction','fact_claims[0]'),('profit_as_loss','report.prose')])
+def test_report_rejects_actionable_reference_and_fact_errors(database,fault,field):
+    from quarterly_dashboard.analysis_validation import ReportValidationError
+    data=snapshot(database)['input']; result=valid_result(data)
+    if fault=='unknown': result['thesis']['core_judgment']['evidence_ids']=['financial.quarter.2026-06-30.profit']
+    if fault=='missing': result['thesis']['core_judgment']['evidence_ids']=[]
+    if fault=='too_many': result['thesis']['core_judgment']['evidence_ids']=data['allowed_evidence_ids']+[data['allowed_evidence_ids'][0]]
+    if fault=='wrong_number': result['fact_claims'][0]['value']+=1000
+    if fault=='wrong_direction': result['fact_claims'][0]['direction']='negative'
+    if fault=='profit_as_loss': result['thesis']['core_judgment']['explanation']='上一季度还出现亏损。'
+    with pytest.raises(ReportValidationError) as caught: validate_output(encoded(result),data)
+    assert caught.value.diagnostic['field']==field
+
+
+def test_reference_error_diagnostics_saved_without_automatic_retry(database):
+    class BrokenProvider(FakeProvider):
+        def infer(self,run_id,model,instructions,data,cancelled):
+            response=super().infer(run_id,model,instructions,data,cancelled)
+            result=json.loads(response['text'])
+            result['thesis']['core_judgment']['evidence_ids']=['made_up_evidence']
+            response['text']=encoded(result)
+            return response
+    item=service(database,BrokenProvider())
+    run=item.create({'code':'600900','request_key':uuid4().hex})
+    terminal=wait_terminal(item,run['id'])
+    assert terminal['status']=='failed'
+    assert 'thesis.core_judgment.evidence_ids' in terminal['error']
+    saved=json.loads(item.repository.run(run['id'],internal=True)['diagnostic_json'])
+    assert saved['validation']['unknown_ids']==['made_up_evidence']
+    assert item.provider.calls==1
+
+
+@pytest.mark.parametrize('name,known',[('未知行业',False),('   ',False),('食品饮料',True)])
+def test_industry_placeholder_is_not_complete_classification(database,name,known):
+    identity=database.ensure_instrument('600900')
+    key=SyncKey(identity,'industry','eastmoney:test')
+    run=database.start_sync(key,parser_version='test',methodology_version='test')
+    database.complete_sync(run,SyncResult(1,'2026-10-01','2026-10-01','2026-10-01'),lambda conn: database.insert_industry_snapshot(conn,key,run,{
+        'snapshot_at':utc_now(),'industry_name':name,'industry_code':None,'classification_basis':'test','raw_json':{}}))
+    data=snapshot(database)['input']
+    assert ('行业分类缺失' in data['quality']['missing']) is (not known)
+    assert data['quality']['candidate_allowed'] is known
+    assert data['instrument']['industry']==(name if known else None)
+
+
+
+def test_explicit_latest_margin_direction_is_checked_without_rejecting_hypothesis(database):
+    from quarterly_dashboard.analysis_validation import ReportValidationError
+    data=snapshot(database)['input'];result=valid_result(data)
+    fact=next(e for e in data['evidence'] if e['metric']=='calculated_fact' and e['field']=='gross_margin' and e['period_type']=='quarter' and e['comparison']=='qoq')
+    fact['value']=-4.3;fact['direction']='down'
+    result['thesis']['core_judgment']['explanation']='最新季度毛利率表现较前期改善。'
+    with pytest.raises(ReportValidationError,match='利润率环比方向'):validate_output(encoded(result),data)
+    result['thesis']['core_judgment']['explanation']='若最新季度毛利率较前期改善，则需要进一步核实。'
+    assert validate_output(encoded(result),data)
+
+
+
+def test_more_valid_fact_claims_are_not_rejected_for_presentation_preference(database):
+    data=snapshot(database)['input']; result=valid_result(data)
+    result['fact_claims']=[{'fact_id':e['id'],'value':e['value'],'direction':e['direction']} for e in data['evidence'] if e['metric']=='calculated_fact']
+    assert len(result['fact_claims'])>12
+    assert validate_output(encoded(result),data)
+
+
+
+def test_editorial_word_preferences_do_not_fail_an_otherwise_valid_report(database):
+    data=snapshot(database)['input'];result=valid_result(data)
+    result['summary']='已有事实与反证需要权衡。'*30
+    result['dimensions']['business']['explanation']='收入与利润变化不完全同步，应核对基期和下一季表现。'*20
+    assert validate_output(encoded(result),data)

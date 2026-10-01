@@ -7,6 +7,8 @@ from datetime import date
 from pathlib import Path
 
 from .core import build_period_rows, view_rows
+from .analysis_facts import financial_facts
+from .analysis_chips import joint_evidence, months_before
 from .fundamental_service import FundamentalService
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
@@ -16,8 +18,9 @@ from .sources import normalize_code
 from .storage import utc_now
 
 INPUT_VERSION = "stock_assessment_input_v1"
-CALCULATION_VERSION = "stock_assessment_calc_v2"
-PROFILE = {"style": "value", "horizon": "1_to_3_years"}
+CALCULATION_VERSION = "stock_assessment_calc_v4"
+PROFILE = {"style": "value", "horizon": "1_to_3_years",
+           "chips_horizon": "6_to_12_months", "chips_framework": "user_hypotheses_v1"}
 
 
 def encoded(value):
@@ -52,10 +55,14 @@ def capture(db, code, *, as_of=None):
         def rows(table, order):
             return [dict(r) for r in conn.execute(
                 f"SELECT * FROM {table} WHERE instrument_id=? ORDER BY {order}", (identity,))]
-        holders = rows("shareholder_observations", "stat_date,source,source_record_key")[-8:]
-        financing = rows("financing_daily", "trade_date,source")
+        holders = rows("shareholder_observations", "stat_date,source,source_record_key")
+        report_periods = sorted({r["period"] for r in financial["reports"] if r["period"] <= today})[-2:]
+        holders = [r for r in holders if r["stat_date"] in report_periods
+                   and (not r.get("announced_on") or r["announced_on"] <= today)]
+        financing = [r for r in rows("financing_daily", "trade_date,source") if r["trade_date"] <= today]
         if financing:
-            financing = [r for r in financing if r["source"] == financing[-1]["source"]][-121:]
+            cutoff = months_before(financing[-1]["trade_date"], 4)
+            financing = [r for r in financing if r["source"] == financing[-1]["source"] and r["trade_date"] >= cutoff]
         states = rows("sync_state", "dataset,source,adjustment")
         active_updates = conn.execute("SELECT count(*) FROM sync_runs WHERE instrument_id=? AND status='running'",
                                       (identity,)).fetchone()[0]
@@ -111,12 +118,6 @@ def capture(db, code, *, as_of=None):
     if qfq:
         add("price.qfq.trend", "price_trend", [{"date": r["date"], "close": r["close"]} for r in qfq[-61:]],
             "元/股", qfq[-1]["date"], "tencent", adjustment="qfq")
-    for i, row in enumerate(holders):
-        earlier = next((r for r in reversed(holders[:i]) if row["holder_scope"] != "unknown" and r["holder_scope"] == row["holder_scope"]
-                        and r["source"] == row["source"] and r["stat_date"] < row["stat_date"]), None)
-        add(f"shareholders.{i}", "holders", row["holders"], "户", row["stat_date"], row["source"],
-            scope=row["holder_scope"], announced_on=row["announced_on"],
-            change=row["holders"] - earlier["holders"] if earlier else None)
     # Require actual known raw trading days; never bridge missing observations.
     financing_by_day = {r["trade_date"]: r for r in financing}
     known_days = [r["date"] for r in raw]
@@ -131,14 +132,17 @@ def capture(db, code, *, as_of=None):
             windows[str(size)] = {"sample_count": sum(r is not None for r in records), "complete": complete,
                 "balance_change": records[-1]["margin_balance"] - records[0]["margin_balance"] if complete else None,
                 "net_buy": sum(net_values) if complete and all(v is not None for v in net_values) else None}
-        add("financing.summary", "financing", {"latest_balance": latest["margin_balance"], "windows": windows,
-            "observations": [{k: r[k] for k in ("trade_date", "margin_balance", "net_buy")} for r in financing[-120:]]},
+        add("financing.summary", "financing", {"latest_balance": latest["margin_balance"], "windows": windows},
             "元", latest["trade_date"], latest["source"], methodology="融资流入不代表确定上涨")
+    evidence.extend(joint_evidence(holders, financing, qfq, raw, report_periods=report_periods, as_of=today))
+    evidence.extend(financial_facts(evidence))
     industry = industry_rows[-1] if industry_rows else None
+    industry_name = str(industry['industry_name'] or '').strip() if industry else ''
+    industry_known = bool(industry_name and industry_name not in {'未知行业','未知','暂无','未分类','--','-','N/A'})
     limitations = ["价值投资，中长期1–3年；仅使用本地事实，未查询新闻和公告。",
         "历史分位不等于内在价值；负PE不能解释为便宜；高股息率需核实可持续性。",
         "ROE/ROIC、债务及自由现金流采用简化口径；周期企业需正常周期盈利，金融业需专门核实适用性。",
-        "股东人数不能识别机构身份；融资仅作背景。业务日期与抓取日期分开，节假日或停牌不能仅按日历判定过期。"]
+        "股东人数与融资结合股价，用最近两个财报期股东人数及3个月融资窗口，按用户个人框架评估短期风险；主力出货及踩踏属于待验证假设，不能确认参与者身份或交易动机。业务日期与抓取日期分开，节假日或停牌不能仅按日历判定过期。"]
     latest = all_rows[-1]
     required = ("revenue_ttm", "profit_ttm", "operating_cash_flow_ttm")
     missing = [field for field in required if latest.get(field) is None]
@@ -154,22 +158,26 @@ def capture(db, code, *, as_of=None):
         limitations.append("融资资料缺失")
     if not dividends:
         limitations.append("分红实施资料缺失，不能推定未来零分红")
-    if not industry:
+    if not industry_known:
+        missing.append("行业分类缺失")
         limitations.append("行业未知，需核实通用经营/现金流/债务指标适用性")
     source_errors = recent_failures
-    quality = {"missing": missing, "limited": bool(missing or not holders or not financing or not dividends or not industry),
-               "candidate_allowed": not missing and bool(industry), "source_status": states,
+    quality = {"missing": missing, "limited": bool(missing or not holders or not financing or not dividends or not industry_known),
+               "candidate_allowed": not missing and industry_known, "source_status": states,
                "source_errors": source_errors, "updating": bool(active_updates),
                "dates": {"financial": latest["period"], "price": raw[-1]["date"] if raw else None,
                          "valuation": max((r["date"] for r in observation_rows), default=None),
                          "shareholders": holders[-1]["stat_date"] if holders else None,
                          "financing": financing[-1]["trade_date"] if financing else None}}
+    add('context.data_quality','data_quality',{'missing':missing,'industry_known':industry_known,
+        'limited':quality['limited'],'limitations':limitations},'资料状态',today,'local')
     input_data = {"schema_version": INPUT_VERSION, "calculation_version": CALCULATION_VERSION,
-        "instrument": {"code": code, "name": instrument["name"], "industry": industry["industry_name"] if industry else None,
+        "instrument": {"code": code, "name": instrument["name"], "industry": industry_name if industry_known else None,
                        "industry_source": industry["source"] if industry else None,
                        "industry_report_period": json.loads(industry["raw_json"]).get("REPORT_DATE") if industry else None,
                        "industry_basis": industry["classification_basis"] if industry else None},
-        "analysis_profile": PROFILE, "evidence": evidence, "limitations": limitations,
+        "analysis_profile": PROFILE, "evidence": evidence,
+        "allowed_evidence_ids": [e["id"] for e in evidence], "limitations": limitations,
         "quality": {**{k: quality[k] for k in ("missing", "limited", "candidate_allowed", "dates")},
                     "source_failures": [{k: r[k] for k in ("dataset", "source", "status")} for r in source_errors]}}
     # Keep sufficient baselines and source records, rather than the whole database.
@@ -179,7 +187,12 @@ def capture(db, code, *, as_of=None):
     manifest["overrides"] = [r for r in manifest["overrides"] if r["period"] >= earliest_financial]
     manifest["valuation"] = [r for r in manifest["valuation"] if r["observed_on"] >= cutoff]
     manifest["raw_prices"] = [{"date": r["date"], "close": r["close"]} for r in raw if r["date"] >= cutoff]
-    manifest["qfq_prices"] = [{"date": r["date"], "close": r["close"]} for r in qfq[-61:]]
+    price_starts = [e["value"]["price_start_on"] for e in evidence
+                    if e["metric"] in {"holders_price", "financing_price"} and e["value"]["price_start_on"]]
+    if qfq:
+        price_starts.append(qfq[max(0, len(qfq) - 61)]["date"])
+    chip_start = min(price_starts, default=today)
+    manifest["qfq_prices"] = [{"date": r["date"], "close": r["close"]} for r in qfq if r["date"] >= chip_start]
     # Traceability may include refresh times/run IDs; actual inference input never does.
     return {"instrument_id": identity, "input": input_data, "hash": digest(input_data),
             "manifest": manifest, "quality": quality, "captured_at": utc_now()}

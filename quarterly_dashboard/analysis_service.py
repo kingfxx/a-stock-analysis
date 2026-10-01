@@ -6,7 +6,7 @@ from threading import Event, Lock, Thread
 
 from .analysis_snapshot import capture, changes, encoded, SnapshotError
 from .analysis_repository import AnalysisRepository, ACTIVE
-from .analysis_validation import validate_output, prompt
+from .analysis_validation import validate_output, prompt, ReportValidationError
 from .ai_provider import ProviderError
 from .sources import normalize_code
 
@@ -93,7 +93,7 @@ class AnalysisService:
                     continue
                 result = validate_output(output["text"], json.loads(run["input_json"]))
                 self.repository.transition(run["id"], "validating", "succeeded", result_json=encoded(result),
-                    verdict=result["verdict"], summary=result["summary"], validation_json=encoded({"version": "v1", "valid": True,
+                    verdict=result["verdict"], summary=result["summary"], validation_json=encoded({"version": "v2", "valid": True,
                         "provider": output.get("diagnostic")}),
                     response_id=output.get("response_id"), resolved_model=output.get("model"), usage_json=encoded(output.get("usage")))
             except Exception as exc:
@@ -104,7 +104,8 @@ class AnalysisService:
                 for expected in ("running", "validating"):
                     self.repository.transition(run["id"], expected, "failed",
                         diagnostic_json=encoded({"message": message, "category": type(exc).__name__,
-                            "provider": exc.diagnostic if isinstance(exc, ProviderError) else None}))
+                            "provider": exc.diagnostic if isinstance(exc, ProviderError) else None,
+                            "validation": exc.diagnostic if isinstance(exc, ReportValidationError) else None}))
             finally:
                 with self.lock:
                     self.events.pop(run["id"], None)
