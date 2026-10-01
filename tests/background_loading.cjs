@@ -13,7 +13,7 @@ const source = page.slice(start, page.lastIndexOf("  if (typeof Plotly !== 'unde
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
-  const pending = new Map(), elements = new Map(), rendered = [];
+  const pending = new Map(), elements = new Map(), rendered = [], events = [];
   const context = {
     state: {code:'601600', views, valuation:{views:{old:true}}, loading,
       warnings:[], cached_stocks:[], ...extra},
@@ -28,6 +28,8 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
       return elements.get(id);
     }},
     confirm: () => false,
+    window: {dispatchEvent(event) { events.push(event.detail.updating); }},
+    CustomEvent: class { constructor(type, init) { this.type=type; this.detail=init.detail; } },
     fetch: url => new Promise(resolve => pending.set(url, resolve))
   };
   vm.createContext(context);
@@ -38,7 +40,7 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
     pending.get(key)({ok, status, json:async () => data});
     pending.delete(key);
   }
-  return {context, pending, elements, rendered, respond};
+  return {context, pending, elements, rendered, respond, events};
 }
 
 (async () => {
@@ -54,6 +56,7 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
     await loaded;
     assert.equal(cached.pending.size, 0);
     assert.equal(cached.rendered.length, 0);
+    assert.deepEqual(cached.events, [], 'Fresh cached data must not leave AI waiting for an update');
     for (const section of Object.keys(fresh)) {
       assert.equal(cached.elements.get(section + '-status').textContent, '');
     }
@@ -62,6 +65,9 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
   // A slow valuation source cannot hold the financial chart hostage.
   let fixture = setup({financial:true, dividends:false, valuation:true});
   let completion = fixture.context.loadDashboard();
+  assert.deepEqual(fixture.events, [true]);
+  await fixture.context.loadDashboard();
+  assert.deepEqual(fixture.events, [true], 'Duplicate loading must not emit an unmatched update event');
   assert.equal(fixture.pending.size, 1);
   assert.match(fixture.elements.get('financial-status').textContent, /后台更新中/);
   fixture.respond('financial', {code:'601600', name:'中国铝业',
@@ -74,6 +80,7 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
   assert.deepEqual(fixture.context.state.valuation.views, {old:true});
   fixture.respond('valuation', {views:{new:true}, updated_on:'2026-09-28', warnings:[]});
   await completion;
+  assert.deepEqual(fixture.events, [true, false]);
   assert.ok(fixture.context.state.valuation.views.new);
   assert.equal(fixture.elements.get('financial-status').textContent, '');
   assert.equal(fixture.elements.get('valuation-status').textContent, '');

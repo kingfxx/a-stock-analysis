@@ -30,3 +30,4 @@ data/verification/
 *.sqlite3-journal
 *.sqlite3.lock
 data/backups/
+data/ai-private/

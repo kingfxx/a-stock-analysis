@@ -1,0 +1,278 @@
+/* Local reads never trigger inference. Model operations have explicit buttons. */
+window.initAIAssessment = function(state) {
+  const el = (tag, text, className) => {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  };
+  const button = (text, action) => {
+    const node = el('button', text, 'ai-button'); node.type = 'button';
+    node.addEventListener('click', () => Promise.resolve().then(action).catch(showError)); return node;
+  };
+  const date = value => value ? new Date(value).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'}) : '—';
+  let overview = {}, status = {}, currentReport = null, timer = null, loginTimer = null, epoch = 0;
+  let updating = false, openedBy = null, historyCursor = null, pollingDelay = 800, view = 'report';
+  const actions = el('span', undefined, 'ai-context-actions');
+  const entry = button('AI 研判', openReport);
+  const settingsEntry = button('AI 设置', openSettings);
+  actions.append(entry, settingsEntry); document.querySelector('.context').append(actions);
+  const summary = el('section', undefined, 'ai-summary'); summary.setAttribute('aria-label', 'AI 综合研判摘要');
+  summary.setAttribute('aria-live', 'polite'); document.querySelector('.context').after(summary);
+  const dialog = el('dialog', undefined, 'ai-dialog'); dialog.setAttribute('aria-label','AI 综合研判');
+  const settings = el('dialog', undefined, 'ai-dialog'); settings.setAttribute('aria-label','AI 设置');
+  document.body.append(dialog, settings);
+  for (const node of [dialog, settings]) {
+    node.addEventListener('click', event => { if (event.target === node && event.clientX < node.getBoundingClientRect().left) node.close(); });
+    node.addEventListener('close', () => { if (node === settings) clearTimeout(loginTimer); openedBy?.focus(); });
+  }
+  function showError(error) {
+    const message = error?.message || '操作未完成，请重试';
+    const target = settings.open ? settings : dialog.open ? dialog : summary;
+    target.querySelector('.ai-operation-error')?.remove();
+    const node = el('p', message, 'ai-message ai-operation-error'); node.setAttribute('role','alert'); target.append(node);
+  }
+  async function api(path, command) {
+    if (command !== undefined && !status.session_token) status = await api('/api/ai/status');
+    const response = await fetch(path, command === undefined ? {cache:'no-store'} : {
+      method:'POST', headers:{'Content-Type':'application/json', 'X-Local-Session':status.session_token}, body:JSON.stringify(command)});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '请求未完成');
+    return data;
+  }
+  function badge(verdict) { const node = el('span', verdict, 'ai-badge'); node.dataset.verdict = verdict; return node; }
+  function dataDates(report) {
+    const dates=report.quality.dates;
+    const chips=[dates.shareholders,dates.financing].filter(Boolean).sort().at(-1);
+    return '财报截至 ' + (dates.financial || '缺失') + ' / 估值截至 ' + (dates.valuation || '缺失') + ' / 筹码截至 ' + (chips || '缺失');
+  }
+  function renderSummary() {
+    summary.replaceChildren();
+    const row = el('div', undefined, 'ai-summary-row'); row.append(el('strong', 'AI 综合研判'));
+    if (overview.report) {
+      row.append(badge(overview.report.verdict), el('p', overview.report.summary), button('查看报告', openReport), button('历史', openHistory));
+      summary.append(row, el('p', '生成于 ' + date(overview.report.completed_at), 'ai-meta'));
+      summary.append(el('p',dataDates(overview.report),'ai-meta'));
+    } else {
+      row.append(el('p', '结合经营、估值与筹码形成综合研判'), button('生成研判', openReport), button('历史', openHistory));
+      summary.append(row);
+    }
+    if (overview.changed) summary.append(el('p', '数据已变化：' + overview.change_types.join('、'), 'ai-message'));
+    if (updating || overview.quality?.updating) summary.append(el('p', '数据更新中，请稍候；已有报告仍可查看', 'ai-meta'));
+    if (overview.quality?.source_errors?.length) summary.append(el('p', '部分数据最近更新失败，当前保留原资料；请核对实际观察日期。', 'ai-message'));
+    if (overview.active) summary.append(el('p', taskText(overview.active), 'ai-meta'));
+    const attempt = overview.latest_attempt;
+    if (attempt && ['failed','cancelled','interrupted'].includes(attempt.status)) summary.append(el('p', attempt.error || taskText(attempt), 'ai-message'));
+    entry.textContent = overview.active ? '分析中…' : 'AI 研判';
+  }
+  async function refresh() {
+    const sequence = ++epoch, code = state.code;
+    const data = await api('/api/analysis?code=' + encodeURIComponent(code));
+    if (sequence !== epoch || code !== state.code) return;
+    overview = data; renderSummary();
+    if (dialog.open && view === 'report') {
+      if (!currentReport || currentReport.id === overview.report?.id || currentReport.status !== 'succeeded') currentReport = overview.report;
+      renderReport();
+    }
+    if (overview.active) poll(overview.active.id, code); else clearTimeout(timer);
+  }
+  function header(node, title) {
+    const head = el('header'); head.append(el('h2', title), button('×', () => node.close()));
+    head.lastChild.setAttribute('aria-label','关闭'); node.append(head);
+  }
+  function open(node, trigger) {
+    openedBy = trigger || document.activeElement;
+    if (!node.open) node.showModal();
+  }
+  async function openReport() {
+    view='report'; open(dialog); currentReport = overview.report; renderReport();
+    await refresh();
+    if (!overview.report && !overview.active) await generate(false);
+  }
+  function taskText(run) {
+    const labels = {queued:'正在整理数据 / 等待分析', running:'正在分析', validating:'正在核对结论与数据依据',
+      succeeded:'分析完成', failed:'分析失败', cancelled:'分析已取消', interrupted:'分析已中断'};
+    const elapsed = run.started_at && ['running','validating'].includes(run.status) ? ' · 已用 ' + Math.max(0,Math.floor((Date.now()-Date.parse(run.started_at))/1000)) + ' 秒' : '';
+    return (labels[run.status] || run.status) + elapsed;
+  }
+  function dataRange(node) {
+    const details = el('details'); details.append(el('summary','本次分析的数据范围'));
+    details.append(el('p','将当前股票的经营、估值、筹码摘要发送给 OpenAI，不包含分组、最近查看、个人笔记或整个数据库。'));
+    if (overview.data_range) {
+      details.append(el('p', '证据 ' + overview.data_range.evidence_count + ' 条 · 价值投资 · 中长期 1–3 年'));
+      details.append(el('pre', JSON.stringify(overview.data_range.input, null, 2)));
+    }
+    node.append(details);
+  }
+  function evidenceLinks(node, ids, report) {
+    for (const id of ids || []) node.append(button('依据', () => {
+      const evidence = report.input.evidence.find(item => item.id === id);
+      const details = el('details'); details.open = true;
+      const labels={revenue:'营业收入',profit:'归母净利润',revenue_growth:'营收同比',profit_growth:'利润同比',gross_margin:'毛利率',net_margin:'净利率',roe:'ROE',roic:'ROIC',operating_cash_flow:'经营现金流',capex:'资本开支',free_cash_flow:'简化自由现金流',cash_dividend:'已实施分红',dividend_payout_ratio:'已实施分红率',monetary_funds:'货币资金',interest_bearing_debt:'简化有息负债',net_cash:'净现金',pe:'PE',pb:'PB',ps:'PS',dividend_yield:'股息率',pe_raw:'原始PE',holders:'股东人数',close:'收盘价',financing:'融资摘要',price_trend:'前复权价格趋势'};
+      const period={quarter:'单季',ttm:'TTM',year:'年度'};
+      details.append(el('summary',(labels[evidence.metric] || '财务指标') + (evidence.period_type ? ' · ' + period[evidence.period_type] : '') + (evidence.years ? ' · '+evidence.years+'年历史' : '')));
+      details.append(el('p','实际观察日期：'+(evidence.observed_on || '缺失')+' · 来源：'+(evidence.source || '未知'),'ai-meta'));
+      const number=value => value===null ? '资料缺失' : new Intl.NumberFormat('zh-CN',{maximumFractionDigits:4}).format(value);
+      if (evidence.metric==='financial_period') {
+        const table=el('table',undefined,'ai-fact-table');
+        for (const [key,value] of Object.entries(evidence.value)) {
+          const row=el('tr'); const ratio=['revenue_growth','profit_growth','gross_margin','net_margin','roe','roic','dividend_payout_ratio'].includes(key);
+          row.append(el('th',labels[key]),el('td',number(value)+(value===null ? '' : ratio ? '%' : ' 元'))); table.append(row);
+        }
+        details.append(table);
+      } else if (typeof evidence.value==='number' || evidence.value===null) {
+        details.append(el('p','当时数值：'+number(evidence.value)+(evidence.value===null ? '' : ' '+evidence.unit)));
+        if (evidence.percentile!==undefined) details.append(el('p','历史分位：'+number(evidence.percentile)+'% · 样本数：'+evidence.sample_count+' · 取样频率：'+({trading_day:'交易日',week:'周',month:'月'}[evidence.sample_frequency] || evidence.sample_frequency)));
+        if (evidence.sparse_hint) details.append(el('p',evidence.sparse_hint,'ai-meta'));
+      }
+      if (evidence.methodology) details.append(el('p',evidence.methodology,'ai-meta'));
+      const raw=el('details'); raw.append(el('summary','查看完整证据记录'),el('pre',JSON.stringify(evidence,null,2))); details.append(raw);
+      node.append(details);
+    }));
+  }
+  function renderReport() {
+    dialog.replaceChildren(); header(dialog, 'AI 综合研判 · ' + (state.name || '') + ' ' + state.code);
+    const toolbar = el('div', undefined, 'ai-toolbar');
+    toolbar.append(button('本次报告', () => {view='report'; currentReport=overview.report; renderReport();}), button('历史记录', openHistory));
+    const regenerate = button('重新分析', () => generate(true)); regenerate.disabled = Boolean(overview.active || updating || overview.quality?.updating);
+    toolbar.append(regenerate, el('span','使用 ChatGPT 额度','ai-meta')); dialog.append(toolbar);
+    if (overview.active) {
+      dialog.append(el('p',taskText(overview.active),'ai-meta'), button('取消分析', async () => {
+        await api('/api/analysis/runs/' + overview.active.id + '/cancel', {}); await refresh();
+      }), el('p','取消会尽力停止请求，已使用的额度未必可撤回。','ai-meta'));
+    }
+    const selectedChanged = currentReport?.snapshot_hash && overview.current_snapshot_hash && currentReport.snapshot_hash !== overview.current_snapshot_hash;
+    if (selectedChanged) dialog.append(el('p','报告数据与当前资料已不同。此报告仍对应生成时的快照，可重新分析当前数据。','ai-message'));
+    if (overview.data_error) dialog.append(el('p',overview.data_error,'ai-message'));
+    if (overview.latest_attempt?.error) dialog.append(el('p',overview.latest_attempt.error,'ai-message'));
+    const report = currentReport;
+    if (!report?.result) {
+      const waiting = updating || overview.quality?.updating;
+      dialog.append(el('p', overview.active ? '尚无成功报告，当前任务正在处理。' : waiting
+        ? '尚未开始分析：数据更新中，完成后请点击“重新分析”。'
+        : '尚无成功报告。点击“重新分析”生成；账号和模型可在 AI 设置中查看。'), button('AI 设置',openSettings));
+      dataRange(dialog); return;
+    }
+    const result = report.result;
+    dialog.append(badge(result.verdict), el('p',result.summary), el('p','分析视角：价值投资 · 中长期 1–3 年','ai-meta'));
+    dialog.append(el('p','生成时间 ' + date(report.completed_at) + ' · 数据状态：' + (report.quality.limited ? '部分' : '完整'),'ai-meta'));
+    const dates = report.quality.dates;
+    dialog.append(el('p', dataDates(report) + ' / 价格截至 ' + (dates.price || '缺失'), 'ai-meta'));
+    const names = {business:'经营趋势', quality:'盈利质量', financial_risk:'财务风险', valuation:'估值', chips:'筹码'};
+    const dimensions = el('div',undefined,'ai-dimensions');
+    for (const [name, dimension] of Object.entries(result.dimensions)) {
+      const node = el('div',undefined,'ai-dimension'); node.append(el('strong',names[name] + '：' + dimension.status),el('p',dimension.explanation));
+      evidenceLinks(node,dimension.evidence_ids,report); dimensions.append(node);
+    }
+    dialog.append(dimensions);
+    for (const [key,label] of [['supporting_factors','支持因素'],['risks','风险与反面证据']]) {
+      dialog.append(el('h3',label)); const list = el('ul');
+      for (const item of result[key]) { const node = el('li',item.explanation); evidenceLinks(node,item.evidence_ids,report); list.append(node); }
+      if (!result[key].length) list.append(el('li','已有资料未提供足够依据')); dialog.append(list);
+    }
+    dialog.append(el('h3','改变判断的条件')); const conditions = el('ul');
+    for (const item of result.change_conditions) conditions.append(el('li',item.direction + '：' + item.condition + '（' + item.indicator + '）'));
+    dialog.append(conditions,el('h3','待核实事项')); const unknowns = el('ul');
+    for (const item of result.unknowns) unknowns.append(el('li',item)); dialog.append(unknowns);
+    const facts = el('details'); facts.append(el('summary','展开数据依据与口径'),el('pre',JSON.stringify(report.input,null,2))); dialog.append(facts);
+    dialog.append(el('p','模型 ' + (report.resolved_model || report.model) + ' · 分析规则 ' + report.prompt_version,'ai-meta'));
+  }
+  async function generate(force) {
+    if (overview.active) {poll(overview.active.id,state.code); return;}
+    if (updating || overview.quality?.updating) throw new Error('数据更新中，请稍候');
+    if (overview.data_error) throw new Error(overview.data_error);
+    status = await api('/api/ai/status');
+    if (!status.connected || !status.plan_authorized || !status.model) { await openSettings(); return; }
+    const code = state.code;
+    const run = await api('/api/analysis',{code,model:status.model,request_key:crypto.randomUUID(),force});
+    if (state.code !== code) return;
+    if (run.status === 'succeeded') currentReport = run;
+    await refresh();
+  }
+  function poll(id, code) {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        const run = await api('/api/analysis/runs/' + id);
+        if (code !== state.code || run.code !== code || overview.active?.id !== id) return;
+        if (['queued','running','validating'].includes(run.status)) {
+          overview.active = run; renderSummary();
+          if (dialog.open && view === 'report') {const scroll = dialog.scrollTop; renderReport(); dialog.scrollTop = scroll;}
+          pollingDelay = Math.min(3000,pollingDelay + 400); poll(id,code);
+        } else { pollingDelay=800; currentReport=run.status==='succeeded' ? run : overview.report; await refresh(); }
+      } catch (error) {showError(error);}
+    }, pollingDelay);
+  }
+  async function openHistory() {
+    view='history'; open(dialog); historyCursor=null; dialog.replaceChildren(); header(dialog,'研判历史 · ' + state.code);
+    dialog.append(button('本次报告',() => {view='report'; currentReport=overview.report; renderReport();}));
+    await moreHistory();
+  }
+  async function moreHistory() {
+    const code = state.code;
+    const data = await api('/api/analysis/history?code=' + encodeURIComponent(code) + (historyCursor ? '&cursor=' + historyCursor : ''));
+    if (code !== state.code || !dialog.open) return;
+    dialog.querySelector('[data-more-history]')?.remove();
+    if (!data.items.length && !historyCursor) dialog.append(el('p','暂无研判记录'));
+    for (const item of data.items) {
+      const node = button(date(item.created_at) + ' · ' + (item.verdict || taskText(item)) + ' · ' + item.model + '\n' + (item.summary || ''), async () => {
+        const report = await api('/api/analysis/runs/' + item.id);
+        if (report.code !== state.code) return;
+        view='report'; currentReport=report; renderReport();
+        if (report.error) dialog.append(el('p',report.error,'ai-message'));
+      }); node.classList.add('ai-history-item'); dialog.append(node);
+    }
+    historyCursor=data.next_cursor;
+    if (historyCursor) {const more=button('更多历史',moreHistory); more.dataset.moreHistory='true'; dialog.append(more);}
+  }
+  async function openSettings() {
+    open(settings); settings.replaceChildren(); header(settings,'AI 设置');
+    status = await api('/api/ai/status');
+    settings.append(el('p',status.connected ? '账号：' + status.account : '尚未连接 ChatGPT'));
+    settings.append(el('p',status.plan_authorized ? '已授权使用 ChatGPT 额度' : '尚未授权使用 ChatGPT 额度','ai-meta'));
+    if (status.error) settings.append(el('p',status.error,'ai-message'));
+    settings.append(el('p','连接会请求使用你的 ChatGPT 计划额度。分析时仅发送当前股票摘要。登录和选择模型不会自动开始分析。'));
+    const connect = button('Continue with ChatGPT',async () => {
+      const popup=window.open('about:blank','stock-chatgpt-auth');
+      try {
+        const result=await api('/api/ai/connect',{});
+        if (popup) popup.location.href=result.authorization_url;
+        else window.location.href=result.authorization_url;
+        waitLogin();
+      } catch(error) {popup?.close(); throw error;}
+    }); settings.append(connect);
+    if (status.connected) {
+      settings.append(button('断开连接',async () => {await api('/api/ai/disconnect',{}); await openSettings(); await refresh();}));
+      if (status.plan_authorized) {
+        settings.append(el('h3','默认模型'));
+        const models=await api('/api/ai/models'); const select=el('select'); select.setAttribute('aria-label','选择默认模型');
+        select.append(el('option','请选择模型')); select.firstChild.value='';
+        for (const model of models.models) {const option=el('option',model.display_name); option.value=model.slug; select.append(option);}
+        select.value=status.model || ''; settings.append(select,button('保存模型',async () => {
+          await api('/api/ai/preferences',{model:select.value}); status=await api('/api/ai/status'); settings.append(el('p','模型已保存；点击生成或重新分析才使用额度。','ai-meta'));
+        }));
+      }
+    }
+    const link=el('a','ChatGPT 额度与授权管理'); link.href='https://chatgpt.com/#settings/Usage'; link.target='_blank'; link.rel='noopener noreferrer';
+    settings.append(el('p','分析视角：价值投资 · 中长期 1–3 年'),link); dataRange(settings);
+  }
+  function waitLogin() {
+    clearTimeout(loginTimer); const deadline=Date.now()+600000;
+    async function check() {
+      if (!settings.open || Date.now()>deadline) return;
+      try {const next=await api('/api/ai/status'); if (!next.connecting) {await openSettings(); return;}}
+      catch(error) {showError(error); return;}
+      loginTimer=setTimeout(check,2000);
+    }
+    loginTimer=setTimeout(check,2000);
+  }
+  window.addEventListener('dashboard-data-state',event => {
+    if (event.detail.code !== state.code) return;
+    updating=event.detail.updating; renderSummary();
+    if (dialog.open && view === 'report') renderReport();
+    if (!updating) refresh().catch(showError);
+  });
+  window.addEventListener('pagehide',() => {clearTimeout(timer); clearTimeout(loginTimer); ++epoch;});
+  renderSummary(); refresh().catch(showError);
+  return {refresh};
+};

@@ -22,7 +22,8 @@ from typing import Callable, Iterator
 DEFAULT_DATABASE = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.sqlite3"
 APPLICATION_ID = 0x4153544B  # ASTK; refuse an unrelated SQLite file.
 MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_facts.sql"),
-              (4, "004_financing_compact.sql"), (5, "005_stock_library.sql"), (6, "006_stock_member_order.sql"))
+              (4, "004_financing_compact.sql"), (5, "005_stock_library.sql"), (6, "006_stock_member_order.sql"),
+              (7, "007_ai_assessments.sql"))
 
 
 class StorageError(RuntimeError):
@@ -235,6 +236,12 @@ class Database:
                 raise
         finally:
             conn.close()
+
+    @contextmanager
+    def shared_reader(self):
+        """Bind existing read repositories to one caller-owned SQLite snapshot."""
+        with self.connection() as conn:
+            yield SharedReader(self, conn)
 
     def ensure_instrument(self, code: str, name: str | None = None) -> int:
         # Keep maintenance independent of requests/plotly.
@@ -555,7 +562,12 @@ class Database:
             target = None
             Database(temporary, journal_mode="delete").check(current=False)
             # Avoid overwriting a backup created concurrently by another process.
-            os.link(temporary, destination)
+            if os.name == "nt":
+                # Windows rename fails if the destination exists, unlike POSIX.
+                # It also works on volumes/providers which prohibit hard links.
+                os.rename(temporary, destination)
+            else:
+                os.link(temporary, destination)
             return destination
         finally:
             if target is not None:
@@ -564,13 +576,20 @@ class Database:
                 source.close()
             temporary.unlink(missing_ok=True)
 
-    def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None, verify_existing=True) -> Path:
+    def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None, verify_existing=True, refresh=False) -> Path:
         if type(keep) is not int or keep < 1:
             raise ValueError("keep must be positive")
         day = day or datetime.now(timezone.utc).date()
         directory = Path(directory).resolve() if directory else self.path.parent / "backups"
         path = directory / f"{self.path.stem}-daily-{day.isoformat()}.sqlite3"
-        if path.exists() and not verify_existing:
+        if refresh:
+            staged = directory / f".daily-refresh-{uuid4().hex}.sqlite3"
+            try:
+                self.backup(staged)
+                staged.replace(path)
+            finally:
+                staged.unlink(missing_ok=True)
+        if path.exists() and not verify_existing and not refresh:
             return path
         if not path.exists():
             self.backup(path)
@@ -588,6 +607,20 @@ class Database:
         for candidate in sorted(owned, reverse=True)[keep:]:
             candidate.unlink()
         return path
+
+
+class SharedReader(Database):
+    """Read methods inherit SQL mappings; nested contexts never open connections."""
+
+    def __init__(self, database, conn):
+        self.path = database.path
+        self.conn = conn
+
+    @contextmanager
+    def connection(self, *, write=False):
+        if write:
+            raise StorageError("Shared snapshot is read-only")
+        yield self.conn
 
 
 @contextmanager

@@ -1,0 +1,129 @@
+"""Append-only reports, immutable snapshots and transactional task admission."""
+from uuid import uuid4
+import json
+
+from .analysis_snapshot import INPUT_VERSION, CALCULATION_VERSION, PROFILE, encoded, digest
+from .storage import utc_now
+
+ACTIVE = ("queued", "running", "validating")
+
+
+class AnalysisRepository:
+    def __init__(self, db):
+        self.db = db
+
+    def preferences(self):
+        with self.db.connection() as conn:
+            row = conn.execute("SELECT model FROM ai_analysis_preferences WHERE id=1").fetchone()
+        return {"model": row[0] if row else None, "analysis_profile": PROFILE}
+
+    def set_model(self, model):
+        with self.db.connection(write=True) as conn:
+            conn.execute("INSERT INTO ai_analysis_preferences(id,model,updated_at) VALUES (1,?,?) "
+                         "ON CONFLICT(id) DO UPDATE SET model=excluded.model,updated_at=excluded.updated_at", (model, utc_now()))
+        return self.preferences()
+
+    def enqueue(self, snapshot, request_key, model, account_ref, prompt, *, force=False):
+        identity = snapshot["instrument_id"]
+        with self.db.connection(write=True) as conn:
+            previous = conn.execute("SELECT * FROM ai_analysis_runs WHERE request_key=?", (request_key,)).fetchone()
+            if previous:
+                if previous["instrument_id"] != identity or previous["model"] != model or previous["account_ref"] != account_ref:
+                    raise ValueError("幂等键已经用于另一分析请求")
+                return dict(previous)
+            active = conn.execute("SELECT * FROM ai_analysis_runs WHERE instrument_id=? AND status IN ('queued','running','validating')",
+                                  (identity,)).fetchone()
+            if active:
+                return dict(active)
+            if not force:
+                successful = conn.execute("SELECT r.* FROM ai_analysis_runs r JOIN ai_analysis_snapshots s ON s.id=r.snapshot_id "
+                    "WHERE r.instrument_id=? AND r.status='succeeded' AND s.snapshot_hash=? AND r.model=? AND r.prompt_hash=? "
+                    "ORDER BY r.created_at DESC LIMIT 1", (identity, snapshot["hash"], model, digest(prompt))).fetchone()
+                if successful:
+                    return dict(successful)
+            count = conn.execute("SELECT count(*) FROM ai_analysis_runs WHERE status IN ('queued','running','validating')").fetchone()[0]
+            if count >= 2:
+                raise ValueError("已有分析和等待任务，请稍后再试")
+            conn.execute("INSERT INTO ai_analysis_snapshots(instrument_id,input_schema_version,calculation_version,snapshot_hash,"
+                "input_json,source_manifest_json,quality_json,captured_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                (identity, INPUT_VERSION, CALCULATION_VERSION, snapshot["hash"], encoded(snapshot["input"]),
+                 encoded(snapshot["manifest"]), encoded(snapshot["quality"]), snapshot["captured_at"]))
+            sid = conn.execute("SELECT id FROM ai_analysis_snapshots WHERE instrument_id=? AND input_schema_version=? "
+                "AND calculation_version=? AND snapshot_hash=?", (identity, INPUT_VERSION, CALCULATION_VERSION, snapshot["hash"])).fetchone()[0]
+            run_id = uuid4().hex
+            conn.execute("INSERT INTO ai_analysis_runs(id,instrument_id,snapshot_id,request_key,account_ref,model,prompt_version,"
+                "prompt_hash,prompt_json,output_schema_version,analysis_profile_json,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (run_id, identity, sid, request_key, account_ref, model, prompt["version"], digest(prompt), encoded(prompt),
+                 prompt["output_version"], encoded(PROFILE), "queued", utc_now()))
+            return dict(conn.execute("SELECT * FROM ai_analysis_runs WHERE id=?", (run_id,)).fetchone())
+
+    def transition(self, run_id, expected, status, **fields):
+        allowed = {"started_at", "completed_at", "result_json", "validation_json", "response_id", "resolved_model",
+                   "usage_json", "diagnostic_json", "verdict", "summary"}
+        if set(fields) - allowed:
+            raise ValueError("Unknown run fields")
+        if status not in ACTIVE:
+            fields["completed_at"] = utc_now()
+        with self.db.connection(write=True) as conn:
+            changed = conn.execute("UPDATE ai_analysis_runs SET status=?" + "".join(f",{k}=?" for k in fields)
+                + " WHERE id=? AND status=?", [status, *fields.values(), run_id, expected]).rowcount
+        return bool(changed)
+
+    def cancel(self, run_id):
+        with self.db.connection(write=True) as conn:
+            return bool(conn.execute("UPDATE ai_analysis_runs SET status='cancelled',completed_at=? "
+                "WHERE id=? AND status IN ('queued','running','validating')", (utc_now(), run_id)).rowcount)
+
+    def recover(self):
+        with self.db.connection(write=True) as conn:
+            return conn.execute("UPDATE ai_analysis_runs SET status='interrupted',completed_at=?,diagnostic_json=? "
+                "WHERE status IN ('queued','running','validating')", (utc_now(), encoded({"message": "后台已中断，请手动重新分析"}))).rowcount
+
+    def claim(self):
+        with self.db.connection(write=True) as conn:
+            if conn.execute("SELECT 1 FROM ai_analysis_runs WHERE status IN ('running','validating')").fetchone():
+                return None
+            row = conn.execute("SELECT id FROM ai_analysis_runs WHERE status='queued' ORDER BY created_at,id LIMIT 1").fetchone()
+            if not row:
+                return None
+            conn.execute("UPDATE ai_analysis_runs SET status='running',started_at=? WHERE id=? AND status='queued'", (utc_now(), row[0]))
+        return self.run(row[0], internal=True)
+
+    def run(self, run_id, *, internal=False):
+        with self.db.connection() as conn:
+            row = conn.execute("SELECT r.*,i.code,i.name,s.input_json,s.snapshot_hash,s.quality_json FROM ai_analysis_runs r "
+                "JOIN instruments i ON i.id=r.instrument_id JOIN ai_analysis_snapshots s ON s.id=r.snapshot_id WHERE r.id=?", (run_id,)).fetchone()
+        if not row:
+            raise ValueError("研判任务不存在")
+        if internal:
+            return dict(row)
+        data = {k: row[k] for k in ("id", "code", "name", "status", "model", "resolved_model", "prompt_version", "verdict", "summary", "snapshot_hash",
+                                    "created_at", "started_at", "completed_at")}
+        for key, column in (("result", "result_json"), ("input", "input_json"), ("quality", "quality_json"), ("usage", "usage_json")):
+            data[key] = json.loads(row[column]) if row[column] else None
+        diagnostic = json.loads(row["diagnostic_json"]) if row["diagnostic_json"] else {}
+        data["error"] = diagnostic.get("message")
+        return data
+
+    def latest(self, code):
+        with self.db.connection() as conn:
+            rows = [dict(r) for r in conn.execute("SELECT r.id,r.status FROM ai_analysis_runs r JOIN instruments i ON i.id=r.instrument_id "
+                "WHERE i.code=? ORDER BY r.created_at DESC,r.id DESC", (code,))]
+        success = next((r["id"] for r in rows if r["status"] == "succeeded"), None)
+        active = next((r["id"] for r in rows if r["status"] in ACTIVE), None)
+        return {"report": self.run(success) if success else None, "active": self.run(active) if active else None,
+                "latest_attempt": self.run(rows[0]["id"]) if rows else None}
+
+    def history(self, code, cursor=None):
+        with self.db.connection() as conn:
+            anchor = conn.execute("SELECT r.created_at,r.id FROM ai_analysis_runs r JOIN instruments i ON i.id=r.instrument_id "
+                "WHERE r.id=? AND i.code=?", (cursor, code)).fetchone() if cursor else None
+            if cursor and not anchor:
+                raise ValueError("历史游标无效")
+            sql = "SELECT r.id,r.status,r.verdict,r.summary,r.model,r.created_at FROM ai_analysis_runs r JOIN instruments i ON i.id=r.instrument_id WHERE i.code=?"
+            args = [code]
+            if anchor:
+                sql += " AND (r.created_at,r.id)<(?,?)"
+                args.extend(anchor)
+            rows = [dict(r) for r in conn.execute(sql + " ORDER BY r.created_at DESC,r.id DESC LIMIT 21", args)]
+        return {"items": rows[:20], "next_cursor": rows[19]["id"] if len(rows) > 20 else None}

@@ -396,9 +396,12 @@
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script src="/plotly.min.js"></script>
 <script src="/stock-picker.js"></script>
+<link rel="stylesheet" href="/ai-assessment.css">
+<script src="/ai-assessment.js"></script>
 <script>
 (() => {
   const state = JSON.parse(document.getElementById('payload').textContent);
+  window.initAIAssessment(state);
   const selectionsKey = 'investment-dashboard-selections-v1';
   let savedSelections = {};
   try { savedSelections = JSON.parse(sessionStorage.getItem(selectionsKey)) || {}; }
@@ -1024,6 +1027,7 @@
       return;
     }
     dashboardUpdating = true;
+    window.dispatchEvent(new CustomEvent('dashboard-data-state', {detail:{code:state.code, updating:true}}));
     const refresh = document.getElementById('refresh');
     const fullRefresh = document.getElementById('full-audit');
     fullRefresh.disabled = true;
@@ -1067,6 +1071,7 @@
     }
     finally {
       dashboardUpdating = false;
+      window.dispatchEvent(new CustomEvent('dashboard-data-state', {detail:{code:state.code, updating:false}}));
       fullRefresh.disabled = false;
       refresh.setAttribute('aria-disabled', 'false');
       refresh.textContent = '刷新数据';

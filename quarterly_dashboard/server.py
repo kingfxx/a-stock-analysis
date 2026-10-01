@@ -7,6 +7,7 @@ import json
 import shutil
 import time
 import sqlite3
+import secrets
 import webbrowser
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +29,8 @@ from .valuation_service import ValuationService
 from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update
 from .storage import SyncKey
 from .stock_library import StockLibrary
+from .analysis_service import AnalysisService
+from .ai_provider import ChatGPTProvider, ProviderError
 from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
                     shareholder_price_snapshots)
 from .sources import (fetch_cash_flow_reports, fetch_financial_reports,
@@ -43,6 +46,8 @@ VALUATION_CACHE = ROOT / "data" / "valuation"
 CHIP_CACHE = ROOT / "data" / "chips"
 DATABASE_PATH = DEFAULT_DATABASE
 _SERVICES, _SERVICE_LOCK = {}, Lock()
+_AI_SERVICES = {}
+LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
@@ -795,8 +800,130 @@ def render_page(code: str, refresh: bool) -> str:
             .replace("__ERROR__", html.escape(error)))
 
 
+def ai_service():
+    key = str(Path(DATABASE_PATH).resolve())
+    with _SERVICE_LOCK:
+        if key not in _AI_SERVICES:
+            db = Database(DATABASE_PATH)
+            _AI_SERVICES[key] = AnalysisService(db, ChatGPTProvider(db.path.parent / "ai-private"))
+        return _AI_SERVICES[key]
+
+
 class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        # OAuth callbacks contain codes; never log their URL or query parameters.
+        if urlparse(self.path).path == "/auth/callback":
+            return
+        super().log_message(format, *args)
+
+    def _ai_reply(self, data, status=200):
+        body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _ai_host(self):
+        port = self.server.server_port
+        if self.headers.get("Host") not in {f"127.0.0.1:{port}", f"localhost:{port}"}:
+            raise ValueError("不允许此 Host 访问本地 AI 接口")
+
+    def _ai_get(self, parsed):
+        try:
+            self._ai_host()
+            service = ai_service()
+            query = parse_qs(parsed.query)
+            if parsed.path == "/api/ai/status":
+                data = {**service.status(), "session_token": LOCAL_SESSION_TOKEN}
+            elif parsed.path == "/api/ai/models":
+                data = {"models": service.provider.models()}
+            elif parsed.path == "/api/analysis":
+                data = service.overview(query.get("code", [""])[0])
+            elif parsed.path == "/api/analysis/history":
+                data = service.repository.history(normalize_code(query.get("code", [""])[0]), query.get("cursor", [None])[0])
+            elif parsed.path.startswith("/api/analysis/runs/"):
+                data = service.repository.run(parsed.path.rsplit("/", 1)[-1])
+            else:
+                self._ai_reply({"error": "接口不存在"}, 404)
+                return
+            self._ai_reply(data)
+        except (ValueError, StorageError) as exc:
+            self._ai_reply({"error": str(exc)}, 400)
+        except Exception:
+            self._ai_reply({"error": "AI 接口暂不可用，请检查本地存储和网络"}, 503)
+
+    def _ai_post(self, path):
+        try:
+            self._ai_host()
+            allowed = {f"http://127.0.0.1:{self.server.server_port}", f"http://localhost:{self.server.server_port}"}
+            if self.headers.get("Origin") not in allowed or not secrets.compare_digest(
+                    self.headers.get("X-Local-Session", ""), LOCAL_SESSION_TOKEN):
+                self._ai_reply({"error": "拒绝跨站或无本地会话的 AI 操作，请刷新页面"}, 403)
+                return
+            if self.headers.get_content_type() != "application/json":
+                raise ValueError("请使用 JSON 请求")
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= 8192:
+                raise ValueError("AI 请求大小无效")
+            command = json.loads(self.rfile.read(size).decode("utf-8"))
+            if not isinstance(command, dict):
+                raise ValueError("AI 请求必须为对象")
+            service = ai_service()
+            status = 200
+            if path == "/api/analysis":
+                data = service.create(command)
+                status = 202 if data.get("accepted") else 200
+            elif path == "/api/ai/connect":
+                data = service.provider.connect(self.server.server_port)
+            elif path == "/api/ai/disconnect":
+                data = service.disconnect()
+            elif path == "/api/ai/preferences":
+                model = command.get("model")
+                if not isinstance(model, str) or len(model) > 128:
+                    raise ValueError("模型选择无效")
+                models = service.provider.catalog or service.provider.models()
+                if model not in {m["slug"] for m in models}:
+                    raise ValueError("模型不在当前账号列表中")
+                data = service.repository.set_model(model)
+            elif path.startswith("/api/analysis/runs/") and path.endswith("/cancel"):
+                data = service.cancel(path.split("/")[-2])
+            else:
+                self._ai_reply({"error": "接口不存在"}, 404)
+                return
+            self._ai_reply(data, status)
+        except (ValueError, UnicodeError, StorageError) as exc:
+            self._ai_reply({"error": str(exc)}, 400)
+        except Exception:
+            self._ai_reply({"error": "AI 操作失败，请检查网络和本地存储"}, 503)
+
+    def _oauth_callback(self, parsed):
+        message = "连接已完成。请返回股票页面的 AI 设置，选择模型；登录不会自动分析。"
+        try:
+            self._ai_host()
+            query = parse_qs(parsed.query)
+            if any(len(values) != 1 for values in query.values()) or len(parsed.query) > 16384:
+                raise ValueError("授权回调格式无效")
+            ai_service().provider.callback({key: values[0] for key, values in query.items()})
+        except Exception:
+            message = "连接未完成或校验失败。请返回股票页面的 AI 设置重新连接。"
+        body = ("<!doctype html><html lang='zh-CN'><meta charset='utf-8'><title>ChatGPT 连接</title><p>"
+                + html.escape(message) + "</p></html>").encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
+        path = urlparse(self.path).path
+        if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/"):
+            self._ai_post(path)
+            return
         if urlparse(self.path).path != "/api/stock-groups":
             self.send_error(404)
             return
@@ -824,6 +951,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/ai/") or parsed.path == "/api/analysis" or parsed.path.startswith("/api/analysis/"):
+            self._ai_get(parsed)
+            return
+        if parsed.path == "/auth/callback":
+            self._oauth_callback(parsed)
+            return
         status = 200
         if parsed.path == "/plotly.min.js":
             body = get_plotlyjs().encode("utf-8")
@@ -831,6 +964,9 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/stock-picker.js":
             body = (ROOT / "web" / "stock-picker.js").read_bytes()
             content_type = "text/javascript; charset=utf-8"
+        elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css"}:
+            body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
+            content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
             body = json.dumps(StockLibrary(services()[0].db).read(), ensure_ascii=False).encode("utf-8")
             content_type = "application/json; charset=utf-8"
@@ -885,6 +1021,7 @@ def serve(port: int = 8765, open_browser: bool = False):
             db.check()
             db.daily_backup()
             recovered = db.recover_interrupted_runs()
+            ai_recovered = ai_service().repository.recover()
             chips, _ = services(initialized=True)
             for section in ("financing", "shareholders"):
                 for path in sorted((CHIP_CACHE / section).glob("*.json")):
@@ -896,6 +1033,7 @@ def serve(port: int = 8765, open_browser: bool = False):
                 print(warning, flush=True)
             print(f"SQLite {runtime['sqlite_version']} / {runtime['journal_mode']} / "
                   f"结构版本 {runtime['schema_version']}；恢复中断任务 {recovered} 个", flush=True)
+            print(f"AI 中断任务 {ai_recovered} 个；仅手动分析使用 ChatGPT 额度", flush=True)
             url = f"http://127.0.0.1:{port}/"
             print(f"季度分析页面：{url}", flush=True)
             if open_browser:
