@@ -222,4 +222,74 @@ def test_two_period_refresh_pages_back_to_existing_history_after_long_gap(tmp_pa
     assert not data["warnings"] and len(data["reports"]) == 10
     assert {num for _,num,_ in calls} == {2}
     assert max(page for _,_,page in calls) == 3
-    assert sum(page==1 for _,_,page in calls) == 6  # Recheck each source's first page.
+    assert sum(page==1 for _,_,page in calls) == 8  # Recheck each source's first page.
+
+
+def test_existing_three_statements_backfill_key_indicators_in_same_table(tmp_path, monkeypatch):
+    db = Database(tmp_path / "facts.sqlite3")
+    db.initialize()
+    calls = []
+    raw_indicator = {"publish_date": "20260829", "rType": "合并期末", "rCurrency": "CNY",
+        "data": [{"item_title": "扣非净利润", "item_field": "NPCUT", "item_source": "ysb", "item_value": "90"},
+                 {"item_title": "净资产收益率(ROE)", "item_field": "ROEWEIGHTED", "item_source": "zyb", "item_value": "5.7"}]}
+
+    def fetch(code, kind, num, page):
+        calls.append((kind, num, page))
+        raw = raw_indicator if kind == "gjzb" else _record("20260630", 100, "2026-08-29")
+        return {"records": {"20260630": raw}, "total": 1}
+
+    service = FundamentalService(db, tmp_path, fetch_page=fetch)
+    with monkeypatch.context() as context:
+        context.setattr("quarterly_dashboard.fundamental_service.REPORT_TYPES", ("lrb", "fzb", "llb"))
+        service.update("601919")
+    calls.clear()
+    result = service.update("601919")
+    assert not result["warnings"]
+    assert calls == [("gjzb", 200, 1)]
+    identity = db.ensure_instrument("601919")
+    from quarterly_dashboard.fundamental_service import SOURCE
+    saved = db.financial_reports(identity, SOURCE, "gjzb")
+    assert len(saved) == 1
+    assert json.loads(saved[0]["raw_json"]) == raw_indicator
+    with db.connection() as conn:
+        assert {r[0] for r in conn.execute("SELECT DISTINCT report_type FROM financial_reports")} == {"lrb", "fzb", "llb", "gjzb"}
+        state = conn.execute("SELECT data_status FROM sync_state WHERE dataset='financial:gjzb'").fetchone()
+        assert state[0] == "data"
+    assert "NPCUT" not in result["reports"][0]
+    calls.clear()
+    service.update("601919")
+    assert calls == []
+    service.update("601919", refresh=True)
+    assert calls == [(kind, 2, 1) for kind in ("lrb", "fzb", "llb", "gjzb")]
+    assert len(db.financial_reports(identity, SOURCE, "gjzb")) == 1
+
+
+def test_failed_or_incomplete_key_indicators_preserve_saved_json(tmp_path):
+    from quarterly_dashboard.fundamental_service import SOURCE
+    db = Database(tmp_path / "facts.sqlite3")
+    db.initialize()
+    mode = ["ok"]
+    original = {"publish_date": "20260829", "data": [
+        {"item_title": "扣非净利润", "item_field": "NPCUT", "item_value": "90"},
+        {"item_title": "净资产收益率(ROE)", "item_field": "ROEWEIGHTED", "item_value": "5.7"}]}
+
+    def fetch(code, kind, num, page):
+        if kind == "gjzb":
+            if mode[0] == "failed":
+                raise ValueError("key indicators unavailable")
+            raw = original if mode[0] == "ok" else {**original, "data": original["data"][1:]}
+        else:
+            raw = _record("20260630", 100 if mode[0] == "ok" else 120, "2026-08-29")
+        return {"records": {"20260630": raw}, "total": 1}
+
+    service = FundamentalService(db, tmp_path, fetch_page=fetch)
+    assert not service.update("601919")["warnings"]
+    identity = db.ensure_instrument("601919")
+    for failure in ("failed", "missing_field"):
+        mode[0] = failure
+        result = service.update("601919", refresh=True)
+        assert any("gjzb" in message for message in result["warnings"])
+        assert result["reports"][0]["revenue_ytd"] == 120
+        assert json.loads(db.financial_reports(identity, SOURCE, "gjzb")[0]["raw_json"]) == original
+    with db.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM sync_runs WHERE dataset='financial:gjzb' AND status='failed'").fetchone()[0] == 2

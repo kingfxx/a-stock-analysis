@@ -50,15 +50,16 @@ def sina_page(periods, total=3):
     return sample
 
 
-def test_sina_page_distinguishes_full_page_last_page_and_empty_page():
+@pytest.mark.parametrize("source", ["lrb", "gjzb"])
+def test_sina_page_distinguishes_full_page_last_page_and_empty_page(source):
     session = Session([
         sina_page(["20260630", "20260331"]),
         sina_page(["20251231"]),
         sina_page([]),
     ])
-    first = sources.fetch_financial_report_page("000001", session, "lrb", num=2, page=1)
-    last = sources.fetch_financial_report_page("000001", session, "lrb", num=2, page=2)
-    empty = sources.fetch_financial_report_page("000001", session, "lrb", num=2, page=3)
+    first = sources.fetch_financial_report_page("000001", session, source, num=2, page=1)
+    last = sources.fetch_financial_report_page("000001", session, source, num=2, page=2)
+    empty = sources.fetch_financial_report_page("000001", session, source, num=2, page=3)
     assert first["total"] == last["total"] == empty["total"] == 3
     assert list(first["records"]) == ["20260630", "20260331"]
     assert list(last["records"]) == ["20251231"]
@@ -66,12 +67,12 @@ def test_sina_page_distinguishes_full_page_last_page_and_empty_page():
     assert (first["newest_period"], first["oldest_period"]) == ("2026-06-30", "2026-03-31")
     assert empty["oldest_period"] is None
     assert [params for _, params in session.calls] == [
-        {"paperCode": "sz000001", "source": "lrb", "type": "0", "page": str(page), "num": "2"}
+        {"paperCode": "sz000001", "source": source, "type": "0", "page": str(page), "num": "2"}
         for page in (1, 2, 3)
     ]
 
 
-@pytest.mark.parametrize("source", ["lrb", "fzb", "llb"])
+@pytest.mark.parametrize("source", ["lrb", "fzb", "llb", "gjzb"])
 def test_sina_requests_each_statement_type_separately(source):
     session = Session([sina_page(["20260630"], total=1)])
     result = sources.fetch_financial_report_page("601919", session, source, num=8)

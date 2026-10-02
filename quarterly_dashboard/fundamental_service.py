@@ -17,7 +17,8 @@ from .update_service import (audit_due, backup_before_update, data_lock, mark_fa
 
 
 SOURCE = "sina:CompanyFinanceService.getFinanceReport2022"
-REPORT_TYPES = ("lrb", "fzb", "llb")
+STATEMENT_TYPES = ("lrb", "fzb", "llb")
+REPORT_TYPES = STATEMENT_TYPES + ("gjzb",)
 
 
 def _income_fields(raw):
@@ -105,7 +106,7 @@ class FundamentalService:
         if not instrument:
             return {"code": code, "name": None, "reports": [], "warnings": []}
         rows = {kind: self.db.financial_reports(instrument["id"], SOURCE, kind)
-                for kind in REPORT_TYPES}
+                for kind in STATEMENT_TYPES}
         def payload(kind):
             return {"result": {"data": {"report_list": {
                 row["period"].replace("-", ""): json.loads(row["raw_json"])

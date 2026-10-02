@@ -11,6 +11,7 @@
 | 新浪财报三表 | 利润表 `lrb`：累计营收、归母净利润、合并净利润、营业成本、利润总额、所得税费用、费用化利息及财务费用项下利息收入 | 收入／利润、同比、利润率、ROE、ROIC 的利润输入 | `sources.fetch_financial_report_page()`、`FundamentalService` |
 | 新浪财报三表 | 资产负债表 `fzb`：报告期末股本、归母净资产、合并所有者权益、货币资金及债务组成科目 | 披露日估算市值、ROE、ROIC、有息负债与净现金 | 同上，与利润表按报告期合并 |
 | 新浪财报三表 | 现金流量表 `llb`：累计经营活动现金流净额、购建长期资产支付的现金 | 经营现金流、CapEx、简化自由现金流 | 同上，独立同步 |
+| 新浪关键指标 | `gjzb`：扣非净利润、来源加权 ROE、EPS、财务比率等完整原始记录 | 按报告期入库，暂不用于图表或 AI 输入 | 同上，独立同步并存入 `financial_reports` |
 | 腾讯行情 | 股票名称；未复权、前复权日 K | 共享日价服务供财务、估值和筹码取价；不复权价格供市值与股息率计算 | `sources.fetch_stock_name()`、`fetch_price_history()`、`price_service.PriceService` |
 | 百度股市通 | 历史 PE(TTM)、PB、总市值观察 | 日／周／月估值图；市值用于按观察日计算 PS(TTM) | `valuation.fetch_valuation_indicator()`、`ValuationService` |
 | 东方财富分红数据 | 预案、取消和已实施事件的报告期、公告日、除权日、税前派息及总股本 | 财务图分红与估值股息率共用事件事实 | `valuation.fetch_dividend_event_page()`、`DividendService` |

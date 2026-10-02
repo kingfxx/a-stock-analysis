@@ -233,7 +233,7 @@ def fetch_financial_report_page(code: str, session: requests.Session, source: st
                                 num: int = 8, page: int = 1) -> dict:
     """Read one raw Sina statement page; ``total`` counts all historical periods."""
     symbol = symbol_for(code)
-    if source not in ("lrb", "fzb", "llb") or not isinstance(num, int) or num < 1 or not isinstance(page, int) or page < 1:
+    if source not in ("lrb", "fzb", "llb", "gjzb") or not isinstance(num, int) or num < 1 or not isinstance(page, int) or page < 1:
         raise ValueError("新浪报表类型或分页参数无效")
     response = session.get(SINA_URL, params={"paperCode": symbol, "source": source,
                                              "type": "0", "page": str(page), "num": str(num)}, timeout=18)

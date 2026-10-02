@@ -35,7 +35,7 @@
 | 表 | 保存内容与主要字段 | 唯一身份及使用方式 |
 | --- | --- | --- |
 | `instruments` | 股票交易所、六位代码、名称和创建时间 | `id` 为主键；`(exchange, code)` 唯一。代码是文本，保留前导零 |
-| `financial_reports` | 财报原始 JSON、报告类型、报告期、披露日期、来源更新时间、内容哈希与取得时间 | `(instrument_id, source, report_type, period)`；新浪类型为 `lrb` 利润表、`fzb` 资产负债表、`llb` 现金流量表，旧合并记录以 `legacy/merged` 保留 |
+| `financial_reports` | 财报原始 JSON、报告类型、报告期、披露日期、来源更新时间、内容哈希与取得时间 | `(instrument_id, source, report_type, period)`；新浪类型为 `lrb` 利润表、`fzb` 资产负债表、`llb` 现金流量表、`gjzb` 关键指标，旧合并记录以 `legacy/merged` 保留 |
 | `dividend_events` | 分红事件标识、报告期、预案/公告/登记/除权日期、状态、每十股现金分红和原始 JSON | `id` 为主键；`(instrument_id, source, event_key)` 唯一。业务读取仅让已经实施且除权日不晚于今天的现金事件参与计算 |
 | `valuation_observations` | 指标、实际观察日期、数值、来源窗口、采样口径版本和原始 JSON | `(instrument_id, source, metric, observed_on)`；当前直接存储 `pe`、`pb`、`market_cap`，保留同一日期曾来自哪些来源窗口 |
 | `industry_snapshots` | 行业名称/代码、分类口径、快照时间和行业估值原始 JSON | `id` 为主键；`(instrument_id, source, snapshot_at)` 唯一。来源内容变化才增加快照，页面读取最新一份 |
@@ -98,7 +98,7 @@
 
 | 数据 | 当前来源 | 普通更新 | 首次、手动全量或核查到期 |
 | --- | --- | --- | --- |
-| 财务三表 | 新浪 `CompanyFinanceService.getFinanceReport2022` | 每类从最近 2 期开始，必要时继续分页覆盖已有尾部 | 分页获取完整可用历史 |
+| 财务三表及关键指标 | 新浪 `CompanyFinanceService.getFinanceReport2022` | 每类从最近 2 期开始，必要时继续分页覆盖已有尾部 | 分页获取完整可用历史 |
 | 分红 | 东方财富 `RPT_SHAREBONUS_DET` | 公告日和除权日分别回看 30 天，复查未完成预案；必要时全量补偿 | 获取全部事件 |
 | PE、PB、市值 | 百度 `opendata` | 来源最小取近一年，普通更新只合并最近三个月；缺口超过三个月时向前接回成功水位，必要时扩大来源窗口 | 取近十年、近五年、近三年三个窗口，保留实际取得的观察 |
 | 行业估值 | 东方财富 `RPT_PCF10_INDUSTRY_CVALUE` | 获取当前行业快照，内容变化才新增行 | 仍为当前快照，不提供完整历史行业序列 |
@@ -120,7 +120,7 @@
 
 | 数据 | 自动来源检查 | 周期性全量核查 | 其他扩大范围的条件 |
 | --- | --- | --- | --- |
-| 财务三表 | 成功检查后 24 小时 | 成功全量后 180 天 | 首次、手动全量；普通查询从近期 2 期开始并按需分页 |
+| 财务三表及关键指标 | 成功检查后 24 小时 | 成功全量后 180 天 | 首次、手动全量；普通查询从近期 2 期开始并按需分页 |
 | 分红 | 成功检查后 24 小时 | 无 | 首次、手动全量，以及增量事件无法对应已有事件时补偿；持续复查未完成预案 |
 | PE、PB、市值 | 成功检查后 24 小时 | 成功全量后 90 天 | 首次、手动全量；长期离线或窗口无交集时扩大来源窗口 |
 | 行业估值 | 成功检查后 24 小时 | 无 | 只查询当前快照，内容变化才增加记录 |
@@ -283,3 +283,7 @@ python -m quarterly_dashboard.storage check --database $restorePath
 | 图表范围、频率及刷新操作 | [web/index.html](../web/index.html) |
 
 历史实测参见 [P4/P5 验收](data-sources/p4-acceptance.md)、[融资存储精简验收](data-sources/financing-compaction-acceptance.md)。这些记录用于说明特定日期的测试结果，不应代替当前代码规则。
+
+### 新浪关键指标原始数据
+
+财务抓取同时独立同步 `gjzb`，沿用 `financial_reports` 表和 `financial:gjzb` 同步水位，无需结构迁移。旧库首次运行时补齐关键指标完整历史，后续与三表采用相同的 24 小时检查、近期 2 期增量及定期全量机制；手动刷新会检查四类来源。抓取失败或丢失已有有效科目时保留已存记录并返回警告，不阻断其他类型成功提交。原始 JSON 保留所有来源科目、分组、重复项、单位/显示格式及来源元信息，暂不映射至图表和 AI 指标；加权 ROE 和来源 ROIC 不替换既有估算口径。
