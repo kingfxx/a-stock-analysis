@@ -7,7 +7,7 @@ window.checklistProductBlocks = function(text, evidence=[]) {
   paragraph(text.slice(0,markers[0].index));
   for(let i=0;i<markers.length;i++) {
     const marker=markers[i], section=text.slice(marker.index+marker[0].length,markers[i+1]?.index ?? text.length);
-    const rows=[...section.matchAll(/(?:^|[；;\n])\s*([^；;\n—]+?)\s*—\s*(-?[0-9][0-9,.]*)\s*(亿元|万元|千元|元)\s*(?:—\s*([^；;\n]+)|[（(]\s*([-+]?\d+(?:\.\d+)?%)\s*[）)])/g)];
+    const rows=[...section.matchAll(/(?:^|[；;\n])\s*([^；;\n—]+?)\s*—\s*(?:(?:营业收入|收入|毛利|分部净利润|税前利润|利润)\s*)?(-?[0-9][0-9,.]*)\s*(亿元|万元|千元|元)\s*(?:[—，,]\s*([^；;\n]+)|[（(]\s*([-+]?\d+(?:\.\d+)?%)\s*[）)])/g)];
     if(!rows.length){paragraph(marker[0]+section);continue;}
     const preamble=section.slice(0,rows[0].index).trim().replace(/[；;]$/,'');
     const rowIncome=rows.some(row=>/收入占|营收占|营业收入/.test(row[4] || ''));
