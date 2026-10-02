@@ -29,7 +29,9 @@
 ## Checklist 与公司财报
 
 - 页面启用 18 项定性 checklist，每项一至两句；旧 AI 研判代码、提示词和历史保留但页面不挂载。新旧任务按 output_schema_version 区分；checklist 内部 verdict=checklist 仅为兼容旧表约束，不能展示为投资结论。
-- 正式财报存放 `data/company_reports/<交易所代码>/<报告期>/<完整SHA256>/report.pdf`，不增加 annual 子目录。披露日、来源、修订关系登记 SQLite；逐页缓存按解析器版本保存，主题片段按提取版本保存。
+- 正式财报存放 `data/company_reports/<交易所代码>/<报告期>/v1/report.pdf`，不增加 annual 子目录。披露日、来源、修订关系登记 SQLite；逐页缓存按解析器版本保存，主题片段按提取版本保存。
 - 不从 verification 目录直接提供正式业务资料；导入保留来源样本。删除 checklist 不删除原件、解析和主题缓存，日常清理不触及正式财报。
 - 查看页面、历史、准备财报不自动调用模型；仅明确生成使用额度。优先复用相同哈希的缓存，常规生成仅一次模型调用。
 - SQLite 备份不包含 PDF；完整资料迁移用 quarterly_dashboard.report_backup，验证哈希，恢复到不存在的新目录，不自动覆盖日常库。
+
+财报同一期文件按 `v1、v2…` 编号，完整 SHA256 仍登记数据库和 manifest 用于去重与校验；版本编号不会因删除而重排。旧哈希目录迁移后，历史快照原路径可通过内容哈希解析到当前路径，不改写历史报告。

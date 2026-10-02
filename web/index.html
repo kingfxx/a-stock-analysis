@@ -491,9 +491,10 @@
     }));
     const axisGroups = [];
     for (const series of active) {
-      let group = axisGroups.find(item => item.unit === series.metric.unit);
+      const axisKey = series.key === 'market_cap' ? 'market_cap' : series.metric.unit;
+      let group = axisGroups.find(item => item.key === axisKey);
       if (!group) {
-        group = {unit:series.metric.unit, names:[], color:series.color};
+        group = {key:axisKey, unit:series.metric.unit, names:[], color:series.color};
         axisGroups.push(group);
       }
       if (!group.names.includes(series.metric.name)) group.names.push(series.metric.name);

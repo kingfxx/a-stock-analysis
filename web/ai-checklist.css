@@ -44,3 +44,10 @@
 @media(max-width:450px) { .ai-dimensions { grid-template-columns:1fr; } .ai-summary-row p { min-width:0; flex-basis:100%; } }
 
 .checklist-table{width:100%;border-collapse:collapse}.checklist-table th,.checklist-table td{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid #41525d}.checklist-table th{width:160px}.checklist-table td p{margin:0 0 8px}.checklist-table pre{white-space:pre-wrap;overflow-wrap:anywhere}
+
+.checklist-item-meta { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.checklist-evidence-toggle { border:0; padding:0; font-size:12px; line-height:1.7; }
+.checklist-item-evidence[hidden] { display:none; }
+
+.checklist-report-cache { padding:8px 0; border-bottom:1px solid #304049; margin-bottom:10px; }
+.checklist-report-cache p { margin:3px 0; }

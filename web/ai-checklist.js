@@ -53,7 +53,7 @@ window.initAIChecklist = function(state) {
     const row = el('div', undefined, 'ai-summary-row'); row.append(el('strong', '投资 checklist'));
     if (overview.report) {
       row.append(el('p', overview.report.summary), button('查看报告', openReport), button('历史', openHistory));
-      summary.append(row, el('p', '生成于 ' + date(overview.report.completed_at), 'ai-meta'));
+      summary.append(row, el('p', '生成于 ' + date(overview.report.completed_at) + generationTime(overview.report), 'ai-meta'));
       summary.append(el('p',dataDates(overview.report),'ai-meta'));
     } else {
       row.append(el('p', '18 项定性检查，每项一至两句话'), button('生成checklist', openReport), button('历史', openHistory));
@@ -91,11 +91,19 @@ window.initAIChecklist = function(state) {
     await refresh();
 
   }
+  function generationTime(run) {
+    if (run.status!=='succeeded' || !run.started_at || !run.completed_at) return '';
+    const seconds=(Date.parse(run.completed_at)-Date.parse(run.started_at))/1000;
+    if (!Number.isFinite(seconds) || seconds<0) return '';
+    const rounded=Math.round(seconds*10)/10;
+    const text=rounded<60 ? rounded.toFixed(1)+' 秒' : Math.floor(rounded/60)+' 分 '+(rounded%60).toFixed(1)+' 秒';
+    return ' · 生成耗时 '+text;
+  }
   function taskText(run) {
     const labels = {queued:'正在整理数据 / 等待分析', running:'正在分析', validating:'正在核对结论与数据依据',
       succeeded:'分析完成', failed:'分析失败', cancelled:'分析已取消', interrupted:'分析已中断'};
     const elapsed = run.started_at && ['running','validating'].includes(run.status) ? ' · 已用 ' + Math.max(0,Math.floor((Date.now()-Date.parse(run.started_at))/1000)) + ' 秒' : '';
-    return (labels[run.status] || run.status) + elapsed;
+    return (labels[run.status] || run.status) + elapsed + generationTime(run);
   }
   function dataRange(node) {
     const details = el('details'); details.append(el('summary','本次分析的数据范围'));
@@ -170,20 +178,42 @@ window.initAIChecklist = function(state) {
     const generateButton=button(overview.report ? '重新生成' : '生成 checklist',()=>generate(Boolean(overview.report)));
     generateButton.disabled=preparing || Boolean(overview.active || updating || overview.quality?.updating || overview.data_error);
     toolbar.append(prepare,update,generateButton,el('span','生成时使用 ChatGPT 额度','ai-meta'));dialog.append(toolbar);
+    const cached=el('div',undefined,'checklist-report-cache');
+    cached.append(el('strong','本地财报资料'));
+    for (const doc of overview.company_reports || []) {
+      const type=doc.report_type==='annual' ? '年报' : '中报';
+      const states={ready:'已解析，可复用',unparsed:'已下载，待解析',missing_file:'原件缺失',missing:'尚未下载'};
+      const row=el('p',type+'：'+(doc.report_period || '尚未下载')+(doc.version ? ' · '+doc.version : '')+' · '+states[doc.state],'ai-meta');
+      if (doc.outdated) row.append(el('span','；早于本地财务期 '+doc.expected_period+'，请准备或刷新财报','ai-message'));
+      if (doc.report_period && /^https:\/\//.test(doc.source_url || '')) {const link=el('a',' 来源公告');link.href=doc.source_url;link.target='_blank';link.rel='noopener noreferrer';row.append(link);}
+      cached.append(row);
+    }
+    dialog.append(cached);
     if (overview.active) dialog.append(el('p',taskText(overview.active),'ai-meta'),button('取消生成',async()=>{await api('/api/analysis/runs/'+overview.active.id+'/cancel',{});await refresh();}));
     if (overview.data_error) dialog.append(el('p',overview.data_error,'ai-message'));
     if (overview.latest_attempt?.error) dialog.append(el('p',overview.latest_attempt.error,'ai-message'));
     const report=currentReport;
-    if (!report?.result?.items) {dialog.append(el('p','先准备年报和中报资料，再点击生成。已存在的财报解析结果会直接复用。'));dataRange(dialog);return;}
+    if (!report?.result?.items) {const ready=overview.company_reports?.every(doc=>doc.state==='ready' && !doc.outdated);dialog.append(el('p',ready ? '财报资料已准备好，可点击生成 checklist。' : '先准备年报和中报资料，再点击生成。已有解析结果会直接复用。'));dataRange(dialog);return;}
     if (report.snapshot_hash!==overview.current_snapshot_hash) dialog.append(el('p','资料已变化，本版本保留生成时的依据，可重新生成。','ai-message'));
-    dialog.append(el('p','生成于 '+date(report.completed_at)+' · '+dataDates(report),'ai-meta'));
+    dialog.append(el('p','生成于 '+date(report.completed_at)+generationTime(report)+' · '+dataDates(report),'ai-meta'));
     const table=el('table',undefined,'checklist-table');
     const titles=Object.fromEntries(report.input.checklist_items.map(i=>[i.id,i.title]));
     const labels={ready:'资料完整',limited:'资料有限',missing:'待补资料',not_applicable:'不适用'};
     for (const item of report.result.items) {
       const row=el('tr'),title=el('th',titles[item.id]),cell=el('td');
-      cell.append(el('p',item.conclusion),el('span',labels[item.status],'ai-meta'));
-      evidenceLinks(cell,item.evidence_ids,report);row.append(title,cell);table.append(row);
+      const meta=el('div',undefined,'checklist-item-meta');
+      const evidence=el('div',undefined,'checklist-item-evidence');
+      evidence.id='checklist-evidence-'+report.id+'-'+item.id; evidence.hidden=true;
+      const toggle=button('展开核实资料',()=>{
+        evidence.hidden=!evidence.hidden;
+        toggle.textContent=evidence.hidden ? '展开核实资料' : '收起核实资料';
+        toggle.setAttribute('aria-expanded',String(!evidence.hidden));
+      });
+      toggle.classList.add('checklist-evidence-toggle');
+      toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',evidence.id);
+      meta.append(el('span',labels[item.status],'ai-meta'),toggle);
+      cell.append(el('p',item.conclusion),meta,evidence);
+      evidenceLinks(evidence,item.evidence_ids,report);row.append(title,cell);table.append(row);
     }
     dialog.append(table);
     const facts=el('details');facts.append(el('summary','生成时的数据与来源'),el('pre',JSON.stringify(report.input,null,2)));dialog.append(facts);

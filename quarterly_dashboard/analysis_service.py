@@ -27,6 +27,9 @@ class AnalysisService:
         code = normalize_code(code)
         data = self.repository.latest(code)
         data.update(changed=False, change_types=[], quality=None, data_error=None)
+        if self.repository.output_version:
+            from .company_report_service import CompanyReportService
+            data['company_reports']=CompanyReportService(self.db).cached_documents(code)
         try:
             snapshot = self.snapshotter(self.db, code)
             data["quality"] = snapshot["quality"]

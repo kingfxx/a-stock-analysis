@@ -81,9 +81,10 @@ def test_pdf_reuse_identity_failure_and_backup(database,tmp_path,monkeypatch):
     first=svc.parse(doc);assert not first['cache_hit']
     assert svc.parse(doc)['cache_hit'] and len(calls)==1
     assert svc.import_report('600900','2025-12-31',source)['id']==doc['id']
+    assert '/v1/' in doc['relative_path']
     archive=tmp_path/'complete.zip';backup(database,archive);restored=tmp_path/'restored';restore(archive,restored)
     restored_doc=Database(restored/'stock_analysis.sqlite3')
-    assert CompanyReportService(restored_doc).prepare('600900')['cached']
+    assert CompanyReportService(restored_doc).cached_documents('600900')[0]['state']=='ready'
     with pytest.raises(ValueError):restore(archive,restored)
     wrong=svc.import_report('600900','2026-06-30',source)
     with pytest.raises(ValueError):svc.parse(wrong)
@@ -130,14 +131,17 @@ def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypa
                 page.get_by_role('button',name='Checklist',exact=True).click()
                 drawer=page.get_by_role('dialog',name='投资 checklist',exact=True);drawer.wait_for(state='visible')
                 assert item.provider.calls==0
+                assert '本地财报资料' in drawer.inner_text() and '尚未下载' in drawer.inner_text()
                 drawer.get_by_role('button',name='生成 checklist',exact=True).click()
                 page.wait_for_function("document.querySelectorAll('.checklist-table tr').length===18")
                 assert item.provider.calls==1
+                assert '生成耗时' in drawer.inner_text()
                 for width in (1280,390):
                     page.set_viewport_size({'width':width,'height':900})
                     assert drawer.evaluate('(node)=>node.scrollWidth<=node.clientWidth+1')
                 drawer.get_by_role('button',name='历史记录',exact=True).click()
                 page.wait_for_function("document.querySelectorAll('.ai-history-select').length===1")
+                assert '生成耗时' in drawer.locator('.ai-history-item').inner_text()
                 drawer.locator('.ai-history-select').check();page.once('dialog',lambda confirm:confirm.accept())
                 drawer.get_by_role('button',name='删除所选',exact=True).click()
                 page.wait_for_function("document.querySelector('dialog[open]').textContent.includes('暂无checklist记录')")
@@ -146,3 +150,67 @@ def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypa
     finally:
         if item.worker:item.worker.join(3)
         http.shutdown();http.server_close();thread.join(3)
+
+
+def test_hash_directory_migration_preserves_cache_history_and_versioning(database,tmp_path,monkeypatch):
+    import hashlib
+    import pdfplumber
+    class Page:
+        def extract_text(self):return '600900 2025 年度报告 公司名称 测试公司 '+('核心竞争力 经营模式 供应链 市场布局 '*60)
+    class PDF:
+        pages=[Page()]
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+    monkeypatch.setattr(pdfplumber,'open',lambda file:PDF())
+    source=tmp_path/'original.pdf';source.write_bytes(b'%PDF-original')
+    svc=CompanyReportService(database);doc=svc.import_report('600900','2025-12-31',source);parsed=svc.parse(doc)
+    current=svc.resolve(doc['relative_path']);old_dir=current.parent.with_name(doc['content_hash']);current.parent.rename(old_dir)
+    old_prefix=svc._relative(old_dir)+'/'
+    with database.connection(write=True) as conn:
+        parse_path=conn.execute('SELECT relative_path FROM company_report_parses WHERE id=?',(parsed['id'],)).fetchone()[0]
+        conn.execute('UPDATE company_report_documents SET relative_path=? WHERE id=?',(old_prefix+'report.pdf',doc['id']))
+        conn.execute('UPDATE company_report_parses SET relative_path=? WHERE id=?',(old_prefix+parse_path.split('/v1/')[1],parsed['id']))
+    item=checklist_service(database);run=item.create({'code':'600900','model':'test-model','request_key':uuid4().hex})
+    assert wait_terminal(item,run['id'])['status']=='succeeded'
+    if item.worker:item.worker.join(3)
+    before=item.repository.run(run['id'])['input']
+    moved=svc.migrate_directories();assert len(moved)==1 and '/v1/' in moved[0]['new_path']
+    assert not old_dir.exists()
+    assert svc.resolve(old_prefix+'report.pdf').is_file()
+    assert svc.resolve(old_prefix+parse_path.split('/v1/')[1]).is_file()
+    assert svc.cached_documents('600900')[0]['state']=='ready'
+    with database.connection() as conn:updated=dict(conn.execute('SELECT * FROM company_report_documents WHERE id=?',(doc['id'],)).fetchone())
+    assert svc.parse(updated)['cache_hit']
+    assert item.repository.run(run['id'])['input']==before
+    assert svc.migrate_directories()==[]
+    assert svc.import_report('600900','2025-12-31',source)['id']==doc['id']
+    source.write_bytes(b'%PDF-revised')
+    revised=svc.import_report('600900','2025-12-31',source)
+    assert '/v2/' in revised['relative_path'] and revised['supersedes_id']==doc['id']
+    assert svc.resolve(moved[0]['new_path']).read_bytes()==b'%PDF-original'
+    archive=tmp_path/'migrated.zip';backup(database,archive);restore(archive,tmp_path/'restored')
+
+
+def test_discover_fulltext_titles_and_cached_report_state(database,monkeypatch,tmp_path):
+    from quarterly_dashboard import company_report_service as module
+    from datetime import datetime,timezone
+    class Response:
+        def __init__(self,data):self.data=data
+        def raise_for_status(self):pass
+        def json(self):return self.data
+    monkeypatch.setattr(module.requests,'get',lambda *args,**kwargs:Response({'stockList':[{'code':'600900','orgId':'org'}]}))
+    def announcements(*args,**kwargs):
+        def item(title,url):return {'secCode':'600900','announcementTitle':title,'announcementTime':datetime(2026,8,28,tzinfo=timezone.utc).timestamp()*1000,'adjunctUrl':url}
+        return Response({'announcements':[
+            item('2019年年度报告','old.pdf'),item('2025年年度报告（全文）','annual.pdf'),
+            item('2024年度报告全文','annual2024.pdf'),item('2025年年度报告摘要','summary.pdf'),
+            item('2026年半年度报告全文','interim.pdf'),item('2025年年度报告的说明','notes.pdf')]})
+    monkeypatch.setattr(module.requests,'post',announcements)
+    svc=CompanyReportService(database);docs=svc.discover('600900')
+    assert [(d['period'],d['kind']) for d in docs]==[('2025-12-31','annual'),('2026-06-30','interim')]
+    assert docs[0]['url'].endswith('annual.pdf')
+    source=tmp_path/'old.pdf';source.write_bytes(b'%PDF-old');svc.import_report('600900','2019-12-31',source)
+    cached=svc.cached_documents('600900')
+    assert cached[0]['report_period']=='2019-12-31' and cached[0]['outdated']
+    assert cached[0]['state']=='unparsed' and cached[1]['state']=='missing'
+    overview=checklist_service(database).overview('600900');assert overview['company_reports']==cached

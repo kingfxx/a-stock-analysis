@@ -128,7 +128,7 @@ class AnalysisRepository:
                 "WHERE r.id=? AND i.code=? AND (? IS NULL OR r.output_schema_version=?)", (cursor, code,self.output_version,self.output_version)).fetchone() if cursor else None
             if cursor and not anchor:
                 raise ValueError("历史游标无效")
-            sql = "SELECT r.id,r.status,r.verdict,r.summary,r.model,r.created_at FROM ai_analysis_runs r JOIN instruments i ON i.id=r.instrument_id WHERE i.code=?"
+            sql = "SELECT r.id,r.status,r.verdict,r.summary,r.model,r.created_at,r.started_at,r.completed_at FROM ai_analysis_runs r JOIN instruments i ON i.id=r.instrument_id WHERE i.code=?"
             sql += " AND (? IS NULL OR r.output_schema_version=?)"
             args = [code,self.output_version,self.output_version]
             if anchor:

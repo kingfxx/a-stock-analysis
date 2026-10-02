@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import tempfile
+import shutil
 from urllib.parse import urlparse
 import requests
 from .storage import utc_now
@@ -39,34 +40,79 @@ class CompanyReportService:
         path = (self.root / relative).resolve()
         if not path.is_relative_to(self.root):
             raise ValueError("财报路径超出正式目录")
+        if not path.exists():
+            parts=Path(relative).parts
+            if len(parts)>=4 and re.fullmatch(r'[0-9a-f]{64}',parts[2]):
+                with self.db.connection() as conn:
+                    document=conn.execute('SELECT relative_path FROM company_report_documents WHERE content_hash=? AND report_period=?',(parts[2],parts[1])).fetchone()
+                if document:
+                    mapped=(self.root/Path(document[0]).parent/Path(*parts[3:])).resolve()
+                    if not mapped.is_relative_to(self.root):raise ValueError('财报路径超出正式目录')
+                    return mapped
         return path
 
+    def _next_directory(self, parent, conn, identity, period):
+        numbers=[int(path.name[1:]) for path in parent.iterdir() if re.fullmatch(r"v[1-9]\d*",path.name)] if parent.exists() else []
+        for row in conn.execute("SELECT relative_path FROM company_report_documents WHERE instrument_id=? AND report_period=?",(identity,period)):
+            match=re.fullmatch(r"v([1-9]\d*)",Path(row[0]).parent.name)
+            if match:numbers.append(int(match[1]))
+        return parent / ('v'+str(max(numbers,default=0)+1))
+
     def import_report(self, code, period, source, *, url="", published_on=None):
-        code = normalize_code(code)
-        if period[5:] not in {"12-31", "06-30", "03-31", "09-30"}:
-            raise ValueError("财报期次无效")
-        datetime.strptime(period, "%Y-%m-%d")
-        data = Path(source).read_bytes()
-        if not data.startswith(b"%PDF") or len(data) > 100 * 1024 * 1024:
-            raise ValueError("财报文件无效或超过100MiB")
-        identity = self.db.ensure_instrument(code)
-        with self.db.connection() as conn:
-            exchange = conn.execute("SELECT exchange FROM instruments WHERE id=?", (identity,)).fetchone()[0]
-        sha = hashlib.sha256(data).hexdigest()
-        target = self.root / (exchange + code) / period / sha / "report.pdf"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            temp = target.with_suffix(".part")
-            temp.write_bytes(data)
-            temp.replace(target)
-        kind = {"12-31":"annual", "06-30":"interim"}.get(period[5:], "quarterly")
+        code=normalize_code(code)
+        if period[5:] not in {"12-31","06-30","03-31","09-30"}:raise ValueError("财报期次无效")
+        datetime.strptime(period,"%Y-%m-%d")
+        data=Path(source).read_bytes()
+        if not data.startswith(b"%PDF") or len(data)>100*1024*1024:raise ValueError("财报文件无效或超过100MiB")
+        identity=self.db.ensure_instrument(code);sha=hashlib.sha256(data).hexdigest()
+        kind={"12-31":"annual","06-30":"interim"}.get(period[5:],"quarterly")
+        # Allocation and registration share the SQLite writer lock, including CLI imports.
         with self.db.connection(write=True) as conn:
-            previous = conn.execute("SELECT id FROM company_report_documents WHERE instrument_id=? AND report_period=? AND report_type=? ORDER BY id DESC LIMIT 1", (identity, period, kind)).fetchone()
-            conn.execute("INSERT INTO company_report_documents(instrument_id,report_period,report_type,published_on,source_url,content_hash,relative_path,supersedes_id,obtained_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-                         (identity,period,kind,published_on,url,sha,self._relative(target),previous[0] if previous else None,utc_now()))
-            doc = dict(conn.execute("SELECT * FROM company_report_documents WHERE instrument_id=? AND report_period=? AND report_type=? AND content_hash=?",(identity,period,kind,sha)).fetchone())
-        target.with_name("manifest.json").write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding="utf-8")
-        return {**doc, "code":code}
+            existing=conn.execute("SELECT * FROM company_report_documents WHERE instrument_id=? AND report_period=? AND report_type=? AND content_hash=?",(identity,period,kind,sha)).fetchone()
+            if existing:
+                doc=dict(existing);target=self.resolve(doc['relative_path'])
+            else:
+                exchange=conn.execute("SELECT exchange FROM instruments WHERE id=?",(identity,)).fetchone()[0]
+                parent=self.root/(exchange+code)/period
+                target=self._next_directory(parent,conn,identity,period)/'report.pdf'
+                previous=conn.execute("SELECT id FROM company_report_documents WHERE instrument_id=? AND report_period=? AND report_type=? ORDER BY id DESC LIMIT 1",(identity,period,kind)).fetchone()
+                conn.execute("INSERT INTO company_report_documents(instrument_id,report_period,report_type,published_on,source_url,content_hash,relative_path,supersedes_id,obtained_at) VALUES (?,?,?,?,?,?,?,?,?)",(identity,period,kind,published_on,url,sha,self._relative(target),previous[0] if previous else None,utc_now()))
+                doc=dict(conn.execute("SELECT * FROM company_report_documents WHERE id=last_insert_rowid()").fetchone())
+            target.parent.mkdir(parents=True,exist_ok=True)
+            if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest()!=sha:raise ValueError("已存财报哈希不符，请先核对原件")
+            if not target.exists():
+                temp=target.with_suffix('.part');temp.write_bytes(data);temp.replace(target)
+            target.with_name('manifest.json').write_text(json.dumps(doc,ensure_ascii=False,indent=2),encoding='utf-8')
+        return {**doc,'code':code}
+
+    def migrate_directories(self):
+        """Copy and verify before updating paths; preserve immutable AI snapshots."""
+        moved=[]
+        with self.db.connection() as conn:
+            documents=[dict(row) for row in conn.execute('SELECT * FROM company_report_documents ORDER BY report_period,id')]
+        for document in documents:
+            original=self.resolve(document['relative_path']);old_dir=original.parent
+            if not re.fullmatch(r'[0-9a-f]{64}',old_dir.name):continue
+            if not original.is_file() or hashlib.sha256(original.read_bytes()).hexdigest()!=document['content_hash']:raise ValueError('迁移前财报原件哈希不符')
+            with self.db.connection(write=True) as conn:
+                target_dir=self._next_directory(old_dir.parent,conn,document['instrument_id'],document['report_period'])
+                if not old_dir.is_relative_to(self.root) or not target_dir.resolve().is_relative_to(self.root):raise ValueError('迁移路径超出正式目录')
+                shutil.copytree(old_dir,target_dir)
+                for file in old_dir.rglob('*'):
+                    if file.is_file() and hashlib.sha256(file.read_bytes()).digest()!=hashlib.sha256((target_dir/file.relative_to(old_dir)).read_bytes()).digest():raise ValueError('迁移文件校验失败，原资料已保留')
+                old_prefix=self._relative(old_dir)+'/'
+                new_prefix=self._relative(target_dir)+'/'
+                conn.execute('UPDATE company_report_documents SET relative_path=? WHERE id=?',(new_prefix+'report.pdf',document['id']))
+                for row in conn.execute('SELECT id,relative_path FROM company_report_parses WHERE document_id=?',(document['id'],)).fetchall():
+                    if row['relative_path'] and row['relative_path'].startswith(old_prefix):
+                        conn.execute('UPDATE company_report_parses SET relative_path=? WHERE id=?',(new_prefix+row['relative_path'][len(old_prefix):],row['id']))
+                updated=dict(conn.execute('SELECT * FROM company_report_documents WHERE id=?',(document['id'],)).fetchone())
+                (target_dir/'manifest.json').write_text(json.dumps(updated,ensure_ascii=False,indent=2),encoding='utf-8')
+            # Only remove the validated old hash directory after the database commit.
+            if old_dir.resolve().is_relative_to(self.root) and re.fullmatch(r'[0-9a-f]{64}',old_dir.name):
+                shutil.rmtree(old_dir)
+            moved.append({'document_id':document['id'],'old_path':document['relative_path'],'new_path':updated['relative_path']})
+        return moved
 
     def parse(self, document):
         try:
@@ -155,14 +201,33 @@ class CompanyReportService:
             response.raise_for_status()
             for item in response.json().get("announcements",[]) or []:
                 title=re.sub("<[^>]+>","",item.get("announcementTitle", ""))
-                year=re.search(r"(20\d{2})年",title)
-                if item.get("secCode")!=code or not year or "摘要" in title or not title.endswith(("报告","报告（修订版）","报告(修订版)")): continue
-                if kind=="annual" and "半年度" in title: continue
+                title=re.sub(r"\s+","",title).replace('（','(').replace('）',')')
+                year=re.search(r"(20\d{2})年?(半年度|年度)报告(?:全文|\((?:全文|修订版|修订|更正版|更新版)\))?$",title)
+                if item.get("secCode")!=code or not year or "摘要" in title:continue
+                if (year[2]=='半年度') != (kind=='interim'):continue
                 ts=item.get("announcementTime")
                 published=datetime.fromtimestamp(ts/1000,timezone.utc).astimezone(__import__('zoneinfo').ZoneInfo('Asia/Shanghai')).date().isoformat() if isinstance(ts,(int,float)) else None
                 if not published or published>datetime.now(__import__('zoneinfo').ZoneInfo('Asia/Shanghai')).date().isoformat():continue
                 records.append({"period":year[1]+("-12-31" if kind=="annual" else "-06-30"),"kind":kind,"published":published,"url":"https://static.cninfo.com.cn/"+item["adjunctUrl"]})
         return [max([r for r in records if r['kind']==kind],key=lambda r:(r['period'],r['published'])) for kind in ('annual','interim') if any(r['kind']==kind for r in records)]
+
+    def cached_documents(self, code):
+        code=normalize_code(code)
+        today=datetime.now(__import__('zoneinfo').ZoneInfo('Asia/Shanghai')).date().isoformat()
+        with self.db.connection() as conn:
+            saved=[dict(row) for row in conn.execute("SELECT d.*,p.status AS parse_status,p.page_count,p.relative_path AS text_path,(SELECT count(*) FROM company_report_facts f WHERE f.parse_id=p.id AND f.extraction_version=?) AS topic_count FROM company_report_documents d JOIN instruments i ON i.id=d.instrument_id LEFT JOIN company_report_parses p ON p.document_id=d.id AND p.parser_version=? WHERE i.code=? ORDER BY d.report_period DESC,d.id DESC",(EXTRACTION_VERSION,PARSER_VERSION,code))]
+            periods=[row[0] for row in conn.execute("SELECT r.period FROM financial_reports r JOIN instruments i ON i.id=r.instrument_id WHERE i.code=? AND r.period<=? AND (r.publish_date IS NULL OR r.publish_date<=?)",(code,today,today))]
+        result=[]
+        for kind,end in [('annual','12-31'),('interim','06-30')]:
+            doc=next((doc for doc in saved if doc['report_type']==kind),None)
+            expected=max((period for period in periods if period.endswith(end)),default=None)
+            if not doc:
+                result.append({'report_type':kind,'report_period':None,'state':'missing','expected_period':expected})
+                continue
+            file_exists=self.resolve(doc['relative_path']).is_file()
+            parsed=file_exists and doc['parse_status']=='succeeded' and bool(doc['text_path']) and self.resolve(doc['text_path']).is_file() and doc['topic_count']==len(TOPICS)
+            result.append({'id':doc['id'],'report_type':kind,'report_period':doc['report_period'],'published_on':doc['published_on'],'version':Path(doc['relative_path']).parent.name,'source_url':doc['source_url'],'state':'ready' if parsed else 'unparsed' if file_exists else 'missing_file','page_count':doc['page_count'],'expected_period':expected,'outdated':bool(expected and doc['report_period']<expected)})
+        return result
 
     def prepare(self, code, *, refresh=False):
         code=normalize_code(code)
@@ -170,7 +235,8 @@ class CompanyReportService:
         try:
             with self.db.connection() as conn:
                 saved=[dict(r) for r in conn.execute("SELECT d.*,i.code FROM company_report_documents d JOIN instruments i ON i.id=d.instrument_id WHERE i.code=? ORDER BY report_period DESC,id DESC",(code,))]
-            if saved and not refresh:
+            cached=self.cached_documents(code)
+            if saved and not refresh and all(d.get("report_period") and not d.get("outdated") for d in cached):
                 docs=[]
                 for kind in ('annual','interim'):
                     doc=next((d for d in saved if d['report_type']==kind),None)
@@ -199,14 +265,18 @@ def main():
     from .storage import Database, DEFAULT_DATABASE
     parser=argparse.ArgumentParser(description="导入、准备可复用公司财报")
     parser.add_argument('--database',type=Path,default=DEFAULT_DATABASE)
-    parser.add_argument('--code',required=True)
+    parser.add_argument('--code')
+    parser.add_argument('--migrate-directories',action='store_true')
     parser.add_argument('--period')
     parser.add_argument('--file',type=Path)
     parser.add_argument('--url',default='')
     parser.add_argument('--published-on')
     parser.add_argument('--refresh',action='store_true')
     args=parser.parse_args();db=Database(args.database);db.check();service=CompanyReportService(db)
-    if args.file:
+    if args.migrate_directories:
+        result={'moved':service.migrate_directories()}
+    elif not args.code:parser.error('需要 --code 或 --migrate-directories')
+    elif args.file:
         if not args.period:parser.error('--file 需要 --period')
         doc=service.import_report(args.code,args.period,args.file,url=args.url,published_on=args.published_on)
         result={**doc,'parse':service.parse(doc)}
