@@ -6,8 +6,8 @@ OUTPUT_VERSION="stock_checklist_output_v1"
 ITEMS=[("company","公司全称"),("strategy","使命和愿景"),("products","核心产品与定价权"),("market","市场与海外布局"),("control","股权与实际控制人"),("cycle","所属行业与周期"),("competition","行业竞争格局"),("value_chain","产业链位置"),("bargaining","上下游议价能力"),("revenue","营业收入与现金流"),("profit","净利润与盈利质量"),("balance","资产负债情况"),("roe","ROE 与资本回报"),("dividend","分红与持续性"),("market_cap","当前市值"),("valuation","估值水平与历史曲线"),("price","K 线基本趋势"),("chips","筹码评估")]
 
 def prompt():
-    instructions=Path(__file__).with_name("prompts").joinpath("checklist_v1.txt").read_text(encoding="utf-8")
-    return {"version":"stock_checklist_prompt_v1","output_version":OUTPUT_VERSION,"instructions":instructions}
+    instructions=Path(__file__).with_name("prompts").joinpath("checklist_v7.txt").read_text(encoding="utf-8")
+    return {"version":"stock_checklist_prompt_v7","output_version":OUTPUT_VERSION,"instructions":instructions}
 
 def validate_output(text, data):
     if not isinstance(text,str) or len(text.encode())>65536:raise ValueError("checklist 输出过大或无效")

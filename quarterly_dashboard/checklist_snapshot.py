@@ -13,7 +13,7 @@ from .core import build_period_rows, view_rows
 from .checklist_validation import ITEMS
 from .company_report_service import PARSER_VERSION, EXTRACTION_VERSION
 INPUT_VERSION="stock_checklist_input_v1"
-CALCULATION_VERSION="stock_checklist_calc_v2"
+CALCULATION_VERSION="stock_checklist_calc_v3"
 PROFILE={"style":"qualitative_checklist","chips_window":"one_year_weekly","holders_periods":3,"valuation_years":10}
 FIELDS={'revenue':'BIZTOTINCO','profit':'PARENETP','profit_cut':'NPCUT','cash_flow':'MANANETR','roe':'ROEWEIGHTED','debt_ratio':'ASSLIABRT','cash':'CURFDS'}
 FALLBACK={'revenue':'revenue_ytd','profit':'profit_ytd','cash_flow':'operating_cash_flow_ytd','cash':'monetary_funds'}
@@ -128,7 +128,7 @@ def capture(db, code, *, as_of=None):
             doc_pages={}
             for fact in conn.execute('SELECT * FROM company_report_facts WHERE parse_id=? AND extraction_version=? ORDER BY topic',(d['parse_id'],EXTRACTION_VERSION)):
                 values=json.loads(fact['facts_json'])
-                if d['report_type']=='annual' and fact['topic'] in seen_topics and fact['topic'] not in ('strategy','control','bargaining'):continue
+                if d['report_type']=='annual' and fact['topic'] in seen_topics and fact['topic'] not in ('strategy','control','bargaining','products','market','competition'):continue
                 if values:seen_topics.add(fact['topic'])
                 for page in values:
                     record=doc_pages.setdefault(page['pdf_page'],{'page':page,'topics':[]})

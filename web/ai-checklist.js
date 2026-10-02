@@ -1,3 +1,60 @@
+/* Convert the existing product-summary format without changing saved reports. */
+window.checklistProductBlocks = function(text, evidence=[]) {
+  const markers=[...text.matchAll(/(?:[\[【［]|^[ \t]*|\n[ \t]*)(20\d{2}年\s*(?:上半年|下半年|半年度|度|\d{1,2}\s*[-–—]\s*\d{1,2}月)?)(?:[\]】］]|\s*[｜|：:]\s*)/g)];
+  if (!markers.length) return [{type:'text',text}];
+  const blocks=[];
+  const paragraph=value=>{const cleaned=value.replace(/^[；;\s]+|[；;\s]+$/g,'');if(cleaned && !/^[。.]$/.test(cleaned))blocks.push({type:'text',text:cleaned});};
+  paragraph(text.slice(0,markers[0].index));
+  for(let i=0;i<markers.length;i++) {
+    const marker=markers[i], section=text.slice(marker.index+marker[0].length,markers[i+1]?.index ?? text.length);
+    const rows=[...section.matchAll(/(?:^|[；;\n])\s*([^；;\n—]+?)\s*—\s*(-?[0-9][0-9,.]*)\s*(亿元|万元|千元|元)\s*(?:—\s*([^；;\n]+)|[（(]\s*([-+]?\d+(?:\.\d+)?%)\s*[）)])/g)];
+    if(!rows.length){paragraph(marker[0]+section);continue;}
+    const preamble=section.slice(0,rows[0].index).trim().replace(/[；;]$/,'');
+    const rowIncome=rows.some(row=>/收入占|营收占|营业收入/.test(row[4] || ''));
+    const basis=/毛利/.test(preamble) ? '毛利' : /(?:收入|营收)/.test(preamble) ? '收入' : /税前/.test(preamble) ? '税前利润' : /净利润/.test(preamble) ? '分部净利润' : rowIncome ? '收入' : '金额';
+    // Keep different units explicit rather than silently converting amounts.
+    const units=new Set(rows.map(row=>row[3]));
+    const unit=units.size===1 ? rows[0][3] : null;
+    blocks.push({type:'table',caption:marker[1]+(preamble ? ' · '+preamble : ''),
+      headers:['产品 / 业务',(basis==='金额' ? '金额' : basis)+(unit ? '（'+unit+'）' : ''),'占比 / 说明'],
+      rows:rows.map(row=>[row[1].trim(),row[2]+(unit ? '' : row[3]),(row[4] || row[5]).trim().replace(/[。.]$/,'')])});
+    let cursor=0;
+    for(const row of rows){if(row.index>cursor && cursor>0)paragraph(section.slice(cursor,row.index));cursor=row.index+row[0].length;}
+    paragraph(section.slice(cursor));
+  }
+  // For new snapshots, display verified numbers independently of model wording.
+  const amount=(value,unit)=>{
+    const yuan=value*({'元':1,'千元':1000,'万元':10000,'亿元':100000000}[unit]);
+    const scale=Math.abs(yuan)>=100000000 ? 100000000 : Math.abs(yuan)>=10000 ? 10000 : 1;
+    return new Intl.NumberFormat('zh-CN',{maximumFractionDigits:2}).format(yuan/scale)+({1:'元',10000:'万元',100000000:'亿元'}[scale]);
+  };
+  for(const block of blocks) {
+    if(block.type!=='table')continue;
+    if(block.headers[1].startsWith('金额'))continue;
+    const year=block.caption.match(/^20\d{2}/)?.[0];
+    const period=year+(/上半年|1\s*[-–—]\s*6月/.test(block.caption.split(' · ')[0]) ? '-06-30' : '-12-31');
+    const key=block.headers[1].includes('收入') ? 'revenue_mix' : 'profit_mix';
+    let selected;
+    for(const entry of evidence) {
+      if(entry.metric!=='report_excerpt' || !Array.isArray(entry.value))continue;
+      for(const page of entry.value) {
+        const metric=page.business_metrics?.[key];
+        if(metric?.period!==period || !Array.isArray(metric.rows) || !['元','千元','万元','亿元'].includes(metric.unit))continue;
+        if(!selected || metric.classification==='产品')selected={metric,id:entry.id};
+      }
+    }
+    if(!selected)continue;
+    const m=selected.metric, measure=key==='revenue_mix' ? 'revenue' : 'profit';
+    const label=key==='revenue_mix' ? '收入' : m.basis.includes('毛利') ? '毛利' : m.basis.includes('净利润') ? '分部净利润' : m.basis.includes('税前') ? '税前利润' : '利润';
+    block.caption=block.caption.split(' · ')[0]+' · '+m.basis+' · 合计'+amount(m.denominator,m.unit);
+    block.headers=['产品 / 业务',label+'金额',label==='收入' ? '收入占比' : '贡献占比'];
+    block.rows=m.rows.map(row=>[row.name,row[measure]===null ? '资料缺失' : amount(row[measure],m.unit),row.share_pct===null ? '资料缺失' : row.share_pct.toFixed(2)+'%']);
+    block.evidenceId=selected.id;
+    block.note=m.note;
+  }
+  return blocks;
+};
+
 /* Local reads never trigger inference. Model operations have explicit buttons. */
 window.initAIChecklist = function(state) {
   const el = (tag, text, className) => {
@@ -212,8 +269,23 @@ window.initAIChecklist = function(state) {
       toggle.classList.add('checklist-evidence-toggle');
       toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',evidence.id);
       meta.append(el('span',labels[item.status],'ai-meta'),toggle);
-      cell.append(el('p',item.conclusion),meta,evidence);
-      evidenceLinks(evidence,item.evidence_ids,report);row.append(title,cell);table.append(row);
+      const conclusion=item.id==='cycle' ? item.conclusion.replace(/判断\s*[\/／]\s*推断/g,'判断') : item.conclusion;
+      const blocks=item.id==='products' ? window.checklistProductBlocks(conclusion,report.input.evidence) : [{type:'text',text:conclusion}];
+      for (const block of blocks) {
+        if (block.type==='text') {cell.append(el('p',block.text));continue;}
+        const wrap=el('div',undefined,'checklist-product-wrap');
+        const productTable=el('table',undefined,'checklist-product-table');
+        productTable.append(el('caption',block.caption));
+        const head=el('thead'),headRow=el('tr');
+        for(const label of block.headers){const th=el('th',label);th.scope='col';headRow.append(th);}
+        head.append(headRow);productTable.append(head);
+        const body=el('tbody');
+        for(const values of block.rows){const tr=el('tr');values.forEach((value,index)=>{const entry=el(index===0 ? 'th' : 'td',value);if(index===0)entry.scope='row';tr.append(entry);});body.append(tr);}
+        productTable.append(body);wrap.append(productTable);cell.append(wrap);
+        if(block.note)cell.append(el('p',block.note,'ai-meta'));
+      }
+      cell.append(meta,evidence);
+      evidenceLinks(evidence,[...new Set([...item.evidence_ids,...blocks.map(b=>b.evidenceId).filter(Boolean)])],report);row.append(title,cell);table.append(row);
     }
     dialog.append(table);
     const facts=el('details');facts.append(el('summary','生成时的数据与来源'),el('pre',JSON.stringify(report.input,null,2)));dialog.append(facts);

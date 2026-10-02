@@ -10,18 +10,19 @@ import shutil
 from urllib.parse import urlparse
 import requests
 from .storage import utc_now
+from .report_business_metrics import business_metrics
 from .sources import normalize_code
 
 PARSER_VERSION = "pdfplumber_pages_v1"
-EXTRACTION_VERSION = "checklist_topics_v3"
+EXTRACTION_VERSION = "checklist_topics_v8"
 TOPICS = {
  "company": "公司全称|公司名称|中文名称|公司简介",
  "strategy": "愿景|战略定位|使命|经营战略|发展战略|战略规划",
- "products": "经营模式|主要业务|经营范围",
- "market": "分地区|经营地区分类|地区信息|地域信息|中国地区|海外业务|市场布局",
+ "products": "经营模式|主要业务|经营范围|分部收益|分部利润|分产品情况|主营业务分行业情况|主营业务分产品情况|报告分部的财务信息|主营收入",
+ "market": "分地区|经营地区分类|地区信息|地域信息|中国地区|海外业务|市场布局|对外交易收入|中国大陆以外",
  "control": "控股股东情况|实际控制人情况|控制人变更|公司无控股股东|公司无实际控制人",
  "cycle": "行业情况|所处行业|行业发展|供需|运价|原奶|生鲜乳",
- "competition": "行业地位|竞争格局|核心竞争力",
+ "competition": "行业地位|竞争格局|核心竞争力|市场占有率|市场份额|全球第一|全球第|世界第|位居|排名",
  "value_chain": "供应链|上下游|采购模式",
  "bargaining": "前五名客户|前五名供应商|议价|定价",
  "financial_notes": "现金流量净额变动原因|商誉减少|短期借款增加|分部间抵销"
@@ -157,6 +158,14 @@ class CompanyReportService:
         temp.write_text("\n".join(json.dumps(p,ensure_ascii=False) for p in pages),encoding="utf-8")
         temp.replace(target)
         quality = {"empty_pages":[p["pdf_page"] for p in pages if not p["text"].strip()],"tables_require_original_page_check":True}
+        currency_context=None
+        for currency_page in pages:
+            declaration=re.search(r'本财务报表以人民币列示',re.sub(r'\s+','',currency_page['text']))
+            if declaration:
+                currency_context={'pdf_page':currency_page['pdf_page'],'text':declaration[0]};break
+        for index, page in enumerate(pages):
+            metrics = business_metrics(page["text"], document["report_period"], pages[index-1]["text"] if index else "", currency_context=currency_context)
+            if metrics:page["business_metrics"] = metrics
         facts = {}
         for topic, pattern in TOPICS.items():
             candidates = []
@@ -166,19 +175,26 @@ class CompanyReportService:
                 # Keep neighboring context, full headings and nearby table text.
                 pos=matches[0].start()
                 text=page["text"] if len(page["text"])<=6000 else page["text"][max(0,pos-300):min(len(page["text"]),pos+4500)]
-                candidates.append({"pdf_page":page["pdf_page"],"text":text})
+                candidates.append({**page,"text":text})
             # Exclude contents pages; keep substantive sections, full nearby tables.
             def rank(candidate):
                 text=candidate['text']
                 substantive=(topic=='market' and bool(re.search('分地区|经营地区分类|地区信息|地域信息|中国地区',text))) or (topic=='strategy' and bool(re.search('使命|愿景|发展战略|经营战略',text)))
-                return ("目录" in text or text.count("....")>2,not substantive,candidate['pdf_page'])
-            chosen=sorted(candidates,key=rank)[:4]
-            if topic in ('market','control'):
+                numeric = (topic=='products' and any(candidate.get('business_metrics',{}).get(key) for key in ('profit_mix','revenue_mix'))) or (topic=='market' and bool(candidate.get('business_metrics',{}).get('region_mix'))) or (topic=='competition' and bool(re.search('市场占有率|市场份额|全球第|世界第|位居.{0,12}第|排名',text)))
+                return ("目录" in text or text.count("....")>2,not numeric,not substantive,candidate['pdf_page'])
+            ordered=sorted(candidates,key=rank)
+            chosen=ordered[:4]
+            # Keep a business description alongside numerical tables.
+            if topic in ('products','market') and len(ordered)>4:
+                descriptive=next((c for c in ordered if not c.get('business_metrics') and re.search('经营模式|主要业务|海外业务|市场布局',c['text']) and '目录' not in c['text']),None)
+                if descriptive and descriptive not in chosen:chosen[-1]=descriptive
+            if topic in ('market','control','products','competition'):
                 neighbors=[]
                 for candidate in chosen:
-                    next_page=next((page for page in pages if page['pdf_page']==candidate['pdf_page']+1),None)
+                    offset=-1 if topic=='products' and candidate.get('business_metrics',{}).get('profit_mix') else 1
+                    next_page=next((page for page in pages if page['pdf_page']==candidate['pdf_page']+offset),None)
                     if next_page and next_page['pdf_page'] not in {x['pdf_page'] for x in chosen+neighbors}:
-                        neighbors.append({'pdf_page':next_page['pdf_page'],'text':next_page['text'][:6000]})
+                        neighbors.append({**next_page,'text':next_page['text'][:6000]})
                 chosen+=neighbors[:2]
             facts[topic]=chosen
         with self.db.connection(write=True) as conn:

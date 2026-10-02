@@ -98,7 +98,8 @@ def test_pdf_reuse_identity_failure_and_backup(database,tmp_path,monkeypatch):
     assert svc.parse(doc)['cache_hit']
 
 
-def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypatch):
+@pytest.mark.parametrize('bare_period',[False,True,'range'])
+def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypatch,bare_period):
     import re
     from http.server import ThreadingHTTPServer
     from threading import Thread
@@ -107,6 +108,16 @@ def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypa
     item=checklist_service(database);item.repository.set_model('test-model')
     monkeypatch.setattr(server,'DATABASE_PATH',database.path)
     monkeypatch.setattr(server,'ai_service',lambda:item)
+    original_result=result
+    def table_result(data):
+        out=original_result(data)
+        products=next(i for i in out['items'] if i['id']=='products')
+        products['conclusion']='核心产品是乳制品。\n[2026年上半年] 主营业务收入口径；液体乳 — 365.90亿元 — 未披露利润贡献；奶粉及奶制品 — 168.45亿元 — 未披露利润贡献。\n[2025年度] 主营业务毛利合计395.08亿元；液体乳 — 221.34亿元 — 毛利贡献56.03%；奶粉及奶制品 — 136.24亿元 — 34.48%。'
+        if bare_period:products['conclusion']=products['conclusion'].replace('[2026年上半年]', '2026年上半年｜').replace('[2025年度]', '2025年度 |')
+        if bare_period=='range':
+            products['conclusion']=products['conclusion'].replace('2026年上半年','2026年1-6月').replace('221.34亿元 — 毛利贡献56.03%','221.34亿元（56.03%）').replace('136.24亿元 — 34.48%','136.24亿元（34.48%）')
+        return out
+    monkeypatch.setattr(__import__(__name__), 'result', table_result)
     original=server.render_page
     def page_html(code,refresh):
         html=original(code,refresh)
@@ -133,9 +144,14 @@ def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypa
                 assert item.provider.calls==0
                 assert '本地财报资料' in drawer.inner_text() and '尚未下载' in drawer.inner_text()
                 drawer.get_by_role('button',name='生成 checklist',exact=True).click()
-                page.wait_for_function("document.querySelectorAll('.checklist-table tr').length===18")
+                page.wait_for_function("document.querySelectorAll('.checklist-table > tr').length===18")
+                assert drawer.locator('.checklist-product-table').count()==2
+                assert '2025年度' in drawer.locator('.checklist-product-table').nth(1).inner_text()
+                assert '221.34' in drawer.locator('.checklist-product-table').nth(1).inner_text()
+                assert '56.03%' in drawer.locator('.checklist-product-table').nth(1).inner_text()
+                assert drawer.locator('.checklist-item-evidence:visible').count()==0
                 assert item.provider.calls==1
-                assert '生成耗时' in drawer.inner_text()
+                assert '生成耗时'  in drawer.inner_text()
                 for width in (1280,390):
                     page.set_viewport_size({'width':width,'height':900})
                     assert drawer.evaluate('(node)=>node.scrollWidth<=node.clientWidth+1')
