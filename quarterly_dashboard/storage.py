@@ -23,7 +23,7 @@ DEFAULT_DATABASE = Path(__file__).resolve().parent.parent / "data" / "stock_anal
 APPLICATION_ID = 0x4153544B  # ASTK; refuse an unrelated SQLite file.
 MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_facts.sql"),
               (4, "004_financing_compact.sql"), (5, "005_stock_library.sql"), (6, "006_stock_member_order.sql"),
-              (7, "007_ai_assessments.sql"))
+              (7, "007_ai_assessments.sql"), (8, "008_checklists.sql"))
 
 
 class StorageError(RuntimeError):

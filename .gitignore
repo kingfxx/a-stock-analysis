@@ -31,3 +31,6 @@ data/verification/
 *.sqlite3.lock
 data/backups/
 data/ai-private/
+
+# Reusable official company reports and parsed artifacts.
+data/company_reports/

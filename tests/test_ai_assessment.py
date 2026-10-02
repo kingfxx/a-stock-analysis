@@ -176,7 +176,7 @@ def test_global_queue_limit_idempotency_and_cross_stock_relation(database):
 def test_migration_preserves_facts_and_groups_and_prebackup(database,tmp_path,monkeypatch):
     from quarterly_dashboard import storage
     old=storage.MIGRATIONS
-    monkeypatch.setattr(storage,'MIGRATIONS',old[:-1])
+    monkeypatch.setattr(storage,'MIGRATIONS',tuple(m for m in old if m[0]<7))
     previous=Database(tmp_path/'version6.sqlite3'); previous.initialize()
     identity=previous.ensure_instrument('600900','原名称')
     from quarterly_dashboard.stock_library import StockLibrary
@@ -184,7 +184,7 @@ def test_migration_preserves_facts_and_groups_and_prebackup(database,tmp_path,mo
     StockLibrary(previous).change({'action':'create','name':'原分组'})
     monkeypatch.setattr(storage,'MIGRATIONS',old)
     previous.initialize()
-    assert previous.check()['schema_version']==7
+    assert previous.check()['schema_version']==8
     with previous.connection() as conn:
         assert conn.execute('SELECT name FROM instruments WHERE id=?',(identity,)).fetchone()[0]=='原名称'
         assert conn.execute('SELECT name FROM stock_groups').fetchone()[0]=='原分组'
@@ -198,7 +198,7 @@ def test_windows_backup_does_not_require_hardlinks(database,tmp_path,monkeypatch
     def unavailable(*args): raise OSError('Hard links unavailable on this volume')
     monkeypatch.setattr(os,'link',unavailable)
     backup=database.backup(tmp_path/'no-hardlink.sqlite3')
-    assert Database(backup).check()['schema_version']==7
+    assert Database(backup).check()['schema_version']==8
     from quarterly_dashboard.storage import StorageError
     with pytest.raises(StorageError): database.backup(backup)
 

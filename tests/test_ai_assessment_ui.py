@@ -15,6 +15,8 @@ from uuid import uuid4
 @pytest.mark.parametrize('fresh_cache',[False,True])
 def test_ai_drawer_history_settings_keyboard_and_width(database, monkeypatch, tmp_path, fresh_cache):
     playwright = pytest.importorskip('playwright.sync_api')
+    # Retained legacy renderer is tested explicitly; the production page uses checklist.
+    monkeypatch.setattr(server,'TEMPLATE',server.TEMPLATE.replace('ai-checklist','ai-assessment').replace('initAIChecklist','initAIAssessment'))
     item=service(database)
     import test_ai_assessment
     original_result=test_ai_assessment.valid_result

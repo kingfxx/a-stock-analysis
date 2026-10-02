@@ -9,13 +9,18 @@ ACTIVE = ("queued", "running", "validating")
 
 
 class AnalysisRepository:
-    def __init__(self, db):
+    def __init__(self, db, *, output_version=None):
         self.db = db
+        self.output_version = output_version
 
     def preferences(self):
         with self.db.connection() as conn:
             row = conn.execute("SELECT model FROM ai_analysis_preferences WHERE id=1").fetchone()
-        return {"model": row[0] if row else None, "analysis_profile": PROFILE}
+        profile=PROFILE
+        if self.output_version:
+            from .checklist_snapshot import PROFILE as checklist_profile
+            profile=checklist_profile
+        return {"model": row[0] if row else None, "analysis_profile": profile}
 
     def set_model(self, model):
         with self.db.connection(write=True) as conn:
@@ -25,6 +30,8 @@ class AnalysisRepository:
 
     def enqueue(self, snapshot, request_key, model, account_ref, prompt, *, force=False):
         identity = snapshot["instrument_id"]
+        input_version = snapshot["input"].get("schema_version", INPUT_VERSION)
+        calc_version = snapshot["input"].get("calculation_version", CALCULATION_VERSION)
         with self.db.connection(write=True) as conn:
             previous = conn.execute("SELECT * FROM ai_analysis_runs WHERE request_key=?", (request_key,)).fetchone()
             if previous:
@@ -46,15 +53,15 @@ class AnalysisRepository:
                 raise ValueError("已有分析和等待任务，请稍后再试")
             conn.execute("INSERT INTO ai_analysis_snapshots(instrument_id,input_schema_version,calculation_version,snapshot_hash,"
                 "input_json,source_manifest_json,quality_json,captured_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-                (identity, INPUT_VERSION, CALCULATION_VERSION, snapshot["hash"], encoded(snapshot["input"]),
+                (identity, input_version, calc_version, snapshot["hash"], encoded(snapshot["input"]),
                  encoded(snapshot["manifest"]), encoded(snapshot["quality"]), snapshot["captured_at"]))
             sid = conn.execute("SELECT id FROM ai_analysis_snapshots WHERE instrument_id=? AND input_schema_version=? "
-                "AND calculation_version=? AND snapshot_hash=?", (identity, INPUT_VERSION, CALCULATION_VERSION, snapshot["hash"])).fetchone()[0]
+                "AND calculation_version=? AND snapshot_hash=?", (identity, input_version, calc_version, snapshot["hash"])).fetchone()[0]
             run_id = uuid4().hex
             conn.execute("INSERT INTO ai_analysis_runs(id,instrument_id,snapshot_id,request_key,account_ref,model,prompt_version,"
                 "prompt_hash,prompt_json,output_schema_version,analysis_profile_json,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (run_id, identity, sid, request_key, account_ref, model, prompt["version"], digest(prompt), encoded(prompt),
-                 prompt["output_version"], encoded(PROFILE), "queued", utc_now()))
+                 prompt["output_version"], encoded(snapshot["input"].get("analysis_profile", PROFILE)), "queued", utc_now()))
             return dict(conn.execute("SELECT * FROM ai_analysis_runs WHERE id=?", (run_id,)).fetchone())
 
     def transition(self, run_id, expected, status, **fields):
@@ -70,6 +77,7 @@ class AnalysisRepository:
         return bool(changed)
 
     def cancel(self, run_id):
+        self.run(run_id)
         with self.db.connection(write=True) as conn:
             return bool(conn.execute("UPDATE ai_analysis_runs SET status='cancelled',completed_at=? "
                 "WHERE id=? AND status IN ('queued','running','validating')", (utc_now(), run_id)).rowcount)
@@ -93,12 +101,12 @@ class AnalysisRepository:
         with self.db.connection() as conn:
             row = conn.execute("SELECT r.*,i.code,i.name,s.input_json,s.snapshot_hash,s.quality_json FROM ai_analysis_runs r "
                 "JOIN instruments i ON i.id=r.instrument_id JOIN ai_analysis_snapshots s ON s.id=r.snapshot_id WHERE r.id=?", (run_id,)).fetchone()
-        if not row:
+        if not row or (self.output_version and row["output_schema_version"] != self.output_version):
             raise ValueError("研判任务不存在")
         if internal:
             return dict(row)
         data = {k: row[k] for k in ("id", "code", "name", "status", "model", "resolved_model", "prompt_version", "verdict", "summary", "snapshot_hash",
-                                    "created_at", "started_at", "completed_at")}
+                                    "created_at", "started_at", "completed_at", "output_schema_version")}
         for key, column in (("result", "result_json"), ("input", "input_json"), ("quality", "quality_json"), ("usage", "usage_json")):
             data[key] = json.loads(row[column]) if row[column] else None
         diagnostic = json.loads(row["diagnostic_json"]) if row["diagnostic_json"] else {}
@@ -108,7 +116,7 @@ class AnalysisRepository:
     def latest(self, code):
         with self.db.connection() as conn:
             rows = [dict(r) for r in conn.execute("SELECT r.id,r.status FROM ai_analysis_runs r JOIN instruments i ON i.id=r.instrument_id "
-                "WHERE i.code=? ORDER BY r.created_at DESC,r.id DESC", (code,))]
+                "WHERE i.code=? AND (? IS NULL OR r.output_schema_version=?) ORDER BY r.created_at DESC,r.id DESC", (code,self.output_version,self.output_version))]
         success = next((r["id"] for r in rows if r["status"] == "succeeded"), None)
         active = next((r["id"] for r in rows if r["status"] in ACTIVE), None)
         return {"report": self.run(success) if success else None, "active": self.run(active) if active else None,
@@ -117,11 +125,12 @@ class AnalysisRepository:
     def history(self, code, cursor=None):
         with self.db.connection() as conn:
             anchor = conn.execute("SELECT r.created_at,r.id FROM ai_analysis_runs r JOIN instruments i ON i.id=r.instrument_id "
-                "WHERE r.id=? AND i.code=?", (cursor, code)).fetchone() if cursor else None
+                "WHERE r.id=? AND i.code=? AND (? IS NULL OR r.output_schema_version=?)", (cursor, code,self.output_version,self.output_version)).fetchone() if cursor else None
             if cursor and not anchor:
                 raise ValueError("历史游标无效")
             sql = "SELECT r.id,r.status,r.verdict,r.summary,r.model,r.created_at FROM ai_analysis_runs r JOIN instruments i ON i.id=r.instrument_id WHERE i.code=?"
-            args = [code]
+            sql += " AND (? IS NULL OR r.output_schema_version=?)"
+            args = [code,self.output_version,self.output_version]
             if anchor:
                 sql += " AND (r.created_at,r.id)<(?,?)"
                 args.extend(anchor)
@@ -136,8 +145,8 @@ class AnalysisRepository:
         placeholders = ','.join('?' for _ in run_ids)
         with self.db.connection(write=True) as conn:
             rows = conn.execute("SELECT r.id,r.status,r.snapshot_id FROM ai_analysis_runs r "
-                "JOIN instruments i ON i.id=r.instrument_id WHERE i.code=? AND r.id IN (" + placeholders + ")",
-                [code, *run_ids]).fetchall()
+                "JOIN instruments i ON i.id=r.instrument_id WHERE i.code=? AND (? IS NULL OR r.output_schema_version=?) AND r.id IN (" + placeholders + ")",
+                [code,self.output_version,self.output_version, *run_ids]).fetchall()
             if len(rows) != len(run_ids):
                 raise ValueError("部分记录已不存在或不属于当前股票，请刷新历史记录")
             if any(row['status'] in ACTIVE for row in rows):

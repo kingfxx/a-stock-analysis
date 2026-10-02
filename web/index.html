@@ -396,12 +396,12 @@
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script src="/plotly.min.js"></script>
 <script src="/stock-picker.js"></script>
-<link rel="stylesheet" href="/ai-assessment.css">
-<script src="/ai-assessment.js"></script>
+<link rel="stylesheet" href="/ai-checklist.css">
+<script src="/ai-checklist.js"></script>
 <script>
 (() => {
   const state = JSON.parse(document.getElementById('payload').textContent);
-  window.initAIAssessment(state);
+  window.initAIChecklist(state);
   const selectionsKey = 'investment-dashboard-selections-v1';
   let savedSelections = {};
   try { savedSelections = JSON.parse(sessionStorage.getItem(selectionsKey)) || {}; }

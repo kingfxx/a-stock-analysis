@@ -12,9 +12,10 @@ from .sources import normalize_code
 
 
 class AnalysisService:
-    def __init__(self, db, provider, *, snapshotter=capture):
+    def __init__(self, db, provider, *, snapshotter=capture, prompt_factory=prompt, validator=validate_output, output_version=None):
         self.db, self.provider, self.snapshotter = db, provider, snapshotter
-        self.repository = AnalysisRepository(db)
+        self.repository = AnalysisRepository(db, output_version=output_version)
+        self.prompt_factory, self.validator = prompt_factory, validator
         self.events = {}
         self.lock = Lock()
         self.worker = None
@@ -61,7 +62,7 @@ class AnalysisService:
         snapshot = self.snapshotter(self.db, code)
         if snapshot["quality"]["updating"]:
             raise ValueError("数据更新中，请稍候；已有报告仍可查看")
-        run = self.repository.enqueue(snapshot, request_key, model, status["account_ref"], prompt(), force=command.get("force", False))
+        run = self.repository.enqueue(snapshot, request_key, model, status["account_ref"], self.prompt_factory(), force=command.get("force", False))
         accepted = run["status"] in ACTIVE
         if accepted:
             self._start_worker()
@@ -91,9 +92,9 @@ class AnalysisService:
                                              json.loads(run["input_json"]), event)
                 if event.is_set() or not self.repository.transition(run["id"], "running", "validating"):
                     continue
-                result = validate_output(output["text"], json.loads(run["input_json"]))
+                result = self.validator(output["text"], json.loads(run["input_json"]))
                 self.repository.transition(run["id"], "validating", "succeeded", result_json=encoded(result),
-                    verdict=result["verdict"], summary=result["summary"], validation_json=encoded({"version": "v2", "valid": True,
+                    verdict=result.get("verdict", "checklist"), summary=result["summary"], validation_json=encoded({"version": "v2", "valid": True,
                         "provider": output.get("diagnostic")}),
                     response_id=output.get("response_id"), resolved_model=output.get("model"), usage_json=encoded(output.get("usage")))
             except Exception as exc:

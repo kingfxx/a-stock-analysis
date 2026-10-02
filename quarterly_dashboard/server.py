@@ -30,6 +30,9 @@ from .update_service import ChipService, instrument_id, sync_state, recently_che
 from .storage import SyncKey
 from .stock_library import StockLibrary
 from .analysis_service import AnalysisService
+from .checklist_snapshot import capture as checklist_capture
+from .checklist_validation import prompt as checklist_prompt, validate_output as validate_checklist, OUTPUT_VERSION
+from .company_report_service import CompanyReportService
 from .ai_provider import ChatGPTProvider, ProviderError
 from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
                     shareholder_price_snapshots)
@@ -805,7 +808,7 @@ def ai_service():
     with _SERVICE_LOCK:
         if key not in _AI_SERVICES:
             db = Database(DATABASE_PATH)
-            _AI_SERVICES[key] = AnalysisService(db, ChatGPTProvider(db.path.parent / "ai-private"))
+            _AI_SERVICES[key] = AnalysisService(db, ChatGPTProvider(db.path.parent / "ai-private"), snapshotter=checklist_capture, prompt_factory=checklist_prompt, validator=validate_checklist, output_version=OUTPUT_VERSION)
         return _AI_SERVICES[key]
 
 
@@ -876,6 +879,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/analysis":
                 data = service.create(command)
                 status = 202 if data.get("accepted") else 200
+            elif path == "/api/analysis/prepare":
+                if set(command) - {"code", "refresh"} or type(command.get("refresh", False)) is not bool:
+                    raise ValueError("财报准备请求无效")
+                data = CompanyReportService(service.db).prepare(command.get("code", ""), refresh=command.get("refresh", False))
             elif path == "/api/analysis/history/delete":
                 if set(command) != {'code', 'run_ids'}:
                     raise ValueError("历史删除请求字段无效")
@@ -968,7 +975,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/stock-picker.js":
             body = (ROOT / "web" / "stock-picker.js").read_bytes()
             content_type = "text/javascript; charset=utf-8"
-        elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css"}:
+        elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
