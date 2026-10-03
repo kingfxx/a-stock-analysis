@@ -1,4 +1,4 @@
-"""Explicit, bounded industry tasks. Never invoke individual-stock update services."""
+"""Explicit single-period SSE/SZSE industry tasks, independent of stock refreshes."""
 from __future__ import annotations
 
 import hashlib
@@ -9,7 +9,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 
 from .industry_cap_history import parse_history
-from .industry_sources import EM, PILOT_INDUSTRIES, financial_rows, parse_quotes
+from .industry_sources import EM, financial_rows, parse_quotes
 from .network import create_data_session
 from .sources import TENCENT_URL, parse_daily_prices
 from .valuation import BAIDU_URL
@@ -39,8 +39,8 @@ def validate_request(action, target, recheck=False, *, today=None):
         raise ValueError('仅支持独立的行业财务或季度市值任务')
     if end >= today:
         raise ValueError('仅更新已结束的报告期或季度')
-    if end.year < today.year-3:
-        raise ValueError('试运行仅允许最近四个年份，不扩大历史采集')
+    if end.year < today.year-10:
+        raise ValueError('仅允许最近十年范围内的报告期或季度')
 
 
 def _response(session, directory, url, params=None, *, binary=False):
@@ -188,22 +188,43 @@ def fetch_cap_quarter(db, directory, stocks, target_date, progress, *, reuse_loc
 
 
 def perform(service, action, target, recheck, progress):
+    # Import lazily: the bulk history collector also uses calendar/roster helpers here.
+    from .industry_bulk import RequestPacer, cap_rows, fetch_pages
     validate_request(action,target,recheck)
     foundation=service.foundation()
+    stocks=sorted(r['stock_code'] for r in foundation['members'])
+    if not 4000<=len(stocks)<=10000:
+        raise ValueError('全市场沪深分类名单规模异常，请先更新分类资料')
+    name=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     bundle={**foundation,'asof':date.today().isoformat(),'obtained_at':datetime.now(timezone.utc).isoformat(),
             'financials':[],'caps':[],
-            'manifest':{'standard':'SW2021','scope':'pilot','pilot_industries':list(PILOT_INDUSTRIES),
-                        'action':action,'target':target,'recheck':recheck}}
-    directory=service.directory/'updates'
+            'manifest':{'standard':'SW2021','scope':'all_market_update','pilot_industries':[],
+                        'action':action,'target':target,'recheck':recheck,'membership_count':len(stocks),
+                        'historical_universe':'current_SSE_SZSE_constituents_backfill',
+                        'pacing':'串行；2.5—3.5 秒随机间隔；每 20 次休息 30 秒；失败冷却 60/120 秒'}}
+    directory=service.directory/'updates'/name
     directory.mkdir(parents=True,exist_ok=True)
+    pacer=RequestPacer(progress)
+    sources=[]
+    def fetch(report, columns, filter_):
+        with create_data_session() as session:
+            session.headers.update({'User-Agent':'Mozilla/5.0','Referer':'https://data.eastmoney.com/'})
+            return fetch_pages(session,directory,report,columns,filter_,progress,pacer)
     if action=='financial_period':
-        stocks=sorted(r['stock_code'] for r in foundation['members'] if r['industry_code'] in PILOT_INDUSTRIES)
-        if not stocks or len(stocks)>60:
-            raise ValueError('试运行行业成员须为 1—60 家，不扩大采集范围')
         local=service.local_period(target,stocks)
-        required=[s for s in stocks if s not in local or any(local[s].get(m) is None for m in ('revenue','parent_profit'))]
-        progress(f'行业财务 {target} · 本地复用 {len(stocks)-len(required)} 家，补取 {len(required)} 家')
-        rows={r['stock_code']:r for r in fetch_financial_period(directory,required,target)}
+        required=stocks
+        progress(f'全市场财务 {target} · {len(stocks)} 家 · 批量核对指定报告期')
+        raw,sources=fetch('RPT_DMSK_FN_INCOME',
+            'SECURITY_CODE,REPORT_DATE,NOTICE_DATE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT',
+            f"(REPORT_DATE='{target}')")
+        if any(r['REPORT_DATE'][:10]!=target for r in raw):
+            raise ValueError('财务返回报告期不匹配，未发布')
+        universe=set(stocks)
+        source_by_code={r['SECURITY_CODE']:sources[i//500] for i,r in enumerate(raw)}
+        rows={r['stock_code']:r for r in financial_rows(raw,bundle['asof']) if r['stock_code'] in universe}
+        for stock,row in rows.items():
+            row['provenance'].pop('raw',None)
+            row['provenance'].update(source_by_code[stock])
         for stock,value in local.items():
             row=rows.setdefault(stock,{'stock_code':stock,'period':target,'notice_date':None,
                                       'revenue':None,'parent_profit':None,'provenance':{}})
@@ -216,16 +237,24 @@ def perform(service, action, target, recheck, progress):
     else:
         target_date=target_trade_date(service.db,target,directory)
         roster=cap_roster(service.db,foundation,target,target_date)
-        stocks=sorted(r['stock_code'] for r in roster['members'] if r['industry_code'] in PILOT_INDUSTRIES)
-        if not stocks or len(stocks)>60:
-            raise ValueError('试运行行业成员须为 1—60 家，不扩大采集范围')
+        stocks=sorted(r['stock_code'] for r in roster['members'])
         known=service.cap_known(target_date)
         required=stocks if recheck else [s for s in stocks if s not in known]
-        progress(f'季度市值 {target} · 已有 {len(stocks)-len(required)} 家，待核对 {len(required)} 家')
-        caps,failures=fetch_cap_quarter(service.db,directory,required,target_date,progress,reuse_local=not recheck)
+        progress(f'全市场市值 {target} · 已有 {len(stocks)-len(required)} 家，待核对 {len(required)} 家')
+        caps=[]
+        if required:
+            raw,sources=fetch('RPT_VALUEANALYSIS_DET',
+                'SECURITY_CODE,TRADE_DATE,TOTAL_MARKET_CAP,TOTAL_SHARES,CLOSE_PRICE',
+                f"(TRADE_DATE='{target_date}')")
+            source_by_code={r['SECURITY_CODE']:sources[i//500] for i,r in enumerate(raw)}
+            caps=cap_rows(raw,target_date,set(required),source_by_code)
+        returned={r['stock_code'] for r in caps}
+        failures=[{'stock_code':s,'error':'来源缺少指定季末有效总市值，保留原值或待补'} for s in required if s not in returned]
         bundle.update(caps=caps,cap_roster=roster)
         bundle['manifest'].update(cap_quarter=target,market_date=target_date,
                                   composition=roster['composition'])
+    bundle['manifest'].update(files=sources,network_requests=pacer.requests)
+    progress('来源已完成，正在保存新增／修订指标并汇总所选一期')
     import_id=service.import_bundle(bundle,capture_local=False)
     if action=='financial_period':
         effective=service._load()['facts']
@@ -233,7 +262,6 @@ def perform(service, action, target, recheck, progress):
                   if any(effective.get((s,target),{}).get(m) is None for m in ('revenue','parent_profit'))]
     result={'import_id':import_id,'action':action,'target':target,'scope_count':len(stocks),
             'requested_count':len(required),'returned_count':len(bundle['financials'] if action=='financial_period' else bundle['caps']),
-            'failures':failures}
-    name=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-    (directory/(name+'.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
+            'network_requests':pacer.requests,'files':sources,'failures':failures}
+    (directory/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
     return result

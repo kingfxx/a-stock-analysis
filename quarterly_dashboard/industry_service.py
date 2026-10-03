@@ -173,7 +173,7 @@ class IndustryService:
         with self.db.connection() as conn:
             latest=conn.execute('SELECT * FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()
             if latest is None:
-                raise ValueError('请先导入试运行分类及必要历史，行业更新不会自动初始化全历史')
+                raise ValueError('请先导入沪深全市场分类及必要历史，行业更新不会自动初始化全历史')
             member_id=latest['member_import_id']
             obtained=conn.execute('SELECT obtained_at FROM sw_imports WHERE id=?',(member_id,)).fetchone()[0]
             checked=conn.execute("SELECT max(json_extract(result_json,'$.source_obtained_at')) FROM sw_update_runs "
@@ -445,6 +445,34 @@ class IndustryService:
                             'cap_trade_date':dates.get(quarter)}
         return result
 
+    def ranking_market_values(self, period, catalog):
+        quarter = f"{period[:4]}Q{(int(period[5:7])-1)//3+1}"
+        prior = f"{int(period[:4])-1}Q{quarter[-1]}"
+        values = {q:{code:{} for code in catalog} for q in (quarter,prior)}
+        with self.db.connection() as conn:
+            rows = conn.execute('SELECT m.quarter,m.industry_code,c.stock_code,c.total_cap '
+                'FROM sw_cap_quarter_members m JOIN sw_cap_quarter_rosters r ON r.quarter=m.quarter '
+                'JOIN sw_cap_facts c ON c.stock_code=m.stock_code AND c.trade_date=r.target_date '
+                'WHERE m.quarter IN (?,?) AND c.total_cap IS NOT NULL '
+                'AND c.import_id=(SELECT max(c2.import_id) FROM sw_cap_facts c2 '
+                'WHERE c2.stock_code=c.stock_code AND c2.trade_date=c.trade_date AND c2.import_id NOT IN '
+                "(SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected'))",
+                (quarter,prior))
+            for row in rows:
+                node = catalog.get(row['industry_code'])
+                while node:
+                    values[row['quarter']][node['code']][row['stock_code']] = row['total_cap']
+                    node = catalog.get(node['parent_code'])
+        result = {}
+        for code in catalog:
+            current, baseline = values[quarter][code], values[prior][code]
+            matched = current.keys() & baseline.keys()
+            before = sum(baseline[s] for s in matched) if matched else None
+            after = sum(current[s] for s in matched) if matched else None
+            result[code] = {'total_cap':sum(current.values()) if current else None,
+                            'cap_yoy':(after/before-1)*100 if before is not None and before>0 else None}
+        return result
+
     def read(self, *, code=None, industry=None, level=3, parent=None, mode='ttm', period=None):
         if mode not in {'ytd','quarter','annual','ttm'} or level not in {1,2,3}:
             raise ValueError('行业层级或营收口径无效')
@@ -473,9 +501,10 @@ class IndustryService:
             period = (covered or periods)[-1] if periods else None
         ranking = []
         if period:
+            ranking_caps = self.ranking_market_values(period,bycode)
             for r in data['catalog']:
                 if r['level'] == level and (not parent or r['parent_code'] == parent):
-                    ranking.append({**r,**aggregate(groups[r['code']],data['facts'],period,mode)})
+                    ranking.append({**r,**aggregate(groups[r['code']],data['facts'],period,mode),**ranking_caps[r['code']]})
         ranking.sort(key=lambda r:(not r['rank_eligible'],r['revenue_yoy'] is None,-(r['revenue_yoy'] or 0),r['code']))
         stock_path = paths.get(code,[])
         selected = industry or (next((s for s in stock_path if bycode[s]['level']==level),None)) or (ranking[0]['code'] if ranking else None)

@@ -33,3 +33,4 @@
 @media(max-width:800px){.sw-controls label{flex:1;min-width:135px}.sw-controls select{width:100%;max-width:none}.sw-chart{height:380px}}
 
 
+.sw-company-name button[data-industry]{color:var(--ink);font-size:13px;font-weight:500;padding:0;text-align:left}.sw-company-name button[data-industry]:hover{color:var(--cyan)}

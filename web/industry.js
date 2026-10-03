@@ -4,7 +4,6 @@
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const amount=v=>v===null||v===undefined?'待补':(v/1e8).toLocaleString('zh-CN',{maximumFractionDigits:2});
   const pct=v=>v===null||v===undefined?'待补':`${v>=0?'+':''}${v.toFixed(2)}%`;
-  const coverage=(n,total)=>`${n}/${total} · ${total?(n/total*100).toFixed(1):'0'}%`;
   const marketDisplay=series=>({mode:series.length>1?'lines+markers':'markers',
     label:series.length===1?'总市值快照（仅1期）':'季度总市值（已覆盖）',
     note:series.length>1?`市值已有 ${series.length} 个季度点（${series[0].quarter}—${series.at(-1).quarter}），更早季度待补。`:
@@ -15,7 +14,7 @@
     const panel=el('industry-panel');
     panel.innerHTML=`<div class="sw-head"><div><h2>申万行业</h2><p>三级成分向上汇总 · 营收景气与季度市值 · 当前股票与本地分析对照</p></div></div>
       <p id="sw-status" class="sw-status" role="status" aria-live="polite"></p><p id="sw-path" class="sw-path"></p>
-      <p class="sw-alert" id="sw-scope">试运行仅补齐锂电池、乳品。行业更新独立于个股刷新；查看页面读取已保存的行业快照。</p>
+      <p class="sw-alert" id="sw-scope">全市场行业更新独立于个股刷新；每次只处理所选报告期或季度，查看页面只读本地快照。</p>
       <div class="sw-controls sw-updates"><label>更新报告期<select id="sw-update-period"></select></label><button type="button" id="sw-refresh-financial">更新行业财务</button>
       <label>市值季度<select id="sw-update-quarter"></select></label><button type="button" id="sw-refresh-cap">补齐季度市值</button>
       <label class="sw-toggle"><input id="sw-recheck-cap" type="checkbox">核对已有市值修订</label></div>
@@ -26,13 +25,25 @@
       <label>报告期<select id="sw-period"></select></label><label class="sw-toggle"><input id="sw-covered" type="checkbox" checked>仅看同比覆盖 ≥95%</label></div>
       <div id="sw-metrics" class="fs-metrics"></div>
       <section class="panel fs-panel"><h3 id="sw-title">行业趋势</h3><p id="sw-chart-note"></p><div id="sw-chart" class="sw-chart"></div><div id="sw-market"></div></section>
-      <section class="panel fs-panel"><div class="sw-company-tabs" role="tablist" aria-label="行业与公司"><button type="button" id="sw-rank-tab" role="tab" aria-selected="true" aria-controls="sw-rank-panel">行业排行</button><button type="button" id="sw-companies-tab" role="tab" aria-selected="false" aria-controls="sw-companies-panel" tabindex="-1">行业内公司 <small id="sw-company-total"></small></button></div><div id="sw-rank-panel" role="tabpanel" aria-labelledby="sw-rank-tab"><p id="sw-rank-note" class="sw-note"></p><div id="sw-ranking" class="sw-scroll"></div></div><div id="sw-companies-panel" role="tabpanel" aria-labelledby="sw-companies-tab" hidden><div class="sw-company-info"><div id="sw-company-context"></div><input id="sw-company-search" type="search" aria-label="搜索公司名称或代码" placeholder="搜索公司名称 / 代码"></div><div id="sw-companies" class="sw-company-scroll"></div><div class="sw-company-footer"><span id="sw-company-count"></span><span>金额单位：亿元 · 点击金额或同比表头排序 · 缺失值排在末尾</span></div></div></section>
+      <section class="panel fs-panel"><div class="sw-company-tabs" role="tablist" aria-label="行业与公司"><button type="button" id="sw-companies-tab" role="tab" aria-selected="true" aria-controls="sw-companies-panel">行业内公司 <small id="sw-company-total"></small></button><button type="button" id="sw-rank-tab" role="tab" aria-selected="false" aria-controls="sw-rank-panel" tabindex="-1">行业排行</button></div><div id="sw-rank-panel" role="tabpanel" aria-labelledby="sw-rank-tab" hidden><p id="sw-rank-note" class="sw-note"></p><div id="sw-ranking" class="sw-company-scroll"></div></div><div id="sw-companies-panel" role="tabpanel" aria-labelledby="sw-companies-tab"><div class="sw-company-info"><div id="sw-company-context"></div><input id="sw-company-search" type="search" aria-label="搜索公司名称或代码" placeholder="搜索公司名称 / 代码"></div><div id="sw-companies" class="sw-company-scroll"></div><div class="sw-company-footer"><span id="sw-company-count"></span><span>金额单位：亿元 · 点击金额或同比表头排序 · 缺失值排在末尾</span></div></div></section>
       <section class="panel fs-panel"><h3>与已保存的股票及分析对照</h3><p id="sw-compare-note"></p><div id="sw-saved" class="sw-scroll"></div></section>
       <details class="panel fs-panel sw-notes"><summary>数据来源与汇总口径</summary><div id="sw-notes"></div></details>`;
     let data=null,seq=0,controller=null,loaded=false,selected=null,parent=null,period=null,pollTimer=null;
     let companySort='revenue',companyDirection=-1;
+    let rankingSort='revenue_yoy',rankingDirection=-1;
     const companyFields=[['revenue','营业收入金额'],['revenue_yoy','营业收入同比'],['parent_profit','归母利润金额'],['parent_profit_yoy','归母利润同比'],['total_cap','市值金额'],['cap_yoy','市值同比']];
     const companyValue=(company,key)=>key==='total_cap'||key==='cap_yoy'?company[key]:company.metrics?.[key.endsWith('_yoy')?key:key+'_known'];
+    function renderRanking(){
+      const rankValue=(row,key)=>row[key==='revenue'||key==='parent_profit'?key+'_known':key];
+      const rows=(el('sw-covered').checked?data.ranking.filter(r=>r.rank_eligible):[...data.ranking]).sort((a,b)=>{
+        const av=rankValue(a,rankingSort),bv=rankValue(b,rankingSort);
+        if(av===null||av===undefined)return bv===null||bv===undefined?a.code.localeCompare(b.code):1;
+        if(bv===null||bv===undefined)return -1;
+        return (av-bv)*rankingDirection||a.code.localeCompare(b.code);
+      });
+      el('sw-rank-note').textContent=`${data.period} · ${el('sw-mode').selectedOptions[0].textContent} · 市值为对应${data.mode==='annual'?'年末':'季末'}快照 · 显示 ${rows.length}/${data.ranking.length} 个行业 · ${companyFields.find(([key])=>key===rankingSort)[1]}${rankingDirection===-1?'从高到低':'从低到高'}。金额单位：亿元，点击表头排序。`;
+      el('sw-ranking').innerHTML=`<table class="sw-company-table"><thead><tr><th class="sw-company-name" scope="col" rowspan="2">行业</th><th colspan="2" scope="colgroup">营业收入</th><th colspan="2" scope="colgroup">归母净利润</th><th colspan="2" scope="colgroup">总市值</th></tr><tr>${companyFields.map(([key,label],i)=>`<th scope="col" class="${i%2===0?'sw-company-divider':''}" aria-sort="${rankingSort===key?(rankingDirection===-1?'descending':'ascending'):'none'}"><button type="button" data-ranking-sort="${key}" aria-label="按行业${label}排序" class="${rankingSort===key?'sw-company-active':''}">${i%2===0?'金额（亿元）':'同比'} <span>${rankingSort===key?(rankingDirection===-1?'↓':'↑'):'↕'}</span></button></th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr class="${r.code===data.selected.code?'sw-company-current':''}"><td class="sw-company-name" title="营收同比可比 ${r.revenue_matched_count} 家"><button type="button" data-industry="${esc(r.code)}">${esc(r.name)}</button><small>${esc(r.code)}</small></td>${companyFields.map(([key],i)=>{const value=rankValue(r,key),missing=value===null||value===undefined;return `<td class="${i%2===0?'sw-company-divider sw-company-amount':missing?'':value>=0?'sw-up':'sw-down'}">${esc(i%2===0?amount(value):missing?'不可比':pct(value))}</td>`;}).join('')}</tr>`).join(''):'<tr><td colspan="7" class="sw-empty">此层级没有符合同比覆盖条件的行业，可取消覆盖筛选查看。</td></tr>'}</tbody></table>`;
+    }
     function renderCompanies(){
       const query=el('sw-company-search').value.trim().toLowerCase();
       const companies=(data.companies||[]).filter(c=>c.name.toLowerCase().includes(query)||c.code.includes(query)).sort((a,b)=>{
@@ -46,7 +57,7 @@
       el('sw-company-count').textContent=`显示 ${companies.length} 家公司 · ${companyFields.find(([key])=>key===companySort)[1]}${companyDirection===-1?'从高到低':'从低到高'}`;
     }
     const completed=[];const today=new Date(),todayText=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-    for(let year=today.getFullYear()-3;year<=today.getFullYear();year++)for(let q=1;q<=4;q++){
+    for(let year=today.getFullYear()-10;year<=today.getFullYear();year++)for(let q=1;q<=4;q++){
       const month=q*3,last=new Date(year,month,0).getDate(),end=`${year}-${String(month).padStart(2,'0')}-${last}`;
       if(end<todayText)completed.unshift({period:end,quarter:`${year}Q${q}`});
     }
@@ -66,11 +77,11 @@
     }
     function choices(id,items,value,label){el(id).innerHTML=`<option value="">全部${label}</option>`+items.map(r=>`<option value="${esc(r.code)}">${esc(r.name)} · ${esc(r.code)}</option>`).join('');el(id).value=value||'';}
     function render(){
-      const history=data.manifest?.scope==='all_market_history';
+      const history=data.manifest?.scope==='all_market_history'||data.manifest?.scope==='all_market_update';
       const allMarket=history||data.manifest?.scope==='all_market_one_year';
-      el('sw-scope').textContent=history?'已补采约十年沪深股票营收、归母利润和季度市值，按当前名单回溯，缺失留空；不包含已退市股票。行业任务独立于个股刷新，页面更新按钮仍仅用于锂电池、乳品试点。':allMarket?'已采集最近一年沪深市场财务与季度市值，按当前名单回溯。TTM、同比所需的更早基期仍待补；可切换本年累计查看。行业任务独立于个股刷新，页面更新按钮仍仅用于锂电池、乳品试点。':'试运行仅补齐锂电池、乳品。行业更新独立于个股刷新；查看页面读取已保存的行业快照。';
-      el('sw-refresh-financial').textContent=allMarket?'更新试点财务':'更新行业财务';
-      el('sw-refresh-cap').textContent=allMarket?'补齐试点市值':'补齐季度市值';
+      el('sw-scope').textContent='全市场更新使用已导入的沪深公司及申万分类名单，不包含北交所及已退市公司。财务批量核对所选报告期；市值按固定季末交易日补缺，勾选核对修订后重核已有值。任务独立于个股刷新，查看页面不采集。';
+      el('sw-refresh-financial').textContent='更新全市场财务';
+      el('sw-refresh-cap').textContent='补齐全市场市值';
       el('sw-notes').innerHTML=data.notes.map(n=>`<p>${esc(n)}</p>`).join('')+`<p>官方来源：<a href="https://www.swsresearch.com/swindex/pdf/SwClass2021/SwClassCode_2021.xls" target="_blank" rel="noopener">申万行业分类</a> · <a href="https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls" target="_blank" rel="noopener">股票分类及变更</a>；营收：东方财富 RPT_DMSK_FN_INCOME / 本地新浪；总市值：${allMarket?'东方财富 RPT_VALUEANALYSIS_DET（元），保留原试点来源版本':'腾讯行情字段 45'}。</p>`;
       if(data.empty){el('sw-status').textContent='尚未初始化行业分类及历史，请先导入试运行来源。';return;}
       if(!updateDefaultsSet){el('sw-update-period').value=data.period||completed[0]?.period;updateDefaultsSet=true;}
@@ -134,9 +145,7 @@
       el('sw-market').innerHTML=`<div class="sw-history-heading"><h4>行业历史数据</h4><span>金额：亿元 · 同比见金额下方 · 时间由新到旧</span></div>`+(historyPeriods.length?
         `<div class="sw-history-scroll" tabindex="0" role="region" aria-label="行业历史数据，可横向滚动"><table class="sw-history-table"><thead><tr><th scope="col">指标 / 亿元</th>${historyPeriods.map((p,i)=>`<th scope="col" class="${i===0?'sw-history-latest':''}">${esc(annual?p.slice(0,4):`${p.slice(0,4)}Q${Number(p.slice(5,7))/3}`)}${i===0?'<small>最新一期</small>':''}</th>`).join('')}</tr></thead><tbody>${historyRows.map(row=>`<tr><th scope="row">${esc(row.label)}<span>${esc(row.scope)}</span></th>${historyPeriods.map((p,i)=>{const value=row.value(p),growth=row.growth(p),title=`覆盖 ${row.count(p)||0} 家${row.cap?' · 市值日期 '+(historyCaps.get(p)?.trade_date||'待补'):''}`;return `<td class="${i===0?'sw-history-latest':''}" title="${esc(title)}"><strong>${esc(amount(value))}</strong><div class="sw-history-yoy ${growthClass(growth)}"><small>同比</small>${esc(growthText(growth))}</div></td>`;}).join('')}</tr>`).join('')}</tbody></table></div><p class="sw-history-footer">营收与利润按所选财务口径；市值为对应${annual?'年末':'季末'}快照。同比使用两期可比公司，缺失金额待补；悬停金额可查看覆盖家数${annual?'及年末':'及季末'}市值日期。</p>`:
         '<p class="sw-empty">暂无行业历史数据。</p>');
-      const rows=el('sw-covered').checked?data.ranking.filter(r=>r.rank_eligible):data.ranking;
-      el('sw-rank-note').textContent=`${data.period} · 按营收同比排序，符合覆盖条件的行业优先。当前显示 ${rows.length}/${data.ranking.length} 个；${history?'历史已补采，仍按同一批公司计算同比；覆盖不足的行业标记待补。':allMarket?'最近一年已批量采集，同比及 TTM 基期覆盖不足的行业仍标记待补。':'试运行覆盖两个三级行业，其余数据待补。'}`;
-      el('sw-ranking').innerHTML=rows.length?`<table class="sw-table"><thead><tr><th>行业</th><th>营收合计（亿元）</th><th>营收同比</th><th>归母利润同比</th><th>同比可比覆盖</th></tr></thead><tbody>${rows.map(r=>`<tr aria-current="${r.code===data.selected.code}"><td><button type="button" data-industry="${esc(r.code)}">${esc(r.name)}</button></td><td>${amount(r.revenue_known)}${r.revenue===null?' *':''}</td><td>${pct(r.revenue_yoy)}</td><td>${pct(r.parent_profit_yoy)}</td><td>${coverage(r.revenue_matched_count,r.expected_count)}${r.rank_eligible?'':' · 待补'}</td></tr>`).join('')}</tbody></table>`:'<p class="sw-empty">此层级没有同比覆盖达到 95% 的行业。可取消覆盖筛选查看样本。</p>';
+      renderRanking();
       el('sw-company-context').innerHTML=`<strong>${esc(path.map(r=>r.name).join(' → '))}</strong><small>财报期 ${esc(data.period)} · ${esc(financialLabel)} · 市值 ${esc(capSummary?.quarter||'待补')} ${annual?'年末':'季末'}</small>`;
       renderCompanies();
       el('sw-compare-note').textContent=`仅比较所选行业内已保存股票，财务使用相同报告期与口径。历史分析展示原摘要和日期，未重新生成。${sameIndustry?' 当前股票营收来源：'+(data.stock_provenance.revenue?.report_type||data.stock_provenance.revenue?.source||'待补')+' / '+(data.stock_provenance.revenue?.field||'待补'):''}`;
@@ -156,13 +165,17 @@
     });
     el('sw-period').addEventListener('change',()=>{period=el('sw-period').value||null;load();});
     el('sw-covered').addEventListener('change',()=>{if(data)render();});
-    el('sw-ranking').addEventListener('click',e=>{const button=e.target.closest('[data-industry]');if(button){selected=button.dataset.industry;load();}});
+    el('sw-ranking').addEventListener('click',e=>{
+      const sort=e.target.closest('[data-ranking-sort]');
+      if(sort){rankingDirection=sort.dataset.rankingSort===rankingSort?-rankingDirection:-1;rankingSort=sort.dataset.rankingSort;renderRanking();return;}
+      const button=e.target.closest('[data-industry]');if(button){selected=button.dataset.industry;load();}
+    });
     function companyTab(name){
       ['rank','companies'].forEach(item=>{const active=item===name;el(`sw-${item}-tab`).setAttribute('aria-selected',String(active));el(`sw-${item}-tab`).tabIndex=active?0:-1;el(`sw-${item}-panel`).hidden=!active;});
     }
     ['rank','companies'].forEach(name=>{
       el(`sw-${name}-tab`).addEventListener('click',()=>companyTab(name));
-      el(`sw-${name}-tab`).addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const target=e.key==='Home'?'rank':e.key==='End'?'companies':name==='rank'?'companies':'rank';companyTab(target);el(`sw-${target}-tab`).focus();});
+      el(`sw-${name}-tab`).addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const target=e.key==='Home'?'companies':e.key==='End'?'rank':name==='rank'?'companies':'rank';companyTab(target);el(`sw-${target}-tab`).focus();});
     });
     el('sw-company-search').addEventListener('input',()=>{if(data)renderCompanies();});
     el('sw-companies').addEventListener('click',e=>{const button=e.target.closest('[data-company-sort]');if(!button)return;companyDirection=button.dataset.companySort===companySort?-companyDirection:-1;companySort=button.dataset.companySort;renderCompanies();});
@@ -174,6 +187,11 @@
     }
     function busy(value){['sw-refresh-financial','sw-refresh-cap','sw-update-period','sw-update-quarter','sw-recheck-cap'].forEach(id=>{el(id).disabled=value;});}
     async function update(action,target,recheck=false){
+      const scope=`已导入沪深全市场名单（${data?.universe_count||'约 5000'} 家），与当前所选行业无关`;
+      const details=action==='financial_period'
+        ?`更新全市场财务？\n\n报告期：${target}\n范围：${scope}\n批量核对该期营收、归母利润及来源修订，只保存新增或变化的指标。`
+        :`更新全市场季度市值？\n\n季度：${target}\n范围：${scope}；已有季度使用固定季末成员名单。\n方式：${recheck?'重新核对该季已有市值及修订':'只补缺失市值，已有值跳过'}。`;
+      if(!window.confirm(details+'\n\n任务可能需要数分钟，串行限频并间歇休息。不会刷新个股或其他报告期。\n确认后开始，取消则不执行。'))return;
       busy(true);
       try{const response=await fetch('/api/industry/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,target,recheck})});const result=await response.json();if(!response.ok)throw new Error(result.error||'刷新失败');clearTimeout(pollTimer);poll();}
       catch(e){el('sw-job-status').textContent=e.message;busy(false);}
@@ -184,3 +202,4 @@
     if(!panel.hidden)load();
   };
 })();
+
