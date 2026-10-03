@@ -222,6 +222,7 @@ window.initStockPicker = function (state) {
   });
   picker.addEventListener('toggle', () => {if(picker.open){search.value='';renderList();positionMenu();search.focus();}});
   window.addEventListener('resize', positionMenu);
+  window.addEventListener('scroll', positionMenu, {passive:true});
   document.addEventListener('click', event => {if(picker.open && !picker.contains(event.target) && !busy)picker.open=false;});
   document.addEventListener('keydown', event => {if(event.key==='Escape' && drag){event.preventDefault();stopDrag();return;}if(event.key==='Escape' && picker.open){picker.open=false;get('stock-picker-summary').focus();}});
   render();

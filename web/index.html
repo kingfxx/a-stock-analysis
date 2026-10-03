@@ -143,17 +143,33 @@
     .warning { background:#4a3c22; color:#ffe5a1; }
     .hide { display:none; }
     @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .panel-head > div:first-child{width:100%} .controls{width:100%;min-width:0} .metric-choice{flex:1 1 100%;min-width:0} .metric-choice select{min-width:0} .controls .period{width:100%;min-width:0} .controls .period button{flex:1;min-width:0;padding:10px 6px} select{flex:1} #chart{height:520px;min-height:420px} .chart-scroll.wide-chart #chart{min-width:850px} .chart-scroll-hint:not([hidden]){display:block;margin:10px 15px 0;color:var(--muted);font-size:12px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} .valuation-overview{grid-template-columns:1fr;padding:18px 15px 0;gap:13px} .valuation-current{max-width:230px} .valuation-levels{padding:14px 15px 0;gap:8px 17px} #valuation-chart{height:360px} }
+    .shell { max-width:1580px; display:grid; grid-template-columns:180px minmax(0,1fr); gap:24px; align-items:start; }
+    .workspace-content { min-width:0; }
+    .stock-sidebar { position:sticky; top:20px; z-index:30; padding:18px 14px; background:var(--panel); border:1px solid var(--line); border-top:3px solid var(--cyan); border-radius:10px; }
+    .current-stock { display:flex; flex-direction:column; gap:8px; min-width:0; }
+    .current-stock-caption { color:var(--muted); font-size:12px; }
+    #current-stock-name { font-size:22px; line-height:1.4; overflow-wrap:anywhere; }
+    #current-stock-code { color:var(--muted); font-size:14px; font-variant-numeric:tabular-nums; }
+    .stock-sidebar .cached-picker { min-width:0; margin-top:20px; border-top:1px solid var(--line); padding-top:14px; }
+    .stock-sidebar .cached-picker summary { max-width:none; white-space:normal; font-size:13px; padding:10px 8px; }
+    .stock-sidebar .cached-menu { left:0; right:auto; max-height:calc(100dvh - 220px); }
+    .context-stock { display:none; }
+    @media(max-width:1050px) { header { align-items:start; flex-direction:column; } .lookup { width:100%; } .search { flex-wrap:wrap; } }
+    @media(max-width:800px) {
+      html { scroll-padding-top:110px; }
+      .shell { grid-template-columns:minmax(0,1fr); gap:18px; }
+      .stock-sidebar { top:8px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; padding:11px 12px; box-shadow:0 5px 16px #0005; }
+      .current-stock { gap:3px; } .current-stock-caption { display:none; } #current-stock-name { font-size:18px; } #current-stock-code { font-size:12px; }
+      .stock-sidebar .cached-picker { margin:0; padding:0; border:0; width:auto; position:static; max-width:150px; }
+      .stock-sidebar .cached-picker summary { padding:9px 10px; }
+      .stock-sidebar .cached-menu { top:calc(100% + 6px); left:0; right:0; width:auto; max-width:none; max-height:calc(100dvh - 110px); }
+    }
   </style>
 </head>
 <body>
 <main class="shell">
-  <header>
-    <div>
-      <div class="eyebrow">A 股 · 本地研究</div>
-      <h1>公司经营与市场表现</h1>
-      <p class="sub">结合财务、估值、股东人数与融资变化，观察公司基本面和市场表现。</p>
-    </div>
-    <div class="lookup">
+  <aside class="stock-sidebar" aria-label="当前标的和股票选择">
+    <div class="current-stock" aria-live="polite"><span class="current-stock-caption">当前标的</span><strong id="current-stock-name">—</strong><span id="current-stock-code">—</span></div>
       <details class="cached-picker" id="cached-picker">
         <summary id="stock-picker-summary">我的股票</summary>
         <div class="cached-menu">
@@ -179,6 +195,16 @@
           <p id="stock-picker-message" role="status" aria-live="polite"></p>
         </div>
       </details>
+  </aside>
+  <div class="workspace-content">
+  <header>
+    <div>
+      <div class="eyebrow">A 股 · 本地研究</div>
+      <h1>公司经营与市场表现</h1>
+      <p class="sub">结合财务、估值、股东人数与融资变化，观察公司基本面和市场表现。</p>
+    </div>
+    <div class="lookup">
+
       <form class="search" action="/" method="get">
         <label for="code">股票代码</label>
         <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
@@ -189,7 +215,7 @@
     </div>
   </header>
   <div class="context">
-    <span>标的 <strong id="stock-code"></strong></span>
+    <span class="context-stock">标的 <strong id="stock-code"></strong></span>
     <span>最新报告期 <strong id="latest-period">—</strong></span>
     <span>本地缓存更新 <strong id="updated">—</strong></span>
   </div>
@@ -402,6 +428,7 @@
   </section>
   </div>
   <section id="statements-panel" role="tabpanel" aria-labelledby="statements-tab" hidden></section>
+  </div>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script src="/plotly.min.js"></script>
@@ -422,7 +449,12 @@
   if (typeof savedSelections !== 'object' || Array.isArray(savedSelections)) savedSelections = {};
   const error = document.getElementById('error');
   if (error.textContent.trim()) error.classList.remove('hide');
-  document.getElementById('stock-code').textContent = state.code ? state.code + (state.name ? ' - ' + state.name : '') : '—';
+  function renderCurrentStock() {
+    document.getElementById('stock-code').textContent = state.code ? state.code + (state.name ? ' - ' + state.name : '') : '—';
+    document.getElementById('current-stock-name').textContent = state.name || '名称待补';
+    document.getElementById('current-stock-code').textContent = state.code || '—';
+  }
+  renderCurrentStock();
   document.getElementById('refresh').href = '/?code=' + encodeURIComponent(state.code || '601919') + '&refresh=1';
   const stockPicker = window.initStockPicker(state);
   function renderCachedStocks() { stockPicker.setStocks(state.cached_stocks || []); }
@@ -957,7 +989,7 @@
     for (const key of ['name','updated_at','views','warnings','cached_stocks']) {
       if (Object.hasOwn(data, key)) state[key] = data[key];
     }
-    document.getElementById('stock-code').textContent = state.code + (state.name ? ' - ' + state.name : '');
+    renderCurrentStock();
     document.getElementById('updated').textContent = state.updated_at ? new Date(state.updated_at).toLocaleString('zh-CN') : '—';
     document.getElementById('latest-period').textContent = state.views?.quarter?.at(-1)?.period || '—';
     state.loading.dividends = Boolean(data.needs_dividends);
