@@ -25,6 +25,8 @@ FIELDS = {
     'cash_increase': ('llb', 'CASHNETR'), 'cash_start': ('llb', 'INICASHBALA'),
     'cash_end': ('llb', 'FINALCASHBALA'), 'capex': ('llb', 'ACQUASSETCASH'),
     'sale_cash': ('llb', 'LABORGETCASH'),
+    'sales_expense': ('lrb', 'SALESEXPE'), 'management_expense': ('lrb', 'MANAEXPE'),
+    'rd_expense': ('lrb', 'DEVEEXPE'), 'financial_expense': ('lrb', 'FINEXPE'),
 }
 DEBT = ('SHORTTERMBORR', 'SHORTTERMBDSPAYA', 'DUENONCLIAB', 'LONGBORR', 'BDSPAYA', 'LEASELIAB')
 BALANCE = ('CURFDS', 'PLAC', 'RECFINANC', 'NOTESACCORECE', 'PREP', 'INVE', 'OTHERCURRASSE', 'EQUIINVE',
@@ -59,7 +61,8 @@ LABELS = dict(zip(FIELDS, ('资产总额','负债总额','合并股东权益','�
                          '营业收入','营业总收入','营业成本','营业总成本','营业利润','利润总额','所得税费用',
                          '合并净利润','归母净利润','少数股东损益','扣非归母净利润（来源口径）',
                          '经营净现金流','投资净现金流','筹资净现金流','汇率影响','现金净增加额',
-                         '期初现金及等价物','期末现金及等价物','购建长期资产现金支出','销售收现')))
+                         '期初现金及等价物','期末现金及等价物','购建长期资产现金支出','销售收现',
+                         '销售费用','管理费用','研发费用','财务费用')))
 
 
 def previous_quarter(period):
@@ -171,6 +174,11 @@ def metric(reports, period, key, mode):
 
 def summarize(reports, period, mode, financial):
     values = {key: metric(reports, period, key, mode) for key in FIELDS}
+    values['gross_profit'] = calculated('毛利润', [values['revenue'], values['cost']],
+                                        '营业收入 − 营业成本', lambda r,c:r-c, period)
+    values['period_expenses'] = calculated('期间费用合计', [values[key] for key in (
+        'sales_expense','management_expense','rd_expense','financial_expense')],
+        '销售费用＋管理费用＋研发费用＋财务费用（保留正负号）', lambda *v:sum(v), period)
     values['debt'] = calculated('有息负债（简化）', [
         extract(reports[period]['fzb'], item, 'fzb', period, 'ytd', reports) if
         (item := find(reports.get(period, {}).get('fzb'), 'fzb', code)) else missing(code, period)
@@ -320,6 +328,12 @@ def read_statements(db, code, *, period=None, mode='ytd', comparison='yoy'):
         section = build_section(reports,period,mode,kind,financial)
         section['baseline'] = compare_period
         section['comparison_items'] = build_section(reports,compare_period,mode,kind,financial)['full_items']
+        if kind == 'lrb':
+            comparison_values = old_values if compare_period == baseline else summarize(reports,compare_period,mode,financial)
+            expense_keys = ('gross_profit','sales_expense','management_expense','rd_expense','financial_expense','period_expenses')
+            section['expense_analysis'] = {
+                'current': {key:values[key] for key in expense_keys},
+                'comparison': {key:comparison_values[key] for key in expense_keys}}
         if kind != 'fzb' and mode == 'ytd' and comparison == 'previous':
             section['warnings'].append('累计期间长度不同，变动额不代表单季环比；可切换单季度比较。')
         result['sections'][kind] = section

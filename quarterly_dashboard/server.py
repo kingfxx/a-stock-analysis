@@ -69,7 +69,7 @@ _DATA_LOCKS: dict[str, Lock] = {}
 
 
 FINANCIAL_VALUES = ("revenue_ytd", "profit_ytd", "shares", "equity") + NEW_REPORT_FIELDS
-CASH_VALUES = ("operating_cash_flow_ytd", "capex_ytd")
+CASH_VALUES = ("operating_cash_flow_ytd", "main_business_cash_flow_ytd", "capex_ytd")
 
 
 def _save_cache(path: Path, data: dict) -> None:

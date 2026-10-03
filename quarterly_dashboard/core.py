@@ -24,7 +24,7 @@ def _growth(current, previous):
     return (current / previous - 1) * 100 if current is not None and previous is not None and previous > 0 else None
 
 
-HOVER_YOY_FIELDS = ("revenue", "profit", "operating_cash_flow", "free_cash_flow",
+HOVER_YOY_FIELDS = ("revenue", "profit", "operating_cash_flow", "main_business_cash_flow", "free_cash_flow",
                     "cash_dividend", "capex", "interest_bearing_debt", "net_cash")
 
 
@@ -150,6 +150,7 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             "operating_cost_quarter": quarter_value("operating_cost_ytd"),
             "net_profit_quarter": quarter_value("net_profit_ytd"),
             "operating_cash_flow_quarter": cash_quarter,
+            "main_business_cash_flow_quarter": quarter_value("main_business_cash_flow_ytd"),
             "capex_quarter": capex_quarter,
             "free_cash_flow_quarter": cash_quarter - capex_quarter if cash_quarter is not None and capex_quarter is not None else None,
             "free_cash_flow_ytd": cash_ytd - capex_ytd if cash_ytd is not None and capex_ytd is not None else None,
@@ -159,6 +160,7 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             "net_profit_ttm": None,
             "capex_ttm": None,
             "operating_cash_flow_ttm": None,
+            "main_business_cash_flow_ttm": None,
             "free_cash_flow_ttm": None,
             "interest_bearing_debt": debt,
             "net_cash": cash - debt if cash is not None and debt is not None else None,
@@ -216,7 +218,7 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
                           for event in dividends_by_period.get(item["period"], [])]
             row["cash_dividend_ttm"], row["cash_dividend_details_ttm"] = dividend_values(ttm_events)
             for field in (("revenue", "profit", "operating_cost", "net_profit", "capex",
-                           "operating_cash_flow", "free_cash_flow") + ROIC_PROFIT_FIELDS):
+                           "operating_cash_flow", "main_business_cash_flow", "free_cash_flow") + ROIC_PROFIT_FIELDS):
                 values = [item[f"{field}_quarter"] for item in chain]
                 if all(value is not None for value in values):
                     row[f"{field}_ttm"] = sum(values)
@@ -265,6 +267,7 @@ def view_rows(rows: list[dict], period: str) -> list[dict]:
                        "revenue_growth": row.get(f"revenue_growth_{suffix}"),
                        "profit_growth": row.get(f"profit_growth_{suffix}"),
                        "operating_cash_flow": row.get(f"operating_cash_flow_{suffix}"),
+                       "main_business_cash_flow": row.get(f"main_business_cash_flow_{suffix}"),
                        "free_cash_flow": row.get(f"free_cash_flow_{suffix}")})
         if period == "year":
             annual = result[-1]

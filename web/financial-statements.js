@@ -64,6 +64,7 @@
       <div class="fs-subtabs" role="tablist" aria-label="财务报表">${Object.entries(names).map(([k,n])=>`<button type="button" role="tab" id="fs-tab-${k}" data-statement="${k}" aria-controls="fs-content" aria-selected="${k==='fzb'}" tabindex="${k==='fzb'?0:-1}">${n}</button>`).join('')}</div>
       <p id="fs-status" class="fs-status" role="status" aria-live="polite"></p><div id="fs-content" role="tabpanel" aria-labelledby="fs-tab-fzb">
       <div id="fs-metrics" class="fs-metrics"></div><div class="panel fs-panel"><h3 id="fs-chart-title"></h3><p id="fs-cash-change" hidden></p><p id="fs-chart-note"></p><div class="fs-chart-scroll"><div id="fs-chart" class="fs-chart" role="img"></div></div></div>
+      <div id="fs-expense-panel" class="panel fs-panel" hidden><h3 id="fs-expense-title">期间费用占毛利润</h3><p id="fs-expense-note"></p><div id="fs-expense" class="fs-chart fs-secondary" role="img" aria-label="本期与比较期期间费用占毛利润柱形图"></div></div>
       <div class="panel fs-panel"><h3 id="fs-secondary-title"></h3><p id="fs-secondary-note"></p><div id="fs-secondary" class="fs-chart fs-secondary" role="img"></div></div>
       <div class="panel fs-panel"><h3>关键明细与比较</h3><p id="fs-table-note"></p><div id="fs-table" class="fs-table-scroll"></div></div>
       <details class="panel fs-panel fs-full"><summary>展开完整原始报表</summary><p>保留来源科目名称；单季度金额按同口径累计差分，现金期初取上季末余额。空白科目显示待补，不作为零。</p><div id="fs-full-table" class="fs-table-scroll"></div></details>
@@ -210,6 +211,39 @@
         hovertemplate:'%{x}<br>'+esc(name)+'：%{customdata}<extra></extra>'})),{showlegend:true,barmode:'group',legend:{orientation:'h',y:1.15},
         yaxis:{title:{text:useRatio?'占营业收入 %':el('fs-unit').value},gridcolor:'#304049',automargin:true}});
     }
+    function expenseChart(section) {
+      const analysis=section.expense_analysis;
+      if(!analysis){empty('fs-expense','费用分析资料待补，请重新读取本地数据。');return;}
+      const current=analysis.current,previous=analysis.comparison;
+      const keys=['sales_expense','management_expense','rd_expense','financial_expense','period_expenses'];
+      const ratioMode=current.gross_profit.value>0;
+      const ratio=(item,group)=>item.value!==null&&group.gross_profit.value>0?item.value/group.gross_profit.value*100:null;
+      el('fs-expense-title').textContent=ratioMode?'期间费用占毛利润':'期间费用金额';
+      el('fs-expense-note').textContent=`本期毛利润 ${amount(current.gross_profit,el('fs-unit').value)}；比较期毛利润 ${amount(previous.gross_profit,el('fs-unit').value)}。毛利润＝营业收入－营业成本。`+
+        (ratioMode?'各期费用除以各期毛利润；比较期毛利润非正或缺失时不绘制其比例。':'本期毛利润非正或缺失，改为金额展示，不计算其比例。')+
+        '合计为销售、管理、研发及财务费用之和；缺项则合计待补。财务费用负值表示净收益，不一定全部来自利息收入。';
+      const missing=keys.filter(key=>current[key].value===null).map(key=>current[key].label);
+      if(missing.length)el('fs-expense-note').textContent+=' 本期待补：'+missing.join('、')+'。';
+      const oldMissing=keys.filter(key=>previous[key].value===null).map(key=>previous[key].label);
+      if(oldMissing.length)el('fs-expense-note').textContent+=' 比较期待补：'+oldMissing.join('、')+'。';
+      const traces=[[current,'本期 '+data.period,'#48b3d1'],[previous,'比较期 '+section.baseline,'#657b8b']].map(([group,name,color])=>({
+        type:'bar',name,x:keys.map(key=>current[key].label),
+        y:keys.map(key=>ratioMode?ratio(group[key],group):group[key].value===null?null:group[key].value/scales[el('fs-unit').value]),
+        marker:{color},text:keys.map(key=>{const value=ratioMode?ratio(group[key],group):group[key].value;
+          return value===null?'待补':ratioMode?value.toFixed(2)+'%':(value/scales[el('fs-unit').value]).toFixed(2);}),
+        textposition:'outside',cliponaxis:false,
+        customdata:keys.map(key=>{const item=group[key],pct=ratio(item,group),other=ratio((group===current?previous:current)[key],group===current?previous:current);
+          const difference=pct!==null&&other!==null?(group===current?pct-other:other-pct):null;
+          return esc(amount(item,el('fs-unit').value))+'<br>'+esc(shareText(item.value,group.gross_profit.value,'毛利润'))+
+            (difference!==null?'<br>本期较比较期：'+(difference>=0?'+':'')+difference.toFixed(2)+' 个百分点':'')+
+            (key==='financial_expense'&&item.value<0?'<br>负值表示净收益':'');}),
+        hovertemplate:'%{x}<br>'+esc(name)+'<br>%{customdata}<extra></extra>'}));
+      plot('fs-expense',traces,{barmode:'group',showlegend:true,legend:{orientation:'h',y:1.15},
+        xaxis:{tickangle:0,tickmode:'array',tickvals:keys.map(key=>current[key].label),ticktext:['销售<br>费用','管理<br>费用','研发<br>费用','财务<br>费用','期间费用<br>合计'],automargin:true},
+        shapes:[{type:'line',xref:'paper',yref:'paper',x0:.8,x1:.8,y0:0,y1:1,line:{color:'#304049',width:1,dash:'dot'}}],
+        yaxis:{title:{text:ratioMode?'占毛利润 %':el('fs-unit').value},gridcolor:'#304049',zerolinecolor:'#8da8b3',zerolinewidth:1.5,automargin:true},
+        margin:{l:75,r:25,t:50,b:65}});
+    }
     function render() {
       if(!data)return;
       const index=data.periods.indexOf(data.period);
@@ -219,6 +253,7 @@
       if(!data.period){el('fs-content').hidden=true;el('fs-status').textContent='本地尚未保存三表。点击页面上方“刷新数据”获取当前股票财报。';return;}
       el('fs-content').hidden=false;
       const section=data.sections[kind],unit=el('fs-unit').value;
+      el('fs-expense-panel').hidden=kind!=='lrb'||data.financial_company;
       const periodText=kind==='fzb'?'期末余额':data.mode==='quarter'?'单季度': '1—'+Number(data.period.slice(5,7))+' 月累计';
       const baselineText=kind==='fzb'?'期末余额':data.mode==='quarter'?'单季度':'1—'+Number(section.baseline.slice(5,7))+' 月累计';
       el('fs-status').textContent=`${data.period} · ${periodText} · 比较期 ${section.baseline}（${baselineText}） · ${section.scope || '合并范围待确认'} · ${section.currency || '币种待确认'}${data.financial_company?' · 金融企业口径':''}。`+section.warnings.join(' ');
@@ -236,7 +271,7 @@
         '按报告总额展示利润形成；其他营业损益净额为营业利润减营业总收入加营业总成本，展开明细查看各项收益及减值。':'期初现金及等价物＋三类活动净现金流＋汇率影响＝期末现金及等价物。货币资金与现金及等价物分别展示。';
       el('fs-secondary-title').textContent=kind==='fzb'?'资产 = 负债 + 权益':kind==='lrb'?(data.financial_company?'金融业务关键收入与费用':'成本与费用占营业收入比例'):'三类活动的现金流入与流出';
       el('fs-secondary-note').textContent=kind==='fzb'?(data.financial_company?'金融企业按资产、负债与权益总额展示，不套用工业企业流动结构。':'流动与非流动结构；资产和负债＋权益使用同一金额坐标。'):kind==='lrb'?'对照同一期间窗口；财务费用保留原始正负号，不重复加入利息费用子项目。':'同时展示流入与流出小计，避免净额掩盖现金进出规模；负值保留来源符号。';
-      if(active){if(kind==='fzb')balanceChart(section);else{drawWaterfall(data.charts[kind],titles[kind]);secondaryFlows(section);}}
+      if(active){if(kind==='fzb')balanceChart(section);else{drawWaterfall(data.charts[kind],titles[kind]);secondaryFlows(section);if(kind==='lrb'&&!data.financial_company)expenseChart(section);}}
       const denominator=kind==='fzb'?data.values.assets.value:kind==='lrb'?data.values.revenue.value:null;
       el('fs-table-note').textContent=`本期 ${data.period}，比较期 ${section.baseline}；${kind==='fzb'?'资产占总资产、负债占总负债、权益占股东权益':kind==='lrb'?'占比以营业收入为分母':'现金流量不统一计算占比'}。金额单位 ${unit}，每股指标单列单位。`;
       el('fs-table').innerHTML=table(section.items,section.comparison_items,denominator);

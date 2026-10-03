@@ -160,6 +160,7 @@ def parse_cash_flow_reports(payload: dict) -> dict[str, dict]:
             continue
         fields = {item.get("item_title"): item.get("item_value") for item in record.get("data", [])}
         result[period] = {"operating_cash_flow_ytd": _first(fields, CASH_FLOW_KEYS),
+                          "main_business_cash_flow_ytd": _first(fields, ("销售商品、提供劳务收到的现金",)),
                           "capex_ytd": _first(fields, CAPEX_KEYS)}
     if not result:
         raise ValueError("新浪现金流量表报告期无法解析")

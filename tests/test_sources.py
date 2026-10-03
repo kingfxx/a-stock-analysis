@@ -5,10 +5,11 @@ from quarterly_dashboard.sources import (normalize_report_dates, parse_cash_flow
 def test_cash_flow_parser_keeps_cumulative_cash_and_capex_by_period():
     payload = {"result": {"data": {"report_list": {"20250630": {"data": [
         {"item_title": "经营活动产生的现金流量净额", "item_value": "1,000.5"},
+        {"item_title": "销售商品、提供劳务收到的现金", "item_value": "2,500"},
         {"item_title": "购建固定资产、无形资产和其他长期资产所支付的现金", "item_value": "200.25"},
     ]}}}}}
     assert parse_cash_flow_reports(payload) == {
-        "2025-06-30": {"operating_cash_flow_ytd": 1000.5, "capex_ytd": 200.25}}
+        "2025-06-30": {"operating_cash_flow_ytd": 1000.5, "main_business_cash_flow_ytd": 2500, "capex_ytd": 200.25}}
 
 
 def test_financial_parser_uses_report_period_and_disclosure_date():
