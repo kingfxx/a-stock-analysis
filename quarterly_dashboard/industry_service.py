@@ -378,6 +378,73 @@ class IndustryService:
             self._cache = (key,data)
         return data
 
+    def market_history(self, industry, catalog):
+        belongs = {}
+        for leaf in catalog:
+            node = leaf
+            while node and node != industry:
+                node = catalog[node]['parent_code']
+            belongs[leaf] = node == industry
+        leaves = [leaf for leaf, included in belongs.items() if included]
+        values, dates = {}, {}
+        with self.db.connection() as conn:
+            dates = {r['quarter']:r['target_date'] for r in conn.execute(
+                'SELECT quarter,target_date FROM sw_cap_quarter_rosters ORDER BY quarter')}
+            values = {q:{} for q in dates}
+            if leaves:
+                rows = conn.execute('SELECT m.quarter,c.stock_code,c.total_cap FROM sw_cap_quarter_members m '
+                    'JOIN sw_cap_quarter_rosters r ON r.quarter=m.quarter '
+                    'JOIN sw_cap_facts c ON c.stock_code=m.stock_code AND c.trade_date=r.target_date '
+                    f"WHERE m.industry_code IN ({','.join('?' for _ in leaves)}) "
+                    'AND c.total_cap IS NOT NULL AND c.import_id=(SELECT max(c2.import_id) FROM sw_cap_facts c2 '
+                    'WHERE c2.stock_code=c.stock_code AND c2.trade_date=c.trade_date AND c2.import_id NOT IN '
+                    "(SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected'))",
+                    leaves)
+                for r in rows:
+                    values[r['quarter']][r['stock_code']] = r['total_cap']
+        result = []
+        for quarter, current in values.items():
+            prior = f"{int(quarter[:4])-1}Q{quarter[-1]}"
+            baseline = values.get(prior, {})
+            matched = current.keys() & baseline.keys()
+            before = sum(baseline[s] for s in matched) if matched else None
+            after = sum(current[s] for s in matched) if matched else None
+            result.append({'quarter':quarter,'trade_date':dates[quarter],
+                'known_cap':sum(current.values()) if current else None,'known_count':len(current),
+                'prior_quarter':prior,'prior_trade_date':dates.get(prior), 'matched_count':len(matched),
+                'matched_current':after,'matched_baseline':before,
+                'yoy':(after/before-1)*100 if before is not None and before>0 else None})
+        return result
+
+    def market_summary(self, industry, period, catalog):
+        quarter = f"{period[:4]}Q{(int(period[5:7])-1)//3+1}"
+        return next((r for r in self.market_history(industry, catalog) if r['quarter']==quarter), None)
+
+    def company_market_values(self, stocks, period):
+        if not stocks or not period:
+            return {}
+        quarter = f"{period[:4]}Q{(int(period[5:7])-1)//3+1}"
+        prior = f"{int(period[:4])-1}Q{quarter[-1]}"
+        values, dates = {quarter:{},prior:{}}, {}
+        with self.db.connection() as conn:
+            dates = {r['quarter']:r['target_date'] for r in conn.execute(
+                'SELECT quarter,target_date FROM sw_cap_quarter_rosters WHERE quarter IN (?,?)', (quarter,prior))}
+            for q, date in dates.items():
+                rows = conn.execute('SELECT c.stock_code,c.total_cap FROM sw_cap_facts c '
+                    f"WHERE c.stock_code IN ({','.join('?' for _ in stocks)}) AND c.trade_date=? "
+                    'AND c.total_cap IS NOT NULL AND c.import_id=(SELECT max(c2.import_id) FROM sw_cap_facts c2 '
+                    'WHERE c2.stock_code=c.stock_code AND c2.trade_date=c.trade_date AND c2.import_id NOT IN '
+                    "(SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected'))",
+                    [*stocks,date])
+                values[q] = {r['stock_code']:r['total_cap'] for r in rows}
+        result = {}
+        for stock in stocks:
+            current, baseline = values[quarter].get(stock), values[prior].get(stock)
+            result[stock] = {'total_cap':current,'cap_yoy':(current/baseline-1)*100
+                            if current is not None and baseline is not None and baseline>0 else None,
+                            'cap_trade_date':dates.get(quarter)}
+        return result
+
     def read(self, *, code=None, industry=None, level=3, parent=None, mode='ttm', period=None):
         if mode not in {'ytd','quarter','annual','ttm'} or level not in {1,2,3}:
             raise ValueError('行业层级或营收口径无效')
@@ -446,6 +513,13 @@ class IndustryService:
             r['provisional'] = r['quarter'] == f"{today[:4]}Q{(int(today[5:7])-1)//3+1}"
             market_series[r['quarter']]=r
         current_stock = next((m for m in data['members'] if m['stock_code']==code),None)
+        market_history = self.market_history(selected,bycode) if selected else []
+        selected_quarter = f"{period[:4]}Q{(int(period[5:7])-1)//3+1}" if period else None
+        company_caps = self.company_market_values(groups.get(selected,[]),period)
+        companies = [{ 'code':m['stock_code'],'name':m['name'],
+                       'metrics':aggregate([m['stock_code']],data['facts'],period,mode) if period else None,
+                       **company_caps.get(m['stock_code'],{})}
+                     for m in data['members'] if selected in paths.get(m['stock_code'],[])]
         provenance = {}
         if code and period:
             for metric in ['revenue','parent_profit']:
@@ -457,7 +531,11 @@ class IndustryService:
                 'stock_metrics':aggregate([code],data['facts'],period,mode) if code and period else None,
                 'stock_provenance':provenance,'selected':bycode.get(selected),'level':level,'parent':parent,
                 'period':period,'periods':periods,'mode':mode,'ranking':ranking,'series':series,
-                'market_series':list(market_series.values()),'saved_stocks':saved,
+                'market_series':list(market_series.values()),
+                'market_history':market_history,
+                'market_summary':next((r for r in market_history if r['quarter']==selected_quarter),None),
+                'saved_stocks':saved,
+                'companies':companies,
                 'universe_count':len(paths),'classified_count':sum(bool(p) for p in paths.values()),
                 'unclassified':[m for m in data['members'] if not m['industry_code']],
                 'notes':NOTES,'status':self.status()}

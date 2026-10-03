@@ -88,6 +88,7 @@ def main():
     report['cap_records'] = sum(len(c['rows']) for c in collection['caps'])
     report['collection_sha256'] = hashlib.sha256((args.directory / 'collection.json').read_bytes()).hexdigest()
     report['missing'] = {}
+    report['absence_interpretation'] = 'missing 为当前名单在该历史季度未匹配有效市值的代码集合，不等于漏采；包含当时尚未上市等情形。未核对上市日期及历史股票全集，不计算历史采集覆盖率。'
     universe = {r['stock_code'] for r in collection['foundation']['members']}
     report['unclassified_stocks'] = [r['stock_code'] for r in collection['foundation']['members'] if not r['industry_code']]
     for c in collection['caps']:
@@ -117,7 +118,8 @@ def main():
              '- 东财 RPT_DMSK_FN_INCOME：TOTAL_OPERATE_INCOME（合并营业总收入）、PARENT_NETPROFIT（归母净利润），元、本年累计。同一期有效本地新浪指标优先复用。',
              '- 东财 RPT_VALUEANALYSIS_DET：TOTAL_MARKET_CAP（总市值），元；与总股本乘不复权收盘价核对。非交易日选季末之前最后交易日，不跨入下一季度。',
              '- 仅回溯当前沪深名单，排除北交所及已退市公司；来源当前修订值不代表历史时点已知信息，不能作为无偏回测数据。早期季度按当前申万三级分类回填，原已固定的季度分类口径保留。',
-             '- 缺失不是零。各期已覆盖合计不能视作完整行业总额；较早年份未上市和来源缺失均可能导致当前名单覆盖低，尚未逐家公司区分原因。',
+             '- 当前名单在历史季度未匹配记录，不等于漏采。很多公司当时尚未上市，其历史市值不适用，不应列为待补。尚未逐家公司核对上市日期，因此无法把未上市、来源缺项等原因分别计数，也不计算历史采集覆盖率。',
+             '- 市值曲线是当前名单中各期有有效历史市值的公司合计；公司集合随上市而变化，增量可能来自新上市公司，不能把整条曲线当作固定公司样本的市值增长或当时完整行业总市值。',
              '- 窗口最早几期可能缺少单季度差分、TTM 或同比所需的前置基期；这些派生指标继续留空，不自动扩大采集年份。',
              '- 公司仅保存营收、归母利润、季度市值及来源；不增加完整财报。三级市值已有落库汇总，营收、利润仍由轻量明细读取汇总，一级二级向上汇总。', '',
              '## 请求与复用', '', collection['manifest']['pacing'] + '。', '',
@@ -126,14 +128,20 @@ def main():
              '早期市值来源空结果实际为 code=9201、message=返回数据为空；已根据保留的真实响应修正识别，停止无意义重试。其他网络／格式失败仍不能冒充空数据。', '',
              '## 财务逐期覆盖', '', '|报告期|来源公司数|当前名单匹配|有效营收|有效归母利润|', '|---|---:|---:|---:|---:|']
     lines.extend(f"|{c['period']}|{c['source_count']}|{c['eligible_count']}|{c['revenue_count']}|{c['profit_count']}|" for c in checks if c['kind'] == 'financial')
-    lines.extend(['', '## 季末市值覆盖', '', '|季度|实际交易日|来源公司数|当前名单有效市值|当前名单覆盖|', '|---|---|---:|---:|---:|'])
-    lines.extend(f"|{c['quarter']}|{c['trade_date']}|{c['source_count']}|{c['eligible_count']}|{c['eligible_count']/c['expected_count']:.1%}|" for c in checks if c['kind'] == 'cap')
+    lines.extend(['', '## 季末市值来源与名单匹配', '',
+                  '本表不表示历史采集覆盖率。来源返回数是接口该日返回的记录数，不是已经核实的当日应有上市公司总数；匹配数仅表示这些记录与当前名单的交集。计算采集覆盖率需要先核实该日已上市且属于目标范围的公司集合。', '',
+                  '|季度|实际交易日|来源返回记录数|当前名单匹配有效市值数|来源状态|', '|---|---|---:|---:|---|'])
+    for c in checks:
+        if c['kind'] == 'cap':
+            status = '有数据；采集覆盖率未评估' if c['source_count'] else '来源为空；历史市值待补'
+            matched = str(c['eligible_count']) if c['source_count'] else '—'
+            lines.append(f"|{c['quarter']}|{c['trade_date']}|{c['source_count']}|{matched}|{status}|")
     empty = [c['quarter'] for c in checks if c['kind'] == 'cap' and not c['source_count']]
     lines.extend(['', '来源明确为空的市值季度：' + ('、'.join(empty) or '无') + '；留空，不插值或使用附近不同日期市值代替。', '',
                   '## 验证和存储', '',
                   f"隔离库验证：{'通过' if report.get('staging') else '待完成'}；日常库发布：{'完成' if report.get('publication') else '待完成'}。",
                   '验证包含来源 SHA256、分页数量和重复、精确报告期／交易日、股本乘价格、SQLite 完整性及外键、三级与一级二级营收汇总一致、原五张个股业务表完整内容哈希一致。', '',
-                  '行业更新与个股刷新分开，浏览页面不采集；页面更新入口仍是原两个行业试点，全市场补采使用独立命令。历史响应和 collection.json 保存于业务来源目录，详细缺失股票清单见同名 JSON 报告。'])
+                  '行业更新与个股刷新分开，浏览页面不采集；页面更新入口仍是原两个行业试点，全市场补采使用独立命令。历史响应和 collection.json 保存于业务来源目录，当前名单未匹配有效记录的代码集合见同名 JSON 报告；该集合不等于漏采清单。'])
     if report.get('publication'):
         lines.extend(['', '发布前正式备份：`' + report['publication']['backup'] + '`。'])
         published = report['publication']

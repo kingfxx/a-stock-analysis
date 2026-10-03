@@ -993,6 +993,9 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/stock-picker.js":
             body = (ROOT / "web" / "stock-picker.js").read_bytes()
             content_type = "text/javascript; charset=utf-8"
+        elif parsed.path == "/samples/industry-summary.html":
+            body = (ROOT / "web" / "samples" / "industry-summary.html").read_bytes()
+            content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css",
                              "/financial-statements.js", "/financial-statements.css", "/industry.js", "/industry.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
