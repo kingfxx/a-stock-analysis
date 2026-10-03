@@ -195,6 +195,11 @@
   </div>
   <div id="error" class="error hide">__ERROR__</div>
   <div id="warnings"></div>
+  <nav class="research-tabs" role="tablist" aria-label="研究视图">
+    <button id="trend-tab" type="button" role="tab" aria-selected="true" aria-controls="trend-panel">企业经营趋势</button>
+    <button id="statements-tab" type="button" role="tab" aria-selected="false" aria-controls="statements-panel" tabindex="-1">财务分析</button>
+  </nav>
+  <div id="trend-panel" role="tabpanel" aria-labelledby="trend-tab">
   <section class="panel comparison-panel" aria-label="季度对照图">
     <div class="panel-head">
       <div>
@@ -392,16 +397,21 @@
       <p id="financing-note" class="note"></p>
     </section>
   </section>
+  </div>
+  <section id="statements-panel" role="tabpanel" aria-labelledby="statements-tab" hidden></section>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script src="/plotly.min.js"></script>
 <script src="/stock-picker.js"></script>
 <link rel="stylesheet" href="/ai-checklist.css">
 <script src="/ai-checklist.js"></script>
+<link rel="stylesheet" href="/financial-statements.css">
+<script src="/financial-statements.js"></script>
 <script>
 (() => {
   const state = JSON.parse(document.getElementById('payload').textContent);
   window.initAIChecklist(state);
+  window.initFinancialStatements(state);
   const selectionsKey = 'investment-dashboard-selections-v1';
   let savedSelections = {};
   try { savedSelections = JSON.parse(sessionStorage.getItem(selectionsKey)) || {}; }
@@ -946,6 +956,7 @@
     document.getElementById('updated').textContent = state.updated_at ? new Date(state.updated_at).toLocaleString('zh-CN') : '—';
     document.getElementById('latest-period').textContent = state.views?.quarter?.at(-1)?.period || '—';
     state.loading.dividends = Boolean(data.needs_dividends);
+    window.dispatchEvent(new CustomEvent('financial-facts-updated', {detail:{code:state.code}}));
     renderCachedStocks();
     renderWarnings();
     if (renderCharts && typeof Plotly !== 'undefined') render();

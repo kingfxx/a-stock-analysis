@@ -24,6 +24,7 @@ from .storage import DEFAULT_DATABASE, Database, StorageError, instance_lock
 from .price_service import PriceService, PriceVersionUnavailable, month_closes
 from .price_projection import chip_prices, financial_prices, valuation_prices
 from .fundamental_service import FundamentalService
+from .statements import read_statements
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
 from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update
@@ -975,7 +976,8 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/stock-picker.js":
             body = (ROOT / "web" / "stock-picker.js").read_bytes()
             content_type = "text/javascript; charset=utf-8"
-        elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css"}:
+        elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css",
+                             "/financial-statements.js", "/financial-statements.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
@@ -986,6 +988,18 @@ class Handler(BaseHTTPRequestHandler):
             code = query.get("code", ["601919"])[0]
             body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
             content_type = "text/html; charset=utf-8"
+        elif parsed.path == "/api/statements":
+            query = parse_qs(parsed.query)
+            try:
+                data = read_statements(Database(DATABASE_PATH), query.get('code', ['601919'])[0],
+                                       period=query.get('period', [None])[0], mode=query.get('mode', ['ytd'])[0],
+                                       comparison=query.get('comparison', ['yoy'])[0])
+            except ValueError as exc:
+                status, data = 400, {'error': str(exc)}
+            except (OSError, StorageError, sqlite3.DatabaseError) as exc:
+                status, data = 503, {'error': str(exc)}
+            body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode('utf-8')
+            content_type = 'application/json; charset=utf-8'
         elif parsed.path in {"/api/financial", "/api/dividends", "/api/valuation",
                              "/api/shareholders", "/api/financing", "/api/prices"}:
             query = parse_qs(parsed.query)
