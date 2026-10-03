@@ -1,6 +1,11 @@
 .research-tabs{display:flex;gap:8px;margin:0 0 22px;border-bottom:1px solid var(--line);padding-bottom:12px}
 .research-tabs button{background:transparent;color:var(--muted);border:1px solid transparent}
 .research-tabs button[aria-selected="true"]{color:var(--cyan);background:#18313a;border-color:#2e6473}
+.stock-sidebar .research-tabs{flex-direction:column;gap:6px;margin:20px 0 0;padding:14px 0 0;border-bottom:0;border-top:1px solid var(--line)}
+.stock-sidebar .research-tabs button{width:100%;text-align:left;font-size:13px;padding:11px 10px;white-space:nowrap}
+.stock-sidebar .research-tabs button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+#trend-panel,#statements-panel,#industry-panel{scroll-margin-top:20px}
+@media(max-width:800px){.stock-sidebar .research-tabs{grid-column:1/-1;flex-direction:row;margin:0;padding-top:10px;gap:5px}.stock-sidebar .research-tabs button{flex:1;min-width:0;text-align:center;font-size:12px;padding:9px 5px}#trend-panel,#statements-panel,#industry-panel{scroll-margin-top:145px}}
 #trend-panel[hidden],#statements-panel[hidden]{display:none!important}
 .fs-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}
 .fs-head h2{margin:0 0 8px;font-size:26px}.fs-head p{color:var(--muted);margin:0;font-size:14px;line-height:1.7}

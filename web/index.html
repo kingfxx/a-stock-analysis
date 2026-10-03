@@ -168,7 +168,7 @@
 </head>
 <body>
 <main class="shell">
-  <aside class="stock-sidebar" aria-label="当前标的和股票选择">
+  <aside class="stock-sidebar" aria-label="当前标的、股票选择和研究视图">
     <div class="current-stock" aria-live="polite"><span class="current-stock-caption">当前标的</span><strong id="current-stock-name">—</strong><span id="current-stock-code">—</span></div>
       <details class="cached-picker" id="cached-picker">
         <summary id="stock-picker-summary">我的股票</summary>
@@ -195,6 +195,11 @@
           <p id="stock-picker-message" role="status" aria-live="polite"></p>
         </div>
       </details>
+  <nav class="research-tabs" role="tablist" aria-label="研究视图">
+    <button id="trend-tab" type="button" role="tab" aria-selected="true" aria-controls="trend-panel">企业经营趋势</button>
+    <button id="statements-tab" type="button" role="tab" aria-selected="false" aria-controls="statements-panel" tabindex="-1">财务分析</button>
+    <button id="industry-tab" type="button" role="tab" aria-selected="false" aria-controls="industry-panel" tabindex="-1">行业内对比</button>
+  </nav>
   </aside>
   <div class="workspace-content">
   <header>
@@ -209,7 +214,7 @@
         <label for="code">股票代码</label>
         <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
         <button type="submit">查看</button>
-        <a id="refresh" class="refresh" href="#" title="刷新当前股票；行业数据在申万行业页面独立更新">刷新数据</a>
+        <a id="refresh" class="refresh" href="#" title="刷新当前股票；行业数据在行业内对比页面独立更新">刷新数据</a>
         <button id="full-audit" class="refresh" type="button">全量刷新</button>
       </form>
     </div>
@@ -221,11 +226,7 @@
   </div>
   <div id="error" class="error hide">__ERROR__</div>
   <div id="warnings"></div>
-  <nav class="research-tabs" role="tablist" aria-label="研究视图">
-    <button id="trend-tab" type="button" role="tab" aria-selected="true" aria-controls="trend-panel">企业经营趋势</button>
-    <button id="statements-tab" type="button" role="tab" aria-selected="false" aria-controls="statements-panel" tabindex="-1">财务分析</button>
-    <button id="industry-tab" type="button" role="tab" aria-selected="false" aria-controls="industry-panel" tabindex="-1">申万行业</button>
-  </nav>
+
   <div id="trend-panel" role="tabpanel" aria-labelledby="trend-tab">
   <section class="panel comparison-panel" aria-label="季度对照图">
     <div class="panel-head">
@@ -437,10 +438,10 @@
 <script src="/stock-picker.js"></script>
 <link rel="stylesheet" href="/ai-checklist.css">
 <script src="/ai-checklist.js"></script>
-<link rel="stylesheet" href="/financial-statements.css">
-<script src="/financial-statements.js"></script>
+<link rel="stylesheet" href="/financial-statements.css?v=20261004-sidebar-tabs">
+<script src="/financial-statements.js?v=20261004-sidebar-tabs"></script>
 <link rel="stylesheet" href="/industry.css?v=20261004-ranking">
-<script src="/industry.js?v=20261004-ranking"></script>
+<script src="/industry.js?v=20261004-industry-comparison"></script>
 <script>
 (() => {
   const state = JSON.parse(document.getElementById('payload').textContent);
@@ -1148,5 +1149,7 @@
 </script>
 </body>
 </html>
+
+
 
 

@@ -81,12 +81,22 @@
       if (active) { if (dirty && !loading) load(); else if (data) render(); }
       else window.dispatchEvent(new Event('resize'));
     }
-    ['trend','statements','industry'].forEach(key=>el(key+'-tab').addEventListener('click',()=>selectTab(key)));
+    const researchNav=el('trend-tab').closest('[role="tablist"]');
+    const compactNav=window.matchMedia('(max-width:800px)');
+    const navOrientation=()=>researchNav.setAttribute('aria-orientation',compactNav.matches?'horizontal':'vertical');
+    navOrientation();compactNav.addEventListener('change',navOrientation);
+    ['trend','statements','industry'].forEach(key=>el(key+'-tab').addEventListener('click',()=>{
+      selectTab(key);el(key+'-panel').scrollIntoView({block:'start',behavior:'instant'});
+    }));
     function tabKeys(buttons, activate) {
       buttons.forEach((button,index)=>button.addEventListener('keydown',event=>{
         let next;
         if (event.key==='ArrowRight') next=(index+1)%buttons.length;
         if (event.key==='ArrowLeft') next=(index+buttons.length-1)%buttons.length;
+        if(buttons[0].closest('[role="tablist"]')?.getAttribute('aria-orientation')==='vertical'){
+          if(event.key==='ArrowDown')next=(index+1)%buttons.length;
+          if(event.key==='ArrowUp')next=(index+buttons.length-1)%buttons.length;
+        }
         if (event.key==='Home') next=0;
         if (event.key==='End') next=buttons.length-1;
         if (next!==undefined) {event.preventDefault();activate(buttons[next]);buttons[next].focus();}

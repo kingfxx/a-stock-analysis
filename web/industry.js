@@ -12,7 +12,7 @@
   window.initIndustry=state=>{
     const el=id=>document.getElementById(id);
     const panel=el('industry-panel');
-    panel.innerHTML=`<div class="sw-head"><div><h2>申万行业</h2><p>三级成分向上汇总 · 营收景气与季度市值 · 当前股票与本地分析对照</p></div></div>
+    panel.innerHTML=`<div class="sw-head"><div><h2>行业内对比</h2><p>按申万行业分类，查看营收、归母利润与市值趋势，对比同行公司表现和行业排行。</p></div></div>
       <p id="sw-status" class="sw-status" role="status" aria-live="polite"></p><p id="sw-path" class="sw-path"></p>
       <p class="sw-alert" id="sw-scope">全市场行业更新独立于个股刷新；每次只处理所选报告期或季度，查看页面只读本地快照。</p>
       <div class="sw-controls sw-updates"><label>更新报告期<select id="sw-update-period"></select></label><button type="button" id="sw-refresh-financial">更新行业财务</button>
