@@ -1,0 +1,13 @@
+const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),assert=require('node:assert/strict');
+const context={window:{}};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../web/industry.js'),'utf8'),context);
+const display=context.window.industryMarketDisplay;
+assert.match(display([]).note,/尚无市值快照/);
+assert.equal(display([{quarter:'2026Q3'}]).mode,'markers');
+assert.match(display([{quarter:'2026Q3'}]).label,/仅1期/);
+assert.match(display([{quarter:'2026Q3'}]).note,/不能形成趋势线/);
+const result=display([{quarter:'2025Q4'},{quarter:'2026Q1'},{quarter:'2026Q2'},{quarter:'2026Q3'}]);
+assert.equal(result.mode,'lines+markers');
+assert.match(result.note,/4 个季度点/);
+assert.match(result.note,/2025Q4—2026Q3/);
+console.log('market snapshot and history presentation checks passed');

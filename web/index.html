@@ -209,7 +209,7 @@
         <label for="code">股票代码</label>
         <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
         <button type="submit">查看</button>
-        <a id="refresh" class="refresh" href="#">刷新数据</a>
+        <a id="refresh" class="refresh" href="#" title="刷新当前股票；行业数据在申万行业页面独立更新">刷新数据</a>
         <button id="full-audit" class="refresh" type="button">全量刷新</button>
       </form>
     </div>
@@ -224,6 +224,7 @@
   <nav class="research-tabs" role="tablist" aria-label="研究视图">
     <button id="trend-tab" type="button" role="tab" aria-selected="true" aria-controls="trend-panel">企业经营趋势</button>
     <button id="statements-tab" type="button" role="tab" aria-selected="false" aria-controls="statements-panel" tabindex="-1">财务分析</button>
+    <button id="industry-tab" type="button" role="tab" aria-selected="false" aria-controls="industry-panel" tabindex="-1">申万行业</button>
   </nav>
   <div id="trend-panel" role="tabpanel" aria-labelledby="trend-tab">
   <section class="panel comparison-panel" aria-label="季度对照图">
@@ -428,6 +429,7 @@
   </section>
   </div>
   <section id="statements-panel" role="tabpanel" aria-labelledby="statements-tab" hidden></section>
+  <section id="industry-panel" role="tabpanel" aria-labelledby="industry-tab" hidden></section>
   </div>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
@@ -437,11 +439,14 @@
 <script src="/ai-checklist.js"></script>
 <link rel="stylesheet" href="/financial-statements.css">
 <script src="/financial-statements.js"></script>
+<link rel="stylesheet" href="/industry.css">
+<script src="/industry.js"></script>
 <script>
 (() => {
   const state = JSON.parse(document.getElementById('payload').textContent);
   window.initAIChecklist(state);
   window.initFinancialStatements(state);
+  window.initIndustry(state);
   const selectionsKey = 'investment-dashboard-selections-v1';
   let savedSelections = {};
   try { savedSelections = JSON.parse(sessionStorage.getItem(selectionsKey)) || {}; }

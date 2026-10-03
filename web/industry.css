@@ -1,0 +1,17 @@
+#industry-panel[hidden]{display:none!important}
+.sw-head{display:flex;justify-content:space-between;align-items:start;gap:16px;flex-wrap:wrap}
+.sw-head h2{margin:0 0 8px;font-size:26px}.sw-head p,.sw-note{color:var(--muted);font-size:13px;line-height:1.8}
+.sw-controls{display:flex;flex-wrap:wrap;align-items:end;gap:12px;margin:20px 0}
+.sw-controls label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:12px}.sw-controls select{max-width:240px;min-width:120px}
+.sw-controls .sw-toggle{flex-direction:row;align-items:center;gap:6px;padding-bottom:9px}
+.sw-updates{padding:14px;border:1px solid var(--line);border-radius:10px}.sw-updates button{margin-bottom:1px}
+.sw-controls input{width:auto}.sw-path{color:var(--cyan);line-height:1.8;font-size:14px;margin:15px 0}
+.sw-chart{height:420px}.sw-scroll{overflow:auto}.sw-table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+.sw-table th,.sw-table td{border-bottom:1px solid var(--line);padding:12px 10px;text-align:right;white-space:nowrap}
+.sw-table th:first-child,.sw-table td:first-child{text-align:left}.sw-table th{color:var(--muted);font-weight:500}
+.sw-table button{padding:4px 8px;background:transparent;color:var(--cyan);text-align:left}.sw-table tr:hover{background:#23323a}.sw-table tr[aria-current="true"]{background:#18313a}
+.sw-summary{max-width:440px;white-space:normal!important;text-align:left!important;color:var(--muted);line-height:1.7}
+.sw-table a{color:var(--cyan)}.sw-status{min-height:24px;color:var(--muted);font-size:13px;line-height:1.8}.sw-empty{padding:25px;color:var(--muted)}
+.sw-alert{padding:12px 16px;border-left:3px solid var(--yellow);background:#272820;color:#dbd0a7;font-size:13px;line-height:1.8}
+.sw-notes{line-height:1.9;color:var(--muted);font-size:13px}.sw-notes summary{cursor:pointer;color:var(--cyan)}.sw-notes a{color:var(--cyan)}
+@media(max-width:800px){.sw-controls label{flex:1;min-width:135px}.sw-controls select{width:100%;max-width:none}.sw-chart{height:380px}}

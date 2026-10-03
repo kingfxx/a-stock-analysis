@@ -1,0 +1,476 @@
+"""Versioned industry facts and read-only comparisons; never invokes a model."""
+from __future__ import annotations
+
+import hashlib
+import json
+import threading
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+from .industry_sources import number
+from .statements import find, previous_quarter
+
+NOTES = [
+    '申万 2021 三级分类；全市场范围为当前沪深 A 股，北交所、已退市公司不在当前成分中。未分类公司单列，不强行归属。',
+    '营收为合并营业总收入，按当前成分回溯；历史不是当时的行业成分，不能作为无偏历史回测。上市母子公司报表未抵销，不等于宏观行业产值。',
+    '累计为本年累计；单季度按同年累计差分；TTM = 本期累计 + 上年全年 − 上年同期累计。缺值留空，有效零保留。',
+    '同比使用两期都有有效值的同一批公司；基期合计大于零才计算百分比。覆盖率低于 95% 的行业不进入优先景气排行；营收增长只是景气线索，需结合利润与财报研判。',
+    '市值独立按已结束季度补齐精确季末值；已有有效值默认跳过，明确核对修订才重取。历史回填保留原成分口径，新季度固定季末分类及成员版本，但股票范围仍为当前沪深名单。',
+    '行业财务只在独立行业任务中更新：指定报告期，优先复用同口径本地新浪有效值，再补取东方财富轻量指标。个股刷新及查看行业均不重算行业快照、不触发行业采集。',
+    '覆盖不全只显示已覆盖合计，完整行业总额留空；市值与营收分别使用交易日和报告期，不能把财报期末当作业绩已披露日。',
+]
+
+
+def dumps(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False, separators=(',', ':'))
+
+
+def financial_signature(row):
+    provenance=row['provenance'] if 'provenance' in row else json.loads(row['provenance_json'])
+    definitions=[]
+    for metric,field in [('revenue','revenue_field'),('parent_profit','profit_field')]:
+        item=provenance.get(metric,provenance)
+        definitions.append(tuple(item.get(k) for k in ('source','report_type','unit','basis','scope','method'))+
+                           (item.get('field',item.get(field)),))
+    return row['revenue'],row['parent_profit'],row['notice_date'],definitions
+
+
+def local_financials(conn, *, period=None, stocks=None):
+    """Equivalent total operating revenue only, with per-period provenance."""
+    reports = {}
+    where="f.report_type IN ('gjzb','lrb')"
+    params=[]
+    if period:
+        where+=' AND f.period=?';params.append(period)
+    if stocks is not None:
+        if not stocks:return {}
+        where+=' AND i.code IN ('+','.join('?' for _ in stocks)+')';params.extend(stocks)
+    for row in conn.execute("SELECT i.code,f.period,f.report_type,f.source,f.raw_json,f.content_hash FROM financial_reports f "
+                            "JOIN instruments i ON i.id=f.instrument_id WHERE "+where+" ORDER BY f.obtained_at",params):
+        raw = json.loads(row['raw_json'])
+        if raw.get('rCurrency') != 'CNY' or raw.get('rType') != '合并期末':
+            continue
+        reports.setdefault((row['code'],row['period']), {})[row['report_type']] = (raw,row['source'])
+    output = {}
+    for key, kinds in reports.items():
+        values = {}
+        for metric, field in [('revenue','BIZTOTINCO'),('parent_profit','PARENETP')]:
+            for kind in ['gjzb','lrb']:
+                if kind not in kinds:
+                    continue
+                raw, source = kinds[kind]
+                item = find(raw, 'lrb', field)
+                # Banks often expose only BIZINCO: confirm its actual title before equivalence.
+                if metric == 'revenue' and item is None:
+                    candidate = find(raw, 'lrb', 'BIZINCO')
+                    if candidate and candidate.get('item_title') == '营业总收入':
+                        item = candidate
+                if item is not None:
+                    values[metric] = number(item['item_value'])
+                    values[metric+'_provenance'] = {'source':source,'report_type':kind,
+                        'field':item['item_field'],'item_source':'lrb','unit':'元','scope':'合并',
+                        'basis':'本年累计','method':'直接取数','period':key[1],
+                        'local_content_hash':hashlib.sha256(dumps(raw).encode()).hexdigest()}
+                    break
+        if values:
+            output[key] = values
+    return output
+
+
+def value_for(facts, stock, period, metric, mode):
+    def val(p):
+        return facts.get((stock,p), {}).get(metric)
+    current = val(period)
+    if current is None:
+        return None
+    if mode == 'ytd' or mode == 'annual' or period[5:] == '12-31' and mode == 'ttm':
+        return current
+    if mode == 'quarter':
+        previous = previous_quarter(period)
+        baseline = val(previous) if previous else 0
+        return current-baseline if baseline is not None else None
+    prior_year = str(int(period[:4])-1)
+    annual = val(prior_year+'-12-31')
+    prior = val(prior_year+period[4:])
+    return current+annual-prior if annual is not None and prior is not None else None
+
+
+def aggregate(stocks, facts, period, mode):
+    result = {'period':period,'expected_count':len(stocks)}
+    prior = str(int(period[:4])-1)+period[4:]
+    for metric in ['revenue','parent_profit']:
+        current = {s:value_for(facts,s,period,metric,mode) for s in stocks}
+        current = {s:v for s,v in current.items() if v is not None}
+        baseline = {s:value_for(facts,s,prior,metric,mode) for s in current}
+        matched = {s:v for s,v in baseline.items() if v is not None}
+        total = sum(current.values()) if current else None
+        before = sum(matched.values()) if matched else None
+        after = sum(current[s] for s in matched) if matched else None
+        result.update({metric:total if len(current)==len(stocks) and stocks else None,
+                       metric+'_known':total, metric+'_count':len(current), metric+'_matched_count':len(matched),
+                       metric+'_baseline':before, metric+'_matched_current':after,
+                       metric+'_coverage':len(current)/len(stocks) if stocks else 0,
+                       metric+'_matched_coverage':len(matched)/len(stocks) if stocks else 0,
+                       metric+'_yoy':(after/before-1)*100 if before is not None and before>0 else None})
+    result['rank_eligible'] = result['revenue_matched_coverage'] >= .95 and result['revenue_yoy'] is not None
+    return result
+
+
+class IndustryService:
+    def __init__(self, db, directory=None):
+        self.db = db
+        self.directory = Path(directory or db.path.parent/'industry_sources')
+        self._lock = threading.Lock()
+        self._cache = None
+        self._status = {'running':False,'message':'尚未刷新','error':None}
+
+    def status(self):
+        with self._lock:
+            return dict(self._status)
+
+    def recover_interrupted_runs(self):
+        """Called under the backend instance lock; recovery starts no source work."""
+        with self.db.connection(write=True) as conn:
+            return conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE status='running'",
+                (datetime.now(timezone.utc).isoformat(),'后台中断，已有行业快照保留；请在行业页面重试补缺')).rowcount
+
+    def start_refresh(self, action, target, recheck=False):
+        from .industry_updates import validate_request
+        validate_request(action,target,recheck)
+        with self._lock:
+            if self._status['running']:
+                return dict(self._status)
+            self._status = {'running':True,'message':f'准备更新行业 {target}','error':None,'action':action,'target':target}
+        threading.Thread(target=self._refresh,args=(action,target,recheck),daemon=True,name='sw-industry-refresh').start()
+        return self.status()
+
+    def _refresh(self, action, target, recheck):
+        from .industry_updates import perform
+        run_id=None
+        def progress(message):
+            with self._lock:
+                self._status['message'] = message
+        try:
+            with self.db.connection(write=True) as conn:
+                run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES(?,?,?,?,'running')",
+                    (action,target,int(recheck),datetime.now(timezone.utc).isoformat())).lastrowid
+            result=perform(self,action,target,recheck,progress)
+            with self.db.connection(write=True) as conn:
+                conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
+                             (datetime.now(timezone.utc).isoformat(),dumps(result),run_id))
+            with self._lock:
+                self._status.update(running=False,message=f"行业更新完成 · {target} · 请求 {result['requested_count']} 家 · 待补 {len(result['failures'])} 家",
+                                    error=None,result=result)
+        except Exception as exc:
+            if run_id is not None:
+                with self.db.connection(write=True) as conn:
+                    conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE id=?",
+                                 (datetime.now(timezone.utc).isoformat(),str(exc),run_id))
+            with self._lock:
+                self._status.update(running=False,message='刷新失败，已有版本继续可用',error=str(exc))
+
+    def foundation(self):
+        with self.db.connection() as conn:
+            latest=conn.execute('SELECT * FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()
+            if latest is None:
+                raise ValueError('请先导入试运行分类及必要历史，行业更新不会自动初始化全历史')
+            member_id=latest['member_import_id']
+            obtained=conn.execute('SELECT obtained_at FROM sw_imports WHERE id=?',(member_id,)).fetchone()[0]
+            checked=conn.execute("SELECT max(json_extract(result_json,'$.source_obtained_at')) FROM sw_update_runs "
+                "WHERE action='classification' AND status='complete' AND json_extract(result_json,'$.member_import_id')=?",(member_id,)).fetchone()[0]
+            return {'member_import_id':member_id,'member_obtained_at':max(obtained,checked or obtained),
+                'taxonomy':[dict(r) for r in conn.execute('SELECT * FROM sw_industries ORDER BY level,code')],
+                'members':[{k:r[k] for k in ('stock_code','name','industry_code','effective_date','source_update')}
+                    for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=? ORDER BY stock_code',(member_id,))],
+                'membership_history':[{k:r[k] for k in ('stock_code','industry_code','effective_date','source_update')}
+                    for r in conn.execute('SELECT * FROM sw_membership_history WHERE import_id=?',(member_id,))]}
+
+    def local_period(self, period, stocks):
+        with self.db.connection() as conn:
+            return {s:v for (s,p),v in local_financials(conn,period=period,stocks=stocks).items()}
+
+    def cap_known(self, target_date):
+        with self.db.connection() as conn:
+            return {r['stock_code'] for r in conn.execute('SELECT stock_code FROM sw_cap_facts WHERE trade_date=? '
+                "AND import_id NOT IN (SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected')",
+                (target_date,))}
+
+    @staticmethod
+    def _classification_check(conn, bundle, member_id):
+        if bundle['manifest'].get('scope')!='classification':return
+        obtained=bundle['obtained_at']
+        if conn.execute("SELECT 1 FROM sw_update_runs WHERE action='classification' AND status='complete' "
+                "AND json_extract(result_json,'$.member_import_id')=? AND json_extract(result_json,'$.source_obtained_at')=?",
+                (member_id,obtained)).fetchone():return
+        now=datetime.now(timezone.utc).isoformat()
+        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,finished_at,status,result_json) "
+            "VALUES('classification',?,1,?,?,'complete',?)",(bundle.get('asof',obtained[:10]),now,now,
+                dumps({'member_import_id':member_id,'source_obtained_at':obtained,'manifest':bundle['manifest']})))
+
+    def import_bundle(self, bundle, *, capture_local=True):
+        bundle={**bundle,'financials':[dict(r) for r in bundle['financials']]}
+        if not bundle['taxonomy'] or not bundle['members']:
+            raise ValueError('行业来源为空')
+        if len({r['stock_code'] for r in bundle['members']}) != len(bundle['members']):
+            raise ValueError('行业成分重复')
+        if any(r['provenance'].get('source','').startswith('tencent') and r['provenance'].get('field')!='45'
+               for r in bundle['caps']):
+            raise ValueError('腾讯总市值必须使用字段 45，字段 44 为流通市值')
+        with self.db.connection(write=True) as conn:
+            if capture_local:
+                selected={r['stock_code'] for r in bundle['members']}
+                rows={(r['stock_code'],r['period']):r for r in bundle['financials']}
+                for (stock,period),value in local_financials(conn).items():
+                    if stock not in selected:
+                        continue
+                    row=rows.setdefault((stock,period),{'stock_code':stock,'period':period,'notice_date':None,
+                        'revenue':None,'parent_profit':None,'provenance':{}})
+                    row['provenance']=dict(row['provenance'])
+                    for metric in ('revenue','parent_profit'):
+                        if value.get(metric) is not None:
+                            row[metric]=value[metric]
+                            row['provenance'][metric]=value[metric+'_provenance']
+                bundle['financials']=list(rows.values())
+            latest = conn.execute('SELECT max(id) FROM sw_imports').fetchone()[0]
+            payload={k:v for k,v in bundle.items() if k not in {'obtained_at','manifest'}}
+            payload['base_import_id']=latest
+            content_hash = hashlib.sha256(dumps(payload).encode()).hexdigest()
+            previous = conn.execute('SELECT id FROM sw_imports WHERE content_hash=?',(content_hash,)).fetchone()
+            if previous:
+                self._classification_check(conn,bundle,conn.execute('SELECT member_import_id FROM sw_imports WHERE id=?',(previous[0],)).fetchone()[0])
+                return previous[0]
+            member_id=None
+            if latest:
+                member_id=conn.execute('SELECT member_import_id FROM sw_imports WHERE id=?',(latest,)).fetchone()[0]
+                old_members=[{k:r[k] for k in ('stock_code','name','industry_code','effective_date','source_update')}
+                    for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=? ORDER BY stock_code',(member_id,))]
+                old_count=len(old_members)
+                if len(bundle['members']) < old_count*.95:
+                    raise ValueError('全市场成分数量骤减，未发布新版本')
+                if old_members!=sorted(bundle['members'],key=lambda r:r['stock_code']):
+                    member_id=None
+                else:
+                    old_history=[{k:r[k] for k in ('stock_code','effective_date','industry_code','source_update')}
+                        for r in conn.execute('SELECT * FROM sw_membership_history WHERE import_id=?',(member_id,))]
+                    if sorted(old_history,key=dumps)!=sorted(bundle.get('membership_history',[]),key=dumps):
+                        member_id=None
+            catalog_fields=('code','name','level','parent_code')
+            current_catalog=[{k:r[k] for k in catalog_fields} for r in conn.execute('SELECT * FROM sw_industries ORDER BY code')]
+            next_catalog=sorted([{k:r[k] for k in catalog_fields} for r in bundle['taxonomy']],key=lambda r:r['code'])
+            catalog_changed=current_catalog!=next_catalog
+            for r in sorted(bundle['taxonomy'], key=lambda r:r['level']):
+                conn.execute('INSERT INTO sw_industries(code,name,level,parent_code) VALUES(?,?,?,?) '
+                             'ON CONFLICT(code) DO UPDATE SET name=excluded.name,parent_code=excluded.parent_code',
+                             (r['code'],r['name'],r['level'],r['parent_code']))
+            # New observations only: unchanged financial facts reuse the previous immutable version.
+            old = {(r['stock_code'],r['period']):dict(r)
+                   for r in conn.execute('SELECT f.* FROM sw_financial_facts f JOIN '
+                    '(SELECT stock_code,period,max(import_id) id FROM sw_financial_facts GROUP BY stock_code,period) l '
+                    'ON f.stock_code=l.stock_code AND f.period=l.period AND f.import_id=l.id')} if bundle['financials'] else {}
+            values = []
+            for r in bundle['financials']:
+                before=old.get((r['stock_code'],r['period']))
+                if before:
+                    r['provenance']=dict(r['provenance'])
+                    for metric in ('revenue','parent_profit'):
+                        if r[metric] is None and before[metric] is not None:
+                            r[metric]=before[metric]
+                            p=json.loads(before['provenance_json'])
+                            r['provenance'][metric]=p.get(metric,p)
+                    r['notice_date']=r['notice_date'] or before['notice_date']
+                data = (r['revenue'],r['parent_profit'],r['notice_date'],dumps(r['provenance']))
+                if before is None or financial_signature(before)!=financial_signature(r):
+                    values.append((r['stock_code'],r['period'],*data))
+            # Keep the erroneous parser observation for audit, but never expose it as a total-cap series.
+            for invalid in conn.execute("SELECT DISTINCT i.id,i.source_manifest_json FROM sw_imports i "
+                    "JOIN sw_cap_facts c ON c.import_id=i.id WHERE json_extract(c.provenance_json,'$.field')='44' "
+                    "AND json_extract(c.provenance_json,'$.source')='tencent:qt.gtimg.cn'").fetchall():
+                manifest=json.loads(invalid['source_manifest_json'])
+                manifest.update(cap_status='rejected',cap_rejection='腾讯字段 44 为流通市值；总市值应使用字段 45')
+                conn.execute('UPDATE sw_imports SET source_manifest_json=? WHERE id=?',(dumps(manifest),invalid['id']))
+            old_caps={(r['stock_code'],r['trade_date']):r['total_cap'] for r in conn.execute('SELECT c.* FROM sw_cap_facts c '
+                "WHERE c.import_id NOT IN (SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected') ORDER BY import_id")}
+            cap_values=[(r['stock_code'],r['trade_date'],r['total_cap'],dumps(r['provenance'])) for r in bundle['caps']
+                        if old_caps.get((r['stock_code'],r['trade_date']))!=r['total_cap']]
+            roster=bundle.get('cap_roster')
+            if latest and member_id and not catalog_changed and not values and not cap_values and (not roster or conn.execute(
+                    'SELECT 1 FROM sw_cap_quarter_rosters WHERE quarter=?',(roster['quarter'],)).fetchone()):
+                self._classification_check(conn,bundle,member_id)
+                return latest
+            import_id = conn.execute("INSERT INTO sw_imports(obtained_at,content_hash,source_manifest_json,status,member_import_id) VALUES(?,?,?,'complete',?)",
+                                     (bundle['obtained_at'],content_hash,dumps(bundle['manifest']),member_id)).lastrowid
+            if member_id is None:
+                member_id=import_id
+                conn.execute('UPDATE sw_imports SET member_import_id=? WHERE id=?',(member_id,import_id))
+                conn.executemany('INSERT INTO sw_memberships VALUES(?,?,?,?,?,?)',
+                    [(import_id,r['stock_code'],r['name'],r['industry_code'],r['effective_date'],r['source_update']) for r in bundle['members']])
+                conn.executemany('INSERT INTO sw_membership_history VALUES(?,?,?,?,?)',
+                    [(import_id,r['stock_code'],r['effective_date'],r['industry_code'],r['source_update']) for r in bundle.get('membership_history',[])])
+            self._classification_check(conn,bundle,member_id)
+            conn.executemany('INSERT INTO sw_financial_facts VALUES(?,?,?,?,?,?,?)',[(import_id,*r) for r in values])
+            conn.executemany('INSERT INTO sw_cap_facts VALUES(?,?,?,?,?)',[(import_id,*r) for r in cap_values])
+            dates = {}
+            for r in bundle['caps']:
+                quarter=f"{r['trade_date'][:4]}Q{(int(r['trade_date'][5:7])-1)//3+1}"
+                dates[quarter]=max(r['trade_date'],dates.get(quarter,''))
+            for quarter,trade_date in dates.items():
+                conn.execute('INSERT INTO sw_industry_cap_quarters '
+                    '(import_id,industry_code,quarter,trade_date,expected_count,known_count,known_cap,total_cap,target_date,composition) '
+                    'SELECT ?,m.industry_code,?,?,count(*),count(c.stock_code),sum(c.total_cap),'
+                    'CASE WHEN count(c.stock_code)=count(*) THEN sum(c.total_cap) ELSE NULL END,?,? '
+                    'FROM sw_memberships m LEFT JOIN sw_cap_facts c ON c.stock_code=m.stock_code AND c.trade_date=? '
+                    'AND c.import_id=(SELECT max(c2.import_id) FROM sw_cap_facts c2 WHERE c2.stock_code=m.stock_code AND c2.trade_date=? '
+                    "AND c2.import_id NOT IN (SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected')) "
+                    'WHERE m.import_id=? AND m.industry_code IS NOT NULL GROUP BY m.industry_code',
+                    (import_id,quarter,trade_date,trade_date,'current_constituents_backfill',trade_date,trade_date,member_id))
+            if roster:
+                if any(r['trade_date']!=roster['target_date'] for r in bundle['caps']):
+                    raise ValueError('市值日期不等于固定目标交易日')
+                saved=conn.execute('SELECT * FROM sw_cap_quarter_rosters WHERE quarter=?',(roster['quarter'],)).fetchone()
+                if saved and saved['target_date']!=roster['target_date']:
+                    raise ValueError('不得改变已固定的季末交易日')
+                conn.execute('INSERT OR IGNORE INTO sw_cap_quarter_rosters VALUES(?,?,?,?)',
+                    (roster['quarter'],roster['target_date'],roster['composition'],roster['member_import_id']))
+                if not conn.execute('SELECT 1 FROM sw_cap_quarter_members WHERE quarter=? LIMIT 1',(roster['quarter'],)).fetchone():
+                    conn.executemany('INSERT INTO sw_cap_quarter_members VALUES(?,?,?)',
+                        [(roster['quarter'],r['stock_code'],r['industry_code']) for r in roster['members']])
+                conn.execute('DELETE FROM sw_industry_cap_quarters WHERE import_id=?',(import_id,))
+                conn.execute('INSERT INTO sw_industry_cap_quarters '
+                    '(import_id,industry_code,quarter,trade_date,expected_count,known_count,known_cap,total_cap,target_date,composition) '
+                    'SELECT ?,m.industry_code,?,?,count(*),count(c.stock_code),sum(c.total_cap),'
+                    'CASE WHEN count(c.stock_code)=count(*) THEN sum(c.total_cap) ELSE NULL END,?,? '
+                    'FROM sw_cap_quarter_members m LEFT JOIN sw_cap_facts c ON c.stock_code=m.stock_code AND c.trade_date=? '
+                    'AND c.import_id=(SELECT max(c2.import_id) FROM sw_cap_facts c2 WHERE c2.stock_code=m.stock_code AND c2.trade_date=? '
+                    "AND c2.import_id NOT IN (SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected')) "
+                    'WHERE m.quarter=? AND m.industry_code IS NOT NULL GROUP BY m.industry_code',
+                    (import_id,roster['quarter'],roster['target_date'],roster['target_date'],roster['composition'],
+                     roster['target_date'],roster['target_date'],roster['quarter']))
+        with self._lock:
+            self._cache = None
+        return import_id
+
+    def _load(self):
+        with self.db.connection() as conn:
+            latest = conn.execute('SELECT * FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()
+            if latest is None:
+                return None
+            key = latest['id']
+            with self._lock:
+                cached = self._cache
+            if cached and cached[0] == key:
+                return cached[1]
+            catalog = [dict(r) for r in conn.execute('SELECT * FROM sw_industries ORDER BY level,code')]
+            members = [dict(r) for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=?',(latest['member_import_id'],))]
+            stored = [dict(r) for r in conn.execute('SELECT f.* FROM sw_financial_facts f JOIN '
+                       '(SELECT stock_code,period,max(import_id) id FROM sw_financial_facts GROUP BY stock_code,period) l '
+                       'ON f.stock_code=l.stock_code AND f.period=l.period AND f.import_id=l.id')]
+            facts = {(r['stock_code'],r['period']): {'revenue':r['revenue'],'parent_profit':r['parent_profit']} for r in stored}
+            provenance = {(r['stock_code'],r['period']):json.loads(r['provenance_json']) for r in stored}
+            member_codes = {m['stock_code'] for m in members}
+            periods = sorted({p for s,p in facts if s in member_codes and p >= '2016-09-30'})
+            # Compute capitalization using each import's own constituent roster.
+            caps = [dict(r) for r in conn.execute('SELECT * '
+                    "FROM sw_industry_cap_quarters WHERE import_id NOT IN "
+                    "(SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected')")]
+            data = {'import':dict(latest),'catalog':catalog,'members':members,'facts':facts,'periods':periods,
+                    'caps':caps,'provenance':provenance}
+        with self._lock:
+            self._cache = (key,data)
+        return data
+
+    def read(self, *, code=None, industry=None, level=3, parent=None, mode='ttm', period=None):
+        if mode not in {'ytd','quarter','annual','ttm'} or level not in {1,2,3}:
+            raise ValueError('行业层级或营收口径无效')
+        data = self._load()
+        if data is None:
+            return {'empty':True,'catalog':[],'notes':NOTES,'status':self.status()}
+        bycode = {r['code']:r for r in data['catalog']}
+        if industry and industry not in bycode or parent and parent not in bycode:
+            raise ValueError('行业代码无效')
+        paths = {}
+        for m in data['members']:
+            node = bycode.get(m['industry_code'])
+            path = []
+            while node:
+                path.insert(0,node['code'])
+                node = bycode.get(node['parent_code'])
+            paths[m['stock_code']] = path
+        groups = {r['code']:[s for s,path in paths.items() if r['code'] in path] for r in data['catalog']}
+        periods = [p for p in data['periods'] if mode != 'annual' or p.endswith('12-31')]
+        if period and period not in periods:
+            raise ValueError('该报告期没有行业数据')
+        if not period:
+            manifest=json.loads(data['import']['source_manifest_json'])
+            scope = [m['stock_code'] for m in data['members'] if not manifest.get('pilot_industries') or m['industry_code'] in manifest['pilot_industries']]
+            covered = [p for p in periods if scope and sum(value_for(data['facts'],s,p,'revenue',mode) is not None for s in scope)/len(scope) >= .80]
+            period = (covered or periods)[-1] if periods else None
+        ranking = []
+        if period:
+            for r in data['catalog']:
+                if r['level'] == level and (not parent or r['parent_code'] == parent):
+                    ranking.append({**r,**aggregate(groups[r['code']],data['facts'],period,mode)})
+        ranking.sort(key=lambda r:(not r['rank_eligible'],r['revenue_yoy'] is None,-(r['revenue_yoy'] or 0),r['code']))
+        stock_path = paths.get(code,[])
+        selected = industry or (next((s for s in stock_path if bycode[s]['level']==level),None)) or (ranking[0]['code'] if ranking else None)
+        series = [aggregate(groups[selected],data['facts'],p,mode) for p in periods] if selected else []
+        # Latest successful analysis is read afresh; it is not part of financial cache and costs no tokens.
+        with self.db.connection() as conn:
+            saved = [dict(r) for r in conn.execute("SELECT i.code,i.name,r.completed_at analysis_date,r.summary analysis_summary "
+                     "FROM instruments i LEFT JOIN ai_analysis_runs r ON r.id=(SELECT a.id FROM ai_analysis_runs a "
+                     "WHERE a.instrument_id=i.id AND a.status='succeeded' ORDER BY a.created_at DESC,a.id DESC LIMIT 1)")]
+        saved = [{**r,'path':[bycode[c] for c in paths.get(r['code'],[])],
+                  'metrics':aggregate([r['code']],data['facts'],period,mode) if period else None}
+                 for r in saved if selected in paths.get(r['code'],[])]
+        market = {}
+        if selected:
+            for r in data['caps']:
+                node = bycode.get(r['industry_code']);lineage=[]
+                while node:
+                    lineage.append(node['code']);node=bycode.get(node['parent_code'])
+                if selected not in lineage:
+                    continue
+                key=(r['trade_date'],r['import_id'])
+                out=market.setdefault(key,{'trade_date':r['trade_date'],'import_id':r['import_id'],
+                    'target_date':r['target_date'],'composition':r['composition'],
+                    'expected_count':0,'known_count':0,'known_cap':0})
+                out['expected_count']+=r['expected_count']
+                out['known_count']+=r['known_count'];out['known_cap']+=r['known_cap'] or 0
+        market_series = {}
+        for (trade_date,version),r in sorted(market.items()):
+            if not r['known_count']:
+                continue
+            r['total_cap']=r['known_cap'] if r['known_count']==r['expected_count'] else None
+            r['coverage']=r['known_count']/r['expected_count'] if r['expected_count'] else 0
+            r['quarter'] = f"{trade_date[:4]}Q{(int(trade_date[5:7])-1)//3+1}"
+            today = datetime.now().astimezone().date().isoformat()
+            r['provisional'] = r['quarter'] == f"{today[:4]}Q{(int(today[5:7])-1)//3+1}"
+            market_series[r['quarter']]=r
+        current_stock = next((m for m in data['members'] if m['stock_code']==code),None)
+        provenance = {}
+        if code and period:
+            for metric in ['revenue','parent_profit']:
+                saved_provenance = data['provenance'].get((code,period),{})
+                provenance[metric] = saved_provenance.get(metric,saved_provenance)
+        return {'empty':False,'import_id':data['import']['id'],'obtained_at':data['import']['obtained_at'],
+                'manifest':json.loads(data['import']['source_manifest_json']), 'catalog':data['catalog'],
+                'stock':current_stock,'stock_path':[bycode[c] for c in stock_path],
+                'stock_metrics':aggregate([code],data['facts'],period,mode) if code and period else None,
+                'stock_provenance':provenance,'selected':bycode.get(selected),'level':level,'parent':parent,
+                'period':period,'periods':periods,'mode':mode,'ranking':ranking,'series':series,
+                'market_series':list(market_series.values()),'saved_stocks':saved,
+                'universe_count':len(paths),'classified_count':sum(bool(p) for p in paths.values()),
+                'unclassified':[m for m in data['members'] if not m['industry_code']],
+                'notes':NOTES,'status':self.status()}
+
+
+if __name__ == '__main__':
+    import argparse
+    from .storage import Database, DEFAULT_DATABASE, instance_lock
+    parser=argparse.ArgumentParser()
+    parser.add_argument('bundle',type=Path)
+    parser.add_argument('--database',type=Path,default=DEFAULT_DATABASE)
+    args=parser.parse_args()
+    with instance_lock(args.database):
+        db=Database(args.database);db.initialize()
+        bundle=json.loads(args.bundle.read_text(encoding='utf-8'))
+        print(IndustryService(db).import_bundle(bundle,capture_local=bool(bundle['financials'])))

@@ -19,6 +19,7 @@ data/cache/
 data/fundamentals/
 data/valuation/
 data/chips/
+data/industry_sources/
 
 # Local report checks and UI screenshots are separate from application data.
 data/verification/

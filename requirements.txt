@@ -3,3 +3,4 @@ plotly==6.5.2
 pypinyin==0.55.0
 PyJWT[crypto]==2.15.1
 pdfplumber==0.11.9
+xlrd==2.0.2

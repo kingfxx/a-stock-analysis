@@ -25,6 +25,7 @@ from .price_service import PriceService, PriceVersionUnavailable, month_closes
 from .price_projection import chip_prices, financial_prices, valuation_prices
 from .fundamental_service import FundamentalService
 from .statements import read_statements
+from .industry_service import IndustryService
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
 from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update
@@ -51,6 +52,7 @@ CHIP_CACHE = ROOT / "data" / "chips"
 DATABASE_PATH = DEFAULT_DATABASE
 _SERVICES, _SERVICE_LOCK = {}, Lock()
 _AI_SERVICES = {}
+_INDUSTRY_SERVICES = {}
 LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
@@ -70,6 +72,16 @@ _DATA_LOCKS: dict[str, Lock] = {}
 
 FINANCIAL_VALUES = ("revenue_ytd", "profit_ytd", "shares", "equity") + NEW_REPORT_FIELDS
 CASH_VALUES = ("operating_cash_flow_ytd", "main_business_cash_flow_ytd", "capex_ytd")
+
+
+def industry_service():
+    with _SERVICE_LOCK:
+        key = str(Path(DATABASE_PATH).resolve())
+        if key not in _INDUSTRY_SERVICES:
+            db = Database(DATABASE_PATH)
+            db.initialize()
+            _INDUSTRY_SERVICES[key] = IndustryService(db)
+        return _INDUSTRY_SERVICES[key]
 
 
 def _save_cache(path: Path, data: dict) -> None:
@@ -936,7 +948,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/"):
             self._ai_post(path)
             return
-        if urlparse(self.path).path != "/api/stock-groups":
+        if path not in {"/api/stock-groups", "/api/industry/refresh"}:
             self.send_error(404)
             return
         status = 200
@@ -950,7 +962,12 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < size <= 65536:
                 raise ValueError("分组请求大小无效")
             command = json.loads(self.rfile.read(size).decode("utf-8"))
-            data = StockLibrary(services()[0].db).change(command)
+            if path == '/api/industry/refresh':
+                if not isinstance(command,dict) or set(command)-{'action','target','recheck'} or not {'action','target'}<=set(command):
+                    raise ValueError('行业更新须指定任务和报告期／季度')
+                data = industry_service().start_refresh(command['action'],command['target'],command.get('recheck',False))
+            else:
+                data = StockLibrary(services()[0].db).change(command)
         except (ValueError, TypeError, OSError, StorageError, sqlite3.DatabaseError) as exc:
             status, data = 400, {"error": str(exc)}
         body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8")
@@ -977,7 +994,7 @@ class Handler(BaseHTTPRequestHandler):
             body = (ROOT / "web" / "stock-picker.js").read_bytes()
             content_type = "text/javascript; charset=utf-8"
         elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css",
-                             "/financial-statements.js", "/financial-statements.css"}:
+                             "/financial-statements.js", "/financial-statements.css", "/industry.js", "/industry.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
@@ -988,6 +1005,19 @@ class Handler(BaseHTTPRequestHandler):
             code = query.get("code", ["601919"])[0]
             body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
             content_type = "text/html; charset=utf-8"
+        elif parsed.path in {'/api/industry','/api/industry/status'}:
+            query = parse_qs(parsed.query)
+            try:
+                data = industry_service().status() if parsed.path.endswith('/status') else industry_service().read(
+                    code=query.get('code',[None])[0], industry=query.get('industry',[None])[0],
+                    level=int(query.get('level',['3'])[0]), parent=query.get('parent',[None])[0],
+                    mode=query.get('mode',['ttm'])[0], period=query.get('period',[None])[0])
+            except (ValueError,TypeError) as exc:
+                status,data=400,{'error':str(exc)}
+            except (OSError,StorageError,sqlite3.DatabaseError) as exc:
+                status,data=503,{'error':str(exc)}
+            body=json.dumps(data,ensure_ascii=False,allow_nan=False).encode('utf-8')
+            content_type='application/json; charset=utf-8'
         elif parsed.path == "/api/statements":
             query = parse_qs(parsed.query)
             try:
@@ -1046,6 +1076,7 @@ def serve(port: int = 8765, open_browser: bool = False):
             db.check()
             db.daily_backup()
             recovered = db.recover_interrupted_runs()
+            industry_recovered = IndustryService(db).recover_interrupted_runs()
             ai_recovered = ai_service().repository.recover()
             chips, _ = services(initialized=True)
             for section in ("financing", "shareholders"):
@@ -1059,6 +1090,7 @@ def serve(port: int = 8765, open_browser: bool = False):
             print(f"SQLite {runtime['sqlite_version']} / {runtime['journal_mode']} / "
                   f"结构版本 {runtime['schema_version']}；恢复中断任务 {recovered} 个", flush=True)
             print(f"AI 中断任务 {ai_recovered} 个；仅手动分析使用 ChatGPT 额度", flush=True)
+            print(f"行业中断任务 {industry_recovered} 个；行业仅通过独立入口更新", flush=True)
             url = f"http://127.0.0.1:{port}/"
             print(f"季度分析页面：{url}", flush=True)
             if open_browser:
