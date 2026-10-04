@@ -662,14 +662,14 @@ def price_bundle(code, *, refresh=False, full=False, version=None):
     financial["dividend_basis"] = DIVIDEND_BASIS if events else None
     valuation = valuations.read(code, financial.get("reports", []))
     if not version:
-        warnings.append("共享前复权尚未就绪，财务和估值的已有价格快照暂按缓存展示。")
+        warnings.append("共享前复权尚未就绪，前复权价格留空；披露日估算市值独立使用已有未复权价格。")
     price_meta = prices.version_info(code, version)
     holders = chip_prices(chips.cached(code, "shareholders"), "shareholders", raw, qfq, version)
     financing = chip_prices(chips.cached(code, "financing"), "financing", raw, qfq, version)
     for data in (holders, financing):
         data["price_validated_at"] = price_meta.get("validated_at")
     return dict(price_version=version, price_context=price_meta, warnings=warnings,
-                financial=_financial_payload(financial_prices(financial, raw, qfq) if version else financial),
+                financial=_financial_payload(financial_prices(financial, raw, qfq)),
                 valuation=_p4_valuation_payload(valuation, raw=raw, qfq=qfq, events=events),
                 shareholders=holders, financing=financing)
 
@@ -690,7 +690,7 @@ def load_chart_data(code: str, section: str, refresh: bool = False, *, price_ver
                 data = _add_sqlite_missing_name(fundamentals.db, data)
                 data["dividend_events"] = dividends.read(code)
                 data["dividend_basis"] = DIVIDEND_BASIS if data["dividend_events"] else None
-                if price_version:
+                if price_version is not None or services()[1].read(code, "raw"):
                     _, raw, qfq = shared_projection(code, price_version, lease=True)
                     data = financial_prices(data, raw, qfq)
                 return {**_financial_payload(data), "cached_stocks": cached_stocks(),
@@ -701,7 +701,7 @@ def load_chart_data(code: str, section: str, refresh: bool = False, *, price_ver
                 data["dividend_events"] = updated["events"]
                 data["dividend_basis"] = DIVIDEND_BASIS if updated["events"] else None
                 data["warnings"] += updated["warnings"]
-                if price_version:
+                if price_version is not None or services()[1].read(code, "raw"):
                     _, raw, qfq = shared_projection(code, price_version, lease=True)
                     data = financial_prices(data, raw, qfq)
                 return {**_financial_payload(data), "cached_stocks": cached_stocks(),
@@ -791,7 +791,7 @@ def render_page(code: str, refresh: bool) -> str:
                     (("prices_raw", "raw"), ("prices_adjusted", "qfq")))
             normalized = {**data, "reports": normalize_report_dates(data.get("reports", [])),
                           "report_date_basis": REPORT_DATE_BASIS} if data else {}
-            if version:
+            if version or raw:
                 payload.update(_financial_payload(financial_prices(normalized, raw, qfq)))
                 payload["valuation"] = _p4_valuation_payload(valuation, raw=raw, qfq=qfq,
                                                             events=data.get("dividend_events"))

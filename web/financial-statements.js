@@ -294,6 +294,6 @@
         ['利润与现金',`合并净利润 ${grow('net_profit')}；经营净现金 ${grow('cfo')}`,data.financial_company?'金融企业经营现金受贷款、存款等影响，应结合业务结构解释。':'结合经营占款与购建支出；利润基期非正时不展示增长百分比。']].map(([title,text,note])=>`<div class="fs-observation"><strong>${title}</strong><p>${esc(text)}</p><p>${esc(note)}</p></div>`).join('');
       el('fs-notes').textContent='金额优先核对同口径关键指标，缺少适用值时回退三表。累计与单季度分别计算；余额科目不做季度差分。缺失字段、空值均不当作零，有息债务仅在组成科目完整时计算；一年内到期非流动负债可能包含非有息项目。货币资金可能含受限资金，不等于可用现金。经营净现金减购建支出不等于严格 FCFF／FCFE；投资收益等不自动认定为非经常性损益。'+(data.financial_company?'金融企业不套用工业企业毛利率及自由现金流指标，完整科目以原报表为准。':'');
     }
-    try{const selected=sessionStorage.getItem('investment-research-tab-v1');if(['statements','industry','maintenance'].includes(selected))selectTab(selected);}catch{}
+    try{const tabs=['trend','statements','industry','maintenance'],requested=new URLSearchParams(window.location?.search||'').get('tab');const selected=tabs.includes(requested)?requested:sessionStorage.getItem('investment-research-tab-v1');if(tabs.includes(selected))selectTab(selected);}catch{}
   };
 })();

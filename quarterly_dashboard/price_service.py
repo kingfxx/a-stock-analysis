@@ -126,7 +126,7 @@ class PriceService:
             rebuild = full or not old or audit_due(state, key.dataset)
             start = "1990-01-01" if rebuild else old[max(0, len(old) - (30 if adjustment == "raw" else 20))]["date"]
             end = today.isoformat()
-            run = self.db.start_sync(key, parser_version="tencent-ohlc-v1", methodology_version="current-adjustment-v1",
+            run = self.db.start_sync(key, parser_version="tencent-ohlc-v2", methodology_version="current-adjustment-v1",
                                      trigger_reason="full_audit" if rebuild else "overlap_check",
                                      requested_start=start, requested_end=end)
             try:
@@ -187,8 +187,11 @@ class PriceService:
                     with self.db.connection(write=True) as conn:
                         version = conn.execute("INSERT INTO adjusted_price_versions(instrument_id,source,adjustment,source_basis,status,"
                                                "coverage_start,coverage_end,row_count,created_at,run_id) "
-                                               "VALUES (?,?,'qfq','tencent-current-ohlc','candidate',?,?,?,?,?)",
-                                               (identity, SOURCE, coverage[0], coverage[1], len(ordered), utc_now(), run)).lastrowid
+                                               "VALUES (?,?,'qfq',?,'candidate',?,?,?,?,?)",
+                                               (identity, SOURCE, "tencent-current-ohlc-verified-unadjusted"
+                                                if any(r.get('source_basis')=='tencent-current-ohlc-verified-unadjusted' for r in rows)
+                                                else "tencent-current-ohlc",
+                                                coverage[0], coverage[1], len(ordered), utc_now(), run)).lastrowid
                         if not rebuild and old:
                             conn.execute("INSERT INTO adjusted_daily_prices SELECT ?,trade_date,close,raw_json "
                                          "FROM adjusted_daily_prices WHERE version_id=?", (version, state["active_price_version_id"]))

@@ -54,7 +54,7 @@ def fetch_valuation_indicator(code: str, session: requests.Session, metric: str,
     try:
         chart = response.json()["Result"][0]["DisplayData"]["resultData"]["tplData"]["result"]["chartInfo"][0]
         body = chart["body"]
-        if chart.get("type", window) != window or chart.get("header", [indicator])[0] != indicator:
+        if chart.get("type", window) not in (window, "全部") or chart.get("header", [indicator])[0] != indicator:
             raise ValueError
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise ValueError(f"百度未返回 {indicator} {window} 历史序列") from exc
@@ -67,7 +67,10 @@ def fetch_valuation_indicator(code: str, session: requests.Session, metric: str,
         if raw_date in seen:
             raise ValueError("百度估值序列存在重复日期")
         seen.add(raw_date)
-        points.append({"date": raw_date, "value": _finite_number(raw_value)})
+        point = {"date": raw_date, "value": _finite_number(raw_value)}
+        if chart.get("type") == "全部":
+            point.update(source_window="全部", requested_window=window)
+        points.append(point)
     return points
 
 

@@ -110,6 +110,7 @@ class ValuationService:
                 raise ValueError(f"百度{metric} {window}返回空序列")
             seen = set()
             for point in points:
+                source_window = point.get("source_window", window)
                 day = date.fromisoformat(point["date"]).isoformat()
                 if day in seen:
                     raise ValueError(f"百度{metric} {window}重复日期 {day}")
@@ -121,10 +122,11 @@ class ValuationService:
                 if prior and abs(prior["value"] - value) > 1e-8:
                     raise ValueError(f"百度{metric}跨窗口同日不一致 {day}")
                 if prior:
-                    prior["source_windows"].append(window)
+                    if source_window not in prior["source_windows"]:
+                        prior["source_windows"].append(source_window)
                 else:
                     merged[day] = {"observed_on": day, "value": value,
-                                   "source_windows": [window], "sampling_version": SAMPLING_VERSION,
+                                   "source_windows": [source_window], "sampling_version": SAMPLING_VERSION,
                                    "raw_json": point}
         return [merged[day] for day in sorted(merged)]
 

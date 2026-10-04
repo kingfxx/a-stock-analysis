@@ -392,7 +392,29 @@ def fetch_price_history(code, session, adjust, start="1990-01-01", end=None):
             "param": f"{symbol},day,,{request_end},{page_size},{adjust}"},
             headers={"Referer": "https://gu.qq.com/"}, timeout=18)
         response.raise_for_status()
-        batch = parse_price_history(response.json(), symbol, adjust)
+        payload = response.json()
+        node = (payload.get("data") or {}).get(symbol, {})
+        verified_unadjusted = False
+        if adjust == "qfq" and "qfqday" not in node and isinstance(node.get("day"), list):
+            # Tencent can return day for an explicitly adjusted request with no
+            # adjustment. Never infer this from a raw payload alone: cross-check
+            # the same window against both raw and backward-adjusted requests.
+            for basis in ("", "hfq"):
+                check = session.get(TENCENT_URL, params={
+                    "param": f"{symbol},day,,{request_end},{page_size},{basis}"},
+                    headers={"Referer": "https://gu.qq.com/"}, timeout=18)
+                check.raise_for_status()
+                other = check.json()
+                other_node = (other.get("data") or {}).get(symbol, {})
+                parse_price_history(other, symbol, "")
+                if "hfqday" in other_node or other_node.get("day") != node["day"]:
+                    raise ValueError("腾讯前复权 day 返回无法确认复权口径")
+            payload = {**payload, "data": {symbol: {"qfqday": node["day"]}}}
+            verified_unadjusted = True
+        batch = parse_price_history(payload, symbol, adjust)
+        if verified_unadjusted:
+            for row in batch:
+                row["source_basis"] = "tencent-current-ohlc-verified-unadjusted"
         if not batch:
             if previous is not None:
                 raise ValueError("腾讯历史分页缺页")

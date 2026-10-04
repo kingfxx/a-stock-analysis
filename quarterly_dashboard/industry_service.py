@@ -596,6 +596,11 @@ class IndustryService:
         ranking.sort(key=lambda r:(not r['rank_eligible'],r['revenue_yoy'] is None,-(r['revenue_yoy'] or 0),r['code']))
         stock_path = paths.get(code,[])
         selected = industry or (next((s for s in stock_path if bycode[s]['level']==level),None)) or (ranking[0]['code'] if ranking else None)
+        child_ranking = []
+        if period and selected and bycode[selected]['level'] < 3:
+            child_ranking = [{**r, **aggregate(groups[r['code']],data['facts'],period,mode),
+                              **ranking_caps[r['code']]}
+                             for r in data['catalog'] if r['parent_code'] == selected]
         series = [aggregate(groups[selected],data['facts'],p,mode) for p in periods] if selected else []
         # Latest successful analysis is read afresh; it is not part of financial cache and costs no tokens.
         with self.db.connection() as conn:
@@ -647,7 +652,7 @@ class IndustryService:
                 'stock':current_stock,'stock_path':[bycode[c] for c in stock_path],
                 'stock_metrics':aggregate([code],data['facts'],period,mode) if code and period else None,
                 'stock_provenance':provenance,'selected':bycode.get(selected),'level':level,'parent':parent,
-                'period':period,'periods':periods,'mode':mode,'ranking':ranking,'series':series,
+                'period':period,'periods':periods,'mode':mode,'ranking':ranking,'child_ranking':child_ranking,'series':series,
                 'market_series':list(market_series.values()),
                 'market_history':market_history,
                 'market_summary':next((r for r in market_history if r['quarter']==selected_quarter),None),

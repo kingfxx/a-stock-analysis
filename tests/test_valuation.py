@@ -43,6 +43,27 @@ def test_industry_snapshot_selects_average_not_median():
                         "peer_count": 37, "report_period": "2025-12-31"}
 
 
+@pytest.mark.parametrize('window,header,accepted', [('全部','市净率',True),
+    ('近五年','市净率',False), ('全部','总市值',False)])
+def test_baidu_all_history_preserves_actual_window_and_validates_metric(window, header, accepted):
+    from quarterly_dashboard.valuation import fetch_valuation_indicator
+    from quarterly_dashboard.valuation_service import ValuationService
+    class Session:
+        def get(self, *args, **kwargs):
+            return FakeResponse({'Result':[{'DisplayData':{'resultData':{'tplData':{'result':{
+                'chartInfo':[{'type':window,'header':[header],'body':[['2026-09-30','46.81']]}]
+            }}}}}]})
+    if not accepted:
+        with pytest.raises(ValueError):
+            fetch_valuation_indicator('688256',Session(),'pb')
+        return
+    points = fetch_valuation_indicator('688256',Session(),'pb')
+    assert points[0]['value'] == 46.81
+    assert points[0]['requested_window'] == '近十年'
+    rows = ValuationService._collect('688256','pb',('近十年','近五年'),lambda *args:points)
+    assert rows[0]['source_windows'] == ['全部']
+
+
 def test_dividend_events_convert_per_ten_shares_to_per_share():
     class Session:
         def get(self, url, params, **kwargs):

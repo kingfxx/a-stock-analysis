@@ -382,6 +382,47 @@ def test_price_parser_does_not_accept_raw_data_for_requested_qfq():
         parse_price_history({"code": 0, "data": {"sh600887": {"day": [price("2026-09-29")["raw"]]}}}, "sh600887", "qfq")
 
 
+@pytest.mark.parametrize('mismatch', [None, 'raw', 'hfq'])
+def test_requested_qfq_day_requires_matching_raw_and_hfq(mismatch):
+    class Response:
+        def __init__(self, payload): self.payload=payload
+        def raise_for_status(self): pass
+        def json(self): return self.payload
+    class Session:
+        def get(self, url, params, **kwargs):
+            basis=params['param'].split(',')[-1]
+            row=copy.deepcopy(price('2026-09-29')['raw'])
+            if mismatch == 'raw' and basis == '': row[2]='999'
+            key='hfqday' if mismatch == 'hfq' and basis == 'hfq' else 'day'
+            return Response({'code':0,'data':{'sh688825':{key:[row]}}})
+    if mismatch:
+        with pytest.raises(ValueError):
+            fetch_price_history('688825',Session(),'qfq',end='2026-09-30')
+    else:
+        result=fetch_price_history('688825',Session(),'qfq',end='2026-09-30')
+        assert len(result)==1
+        assert result[0]['source_basis']=='tencent-current-ohlc-verified-unadjusted'
+
+
+def test_price_bundle_projects_market_cap_without_qfq(monkeypatch):
+    from types import SimpleNamespace
+    data={'code':'688825','reports':[
+        {'period':'2026-03-31','publish_date':'2026-07-09','shares':100,'revenue_ytd':10,'profit_ytd':1},
+        {'period':'2026-06-30','publish_date':'2026-08-29','shares':100,'revenue_ytd':30,'profit_ytd':3}],
+        'report_date_basis':server.REPORT_DATE_BASIS}
+    raw=[{'date':'2026-08-28','close':58.6}]
+    monkeypatch.setattr(server,'services',lambda:(
+        SimpleNamespace(cached=lambda *args:{}),SimpleNamespace(version_info=lambda *args:{})))
+    monkeypatch.setattr(server,'shared_projection',lambda *args,**kwargs:(None,raw,[]))
+    monkeypatch.setattr(server,'p4_services',lambda:(SimpleNamespace(read=lambda *args:data),
+        SimpleNamespace(read=lambda *args:[]),SimpleNamespace(read=lambda *args:{})))
+    bundle=server.price_bundle('688825',version=0)
+    rows=bundle['financial']['views']['quarter']
+    assert rows[-1]['market_cap']==5860
+    assert rows[-1]['qfq_price'] is None
+    assert rows[0]['market_cap'] is None
+
+
 def test_production_financing_adapter_passes_and_verifies_date_window():
     class Session:
         def get(self, url, params, **kwargs):

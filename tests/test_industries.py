@@ -93,6 +93,23 @@ def test_company_and_industry_gross_margin_and_financial_exclusion(service):
     assert all(r['gross_margin'] is None for r in result['ranking'])
 
 
+def test_child_ranking_uses_selected_parent_and_same_metrics(service):
+    bundle=fixture_bundle()
+    for row in bundle['financials']:
+        row.update(operating_revenue=row['revenue'],operating_cost=row['revenue']*.6)
+    service.import_bundle(bundle)
+    first=service.read(industry='630000',level=1,mode='ytd',period='2025-06-30')
+    assert [r['code'] for r in first['child_ranking']]==['630700']
+    second=service.read(industry='630700',level=2,mode='ytd',period='2025-06-30')
+    assert {r['code'] for r in second['child_ranking']}=={'630701','630702'}
+    third=service.read(industry='630701',level=3,mode='ytd',period='2025-06-30')
+    assert third['child_ranking']==[]
+    same_level={r['code']:r for r in third['ranking']}
+    for row in second['child_ranking']:
+        assert row==same_level[row['code']]
+    assert sum(r['revenue_known'] for r in second['child_ranking'])==first['child_ranking'][0]['revenue_known']
+
+
 @pytest.mark.parametrize('mode,current,baseline', [('ytd','2025-06-30','2024-06-30'),
     ('quarter','2025-06-30','2024-06-30'),('ttm','2025-06-30','2024-06-30'),
     ('annual','2025-12-31','2024-12-31')])
