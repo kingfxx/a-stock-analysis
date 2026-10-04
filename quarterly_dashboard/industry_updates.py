@@ -9,7 +9,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 
 from .industry_cap_history import parse_history
-from .industry_sources import EM, financial_rows, parse_quotes
+from .industry_sources import EM, FINANCIAL_COLUMNS, attach_financial_source, financial_rows, parse_quotes
 from .network import create_data_session
 from .sources import TENCENT_URL, parse_daily_prices
 from .valuation import BAIDU_URL
@@ -62,7 +62,7 @@ def fetch_financial_period(directory, stocks, period):
         return []
     stock_filter = ','.join('"'+s+'"' for s in stocks)
     params = {'reportName':'RPT_DMSK_FN_INCOME',
-        'columns':'SECURITY_CODE,REPORT_DATE,NOTICE_DATE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT',
+        'columns':FINANCIAL_COLUMNS,
         'filter':f'(REPORT_DATE=\'{period}\')(SECURITY_CODE in ({stock_filter}))',
         'sortColumns':'SECURITY_CODE','sortTypes':'1','pageSize':100,'pageNumber':1}
     with create_data_session() as session:
@@ -79,8 +79,7 @@ def fetch_financial_period(directory, stocks, period):
     if len({r['stock_code'] for r in rows})!=len(rows):
         raise ValueError('指定报告期财务重复')
     for row in rows:
-        row['provenance'] = {**row['provenance'],**source}
-        row['provenance'].pop('raw',None)  # Original response is stored once, by content hash.
+        attach_financial_source(row,source)
     return rows
 
 
@@ -215,7 +214,7 @@ def perform(service, action, target, recheck, progress):
         required=stocks
         progress(f'全市场财务 {target} · {len(stocks)} 家 · 批量核对指定报告期')
         raw,sources=fetch('RPT_DMSK_FN_INCOME',
-            'SECURITY_CODE,REPORT_DATE,NOTICE_DATE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT',
+            FINANCIAL_COLUMNS,
             f"(REPORT_DATE='{target}')")
         if any(r['REPORT_DATE'][:10]!=target for r in raw):
             raise ValueError('财务返回报告期不匹配，未发布')
@@ -223,8 +222,7 @@ def perform(service, action, target, recheck, progress):
         source_by_code={r['SECURITY_CODE']:sources[i//500] for i,r in enumerate(raw)}
         rows={r['stock_code']:r for r in financial_rows(raw,bundle['asof']) if r['stock_code'] in universe}
         for stock,row in rows.items():
-            row['provenance'].pop('raw',None)
-            row['provenance'].update(source_by_code[stock])
+            attach_financial_source(row,source_by_code[stock])
         for stock,value in local.items():
             row=rows.setdefault(stock,{'stock_code':stock,'period':target,'notice_date':None,
                                       'revenue':None,'parent_profit':None,'provenance':{}})

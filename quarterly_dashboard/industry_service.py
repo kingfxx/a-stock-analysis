@@ -7,7 +7,8 @@ import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from .industry_sources import number
+from .industry_sources import EXTRA_FINANCIAL_FIELDS, number
+from .industry_storage import latest_financial_rows, store_provenance, store_cap_provenance
 from .statements import find, previous_quarter
 
 NOTES = [
@@ -28,11 +29,11 @@ def dumps(value):
 def financial_signature(row):
     provenance=row['provenance'] if 'provenance' in row else json.loads(row['provenance_json'])
     definitions=[]
-    for metric,field in [('revenue','revenue_field'),('parent_profit','profit_field')]:
+    for metric,field in [('revenue','revenue_field'),('parent_profit','profit_field'),*EXTRA_FINANCIAL_FIELDS.items()]:
         item=provenance.get(metric,provenance)
         definitions.append(tuple(item.get(k) for k in ('source','report_type','unit','basis','scope','method'))+
                            (item.get('field',item.get(field)),))
-    return row['revenue'],row['parent_profit'],row['notice_date'],definitions
+    return row['revenue'],row['parent_profit'],row['notice_date'],tuple(row.get(m) for m in EXTRA_FINANCIAL_FIELDS),definitions
 
 
 def local_financials(conn, *, period=None, stocks=None):
@@ -126,7 +127,22 @@ class IndustryService:
 
     def status(self):
         with self._lock:
-            return dict(self._status)
+            status = dict(self._status)
+        if not status['running']:
+            with self.db.connection() as conn:
+                run = conn.execute("SELECT * FROM sw_update_runs ORDER BY id DESC LIMIT 1").fetchone()
+            if run and run['status']=='running':
+                progress = json.loads(run['result_json'] or '{}')
+                status.update(running=True,action=run['action'],target=run['target'],error=None,
+                              message=progress.get('message',f"行业任务运行中 · {run['target']}"))
+            elif run and run['action']=='financial_extensions':
+                result = json.loads(run['result_json'] or '{}')
+                message = (f"行业四字段补采完成 · {len(result.get('periods',[]))} 个报告期 · "
+                           f"{result.get('start',run['target'])}—{result.get('end',run['target'])}")
+                if run['status']!='complete':
+                    message='行业四字段补采未完成 · '+(run['error'] or '已有数据保留，请检查报告后续采')
+                status.update(running=False,action=run['action'],target=run['target'],error=run['error'],message=message)
+        return status
 
     def recover_interrupted_runs(self):
         """Called under the backend instance lock; recovery starts no source work."""
@@ -137,6 +153,9 @@ class IndustryService:
     def start_refresh(self, action, target, recheck=False):
         from .industry_updates import validate_request
         validate_request(action,target,recheck)
+        current = self.status()
+        if current['running']:
+            return current
         with self._lock:
             if self._status['running']:
                 return dict(self._status)
@@ -152,6 +171,8 @@ class IndustryService:
                 self._status['message'] = message
         try:
             with self.db.connection(write=True) as conn:
+                if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+                    raise ValueError('已有行业任务运行，未启动重复更新')
                 run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES(?,?,?,?,'running')",
                     (action,target,int(recheck),datetime.now(timezone.utc).isoformat())).lastrowid
             result=perform(self,action,target,recheck,progress)
@@ -263,34 +284,40 @@ class IndustryService:
                              'ON CONFLICT(code) DO UPDATE SET name=excluded.name,parent_code=excluded.parent_code',
                              (r['code'],r['name'],r['level'],r['parent_code']))
             # New observations only: unchanged financial facts reuse the previous immutable version.
-            old = {(r['stock_code'],r['period']):dict(r)
-                   for r in conn.execute('SELECT f.* FROM sw_financial_facts f JOIN '
-                    '(SELECT stock_code,period,max(import_id) id FROM sw_financial_facts GROUP BY stock_code,period) l '
-                    'ON f.stock_code=l.stock_code AND f.period=l.period AND f.import_id=l.id')} if bundle['financials'] else {}
+            old = {(r['stock_code'],r['period']):r for r in latest_financial_rows(conn)} if bundle['financials'] else {}
             values = []
             for r in bundle['financials']:
+                for metric in EXTRA_FINANCIAL_FIELDS:
+                    r.setdefault(metric,None)
                 before=old.get((r['stock_code'],r['period']))
                 if before:
                     r['provenance']=dict(r['provenance'])
-                    for metric in ('revenue','parent_profit'):
+                    for metric in ('revenue','parent_profit',*EXTRA_FINANCIAL_FIELDS):
                         if r[metric] is None and before[metric] is not None:
                             r[metric]=before[metric]
                             p=json.loads(before['provenance_json'])
-                            r['provenance'][metric]=p.get(metric,p)
+                            source=p.get(metric,p)
+                            reference=source.get('source_ref')
+                            if reference and reference in p:
+                                source={**source,**p[reference]}
+                                source.pop('source_ref',None)
+                            r['provenance'][metric]=source
                     r['notice_date']=r['notice_date'] or before['notice_date']
-                data = (r['revenue'],r['parent_profit'],r['notice_date'],dumps(r['provenance']))
                 if before is None or financial_signature(before)!=financial_signature(r):
+                    data = (r['revenue'],r['parent_profit'],r['notice_date'],'{}',
+                            *(r[m] for m in EXTRA_FINANCIAL_FIELDS),store_provenance(conn,r['provenance']))
                     values.append((r['stock_code'],r['period'],*data))
             # Keep the erroneous parser observation for audit, but never expose it as a total-cap series.
             for invalid in conn.execute("SELECT DISTINCT i.id,i.source_manifest_json FROM sw_imports i "
-                    "JOIN sw_cap_facts c ON c.import_id=i.id WHERE json_extract(c.provenance_json,'$.field')='44' "
-                    "AND json_extract(c.provenance_json,'$.source')='tencent:qt.gtimg.cn'").fetchall():
+                    "JOIN sw_cap_facts c ON c.import_id=i.id LEFT JOIN sw_cap_provenance p ON p.id=c.provenance_id "
+                    "WHERE json_extract(coalesce(nullif(c.provenance_json,'{}'),p.provenance_json),'$.field')='44' "
+                    "AND json_extract(coalesce(nullif(c.provenance_json,'{}'),p.provenance_json),'$.source')='tencent:qt.gtimg.cn'").fetchall():
                 manifest=json.loads(invalid['source_manifest_json'])
                 manifest.update(cap_status='rejected',cap_rejection='腾讯字段 44 为流通市值；总市值应使用字段 45')
                 conn.execute('UPDATE sw_imports SET source_manifest_json=? WHERE id=?',(dumps(manifest),invalid['id']))
             old_caps={(r['stock_code'],r['trade_date']):r['total_cap'] for r in conn.execute('SELECT c.* FROM sw_cap_facts c '
                 "WHERE c.import_id NOT IN (SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected') ORDER BY import_id")}
-            cap_values=[(r['stock_code'],r['trade_date'],r['total_cap'],dumps(r['provenance'])) for r in bundle['caps']
+            cap_values=[(r['stock_code'],r['trade_date'],r['total_cap'],'{}',store_cap_provenance(conn,r['provenance'])) for r in bundle['caps']
                         if old_caps.get((r['stock_code'],r['trade_date']))!=r['total_cap']]
             roster=bundle.get('cap_roster')
             if latest and member_id and not catalog_changed and not values and not cap_values and (not roster or conn.execute(
@@ -307,8 +334,13 @@ class IndustryService:
                 conn.executemany('INSERT INTO sw_membership_history VALUES(?,?,?,?,?)',
                     [(import_id,r['stock_code'],r['effective_date'],r['industry_code'],r['source_update']) for r in bundle.get('membership_history',[])])
             self._classification_check(conn,bundle,member_id)
-            conn.executemany('INSERT INTO sw_financial_facts VALUES(?,?,?,?,?,?,?)',[(import_id,*r) for r in values])
-            conn.executemany('INSERT INTO sw_cap_facts VALUES(?,?,?,?,?)',[(import_id,*r) for r in cap_values])
+            conn.executemany('INSERT INTO sw_financial_facts '
+                '(import_id,stock_code,period,revenue,parent_profit,notice_date,provenance_json,'
+                'operating_revenue,operating_cost,deduct_parent_profit,operating_profit,provenance_id) '
+                'VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',[(import_id,*r) for r in values])
+            conn.executemany('INSERT INTO sw_cap_facts '
+                '(import_id,stock_code,trade_date,total_cap,provenance_json,provenance_id) VALUES(?,?,?,?,?,?)',
+                [(import_id,*r) for r in cap_values])
             dates = {}
             for r in bundle['caps']:
                 quarter=f"{r['trade_date'][:4]}Q{(int(r['trade_date'][5:7])-1)//3+1}"
@@ -361,10 +393,8 @@ class IndustryService:
                 return cached[1]
             catalog = [dict(r) for r in conn.execute('SELECT * FROM sw_industries ORDER BY level,code')]
             members = [dict(r) for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=?',(latest['member_import_id'],))]
-            stored = [dict(r) for r in conn.execute('SELECT f.* FROM sw_financial_facts f JOIN '
-                       '(SELECT stock_code,period,max(import_id) id FROM sw_financial_facts GROUP BY stock_code,period) l '
-                       'ON f.stock_code=l.stock_code AND f.period=l.period AND f.import_id=l.id')]
-            facts = {(r['stock_code'],r['period']): {'revenue':r['revenue'],'parent_profit':r['parent_profit']} for r in stored}
+            stored = latest_financial_rows(conn)
+            facts = {(r['stock_code'],r['period']): {m:r[m] for m in ('revenue','parent_profit',*EXTRA_FINANCIAL_FIELDS)} for r in stored}
             provenance = {(r['stock_code'],r['period']):json.loads(r['provenance_json']) for r in stored}
             member_codes = {m['stock_code'] for m in members}
             periods = sorted({p for s,p in facts if s in member_codes and p >= '2016-09-30'})

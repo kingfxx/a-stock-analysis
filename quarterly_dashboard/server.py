@@ -12,8 +12,8 @@ import webbrowser
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Lock
-from urllib.parse import parse_qs, urlparse
+from threading import Lock, Thread
+from urllib.parse import parse_qs, urlparse, unquote
 
 import requests
 from plotly.offline import get_plotlyjs
@@ -26,6 +26,8 @@ from .price_projection import chip_prices, financial_prices, valuation_prices
 from .fundamental_service import FundamentalService
 from .statements import read_statements
 from .industry_service import IndustryService
+from .maintenance import MaintenanceService
+from .database_restore import RestoreManager, RequestGate, MAX_UPLOAD
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
 from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update
@@ -53,6 +55,7 @@ DATABASE_PATH = DEFAULT_DATABASE
 _SERVICES, _SERVICE_LOCK = {}, Lock()
 _AI_SERVICES = {}
 _INDUSTRY_SERVICES = {}
+_MAINTENANCE_SERVICES = {}
 LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
@@ -826,6 +829,58 @@ def ai_service():
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _maintenance_auth(self):
+        self._ai_host()
+        allowed={f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'}
+        if self.headers.get('Origin') not in allowed or not secrets.compare_digest(
+                self.headers.get('X-Local-Session',''),LOCAL_SESSION_TOKEN):
+            raise ValueError('拒绝跨站或无本地会话的恢复操作，请刷新页面')
+
+    def _maintenance_post(self, path):
+        scheduled=False
+        try:
+            self._maintenance_auth()
+            manager=self.server.restore_manager
+            size=int(self.headers.get('Content-Length','0'))
+            if path=='/api/maintenance/restore/upload':
+                if self.headers.get_content_type()!='application/octet-stream' or not 16<=size<=MAX_UPLOAD:
+                    raise ValueError('请选择完整 SQLite 备份文件，最大 4 GiB')
+                self.connection.settimeout(300)
+                data=manager.upload(self.rfile,size,unquote(self.headers.get('X-Backup-Name','backup.sqlite3')))
+            else:
+                if self.headers.get_content_type()!='application/json' or not 0<size<=8192:
+                    raise ValueError('恢复请求格式无效')
+                command=json.loads(self.rfile.read(size).decode('utf-8'))
+                if not isinstance(command,dict):raise ValueError('恢复请求必须是对象')
+                if path=='/api/maintenance/restore/preview':data=manager.prepare(command)
+                elif path=='/api/maintenance/restore/cancel':
+                    if command:raise ValueError('取消请求格式无效')
+                    data=manager.cancel()
+                elif path=='/api/maintenance/restore/confirm':
+                    data=manager.schedule(command,self.server.request_gate);scheduled=True
+                else:raise ValueError('恢复接口不存在')
+            self._ai_reply(data,202 if scheduled else 200)
+        except (ValueError,TypeError,UnicodeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+            self._ai_reply({'error':str(exc)},400)
+        finally:
+            if scheduled:Thread(target=self.server.shutdown,name='database-restore-shutdown',daemon=True).start()
+
+    def _dispatch(self, method):
+        gate=getattr(self.server,'request_gate',None)
+        # The status response is memory-only and remains available while draining.
+        if method=='GET' and urlparse(self.path).path=='/api/maintenance/restore/status':
+            try:self._ai_host();self._ai_reply(self.server.restore_manager.state)
+            except ValueError as exc:self._ai_reply({'error':str(exc)},400)
+            return
+        if gate and not gate.enter():
+            self._ai_reply({'error':'数据库正在恢复，请稍候','restoring':True},503);return
+        try:getattr(self,'_do_'+method)()
+        finally:
+            if gate:gate.leave()
+
+    def do_POST(self):self._dispatch('POST')
+    def do_GET(self):self._dispatch('GET')
+
     def log_message(self, format, *args):
         # OAuth callbacks contain codes; never log their URL or query parameters.
         if urlparse(self.path).path == "/auth/callback":
@@ -943,8 +998,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self):
+    def _do_POST(self):
         path = urlparse(self.path).path
+        if path in {'/api/maintenance/restore/upload','/api/maintenance/restore/preview','/api/maintenance/restore/confirm','/api/maintenance/restore/cancel'}:
+            self._maintenance_post(path);return
         if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/"):
             self._ai_post(path)
             return
@@ -978,8 +1035,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self):
+    def _do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path=='/api/maintenance/backups':
+            try:
+                self._ai_host()
+                self._ai_reply({'backups':self.server.restore_manager.list_backups(),'session_token':LOCAL_SESSION_TOKEN,
+                    'restore_status':self.server.restore_manager.state})
+            except ValueError as exc:self._ai_reply({'error':str(exc)},400)
+            return
         if parsed.path.startswith("/api/ai/") or parsed.path == "/api/analysis" or parsed.path.startswith("/api/analysis/"):
             self._ai_get(parsed)
             return
@@ -997,7 +1061,8 @@ class Handler(BaseHTTPRequestHandler):
             body = (ROOT / "web" / "samples" / "industry-summary.html").read_bytes()
             content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css",
-                             "/financial-statements.js", "/financial-statements.css", "/industry.js", "/industry.css"}:
+                             "/financial-statements.js", "/financial-statements.css", "/industry.js", "/industry.css",
+                             "/maintenance.js", "/maintenance.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
@@ -1008,6 +1073,19 @@ class Handler(BaseHTTPRequestHandler):
             code = query.get("code", ["601919"])[0]
             body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
             content_type = "text/html; charset=utf-8"
+        elif parsed.path == '/api/maintenance/storage':
+            query=parse_qs(parsed.query)
+            try:
+                with _SERVICE_LOCK:
+                    key=str(DATABASE_PATH)
+                    if key not in _MAINTENANCE_SERVICES:
+                        _MAINTENANCE_SERVICES[key]=MaintenanceService(Database(DATABASE_PATH))
+                    maintenance=_MAINTENANCE_SERVICES[key]
+                data=maintenance.read(refresh=query.get('refresh')==['1'])
+            except (ValueError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                status,data=503,{'error':str(exc)}
+            body=json.dumps(data,ensure_ascii=False,allow_nan=False).encode('utf-8')
+            content_type='application/json; charset=utf-8'
         elif parsed.path in {'/api/industry','/api/industry/status'}:
             query = parse_qs(parsed.query)
             try:
@@ -1068,38 +1146,52 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def _initialize_runtime(db, skip_legacy=False):
+    runtime=db.initialize();db.check();db.daily_backup()
+    recovered=db.recover_interrupted_runs()
+    industry_recovered=IndustryService(db).recover_interrupted_runs()
+    ai_recovered=ai_service().repository.recover()
+    chips,_=services(initialized=True)
+    # After restoring, do not silently import newer external cache files into the snapshot.
+    if not skip_legacy:
+        for section in ('financing','shareholders'):
+            for path in sorted((CHIP_CACHE/section).glob('*.json')):
+                try:chips.import_legacy(normalize_code(path.stem),section)
+                except (ValueError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                    print(f'{path.name} {section} 迁移未完成，原文件保留：{exc}',flush=True)
+        for warning in import_p4_legacy(db):print(warning,flush=True)
+    print(f"SQLite {runtime['sqlite_version']} / {runtime['journal_mode']} / "
+          f"结构版本 {runtime['schema_version']}；恢复中断任务 {recovered} 个",flush=True)
+    print(f'AI 中断任务 {ai_recovered} 个；仅手动分析使用 ChatGPT 额度',flush=True)
+    print(f'行业中断任务 {industry_recovered} 个；行业仅通过独立入口更新',flush=True)
+
+
+def _restore_activity():
+    with _SERVICE_LOCK:
+        return any(s.status()['running'] for s in _INDUSTRY_SERVICES.values()) or any(
+            s.worker and s.worker.is_alive() for s in _AI_SERVICES.values())
+
+
 def serve(port: int = 8765, open_browser: bool = False):
-    # Import old snapshots once; normal requests read the SQLite facts.
-    with instance_lock(DATABASE_PATH):
-        address = ("127.0.0.1", port)
-        server = ThreadingHTTPServer(address, Handler)
-        try:
-            db = Database(DATABASE_PATH)
-            runtime = db.initialize()
-            db.check()
-            db.daily_backup()
-            recovered = db.recover_interrupted_runs()
-            industry_recovered = IndustryService(db).recover_interrupted_runs()
-            ai_recovered = ai_service().repository.recover()
-            chips, _ = services(initialized=True)
-            for section in ("financing", "shareholders"):
-                for path in sorted((CHIP_CACHE / section).glob("*.json")):
-                    try:
-                        chips.import_legacy(normalize_code(path.stem), section)
-                    except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
-                        print(f"{path.name} {section} 迁移未完成，原文件保留：{exc}", flush=True)
-            for warning in import_p4_legacy(db):
-                print(warning, flush=True)
-            print(f"SQLite {runtime['sqlite_version']} / {runtime['journal_mode']} / "
-                  f"结构版本 {runtime['schema_version']}；恢复中断任务 {recovered} 个", flush=True)
-            print(f"AI 中断任务 {ai_recovered} 个；仅手动分析使用 ChatGPT 额度", flush=True)
-            print(f"行业中断任务 {industry_recovered} 个；行业仅通过独立入口更新", flush=True)
-            url = f"http://127.0.0.1:{port}/"
-            print(f"季度分析页面：{url}", flush=True)
-            if open_browser:
-                webbrowser.open(url)
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            server.server_close()
+    db=Database(DATABASE_PATH);manager=RestoreManager(db,activity_check=_restore_activity);reloaded=False
+    while True:
+        with instance_lock(DATABASE_PATH):
+            server=ThreadingHTTPServer(('127.0.0.1',port),Handler)
+            server.restore_manager=manager;server.request_gate=RequestGate()
+            try:
+                _initialize_runtime(db,skip_legacy=reloaded)
+                print(f'季度分析页面：http://127.0.0.1:{port}/',flush=True)
+                if open_browser and not reloaded:webbrowser.open(f'http://127.0.0.1:{port}/')
+                server.serve_forever()
+            except KeyboardInterrupt:
+                return
+            finally:
+                # Drain request threads and release all connections before replacing SQLite.
+                server.server_close()
+            if not manager.pending:return
+            result=manager.execute()
+            print('数据库恢复：'+json.dumps(result,ensure_ascii=False),flush=True)
+            with _SERVICE_LOCK:
+                _SERVICES.clear();_AI_SERVICES.clear();_INDUSTRY_SERVICES.clear();_MAINTENANCE_SERVICES.clear()
+                _DATA_LOCKS.clear()
+            reloaded=True

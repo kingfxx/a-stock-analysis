@@ -24,6 +24,18 @@
 
 ## 页面口径
 
+结构版本 11 在 `sw_financial_facts` 新增四个可空本年累计金额列：`operating_revenue`（`OPERATE_INCOME`）、`operating_cost`（`OPERATE_COST`）、`deduct_parent_profit`（`DEDUCT_PARENT_NETPROFIT`）、`operating_profit`（`OPERATE_PROFIT`）。保留原版本，旧行新列为 NULL；后续普通财务更新同时请求四字段。按用户确认的行业采集例外，四字段统一取东财，字段码、单位、合并／归母、期间口径、分页文件和 SHA256 逐项记录，缺项不覆盖已有有效值。毛利率不新增存储列，也不无条件用营业总收入替代缺失营业收入。
+
+专用补采工具为 `python -m quarterly_dashboard.industry_financial_extensions data/industry_sources/financial_extensions_20261004 --report-directory data/verification/reports/financial_extensions_pilot_20261004 --publish`，默认只处理最近已有财报期。最近一期核对后加 `--all-history` 推进已存约十年报告期，报告另存 `data/verification/reports/financial_extensions_history_20261004/`。每次发布先备份；每期保留原有营收、归母利润、披露日及其来源，仅新增四字段版本，并核对原字段 SHA256。精确分页缓存用于中断续跑；源字段为空记录为空而非重复无限补采。串行随机间隔、阶段休息和失败冷却与历史批量采集一致，行业独立任务锁阻止同时点击其他行业更新。
+
+2026-06-30 最近一期实际来源返回 5,579 条记录，当前沪深名单匹配 5,222 家。四字段分别覆盖 47、5,119、5,222、5,222 家。`OPERATE_INCOME` 仅少数公司有值，不能将该列的缺失理解为公司没有收入：原有 `TOTAL_OPERATE_INCOME` 保持不变，非金融企业来源通常由它表达收入。金融企业营业成本缺失时不套用工业企业毛利率公式。报告中的覆盖数均为公司家数，历史期不以当前 5,223 家作为漏采分母。最近一期和历史补采报告保存在上述目录，原业务表内容校验资料为 `data/verification/reports/financial_extensions_pilot_20261004/original_tables_audit.json`。
+
+历史补采已完成 2016-09-30—2026-06-30 共 40 期、188,086 条公司报告期记录，四字段有效记录数分别为 1,855、182,656、186,872、187,808。历史阶段实际请求 409 页，最近一期复用已核对缓存；全部分页与报告期核对通过。原营收、归母利润及披露日 SHA256 一致；`instruments`、`financial_reports`、`valuation_observations`、`raw_daily_prices`、`ai_analysis_runs` 内容与补采前备份一致。最终报告及原业务表校验保存在 `data/verification/reports/financial_extensions_history_20261004/`；未跑自动测试套件。8765 日常后台已加载结构版本 11，最终日志为 `data/verification/logs/daily-8765-financial-extensions-final.out.log` 和 `.err.log`。
+
+随后存储整理升级至结构版本 12：`sw_financial_provenance` 按完整来源说明哈希共享，财务行保存 `provenance_id`，旧 `provenance_json` 为兼容占位；统一读写入口解析引用，原始响应文件仍保留。后续导入只在金额、披露日或指标定义变化时追加版本，同值重复抓取不增行。离线维护命令为 `python -m quarterly_dashboard.industry_compact --report-directory data/verification/reports/<整理批次>`，必须停止后台，持有数据库实例锁；自动备份，仅清理本次扩展完整替代且原金额、披露日及来源一致的旧行，保留真实修订，然后共享来源并执行 VACUUM。整理前后最新六个金额字段、披露日与完整来源 SHA256 一致才提交。
+
+实际整理删除 188,064 条补采重复旧行，财务行由 377,428 减至 189,364，来源说明集中为 3,738 份。数据库由 1,442,918,400 字节减至 497,111,040 字节（1,376.07 → 474.08 MiB）；来源说明及兼容占位合计约 6.08 MiB。五项隔离测试通过，SQLite 完整性和外键检查通过，13 张原业务／行业分类／市值表内容一致。后续正式更新、历史批量工具和旧试点工具均使用共享来源附件，响应原始行不再嵌入新财务明细。报告保存在 `data/verification/reports/financial_storage_compaction_20261004/`；8765 已恢复，日志为 `data/verification/logs/daily-8765-financial-compact-complete.out.log`、`.err.log`。
+
 行业内公司标签排在左侧并默认展示；右侧行业排行与公司列表统一为营业收入、归母净利润、总市值三组金额／同比共六列，支持点击表头升降序排序，缺失值置底。行业排行默认营收同比降序，保留层级、父行业及同比覆盖筛选；首列固定并展示行业名称和代码，点击名称切换所选行业。行业市值使用所选报告期对应季度固定成员，同比按两期同时属于该行业且均有有效市值的同一批公司计算，批量读取该季及去年同季本地明细，不逐行业调用外部来源。
 
 行业排行区域新增「行业内公司」标签页，读取所选行业当前分类名单的全部公司（不只本地已保存个股），支持名称／代码搜索及营收、归母利润、市值金额／同比六列升降序排序，缺失值始终排在末尾。营收、利润及其同比使用所选报告期和财务口径；公司市值取同一报告期对应的固定季末交易日，全年为年末，同比比较同一家公司去年同季末市值。缺少基期或基期非正时显示不可比，不将未上市公司的市值补零。不新增明细存储、外部采集或模型调用。
@@ -50,12 +62,16 @@
 
 页面具有两个独立行业更新入口，均通过 `POST /api/industry/refresh`，不接受全历史 `refresh_pilot` 请求：
 
-- 「更新全市场财务」：`{"action":"financial_period","target":"2026-06-30","recheck":false}`。使用已导入的沪深全市场名单，东方财富 `RPT_DMSK_FN_INCOME` 分页读取指定报告期，核对营收、归母利润及修订。本地新浪同口径有效值优先；缺少有效值时取东财轻量指标。指标未变不重复入库，来源缺失保留该期已有有效值；未披露留空。不采集市值、完整三表或其他报告期。
+- 「更新全市场财务」：`{"action":"financial_period","target":"2026-06-30","recheck":false}`。使用已导入的沪深全市场名单，东方财富 `RPT_DMSK_FN_INCOME` 分页读取指定报告期，核对原有营收、归母利润及新增四字段。原有两指标仍优先本地新浪同口径有效值，缺少时取东财；新增四字段统一取东财。指标未变不重复入库，来源缺失保留该期已有有效值；未披露留空。不采集市值、完整三表或其他报告期。
 - 「补齐全市场市值」：`{"action":"cap_quarter","target":"2026Q3","recheck":false}`。使用固定季度成员及交易日，东方财富 `RPT_VALUEANALYSIS_DET` 批量分页读取该日市值，默认只导入缺失公司；`recheck=true` 才核对已有值及来源修订。金额元，核对总股本 × 不复权收盘价；缺项不清除旧值。不查询逐股百度历史，不采集其他季度；全已覆盖且未勾选修订时不请求市值来源。
 
 两个按钮均先弹出确认提示，显示报告期／季度、全市场名单范围、补缺／修订方式与耗时说明；取消不提交请求。确认后使用独立行业任务状态，重复点击不新增并行任务。支持最近十年内已结束报告期／季度，每次仅一期间。东财每页 500 条，串行 2.5—3.5 秒随机间隔，每 20 次休息 30 秒，失败冷却 60／120 秒；每次任务使用独立来源目录，避免复用上次任务的旧财报分页掩盖修订。完整分页及日期核对通过后才发布，失败保留已有快照。响应与结果保存在 `data/industry_sources/updates/<任务时间>/`。
 
 两个行业任务共享行业自身互斥状态，与个股任务分开；页面 GET 只读，个股 `financial-facts-updated` 事件不刷新行业页面。没有自动调度，也不在后台启动或查看页面时采集。
+
+市值来源采用共享存储（schema v13）：`sw_cap_provenance` 按完整 JSON 的规范化 SHA256 去重，`sw_cap_facts.provenance_id` 引用来源，旧内联字段保存 `{}`。来源路径、参数、哈希、字段、单位、计算和校验信息完整保留，正式响应文件不删除；兼容尚未整理的旧内联 JSON。后续导入金额未变不复制明细，新值引用共享来源；腾讯字段 44 的错误版本识别同时支持两种来源存储格式。
+
+离线整理工具为 `python -m quarterly_dashboard.industry_cap_compact --report-directory data/verification/reports/<本次报告目录>`，必须停止后台并持有数据库实例锁。迁移自动备份，工具复用迁移前备份；已完成迁移时额外生成整理前备份。仅清理同一公司及交易日的连续版本中金额、完整来源、拒绝状态完全相同的后续行；若有外键直接引用市值明细则不清理。保留修订、来源变化和错误版本审计。整理前后核对最新有效市值、真实变更序列及完整来源，并逐表校验行业汇总和其他业务数据的 SHA256；事务通过后 VACUUM 回收空间，再检查完整性和外键。重复运行不重复整理。
 
 分类及名单需要单独更新：`python -m quarterly_dashboard.industry_sources data/industry_sources/<新目录> --foundation-only`，然后通过 `python -m quarterly_dashboard.industry_service <目录>/bundle.json --database <指定数据库>` 导入；该模式不下载财务或市值，不捕获本地财务。新季度要求分类资料的采集日期不早于目标季末，过旧则提示先更新分类。已经固定的季度不随后来分类变化而改写。
 

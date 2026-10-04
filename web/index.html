@@ -199,6 +199,7 @@
     <button id="trend-tab" type="button" role="tab" aria-selected="true" aria-controls="trend-panel">企业经营趋势</button>
     <button id="statements-tab" type="button" role="tab" aria-selected="false" aria-controls="statements-panel" tabindex="-1">财务分析</button>
     <button id="industry-tab" type="button" role="tab" aria-selected="false" aria-controls="industry-panel" tabindex="-1">行业内对比</button>
+    <button id="maintenance-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-panel" tabindex="-1">后台维护</button>
   </nav>
   </aside>
   <div class="workspace-content">
@@ -431,6 +432,7 @@
   </div>
   <section id="statements-panel" role="tabpanel" aria-labelledby="statements-tab" hidden></section>
   <section id="industry-panel" role="tabpanel" aria-labelledby="industry-tab" hidden></section>
+  <section id="maintenance-panel" role="tabpanel" aria-labelledby="maintenance-tab" hidden></section>
   </div>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
@@ -442,12 +444,15 @@
 <script src="/financial-statements.js?v=20261004-sidebar-tabs"></script>
 <link rel="stylesheet" href="/industry.css?v=20261004-ranking">
 <script src="/industry.js?v=20261004-industry-comparison"></script>
+<link rel="stylesheet" href="/maintenance.css?v=20261004-storage">
+  <script src="/maintenance.js?v=20261004-restore-scope"></script>
 <script>
 (() => {
   const state = JSON.parse(document.getElementById('payload').textContent);
   window.initAIChecklist(state);
   window.initFinancialStatements(state);
   window.initIndustry(state);
+  window.initMaintenance();
   const selectionsKey = 'investment-dashboard-selections-v1';
   let savedSelections = {};
   try { savedSelections = JSON.parse(sessionStorage.getItem(selectionsKey)) || {}; }

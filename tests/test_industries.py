@@ -432,7 +432,7 @@ def test_industry_job_audits_success_and_failure(service,monkeypatch,tmp_path):
 def test_populated_schema9_migration_preserves_cap_values_and_rejected_versions(monkeypatch,tmp_path):
     from quarterly_dashboard import storage
     migrations=storage.MIGRATIONS
-    monkeypatch.setattr(storage,'MIGRATIONS',migrations[:-1])
+    monkeypatch.setattr(storage,'MIGRATIONS',migrations[:9])
     db=Database(tmp_path/'old.sqlite3');db.initialize();b=fixture_bundle()
     with db.connection(write=True) as conn:
         for row in b['taxonomy']:

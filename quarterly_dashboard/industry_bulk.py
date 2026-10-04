@@ -10,7 +10,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .industry_service import IndustryService, dumps
-from .industry_sources import EM, financial_rows, number
+from .industry_sources import EM, FINANCIAL_COLUMNS, attach_financial_source, financial_rows, number
 from .industry_updates import cap_roster, quarter_end, target_trade_date
 from .network import create_data_session
 
@@ -147,7 +147,7 @@ def collect(service, directory, *, today=None, progress=print, years=1, cache_di
         for quarter in financial_quarters:
             period = quarter_end(quarter).isoformat()
             raw, sources = fetch_pages(session, directory, 'RPT_DMSK_FN_INCOME',
-                'SECURITY_CODE,REPORT_DATE,NOTICE_DATE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT',
+                FINANCIAL_COLUMNS,
                 f"(REPORT_DATE='{period}')", progress, pacer, cache_directory)
             if any(r['REPORT_DATE'][:10] != period for r in raw):
                 raise ValueError('财务返回报告期不匹配')
@@ -155,8 +155,7 @@ def collect(service, directory, *, today=None, progress=print, years=1, cache_di
             source_by_code = {r['SECURITY_CODE']: sources[i // 500] for i, r in enumerate(raw)}
             local = service.local_period(period, sorted(universe))
             for row in rows:
-                row['provenance'].pop('raw', None)
-                row['provenance'].update(source_by_code[row['stock_code']])
+                attach_financial_source(row,source_by_code[row['stock_code']])
                 for metric in ('revenue', 'parent_profit'):
                     if local.get(row['stock_code'], {}).get(metric) is not None:
                         row[metric] = local[row['stock_code']][metric]

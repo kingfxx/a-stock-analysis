@@ -73,6 +73,13 @@
         const response=await fetch('/api/industry?'+query,{cache:'no-store',signal:controller.signal});const result=await response.json();
         if(!response.ok)throw new Error(result.error||'读取失败');if(request!==seq)return;
         data=result;loaded=true;render();
+        const statusResponse=await fetch('/api/industry/status',{cache:'no-store'});
+        if(statusResponse.ok&&request===seq){
+          const status=await statusResponse.json();busy(status.running);
+          if(status.message!=='尚未刷新')el('sw-job-status').textContent=status.message+(status.error?'：'+status.error:'');
+          if(status.running&&!pollTimer)pollTimer=setTimeout(poll,1500);
+          if(!status.running){clearTimeout(pollTimer);pollTimer=null;}
+        }
       }catch(e){if(e.name!=='AbortError'&&request===seq)el('sw-status').textContent=e.message;}
     }
     function choices(id,items,value,label){el(id).innerHTML=`<option value="">全部${label}</option>`+items.map(r=>`<option value="${esc(r.code)}">${esc(r.name)} · ${esc(r.code)}</option>`).join('');el(id).value=value||'';}

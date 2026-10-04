@@ -24,6 +24,11 @@ SW_BASE = 'https://www.swsresearch.com/swindex/pdf/SwClass2021/'
 SINA = 'https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/'
 EM = 'https://datacenter-web.eastmoney.com/api/data/v1/get'
 FIN_SOURCE = 'eastmoney:RPT_DMSK_FN_INCOME'
+EXTRA_FINANCIAL_FIELDS = {
+    'operating_revenue':'OPERATE_INCOME', 'operating_cost':'OPERATE_COST',
+    'deduct_parent_profit':'DEDUCT_PARENT_NETPROFIT', 'operating_profit':'OPERATE_PROFIT',
+}
+FINANCIAL_COLUMNS = 'SECURITY_CODE,REPORT_DATE,NOTICE_DATE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT,'+','.join(EXTRA_FINANCIAL_FIELDS.values())
 
 
 def number(value):
@@ -124,13 +129,30 @@ def financial_rows(data, asof):
             continue
         if period > asof or notice and notice > asof:
             continue
-        result.append({'stock_code': stock, 'period': period, 'notice_date': notice,
+        parsed = {'stock_code': stock, 'period': period, 'notice_date': notice,
                        'revenue': number(row.get('TOTAL_OPERATE_INCOME')),
                        'parent_profit': number(row.get('PARENT_NETPROFIT')),
                        'provenance': {'source': FIN_SOURCE, 'revenue_field': 'TOTAL_OPERATE_INCOME',
                                       'profit_field': 'PARENT_NETPROFIT', 'unit': '元',
-                                      'scope': '合并', 'basis': '本年累计', 'raw': row}})
+                                      'scope': '合并', 'basis': '本年累计', 'raw': row}}
+        for metric,field in EXTRA_FINANCIAL_FIELDS.items():
+            parsed[metric] = number(row.get(field))
+            if parsed[metric] is not None:
+                parsed['provenance'][metric] = {'source':FIN_SOURCE,'field':field,'unit':'元',
+                    'basis':'本年累计','scope':'归母' if 'parent_profit' in metric else '合并','method':'直接取数'}
+        result.append(parsed)
     return result
+
+
+def attach_financial_source(row, source):
+    """Keep response files once; metrics refer to their shared evidence."""
+    provenance=row['provenance']
+    provenance.pop('raw',None)
+    provenance.update(source)
+    provenance['extension_source']=source
+    for metric in EXTRA_FINANCIAL_FIELDS:
+        if metric in provenance:
+            provenance[metric]['source_ref']='extension_source'
 
 
 PILOT_INDUSTRIES = ('630701', '340702')  # 锂电池、乳品：45 家左右，验证完整三级汇总。
@@ -222,7 +244,13 @@ def download(directory, *, progress=lambda message: None, foundation=None, found
         if not data.get('success') or not data.get('result') or data['result']['count'] != total_count:
             raise ValueError('利润表分页期间数据变化或接口失败，请重新刷新')
         observed += len(data['result']['data'])
-        rows.extend(financial_rows(data['result']['data'], asof))
+        page_rows=financial_rows(data['result']['data'], asof)
+        source_path=directory/f'income_{page}.json'
+        evidence={'file':str(source_path.resolve()),'sha256':hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                  'url':EM,'params':{**params,'pageNumber':page}}
+        for row in page_rows:
+            attach_financial_source(row,evidence)
+        rows.extend(page_rows)
     if observed != total_count or len({(r['stock_code'],r['period']) for r in rows}) != len(rows):
         raise ValueError('利润表分页不完整或重复')
     quotes = []
