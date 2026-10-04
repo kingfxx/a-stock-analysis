@@ -7,7 +7,7 @@
   const marketDisplay=series=>({mode:series.length>1?'lines+markers':'markers',
     label:series.length===1?'总市值快照（仅1期）':'季度总市值（已覆盖）',
     note:series.length>1?`市值已有 ${series.length} 个季度点（${series[0].quarter}—${series.at(-1).quarter}），更早季度待补。`:
-      series.length===1?'市值仅有 1 个季度快照，图中为橙色点，尚不能形成趋势线；历史季度待补。':'尚无市值快照，图中只展示营收；市值历史待补。'});
+      series.length===1?'市值仅有 1 个季度快照，图中为黄色点，尚不能形成趋势线；历史季度待补。':'尚无市值快照，图中只展示营收与归母利润；市值历史待补。'});
   window.industryMarketDisplay=marketDisplay;
   window.initIndustry=state=>{
     const el=id=>document.getElementById(id);
@@ -24,12 +24,13 @@
       <label>财务口径<select id="sw-mode"><option value="ttm">滚动十二个月 TTM</option><option value="quarter">单季度</option><option value="ytd">本年累计</option><option value="annual">全年</option></select></label>
       <label>报告期<select id="sw-period"></select></label><label class="sw-toggle"><input id="sw-covered" type="checkbox" checked>仅看营收同比 / 毛利率覆盖 ≥95%</label></div>
       <div class="sw-metrics-scroll" tabindex="0" role="region" aria-label="行业汇总，可横向滚动"><div id="sw-metrics" class="fs-metrics"></div></div>
-      <section class="panel fs-panel"><h3 id="sw-title">行业趋势</h3><p id="sw-chart-note"></p><div id="sw-chart" class="sw-chart"></div><div id="sw-market"></div></section>
+      <section class="panel fs-panel"><div class="sw-trend-heading"><h3 id="sw-title">行业趋势</h3><div class="metric-mode-group sw-trend-toggles" role="group" aria-label="行业趋势指标显示"><button type="button" class="metric-mode" id="sw-show-revenue" aria-pressed="true" aria-controls="sw-chart" style="--series-color:#38c4dc"><i aria-hidden="true"></i>营收</button><button type="button" class="metric-mode" id="sw-show-profit" aria-pressed="true" aria-controls="sw-chart" style="--series-color:#b9a0f5"><i aria-hidden="true"></i>利润</button><button type="button" class="metric-mode" id="sw-show-cap" aria-pressed="true" aria-controls="sw-chart" style="--series-color:#f4d35e"><i aria-hidden="true"></i>市值</button></div></div><p id="sw-chart-note"></p><div id="sw-chart" class="sw-chart"></div><div id="sw-market"></div></section>
       <section class="panel fs-panel"><div class="sw-company-toolbar"><div class="sw-company-tabs" role="tablist" aria-label="行业与公司"><button type="button" id="sw-companies-tab" role="tab" aria-selected="true" aria-controls="sw-companies-panel">行业内公司 <small id="sw-company-total"></small></button><button type="button" id="sw-rank-tab" role="tab" aria-selected="false" aria-controls="sw-rank-panel" tabindex="-1">行业排行</button><button type="button" id="sw-child-rank-tab" role="tab" aria-selected="false" aria-controls="sw-child-rank-panel" tabindex="-1" hidden>子行业统计</button></div><div class="sw-ranking-levels" role="group" aria-label="快速切换排行层级"><span>排行层级</span>${[1,2,3].map(level=>`<button type="button" id="sw-rank-level-${level}" data-rank-level="${level}" aria-pressed="${level===3}">${['一级','二级','三级'][level-1]}</button>`).join('')}</div></div><div id="sw-rank-panel" role="tabpanel" aria-labelledby="sw-rank-tab" hidden><p id="sw-rank-note" class="sw-note"></p><div id="sw-ranking" class="sw-company-scroll"></div></div><div id="sw-child-rank-panel" role="tabpanel" aria-labelledby="sw-child-rank-tab" hidden><h4 id="sw-child-ranking-title"></h4><p id="sw-child-rank-note" class="sw-note"></p><div id="sw-child-ranking" class="sw-company-scroll"></div></div><div id="sw-companies-panel" role="tabpanel" aria-labelledby="sw-companies-tab"><div class="sw-company-info"><div id="sw-company-context"></div><input id="sw-company-search" type="search" aria-label="搜索公司名称或代码" placeholder="搜索公司名称 / 代码"></div><div id="sw-companies" class="sw-company-scroll"></div><div class="sw-company-footer"><span id="sw-company-count"></span><span>金额单位：亿元 · 毛利率同比：百分点 · 点击表头排序 · 缺失值排在末尾</span></div></div></section>
       <section class="panel fs-panel"><h3>与已保存的股票及分析对照</h3><p id="sw-compare-note"></p><div id="sw-saved" class="sw-scroll"></div></section>
       <details class="panel fs-panel sw-notes"><summary>数据来源与汇总口径</summary><div id="sw-notes"></div></details>`;
     let data=null,seq=0,controller=null,loaded=false,selected=null,parent=null,period=null,pollTimer=null;
     let companySort='revenue',companyDirection=-1;
+    const chartVisibility={revenue:true,profit:true,cap:true};
     let rankingSort='revenue_yoy',rankingDirection=-1;
     let childRankingSort='revenue_yoy',childRankingDirection=-1;
     const companyFields=[['revenue','营业收入金额'],['revenue_yoy','营业收入同比'],['parent_profit','归母利润金额'],['parent_profit_yoy','归母利润同比'],['total_cap','市值金额'],['cap_yoy','市值同比'],['gross_margin','毛利率'],['gross_margin_yoy','毛利率同比']];
@@ -121,9 +122,9 @@
       const hoverAmount=v=>v===null||v===undefined?'待补':`${amount(v)} 亿元`;
       const hoverData=period=>{
         const revenue=revenueByPeriod.get(period),cap=marketByPeriod.get(period);
-        return [hoverAmount(revenue?.revenue_known),revenue?.revenue_count||0,hoverAmount(cap?.known_cap),cap?.known_count||0,cap?.trade_date||'待补'];
+        return [hoverAmount(revenue?.revenue_known),revenue?.revenue_count||0,hoverAmount(cap?.known_cap),cap?.known_count||0,cap?.trade_date||'待补',hoverAmount(revenue?.parent_profit_known),revenue?.parent_profit_count||0];
       };
-      const hoverTemplate='报告期 %{x|%Y-%m}<br>营收 %{customdata[0]} · 覆盖 %{customdata[1]} 家<br>总市值 %{customdata[2]} · 覆盖 %{customdata[3]} 家<br>市值日期 %{customdata[4]}<extra></extra>';
+      const hoverTemplate='报告期 %{x|%Y-%m}<br>营收 %{customdata[0]} · 覆盖 %{customdata[1]} 家<br>归母净利润 %{customdata[5]} · 覆盖 %{customdata[6]} 家<br>总市值 %{customdata[2]} · 覆盖 %{customdata[3]} 家<br>市值日期 %{customdata[4]}<extra></extra>';
       const sameIndustry=data.stock_path.some(r=>r.code===data.selected.code);
       const growthText=v=>v===null||v===undefined?'不可比':pct(v);
       const growthClass=v=>v===null||v===undefined?'':v>=0?'sw-up':'sw-down';
@@ -139,13 +140,15 @@
         summaryCard(annual?'年末市值合计':'季末市值合计',capSummary?.known_cap,capSummary?.yoy,[`${capSummary?.quarter||'所选季度'} · ${capSummary?.trade_date||'日期待补'} · 覆盖 ${capSummary?.known_count||0} 家`,`去年同季可比 ${capSummary?.matched_count||0} 家`])+
         summaryCard('行业毛利率',metric?.gross_margin,metric?.gross_margin_yoy,[`毛利率覆盖 ${metric?.gross_margin_count||0}/${metric?.expected_count||0} 家`,`两期可比 ${metric?.gross_margin_matched_count||0} 家`],true)+
         `<article class="fs-metric sw-summary-card sw-summary-comparison"><div class="sw-summary-heading">当前股票相对行业</div>${comparisonRow('营收同比','revenue')}${comparisonRow('归母利润同比','parent_profit')}</article>`;
-      el('sw-title').textContent=path.map(r=>r.name).join(' → ')+(annual?' · 营收与年末市值':' · 营收与季度市值');
-      el('sw-chart-note').textContent=`蓝柱：${el('sw-mode').selectedOptions[0].textContent}营收；${marketSeries.length>1?'橙线':'橙点'}：${annual?'年末':'季度'}总市值。按${annual?'年度':'季度'}末对齐，实际市值交易日期见悬浮提示。${marketStyle.note} 两轴均为亿元，尺度独立。营收按当前成分回溯；市值按各季度保存的成员口径，覆盖不全为已覆盖合计。`;
-      const valid=data.series.filter(r=>r.revenue_known!==null);
+      el('sw-title').textContent=path.map(r=>r.name).join(' → ')+(annual?' · 营收、归母利润与年末市值':' · 营收、归母利润与季度市值');
+      el('sw-chart-note').textContent=`青柱：营收，紫柱：归母净利润（${el('sw-mode').selectedOptions[0].textContent}）；${marketSeries.length>1?'黄线':'黄点'}：${annual?'年末':'季度'}总市值。按${annual?'年度':'季度'}末对齐，实际市值交易日期见悬浮提示。${marketStyle.note} 营收与利润共用左轴，市值使用右轴，两轴均为亿元，尺度独立。点击指标按钮可显示或隐藏。营收与利润按当前成分回溯；市值按各季度保存的成员口径，覆盖不全为已覆盖合计。`;
+      ['revenue','profit','cap'].forEach(key=>el(`sw-show-${key}`).setAttribute('aria-pressed',String(chartVisibility[key])));
+      const valid=data.series.filter(r=>r.revenue_known!=null||r.parent_profit_known!=null);
       if(valid.length||market){
-        Plotly.react('sw-chart',[{type:'bar',name:'营收合计（已覆盖）',x:data.series.map(r=>r.period),y:data.series.map(r=>r.revenue_known===null?null:r.revenue_known/1e8),marker:{color:'#39aacf'},customdata:data.series.map(r=>hoverData(r.period)),hovertemplate:hoverTemplate},
-          {type:'scatter',mode:marketStyle.mode,name:marketStyle.label,x:marketSeries.map(quarterPeriod),y:marketSeries.map(r=>r.known_cap/1e8),yaxis:'y2',line:{color:'#ec995f',width:3},marker:{size:marketSeries.length===1?12:9},customdata:marketSeries.map(r=>hoverData(quarterPeriod(r))),hovertemplate:hoverTemplate}],
-          {paper_bgcolor:'transparent',plot_bgcolor:'transparent',font:{color:'#b8c9d0'},hovermode:'closest',margin:{l:75,r:85,t:25,b:70},legend:{orientation:'h',y:-.2},xaxis:{type:'date',tickformat:'%Y-%m',gridcolor:'#27333a'},yaxis:{title:{text:'营收 · 亿元'},gridcolor:'#27333a',rangemode:'tozero'},yaxis2:{title:{text:'总市值 · 亿元'},overlaying:'y',side:'right',showgrid:false,rangemode:'tozero'},annotations:marketSeries.length===1?[{xref:'x',yref:'y2',x:quarterPeriod(market),y:market.known_cap/1e8,text:'仅1期市值快照<br>历史待补',showarrow:true,arrowhead:2,ax:-65,ay:35,font:{color:'#ec995f',size:12}}]:[]},{responsive:true,displayModeBar:false});
+        Plotly.react('sw-chart',[{type:'bar',visible:chartVisibility.revenue,name:'营收合计（已覆盖）',x:data.series.map(r=>r.period),y:data.series.map(r=>r.revenue_known==null?null:r.revenue_known/1e8),marker:{color:'#38c4dc'},customdata:data.series.map(r=>hoverData(r.period)),hovertemplate:hoverTemplate},
+          {type:'bar',visible:chartVisibility.profit,name:'归母净利润合计（已覆盖）',x:data.series.map(r=>r.period),y:data.series.map(r=>r.parent_profit_known==null?null:r.parent_profit_known/1e8),marker:{color:'#b9a0f5'},customdata:data.series.map(r=>hoverData(r.period)),hovertemplate:hoverTemplate},
+          {type:'scatter',visible:chartVisibility.cap,mode:marketStyle.mode,name:marketStyle.label,x:marketSeries.map(quarterPeriod),y:marketSeries.map(r=>r.known_cap/1e8),yaxis:'y2',line:{color:'#f4d35e',width:3},marker:{color:'#f4d35e',size:marketSeries.length===1?12:9},customdata:marketSeries.map(r=>hoverData(quarterPeriod(r))),hovertemplate:hoverTemplate}],
+          {paper_bgcolor:'transparent',plot_bgcolor:'transparent',font:{color:'#b8c9d0'},barmode:'group',uirevision:`${data.selected.code}:${data.mode}`,hovermode:'closest',margin:{l:75,r:85,t:25,b:70},legend:{orientation:'h',y:-.2},xaxis:{type:'date',tickformat:'%Y-%m',gridcolor:'#27333a'},yaxis:{visible:chartVisibility.revenue||chartVisibility.profit,title:{text:'营收 / 归母净利润 · 亿元'},gridcolor:'#27333a',rangemode:'tozero'},yaxis2:{visible:chartVisibility.cap,title:{text:'总市值 · 亿元'},overlaying:'y',side:'right',showgrid:false,rangemode:'tozero'},annotations:!Object.values(chartVisibility).some(Boolean)?[{xref:'paper',yref:'paper',x:.5,y:.5,text:'请选择至少一个指标',showarrow:false}]:chartVisibility.cap&&marketSeries.length===1?[{xref:'x',yref:'y2',x:quarterPeriod(market),y:market.known_cap/1e8,text:'仅1期市值快照<br>历史待补',showarrow:true,arrowhead:2,ax:-65,ay:35,font:{color:'#f4d35e',size:12}}]:[]},{responsive:true,displayModeBar:false});
       }else{Plotly.purge('sw-chart');el('sw-chart').innerHTML='<p class="sw-empty">该行业尚无可汇总的财务或市值。</p>';}
       const historyCaps=new Map((data.market_history||[]).filter(r=>!annual||r.quarter.endsWith('Q4')).map(r=>[quarterPeriod(r),r]));
       const latestFinancialPeriod=data.series.filter(r=>r.revenue_known!==null&&r.revenue_known!==undefined||r.parent_profit_known!==null&&r.parent_profit_known!==undefined).map(r=>r.period).sort().at(-1);
@@ -165,6 +168,7 @@
       el('sw-compare-note').textContent=`仅比较所选行业内已保存股票，财务使用相同报告期与口径。历史分析展示原摘要和日期，未重新生成。${sameIndustry?' 当前股票营收来源：'+(data.stock_provenance.revenue?.report_type||data.stock_provenance.revenue?.source||'待补')+' / '+(data.stock_provenance.revenue?.field||'待补'):''}`;
       el('sw-saved').innerHTML=data.saved_stocks.length?`<table class="sw-table"><thead><tr><th>已保存股票</th><th>营收同比</th><th>归母利润同比</th><th>最近分析</th><th>历史摘要</th></tr></thead><tbody>${data.saved_stocks.map(s=>`<tr><td><a href="/?code=${esc(s.code)}&amp;tab=trend">${esc(s.code)} ${esc(s.name)}</a></td><td>${pct(s.metrics?.revenue_yoy)}</td><td>${pct(s.metrics?.parent_profit_yoy)}</td><td>${s.analysis_date?esc(new Date(s.analysis_date).toLocaleDateString('zh-CN')):'尚无分析'}</td><td class="sw-summary">${esc(s.analysis_summary||'—')}</td></tr>`).join('')}</tbody></table>`:'<p class="sw-empty">本地还没有所选行业的股票。</p>';
     }
+    ['revenue','profit','cap'].forEach(key=>el(`sw-show-${key}`).addEventListener('click',()=>{chartVisibility[key]=!chartVisibility[key];if(data&&!data.empty)render();}));
     ['first','second','third'].forEach((name,index)=>el('sw-'+name).addEventListener('change',()=>{
       selected=el('sw-'+name).value||null;el('sw-level').value=String(index+1);
       parent=null;load();
