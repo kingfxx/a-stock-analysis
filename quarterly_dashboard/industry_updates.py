@@ -121,12 +121,16 @@ def cap_roster(db, foundation, quarter, target_date):
             latest[row['stock_code']] = row
     members = []
     for row in foundation['members']:
+        if row.get('listing_date') and row['listing_date']>target_date:
+            continue
         past = latest.get(row['stock_code'])
         if past is None and row.get('effective_date') and row['effective_date']<=target_date:
             past = row
         if past is not None:
             members.append({'stock_code':row['stock_code'],
                             'industry_code':past['industry_code'] if past['industry_code'] in valid else None})
+        elif row.get('listing_date'):
+            members.append({'stock_code':row['stock_code'],'industry_code':None})
     if not members:
         raise ValueError('没有可确认的季末分类成员')
     return {'quarter':quarter,'target_date':target_date,'composition':'quarter_end_classification_current_universe',
@@ -190,6 +194,8 @@ def perform(service, action, target, recheck, progress):
     # Import lazily: the bulk history collector also uses calendar/roster helpers here.
     from .industry_bulk import RequestPacer, cap_rows, fetch_pages
     validate_request(action,target,recheck)
+    from .industry_memberships import ensure_daily_memberships
+    membership_check=ensure_daily_memberships(service,progress)
     foundation=service.foundation()
     stocks=sorted(r['stock_code'] for r in foundation['members'])
     if not 4000<=len(stocks)<=10000:
@@ -258,7 +264,7 @@ def perform(service, action, target, recheck, progress):
         effective=service._load()['facts']
         failures=[{'stock_code':s,'error':'指定报告期营收或归母净利润待补'} for s in stocks
                   if any(effective.get((s,target),{}).get(m) is None for m in ('revenue','parent_profit'))]
-    result={'import_id':import_id,'action':action,'target':target,'scope_count':len(stocks),
+    result={'import_id':import_id,'action':action,'target':target,'scope_count':len(stocks),'membership_check':membership_check,
             'requested_count':len(required),'returned_count':len(bundle['financials'] if action=='financial_period' else bundle['caps']),
             'network_requests':pacer.requests,'files':sources,'failures':failures}
     (directory/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')

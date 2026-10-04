@@ -27,7 +27,9 @@ def fixture_bundle():
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path,monkeypatch):
+    monkeypatch.setattr('quarterly_dashboard.industry_memberships.ensure_daily_memberships',
+        lambda *a,**k:{'status':'complete','reused':True})
     db=Database(tmp_path/'industry.sqlite3');db.initialize()
     return IndustryService(db)
 
@@ -45,6 +47,77 @@ def test_missing_zero_quarter_ttm_and_same_cohort():
     assert r['revenue_matched_count']==1 and not r['rank_eligible']
     r=aggregate(['a','b'],facts,'2024-03-31','ytd')
     assert r['revenue'] is None and r['revenue_known']==0 and r['revenue_count']==1
+
+
+def test_gross_margin_periods_weighting_and_missing():
+    facts={('a',p):{'operating_revenue':r,'operating_cost':c}
+           for p,r,c in [('2024-06-30',100,80),('2024-12-31',240,180),
+                         ('2025-03-31',60,45),('2025-06-30',160,100)]}
+    assert aggregate(['a'],facts,'2025-06-30','ytd')['gross_margin']==37.5
+    assert aggregate(['a'],facts,'2025-06-30','quarter')['gross_margin']==45
+    assert aggregate(['a'],facts,'2025-06-30','ttm')['gross_margin']==pytest.approx(100/3)
+    assert aggregate(['a'],facts,'2024-12-31','annual')['gross_margin']==25
+    facts[('b','2025-06-30')]={'operating_revenue':40,'operating_cost':40}
+    facts[('missing','2025-06-30')]={'operating_revenue':1000}
+    facts[('zero','2025-06-30')]={'operating_revenue':0,'operating_cost':0}
+    facts[('bank','2025-06-30')]={'operating_revenue':500,'operating_cost':0,'gross_margin_applicable':False}
+    result=aggregate(['a','b','missing','zero','bank'],facts,'2025-06-30','ytd')
+    assert result['gross_margin']==30
+    assert result['gross_margin_count']==2 and result['gross_margin_coverage']==.4
+    assert aggregate(['b'],facts,'2025-06-30','ytd')['gross_margin']==0
+    assert aggregate(['bank'],facts,'2025-06-30','ytd')['gross_margin'] is None
+    facts[('a','2025-03-31')]['operating_cost']=None
+    assert aggregate(['a'],facts,'2025-06-30','quarter')['gross_margin'] is None
+    facts[('fallback','2025-06-30')]={'revenue':100,'operating_cost':60}
+    assert aggregate(['fallback'],facts,'2025-06-30','ytd')['gross_margin'] is None
+    facts[('fallback','2025-06-30')]['gross_margin_total_revenue_equivalent']=True
+    assert aggregate(['fallback'],facts,'2025-06-30','ytd')['gross_margin']==40
+    facts[('fallback','2025-06-30')]['operating_revenue']=80
+    assert aggregate(['fallback'],facts,'2025-06-30','ytd')['gross_margin']==25
+
+
+def test_company_and_industry_gross_margin_and_financial_exclusion(service):
+    bundle=fixture_bundle()
+    for row in bundle['financials']:
+        row.update(operating_revenue=row['revenue'],operating_cost=row['revenue']*.6)
+    service.import_bundle(bundle)
+    result=service.read(code='300750',mode='ytd',period='2025-06-30')
+    assert result['companies'][0]['metrics']['gross_margin']==40
+    assert result['ranking'][0]['gross_margin']==40
+    assert result['series'][-1]['gross_margin_count']==2
+    bank=copy.deepcopy(bundle)
+    bank['taxonomy'][0]['name']='银行'
+    service.import_bundle(bank)
+    result=service.read(code='300750',mode='ytd',period='2025-06-30')
+    assert all(c['metrics']['gross_margin'] is None for c in result['companies'])
+    assert all(r['gross_margin'] is None for r in result['ranking'])
+
+
+@pytest.mark.parametrize('mode,current,baseline', [('ytd','2025-06-30','2024-06-30'),
+    ('quarter','2025-06-30','2024-06-30'),('ttm','2025-06-30','2024-06-30'),
+    ('annual','2025-12-31','2024-12-31')])
+def test_gross_margin_yoy_same_cohort_and_period(mode,current,baseline):
+    facts={}
+    for year in (2023,2024,2025):
+        for suffix,revenue in [('03-31',50),('06-30',100),('12-31',200)]:
+            facts[('a',f'{year}-{suffix}') ]={'operating_revenue':revenue,
+                'operating_cost':revenue*(.7 if year==2025 else .8)}
+    facts[('new',current)]={'operating_revenue':900,'operating_cost':0}
+    result=aggregate(['a','new'],facts,current,mode)
+    assert result['gross_margin_yoy']==pytest.approx(10 if mode!='ttm' else 5)
+    assert result['gross_margin_matched_count']==1
+    assert result['gross_margin_matched_coverage']==.5
+    assert result['gross_margin_baseline']==pytest.approx(20)
+    assert aggregate(['new'],facts,current,mode)['gross_margin_yoy'] is None
+    facts[('a',baseline)]['operating_cost']=None
+    assert aggregate(['a'],facts,current,mode)['gross_margin_yoy'] is None
+
+
+@pytest.mark.parametrize('baseline_cost,expected', [(100,30),(120,50)])
+def test_gross_margin_yoy_zero_or_negative_baseline(baseline_cost,expected):
+    facts={('a','2024-06-30'):{'operating_revenue':100,'operating_cost':baseline_cost},
+           ('a','2025-06-30'):{'operating_revenue':100,'operating_cost':70}}
+    assert aggregate(['a'],facts,'2025-06-30','ytd')['gross_margin_yoy']==pytest.approx(expected)
 
 
 def test_upward_sum_classification_comparison_and_quarter_cap(service):

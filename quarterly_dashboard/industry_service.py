@@ -15,9 +15,12 @@ NOTES = [
     '申万 2021 三级分类；全市场范围为当前沪深 A 股，北交所、已退市公司不在当前成分中。未分类公司单列，不强行归属。',
     '营收为合并营业总收入，按当前成分回溯；历史不是当时的行业成分，不能作为无偏历史回测。上市母子公司报表未抵销，不等于宏观行业产值。',
     '累计为本年累计；单季度按同年累计差分；TTM = 本期累计 + 上年全年 − 上年同期累计。缺值留空，有效零保留。',
+    '毛利率＝（营业收入－营业成本）÷营业收入；先按所选周期计算收入、成本。行业按收入加权，仅汇总收入大于零且成本完整的公司，并显示覆盖家数；银行和非银金融不适用。营业收入缺失时，仅明确分类的非金融公司、且来源字段为同口径合并累计营业总收入时使用该值作分母，不改写原字段。',
+    '毛利率同比为较去年同报告期、同财务口径的变化，单位为百分点；行业使用两期都有有效收入和成本的同一批公司，分别计算加权毛利率后相减。缺少基期显示不可比。',
     '同比使用两期都有有效值的同一批公司；基期合计大于零才计算百分比。覆盖率低于 95% 的行业不进入优先景气排行；营收增长只是景气线索，需结合利润与财报研判。',
     '市值独立按已结束季度补齐精确季末值；已有有效值默认跳过，明确核对修订才重取。历史回填保留原成分口径，新季度固定季末分类及成员版本，但股票范围仍为当前沪深名单。',
-    '行业财务只在独立行业任务中更新：指定报告期，优先复用同口径本地新浪有效值，再补取东方财富轻量指标。个股刷新及查看行业均不重算行业快照、不触发行业采集。',
+    '全市场财务／市值任务开始前按上海日期每天最多检查一次官方沪深 A 股名单、申万分类和上市日期；检查失败沿用已保存名单并提示，暂缺公司不直接移除。查看页面与个股刷新不触发名单采集。',
+    '行业财务只在独立行业任务中更新：指定报告期，原营收／归母利润优先复用同口径本地新浪有效值，再补取东方财富轻量指标；扩展四字段统一取东财。已有季度市值固定成员不变，新建季度名单排除季末尚未上市公司。',
     '覆盖不全只显示已覆盖合计，完整行业总额留空；市值与营收分别使用交易日和报告期，不能把财报期末当作业绩已披露日。',
 ]
 
@@ -80,7 +83,11 @@ def local_financials(conn, *, period=None, stocks=None):
 
 def value_for(facts, stock, period, metric, mode):
     def val(p):
-        return facts.get((stock,p), {}).get(metric)
+        row = facts.get((stock,p), {})
+        if metric == 'gross_margin_revenue':
+            revenue = row.get('operating_revenue')
+            return row.get('revenue') if revenue is None and row.get('gross_margin_total_revenue_equivalent') else revenue
+        return row.get(metric)
     current = val(period)
     if current is None:
         return None
@@ -114,6 +121,30 @@ def aggregate(stocks, facts, period, mode):
                        metric+'_matched_coverage':len(matched)/len(stocks) if stocks else 0,
                        metric+'_yoy':(after/before-1)*100 if before is not None and before>0 else None})
     result['rank_eligible'] = result['revenue_matched_coverage'] >= .95 and result['revenue_yoy'] is not None
+    def margin_values(p, codes):
+        values = {}
+        for stock in codes:
+            if not facts.get((stock,p),{}).get('gross_margin_applicable',True):
+                continue
+            revenue = value_for(facts,stock,p,'gross_margin_revenue',mode)
+            cost = value_for(facts,stock,p,'operating_cost',mode)
+            if revenue is not None and revenue > 0 and cost is not None:
+                values[stock] = (revenue,cost)
+        return values
+    def margin(values):
+        revenue = sum(r for r,c in values)
+        return (revenue-sum(c for r,c in values))/revenue*100 if revenue > 0 else None
+    current = margin_values(period,stocks)
+    baseline = margin_values(prior,current)
+    before = margin(list(baseline.values()))
+    after = margin([current[s] for s in baseline])
+    result.update(gross_margin=margin(list(current.values())),
+                  gross_margin_count=len(current),
+                  gross_margin_coverage=len(current)/len(stocks) if stocks else 0,
+                  gross_margin_matched_count=len(baseline),
+                  gross_margin_matched_coverage=len(baseline)/len(stocks) if stocks else 0,
+                  gross_margin_baseline=before, gross_margin_matched_current=after,
+                  gross_margin_yoy=after-before if after is not None and before is not None else None)
     return result
 
 
@@ -147,6 +178,8 @@ class IndustryService:
     def recover_interrupted_runs(self):
         """Called under the backend instance lock; recovery starts no source work."""
         with self.db.connection(write=True) as conn:
+            conn.execute("UPDATE sw_membership_checks SET status='failed',finished_at=?,error=? WHERE status='running'",
+                (datetime.now(timezone.utc).isoformat(),'后台中断，今日名单检查未完成，沿用已保存名单'))
             return conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE status='running'",
                 (datetime.now(timezone.utc).isoformat(),'后台中断，已有行业快照保留；请在行业页面重试补缺')).rowcount
 
@@ -180,7 +213,9 @@ class IndustryService:
                 conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
                              (datetime.now(timezone.utc).isoformat(),dumps(result),run_id))
             with self._lock:
-                self._status.update(running=False,message=f"行业更新完成 · {target} · 请求 {result['requested_count']} 家 · 待补 {len(result['failures'])} 家",
+                warning=result.get('membership_check',{}).get('warning')
+                self._status.update(running=False,message=f"行业更新完成 · {target} · 请求 {result['requested_count']} 家 · 待补 {len(result['failures'])} 家"+
+                                    (' · '+warning if warning else ''),
                                     error=None,result=result)
         except Exception as exc:
             if run_id is not None:
@@ -201,7 +236,7 @@ class IndustryService:
                 "WHERE action='classification' AND status='complete' AND json_extract(result_json,'$.member_import_id')=?",(member_id,)).fetchone()[0]
             return {'member_import_id':member_id,'member_obtained_at':max(obtained,checked or obtained),
                 'taxonomy':[dict(r) for r in conn.execute('SELECT * FROM sw_industries ORDER BY level,code')],
-                'members':[{k:r[k] for k in ('stock_code','name','industry_code','effective_date','source_update')}
+                'members':[{k:r[k] for k in ('stock_code','name','industry_code','effective_date','source_update','listing_date','listing_source_id')}
                     for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=? ORDER BY stock_code',(member_id,))],
                 'membership_history':[{k:r[k] for k in ('stock_code','industry_code','effective_date','source_update')}
                     for r in conn.execute('SELECT * FROM sw_membership_history WHERE import_id=?',(member_id,))]}
@@ -268,7 +303,8 @@ class IndustryService:
                 old_count=len(old_members)
                 if len(bundle['members']) < old_count*.95:
                     raise ValueError('全市场成分数量骤减，未发布新版本')
-                if old_members!=sorted(bundle['members'],key=lambda r:r['stock_code']):
+                member_fields=('stock_code','name','industry_code','effective_date','source_update')
+                if old_members!=sorted([{k:r[k] for k in member_fields} for r in bundle['members']],key=lambda r:r['stock_code']):
                     member_id=None
                 else:
                     old_history=[{k:r[k] for k in ('stock_code','effective_date','industry_code','source_update')}
@@ -329,8 +365,14 @@ class IndustryService:
             if member_id is None:
                 member_id=import_id
                 conn.execute('UPDATE sw_imports SET member_import_id=? WHERE id=?',(member_id,import_id))
-                conn.executemany('INSERT INTO sw_memberships VALUES(?,?,?,?,?,?)',
-                    [(import_id,r['stock_code'],r['name'],r['industry_code'],r['effective_date'],r['source_update']) for r in bundle['members']])
+                existing={r['stock_code']:dict(r) for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=?',
+                    (conn.execute('SELECT member_import_id FROM sw_imports WHERE id=?',(latest,)).fetchone()[0],))} if latest else {}
+                conn.executemany('INSERT INTO sw_memberships '
+                    '(import_id,stock_code,name,industry_code,effective_date,source_update,listing_date,listing_source_id) '
+                    'VALUES(?,?,?,?,?,?,?,?)',
+                    [(import_id,r['stock_code'],r['name'],r['industry_code'],r['effective_date'],r['source_update'],
+                      r.get('listing_date') or existing.get(r['stock_code'],{}).get('listing_date'),
+                      r.get('listing_source_id') or existing.get(r['stock_code'],{}).get('listing_source_id')) for r in bundle['members']])
                 conn.executemany('INSERT INTO sw_membership_history VALUES(?,?,?,?,?)',
                     [(import_id,r['stock_code'],r['effective_date'],r['industry_code'],r['source_update']) for r in bundle.get('membership_history',[])])
             self._classification_check(conn,bundle,member_id)
@@ -395,7 +437,23 @@ class IndustryService:
             members = [dict(r) for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=?',(latest['member_import_id'],))]
             stored = latest_financial_rows(conn)
             facts = {(r['stock_code'],r['period']): {m:r[m] for m in ('revenue','parent_profit',*EXTRA_FINANCIAL_FIELDS)} for r in stored}
+            catalog_map = {r['code']:r for r in catalog}
+            nonfinancial_stocks = set()
+            for member in members:
+                node = catalog_map.get(member['industry_code'])
+                while node:
+                    if node['level']==1 and node['name'] not in {'银行','非银金融'}:
+                        nonfinancial_stocks.add(member['stock_code'])
+                    node = catalog_map.get(node['parent_code'])
             provenance = {(r['stock_code'],r['period']):json.loads(r['provenance_json']) for r in stored}
+            for (stock,period),values in facts.items():
+                values['gross_margin_applicable'] = stock in nonfinancial_stocks
+                source = provenance[(stock,period)]
+                revenue_source = source.get('revenue',source)
+                values['gross_margin_total_revenue_equivalent'] = (stock in nonfinancial_stocks
+                    and revenue_source.get('field',revenue_source.get('revenue_field')) in {'TOTAL_OPERATE_INCOME','BIZTOTINCO'}
+                    and revenue_source.get('scope')=='合并' and revenue_source.get('basis')=='本年累计'
+                    and revenue_source.get('unit')=='元')
             member_codes = {m['stock_code'] for m in members}
             periods = sorted({p for s,p in facts if s in member_codes and p >= '2016-09-30'})
             # Compute capitalization using each import's own constituent roster.
@@ -575,7 +633,7 @@ class IndustryService:
         market_history = self.market_history(selected,bycode) if selected else []
         selected_quarter = f"{period[:4]}Q{(int(period[5:7])-1)//3+1}" if period else None
         company_caps = self.company_market_values(groups.get(selected,[]),period)
-        companies = [{ 'code':m['stock_code'],'name':m['name'],
+        companies = [{ 'code':m['stock_code'],'name':m['name'],'listing_date':m.get('listing_date'),
                        'metrics':aggregate([m['stock_code']],data['facts'],period,mode) if period else None,
                        **company_caps.get(m['stock_code'],{})}
                      for m in data['members'] if selected in paths.get(m['stock_code'],[])]

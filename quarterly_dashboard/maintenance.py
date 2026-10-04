@@ -25,7 +25,9 @@ DESCRIPTIONS={
  'sw_industry_cap_quarters':('行业数据','三级行业季度市值汇总及覆盖家数'),
  'sw_industries':('行业数据','申万三级行业分类及父子关系'),
  'sw_imports':('行业数据','行业采集批次、来源清单与导入版本'),
- 'sw_memberships':('行业数据','行业成分公司名单及分类版本'),
+ 'sw_memberships':('行业数据','行业成分公司名单、分类版本及 A 股上市日期'),
+ 'sw_listing_sources':('行业数据','上市日期共享来源响应、字段定义及采集时间'),
+ 'sw_membership_checks':('运行与配置','全市场任务前每日名单检查、结果及失败记录'),
  'sw_membership_history':('行业数据','来源提供的历史分类变更'),
  'sw_cap_quarter_rosters':('行业数据','固定季度成员版本、实际季末交易日和统计口径'),
  'sw_cap_quarter_members':('行业数据','固定季度的公司及行业归属'),
@@ -67,6 +69,10 @@ def quote(name):
 
 
 def table_time(conn, name, columns):
+    if name=='sw_memberships':
+        values=conn.execute('SELECT max(i.obtained_at),max(s.obtained_at) FROM sw_memberships m '
+            'JOIN sw_imports i ON i.id=m.import_id LEFT JOIN sw_listing_sources s ON s.id=m.listing_source_id').fetchone()
+        return max((v for v in values if v),default=None),'名单批次及上市日期来源采集时间'
     fields=[c for c in TIME_COLUMNS if c in columns]
     if fields:
         # Take max over the separate non-null aggregates.

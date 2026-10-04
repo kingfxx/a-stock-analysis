@@ -10,7 +10,7 @@ from threading import Thread
 import pytest
 
 from quarterly_dashboard.database_restore import RestoreManager, RequestGate, digest
-from quarterly_dashboard.storage import Database, StorageError, instance_lock
+from quarterly_dashboard.storage import Database, StorageError, instance_lock, MIGRATIONS
 
 
 def setup_db(tmp_path):
@@ -30,7 +30,7 @@ def test_restore_keeps_rollback_backup_and_replaces_only_sqlite(tmp_path):
     db,backup,manager=setup_db(tmp_path)
     pdf=tmp_path/'report.pdf';pdf.write_bytes(b'PDF-preserve')
     before=digest(db.path);preview=manager.prepare({'backup':backup.name})
-    assert preview['source_version']==13 and not preview['upgraded']
+    assert preview['source_version']==MIGRATIONS[-1][0] and not preview['upgraded']
     assert preview['source_table_count']==preview['table_count'] and preview['added_tables']==[]
     assert digest(db.path)==before
     schedule(manager,preview)
@@ -51,13 +51,15 @@ def test_old_schema_upgraded_in_copy_and_original_unchanged(tmp_path,monkeypatch
     db=Database(tmp_path/'stock.sqlite3');db.initialize();manager=RestoreManager(db)
     uploaded=manager.upload(io.BytesIO(old.path.read_bytes()),old.path.stat().st_size,'old.sqlite3')
     preview=manager.prepare({'upload':uploaded['upload']})
-    assert preview['upgraded'] and preview['source_version']==12 and preview['target_version']==13
-    assert preview['source_table_count']==preview['table_count']-1
-    assert preview['added_tables']==[{'name':'sw_cap_provenance','rows':0}]
+    assert preview['upgraded'] and preview['source_version']==12 and preview['target_version']==MIGRATIONS[-1][0]
+    assert preview['source_table_count']==preview['table_count']-3
+    assert preview['added_tables']==[{'name':'sw_cap_provenance','rows':0},
+                                   {'name':'sw_listing_sources','rows':0},
+                                   {'name':'sw_membership_checks','rows':0}]
     assert digest(old.path)==original
     schedule(manager,preview)
     with instance_lock(db.path):assert manager.execute()['phase']=='complete'
-    assert db.check()['schema_version']==13
+    assert db.check()['schema_version']==MIGRATIONS[-1][0]
 
 
 @pytest.mark.parametrize('fault',['future','missing_table','missing_column','wrong_index','foreign_file','corrupt'])
@@ -160,7 +162,7 @@ def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch
             except (OSError,urllib.error.URLError):pass
             time.sleep(.05)
         assert state['phase']=='complete' and len(starts)==2 and starts==[False,True]
-        assert request('/api/maintenance/storage')['summary']['schema_version']==13
+        assert request('/api/maintenance/storage')['summary']['schema_version']==MIGRATIONS[-1][0]
         assert db.check()['instruments']==0
     finally:
         instances[-1].shutdown();thread.join(timeout=10)

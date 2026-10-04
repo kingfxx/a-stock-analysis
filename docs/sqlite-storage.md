@@ -1,6 +1,6 @@
 # SQLite 存储、数据更新与备份
 
-本文依据当前代码整理，核对日期为 2026-10-01。数据库结构版本为 **7**，共 **24 张应用表**。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
+本文依据当前代码整理；上市日期及名单自动检查部分更新于 2026-10-04，当前数据库结构版本为 **14**，表数量以维护页实时统计为准。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
 
 ## 1. 文件位置与启动过程
 
@@ -39,6 +39,9 @@
 | `dividend_events` | 分红事件标识、报告期、预案/公告/登记/除权日期、状态、每十股现金分红和原始 JSON | `id` 为主键；`(instrument_id, source, event_key)` 唯一。业务读取仅让已经实施且除权日不晚于今天的现金事件参与计算 |
 | `valuation_observations` | 指标、实际观察日期、数值、来源窗口、采样口径版本和原始 JSON | `(instrument_id, source, metric, observed_on)`；当前直接存储 `pe`、`pb`、`market_cap`，保留同一日期曾来自哪些来源窗口 |
 | `industry_snapshots` | 行业名称/代码、分类口径、快照时间和行业估值原始 JSON | `id` 为主键；`(instrument_id, source, snapshot_at)` 唯一。来源内容变化才增加快照，页面读取最新一份 |
+| `sw_memberships` | 行业成分版本、A 股上市日期及来源引用 | `(import_id, stock_code)` 主键；首次直接补齐当前版本的 `listing_date`／`listing_source_id`，不变更季度成员引用。更新时间取名单批次与关联上市日期来源采集时间的较新值 |
+| `sw_listing_sources` | 共享上市日期来源、请求参数、文件路径、SHA256、字段及定义 | `id` 主键，`content_hash` 唯一；`obtained_at` 为实际来源采集时间，空表或缺时间显示未记录 |
+| `sw_membership_checks` | 全市场任务开始前的每日名单检查结果 | `check_date` 为上海日期主键，成功／失败／中断当天均不重复检查；更新时间来自 `checked_at`／`finished_at`，不以股票上市日期代替 |
 | `financing_daily` | 交易日、融资余额、融券余额、融资融券余额、融资净买入、来源收盘价、原始 JSON 和沿用字段 | `(instrument_id, source, trade_date)`；保存完整日度历史，前端取最近五年用于 1/3/5 年筛选。净买入允许为负 |
 | `shareholder_observations` | 来源记录键、统计截止日、公告日、股东人数及口径、原始 JSON | `(instrument_id, source, source_record_key)`；`holder_scope` 分为 `total`、`a_share`、`unknown`，不同来源和人数口径分别保留 |
 | `raw_daily_prices` | 腾讯不复权日行情的开、高、低、收、成交量、原始 JSON、哈希和取得时间 | `(instrument_id, source, trade_date)`；为股息率计算及不复权价格展示提供共享行情 |

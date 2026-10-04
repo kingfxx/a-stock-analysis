@@ -91,10 +91,13 @@ def test_offline_compaction_backup_integrity_and_business_hashes(tmp_path):
     assert result['values_and_sources_unchanged'] and result['other_tables_unchanged']
     assert result['integrity_check']==result['foreign_key_check']=='ok'
     assert result['before_rows']==result['after_rows']==3
-    assert Database(result['backup']).check()['schema_version']==13
+    from quarterly_dashboard.storage import MIGRATIONS
+    assert Database(result['backup']).check()['schema_version']==MIGRATIONS[-1][0]
 
 
 def test_full_market_batch_update_skips_known_and_stores_only_revision(tmp_path,monkeypatch):
+    monkeypatch.setattr('quarterly_dashboard.industry_memberships.ensure_daily_memberships',
+        lambda *a,**k:{'status':'complete','reused':True})
     from quarterly_dashboard import industry_bulk, industry_updates
     bundle=copy.deepcopy(fixture_bundle())
     for value in range(1000,4997):
