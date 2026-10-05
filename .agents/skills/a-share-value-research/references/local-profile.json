@@ -1,0 +1,7 @@
+{
+  "adapter": "investment-sina-v1",
+  "database": "data/stock_analysis.sqlite3",
+  "reports_root": "data/company_reports",
+  "output_root": "data/research_reports",
+  "history_years": 10
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "A股价值投资研报"
+  short_description: "优先读取本地财报和SQLite，补充公开资料，生成可核对的深度研报"
+  default_prompt: "使用 $a-share-value-research 优先读取本地资料，为指定公司生成有证据、反证和可复算估值的价值投资研报。"
+policy:
+  allow_implicit_invocation: true
