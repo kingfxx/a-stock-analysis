@@ -7,3 +7,9 @@
 披露日估算市值独立使用已保存的未复权价格和财报股本，不再依赖共享前复权版本就绪。前复权不可用时价格留空，不阻断未复权价格投影；上市前披露日没有交易价格时市值仍留空。该值是财报股本口径的估算值，不等同于来源按披露日实际股本计算的总市值。
 
 诊断原始响应保存在 `data/verification/samples/688256-valuation-diagnosis-20261004/` 与 `data/verification/samples/688825-price-diagnosis-20261004/`，诊断及修复验收报告保存在 `data/verification/reports/`。
+
+## 页面估值传输去重（2026-10-06）
+
+初始页面、`GET /api/valuation` 和 `GET /api/prices` 中的估值结果采用 `transport_version=1`：唯一图表点集中在 `row_pool`，各指标及时间范围用 `row_indices` 和 `row_indices_by_frequency` 引用。前端解码恢复原 `rows`／`rows_by_frequency`，复用相同图表点；无前复权版本时的价格回退先复制要修改的点，防止影响其他频率。未标记传输版本的旧数据仍可读取。
+
+去重只改变传输结构，不改变日／周／月聚合、观察日期、价格日期、负 PE 区间及分位计算。内部 `_p4_valuation_payload` 仍返回原结构；接口调用者需按索引读取图表点。维护和趋势内存验收记录见 `data/verification/reports/maintenance-trend-memory-fix.json`。

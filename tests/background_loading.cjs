@@ -9,7 +9,8 @@ assert.ok(start >= 0, 'The page must support background chart loading');
 const header = page.slice(page.indexOf('<header>'), page.indexOf('</header>'));
 assert.match(header, /刷新数据[\s\S]*id="full-audit"[^>]*type="button">全量刷新/);
 assert.equal((page.match(/id="full-audit"/g) || []).length, 1);
-const source = page.slice(start, page.lastIndexOf("  if (typeof Plotly !== 'undefined') { render(); renderValuation(); }"));
+const decoder = page.slice(page.indexOf('  function expandValuationPayload('), page.indexOf('  const state ='));
+const source = decoder + page.slice(start, page.lastIndexOf("  if (typeof Plotly !== 'undefined') { render(); renderValuation(); }"));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {

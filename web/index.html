@@ -448,7 +448,23 @@
   <script src="/maintenance.js?v=20261004-restore-scope"></script>
 <script>
 (() => {
+  function expandValuationPayload(data) {
+    if (!data || data.transport_version !== 1) return data;
+    const pool = data.row_pool;
+    for (const metrics of Object.values(data.views || {})) {
+      for (const summary of Object.values(metrics)) {
+        if (summary.row_indices) summary.rows = summary.row_indices.map(index => pool[index]);
+        if (summary.row_indices_by_frequency) summary.rows_by_frequency = Object.fromEntries(
+          Object.entries(summary.row_indices_by_frequency).map(([frequency, indices]) => [frequency, indices.map(index => pool[index])])
+        );
+        delete summary.row_indices; delete summary.row_indices_by_frequency;
+      }
+    }
+    delete data.row_pool; delete data.transport_version;
+    return data;
+  }
   const state = JSON.parse(document.getElementById('payload').textContent);
+  state.valuation = expandValuationPayload(state.valuation);
   window.initAIChecklist(state);
   window.initFinancialStatements(state);
   window.initIndustry(state);
@@ -1024,6 +1040,7 @@
       if (!response.ok) throw new Error(data.error || '请求失败');
       if (state.code !== requestCode) return false;
       if (section === 'valuation') {
+        expandValuationPayload(data);
         if (Object.hasOwn(state, 'price_version') && !state.price_version) {
           for (const [years, metrics] of Object.entries(data.views || {})) for (const [metric, summary] of Object.entries(metrics)) {
             const oldSummary = state.valuation?.views?.[years]?.[metric];
@@ -1033,7 +1050,9 @@
                 : oldSummary?.rows_by_frequency?.[frequency] || [];
               const rowKey = row => frequency === 'legacy' ? row.date.slice(0,7) : row.date;
               const previous = new Map(oldRows.map(row => [rowKey(row),row]));
-              for (const row of rows) {
+              for (let index = 0; index < rows.length; index++) {
+                // A transported point may be shared by several ranges/frequencies.
+                const row = rows[index] = {...rows[index]};
                 for (const key of Object.keys(row).filter(key => key.startsWith('qfq_'))) delete row[key];
                 for (const [key,value] of Object.entries(previous.get(rowKey(row)) || {})) if (key.startsWith('qfq_')) row[key] = value;
               }
@@ -1072,7 +1091,7 @@
     if (!data) return;
     state.price_version = data.price_version;
     if (Object.keys(data.financial?.views || {}).length) applyFinancial(data.financial, true, false);
-    if (Object.keys(data.valuation?.views || {}).length) state.valuation = data.valuation;
+    if (Object.keys(data.valuation?.views || {}).length) state.valuation = expandValuationPayload(data.valuation);
     for (const section of ['shareholders','financing']) {
       state[section] = {...data[section], warnings:[...new Set([...(state[section]?.warnings || []), ...(data[section]?.warnings || [])])]};
     }

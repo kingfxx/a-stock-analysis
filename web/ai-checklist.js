@@ -74,20 +74,20 @@ window.initAIChecklist = function(state) {
   let historyDeleteButton = null, historyCount = null, deletingHistory = false;
   const actions = el('span', undefined, 'ai-context-actions');
   const entry = button('Checklist', openReport);
+  const researchEntry = button('AI 研报', openResearch);
   const settingsEntry = button('AI 设置', openSettings);
-  actions.append(entry, settingsEntry); document.querySelector('.context').append(actions);
-  const summary = el('section', undefined, 'ai-summary'); summary.setAttribute('aria-label', '投资 checklist摘要');
-  summary.setAttribute('aria-live', 'polite'); document.querySelector('.context').after(summary);
+  actions.append(entry, researchEntry, settingsEntry); document.querySelector('.context').append(actions);
   const dialog = el('dialog', undefined, 'ai-dialog'); dialog.setAttribute('aria-label','投资 checklist');
   const settings = el('dialog', undefined, 'ai-dialog'); settings.setAttribute('aria-label','AI 设置');
-  document.body.append(dialog, settings);
-  for (const node of [dialog, settings]) {
+  const research = el('dialog', undefined, 'ai-dialog'); research.setAttribute('aria-label','AI 研报');
+  document.body.append(dialog, settings, research);
+  for (const node of [dialog, settings, research]) {
     node.addEventListener('click', event => { if (event.target === node && event.clientX < node.getBoundingClientRect().left) node.close(); });
     node.addEventListener('close', () => { if (node === settings) clearTimeout(loginTimer); openedBy?.focus(); });
   }
   function showError(error) {
     const message = error?.message || '操作未完成，请重试';
-    const target = settings.open ? settings : dialog.open ? dialog : summary;
+    const target = settings.open ? settings : research.open ? research : dialog.open ? dialog : document.querySelector('.context');
     target.querySelector('.ai-operation-error')?.remove();
     const node = el('p', message, 'ai-message ai-operation-error'); node.setAttribute('role','alert'); target.append(node);
   }
@@ -106,23 +106,28 @@ window.initAIChecklist = function(state) {
     return '财报截至 ' + (dates.financial || '缺失') + ' / 估值截至 ' + (dates.valuation || '缺失') + ' / 筹码截至 ' + (chips || '缺失');
   }
   function renderSummary() {
-    summary.replaceChildren();
-    const row = el('div', undefined, 'ai-summary-row'); row.append(el('strong', '投资 checklist'));
-    if (overview.report) {
-      row.append(el('p', overview.report.summary), button('查看报告', openReport), button('历史', openHistory));
-      summary.append(row, el('p', '生成于 ' + date(overview.report.completed_at) + generationTime(overview.report), 'ai-meta'));
-      summary.append(el('p',dataDates(overview.report),'ai-meta'));
-    } else {
-      row.append(el('p', '18 项定性检查，每项一至两句话'), button('生成checklist', openReport), button('历史', openHistory));
-      summary.append(row);
-    }
-    if (overview.changed) summary.append(el('p', '数据已变化：' + overview.change_types.join('、'), 'ai-message'));
-    if (updating || overview.quality?.updating) summary.append(el('p', '数据更新中，请稍候；已有报告仍可查看', 'ai-meta'));
-    if (overview.quality?.source_errors?.length) summary.append(el('p', '部分数据最近更新失败，当前保留原资料；请核对实际观察日期。', 'ai-message'));
-    if (overview.active) summary.append(el('p', taskText(overview.active), 'ai-meta'));
-    const attempt = overview.latest_attempt;
-    if (attempt && ['failed','cancelled','interrupted'].includes(attempt.status)) summary.append(el('p', attempt.error || taskText(attempt), 'ai-message'));
     entry.textContent = overview.active ? '分析中…' : 'Checklist';
+  }
+  async function openResearch() {
+    open(research); research.replaceChildren();
+    const code = state.code;
+    header(research, 'AI 研报 · '+(state.name || '')+' '+code);
+    const loading = el('p', '正在读取历史研报…', 'ai-meta'); research.append(loading);
+    const data = await api('/api/research-reports?code='+encodeURIComponent(code));
+    if (!research.open || code !== state.code || !loading.isConnected) return;
+    loading.remove();
+    if (!data.reports.length) {
+      research.append(el('p', '当前股票暂无 AI 研报。', 'ai-message'));
+      return;
+    }
+    research.append(el('p', '共 '+data.reports.length+' 份研报，点击在新窗口打开 HTML 版本。', 'ai-meta'));
+    for (const report of data.reports) {
+      const row = el('section', undefined, 'ai-research-item');
+      const link = el('a', report.title, 'ai-button ai-history-item');
+      link.href = report.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      row.append(link, el('p', report.date+' · '+report.version, 'ai-meta'));
+      research.append(row);
+    }
   }
   async function refresh() {
     const sequence = ++epoch, code = state.code;

@@ -282,7 +282,9 @@ def test_live_shared_price_context_pins_all_consumers_and_rejects_missing_versio
         result = json.load(response)
     assert result["price_version"] == version
     assert result["financial"]["views"]["year"][0]["qfq_price"] == 21
-    assert result["valuation"]["views"]["10"]["pe"]["rows"][0]["qfq_close"] == 21
+    valuation = result['valuation']
+    index = valuation['views']['10']['pe']['row_indices'][0]
+    assert valuation['row_pool'][index]['qfq_close'] == 21
     assert result["shareholders"]["price_version"] == version
     assert result["financing"]["rows"][0]["qfq_close"] == 21
     for section in ("financial", "valuation", "shareholders", "financing"):

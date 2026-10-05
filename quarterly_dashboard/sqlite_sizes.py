@@ -5,7 +5,6 @@ The caller must hold a SQLite read transaction; direct reading is rollback-mode 
 """
 from __future__ import annotations
 
-import mmap
 import sqlite3
 
 
@@ -32,19 +31,32 @@ def physical_sizes(conn, path):
         return {},'unavailable'
     roots=[(r[0],r[1]) for r in conn.execute("SELECT name,rootpage FROM sqlite_master WHERE rootpage>0")]
     roots.append(('sqlite_schema',1))
-    sizes={};seen=set()
-    with path.open('rb') as source, mmap.mmap(source.fileno(),0,access=mmap.ACCESS_READ) as data:
-        if data[:16]!=b'SQLite format 3\x00':
+    sizes={}
+    with path.open('rb') as source:
+        header=source.read(100)
+        if len(header)!=100 or header[:16]!=b'SQLite format 3\x00':
             raise ValueError('SQLite 文件头不匹配')
-        page_size=int.from_bytes(data[16:18],'big')
+        page_size=int.from_bytes(header[16:18],'big')
         if page_size==1:page_size=65536
-        usable=page_size-data[20];page_count=len(data)//page_size
+        file_size=source.seek(0,2)
+        if page_size<512 or page_size>65536 or page_size&(page_size-1) or file_size%page_size:
+            raise ValueError('SQLite 页大小或文件长度异常')
+        usable=page_size-header[20];page_count=file_size//page_size
+        # One bit per page, plus one page buffer; never map the whole database.
+        seen=bytearray((page_count+7)//8)
         def page(number):
-            if not 1<=number<=page_count or number in seen:
+            if not 1<=number<=page_count:
                 raise ValueError('SQLite 页引用异常，停止大小统计')
-            seen.add(number)
+            index,bit=divmod(number-1,8)
+            if seen[index]&(1<<bit):
+                raise ValueError('SQLite 页引用异常，停止大小统计')
+            seen[index]|=1<<bit
             start=(number-1)*page_size
-            return data[start:start+page_size]
+            source.seek(start)
+            block=source.read(page_size)
+            if len(block)!=page_size:
+                raise ValueError('SQLite 页读取不完整')
+            return block
         for name,root in roots:
             pending=[root];count=0
             while pending:

@@ -4,7 +4,8 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
-const source = page.slice(page.indexOf('  let valuationMetric ='), page.indexOf('  // Chip assessment charts.'));
+const decoder = page.slice(page.indexOf('  function expandValuationPayload('), page.indexOf('  const state ='));
+const source = decoder + page.slice(page.indexOf('  let valuationMetric ='), page.indexOf('  // Chip assessment charts.'));
 
 function fixture(range = '3', persistedFrequency = null) {
   const elements = new Map(), plots = [], requests = [], storage = new Map();

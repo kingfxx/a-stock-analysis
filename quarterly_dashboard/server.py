@@ -37,6 +37,8 @@ from .analysis_service import AnalysisService
 from .checklist_snapshot import capture as checklist_capture
 from .checklist_validation import prompt as checklist_prompt, validate_output as validate_checklist, OUTPUT_VERSION
 from .company_report_service import CompanyReportService
+from .research_reports import list_reports, resolve_report
+from .valuation_transport import compact_valuation
 from .ai_provider import ChatGPTProvider, ProviderError
 from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
                     shareholder_price_snapshots)
@@ -813,6 +815,7 @@ def render_page(code: str, refresh: bool) -> str:
         error = str(exc)
     payload["cached_stocks"] = cached_stocks()
     payload["stock_library"] = StockLibrary(services()[0].db).read() if Path(DATABASE_PATH).exists() else {}
+    payload['valuation'] = compact_valuation(payload['valuation'])
     embedded = json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     return (TEMPLATE.replace("__PAYLOAD__", embedded)
             .replace("__CODE__", html.escape(code, quote=True))
@@ -1037,6 +1040,29 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == '/api/research-reports':
+            try:
+                self._ai_host()
+                self._ai_reply(list_reports(parse_qs(parsed.query).get('code', [''])[0]))
+            except (ValueError, OSError, UnicodeError) as exc:
+                self._ai_reply({'error': str(exc)}, 400)
+            return
+        if parsed.path.startswith('/research-reports/'):
+            try:
+                self._ai_host()
+                path = resolve_report(unquote(parsed.path[len('/research-reports/'):]))
+                body = path.read_bytes()
+            except (ValueError, OSError):
+                self.send_error(404, 'Report not found')
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if parsed.path=='/api/maintenance/backups':
             try:
                 self._ai_host()
@@ -1130,6 +1156,10 @@ class Handler(BaseHTTPRequestHandler):
             except (requests.RequestException, ValueError, KeyError, TypeError, OSError, StorageError, sqlite3.DatabaseError) as exc:
                 status = 503
                 data = {"error": str(exc)}
+            if status == 200 and parsed.path == '/api/valuation':
+                data = compact_valuation(data)
+            elif status == 200 and parsed.path == '/api/prices':
+                data['valuation'] = compact_valuation(data['valuation'])
             body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8")
             content_type = "application/json; charset=utf-8"
         else:

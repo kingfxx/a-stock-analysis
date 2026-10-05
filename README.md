@@ -109,3 +109,5 @@ python -m pytest tests -q
 ## 投资 checklist
 
 原 AI 研判页面已替换为 18 项定性 checklist，复用 ChatGPT 接入、本地财务四表和其他历史数据；年报、中报原件与解析按版本缓存。旧研判代码及历史保留。使用、资料导入和完整备份见 [checklist 说明](docs/ai-stock-assessment.md)。
+
+页面顶部的「Checklist」统一提供生成、查看和历史入口。「AI 研报」列出当前股票在 `data/research_reports/<交易所代码>/<研究日期>/` 下的 `report.html`，包括各版本子目录，点击在新窗口打开 HTML。交易所代码目录不区分大小写；新增研报后重新打开列表即可看到，不需导入数据库。研报由项目的 `a-share-value-research` 技能生成，页面仅浏览已有文件。

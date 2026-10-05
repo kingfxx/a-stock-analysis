@@ -153,6 +153,7 @@ class IndustryService:
         self.db = db
         self.directory = Path(directory or db.path.parent/'industry_sources')
         self._lock = threading.Lock()
+        self._load_lock = threading.Lock()
         self._cache = None
         self._status = {'running':False,'message':'尚未刷新','error':None}
 
@@ -424,6 +425,11 @@ class IndustryService:
         return import_id
 
     def _load(self):
+        # Serialize cold loads without holding the status/update lock.
+        with self._load_lock:
+            return self._load_cached()
+
+    def _load_cached(self):
         with self.db.connection() as conn:
             latest = conn.execute('SELECT * FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()
             if latest is None:
@@ -445,7 +451,14 @@ class IndustryService:
                     if node['level']==1 and node['name'] not in {'银行','非银金融'}:
                         nonfinancial_stocks.add(member['stock_code'])
                     node = catalog_map.get(node['parent_code'])
-            provenance = {(r['stock_code'],r['period']):json.loads(r['provenance_json']) for r in stored}
+            provenance, sources = {}, {}
+            for row in stored:
+                source_id = row.get('provenance_id')
+                source_key = ('id', source_id) if source_id is not None else ('legacy', row['provenance_json'])
+                if source_key not in sources:
+                    sources[source_key] = json.loads(row['provenance_json'])
+                # Source objects are read-only; many stock/period rows share one.
+                provenance[(row['stock_code'],row['period'])] = sources[source_key]
             for (stock,period),values in facts.items():
                 values['gross_margin_applicable'] = stock in nonfinancial_stocks
                 source = provenance[(stock,period)]

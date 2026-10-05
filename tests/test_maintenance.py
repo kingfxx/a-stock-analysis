@@ -7,6 +7,34 @@ from quarterly_dashboard.sqlite_sizes import physical_sizes
 from quarterly_dashboard.storage import Database
 
 
+def test_fallback_reads_only_one_page_at_a_time(tmp_path):
+    path=tmp_path/'bounded.sqlite3';conn=sqlite3.connect(path)
+    conn.execute('CREATE TABLE sample(body BLOB)')
+    conn.execute('INSERT INTO sample VALUES(?)',(b'x'*200000,))
+    conn.commit();conn.execute('BEGIN');conn.execute('SELECT count(*) FROM sample').fetchone()
+    sizes_expected=(conn.execute('PRAGMA page_count').fetchone()[0]-conn.execute('PRAGMA freelist_count').fetchone()[0])*4096
+    reads=[]
+
+    class FallbackConnection:
+        def execute(self, sql):
+            if 'FROM dbstat' in sql:raise sqlite3.OperationalError('no such table: dbstat')
+            return conn.execute(sql)
+
+    class Reader:
+        def __enter__(self):self.file=path.open('rb');return self
+        def __exit__(self,*args):self.file.close()
+        def seek(self,*args):return self.file.seek(*args)
+        def read(self,size):reads.append(size);return self.file.read(size)
+
+    class BoundedPath:
+        def open(self,*args):return Reader()
+
+    sizes,method=physical_sizes(FallbackConnection(),BoundedPath())
+    assert method=='sqlite_pages' and sum(sizes.values())==sizes_expected
+    assert max(reads)==4096 and reads[0]==100
+    conn.close()
+
+
 @pytest.mark.parametrize('page_size',[512,4096,65536])
 def test_physical_accounting_includes_indexes_overflow_and_without_rowid(tmp_path,page_size):
     path=tmp_path/'pages.sqlite3';conn=sqlite3.connect(path)
