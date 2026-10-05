@@ -143,11 +143,18 @@ class CompanyReportService:
         else:
             with pdfplumber.open(file) as pdf:
                 pages = [{"pdf_page":i+1,"text":page.extract_text() or ""} for i,page in enumerate(pdf.pages)]
-        preview = "".join(p["text"] for p in pages[:6])
+        preview = "".join(p["text"] for p in pages[:12])
         year = document["report_period"][:4]
         expected = "年度报告" if document["report_type"]=="annual" else "半年度报告" if document["report_type"]=="interim" else "季度报告"
         compact=re.sub(r"\s+","",preview)
-        if code not in compact or not re.search(year+r"年?"+expected,compact) or "年度报告摘要" in compact:
+        # Designed headers can extract the year before the company name; the
+        # stock profile may follow several cover, contents and section pages.
+        title_matches = any(re.search(
+            r"^"+year+r"(?:年?"+expected+r"|[^\d]{1,80}?年"+expected+r")",
+            re.sub(r"\s+", "", page["text"])[:200]
+        ) for page in pages[:12])
+        title_matches = title_matches or bool(re.search(year+r"年?"+expected,compact))
+        if not re.search(r"(?<!\d)"+code+r"(?!\d)",preview) or not title_matches or "年度报告摘要" in compact:
             raise ValueError("财报股票或年度不匹配，请核对下载文件")
         if sum(len(p["text"].strip()) for p in pages) < 500:
             raise ValueError("财报文本不足，扫描文件暂需人工核对")
