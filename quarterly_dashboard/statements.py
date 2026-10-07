@@ -61,7 +61,7 @@ LABELS = dict(zip(FIELDS, ('资产总额','负债总额','合并股东权益','�
                          '营业收入','营业总收入','营业成本','营业总成本','营业利润','利润总额','所得税费用',
                          '合并净利润','归母净利润','少数股东损益','扣非归母净利润（来源口径）',
                          '经营净现金流','投资净现金流','筹资净现金流','汇率影响','现金净增加额',
-                         '期初现金及等价物','期末现金及等价物','购建长期资产现金支出','销售收现',
+                         '期初现金及等价物','期末现金及等价物','Capex（资本支出）','销售收现',
                          '销售费用','管理费用','研发费用','财务费用')))
 
 
@@ -125,7 +125,11 @@ def extract(raw, item, kind, period, mode, reports):
                 earlier = _number(prior_item['item_value'])
                 output.update(value=earlier if item['item_field'] in CASH_STOCKS else value - earlier,
                               method='上季末余额' if item['item_field'] in CASH_STOCKS else '本期累计 − 上季累计',
-                              baseline_period=prior_period, baseline_field=prior_code)
+                              baseline_period=prior_period, baseline_field=prior_code,
+                              inputs=([extract(prior,prior_item,kind,prior_period,'ytd',reports)]
+                                      if item['item_field'] in CASH_STOCKS else
+                                      [extract(raw,item,kind,period,'ytd',reports),
+                                       extract(prior,prior_item,kind,prior_period,'ytd',reports)]))
     if output['value'] is None and output['reason'] is None:
         output['reason'] = '该报告期缺少有效值'
     return output
@@ -145,7 +149,7 @@ def calculated(label, inputs, formula, operation, period, unit='元'):
     return result
 
 
-def metric(reports, period, key, mode):
+def metric(reports, period, key, mode, *, balance_first=False):
     source, code = FIELDS[key]
     if mode == 'quarter' and source != 'fzb' and period[5:] != '03-31' and key != 'cash_end':
         current = metric(reports, period, key, 'ytd')
@@ -159,7 +163,7 @@ def metric(reports, period, key, mode):
                 'baseline_source':previous['source'], 'inputs':[current,previous], 'reason':None}
     entry = reports.get(period, {})
     # Only accept exact, applicable gjzb fields; never substitute similarly named totals.
-    for kind in ('gjzb', source):
+    for kind in ((source, 'gjzb') if balance_first else ('gjzb', source)):
         raw = entry.get(kind)
         if not raw:
             continue
@@ -174,27 +178,55 @@ def metric(reports, period, key, mode):
 
 def summarize(reports, period, mode, financial):
     values = {key: metric(reports, period, key, mode) for key in FIELDS}
+    values['capex']['note'] = '使用现金流量表字段 ACQUASSETCASH：购建固定资产、无形资产和其他长期资产支付的现金。'
     values['gross_profit'] = calculated('毛利润', [values['revenue'], values['cost']],
                                         '营业收入 − 营业成本', lambda r,c:r-c, period)
     values['period_expenses'] = calculated('期间费用合计', [values[key] for key in (
         'sales_expense','management_expense','rd_expense','financial_expense')],
         '销售费用＋管理费用＋研发费用＋财务费用（保留正负号）', lambda *v:sum(v), period)
-    values['debt'] = calculated('有息负债（简化）', [
-        extract(reports[period]['fzb'], item, 'fzb', period, 'ytd', reports) if
-        (item := find(reports.get(period, {}).get('fzb'), 'fzb', code)) else missing(code, period)
-        for code in DEBT], '短期借款＋短期债券＋一年内到期非流动负债＋长期借款＋应付债券＋租赁负债',
+    debt_inputs = []
+    for code, label in zip(DEBT, ('短期借款','应付短期债券','一年内到期的非流动负债','长期借款','应付债券','租赁负债')):
+        value = {**missing(label, period), 'field':code, 'item_source':'fzb'}
+        for kind in ('fzb', 'gjzb'):
+            raw = reports.get(period, {}).get(kind)
+            item = find(raw, 'fzb', code)
+            if item:
+                candidate = extract(raw, item, kind, period, 'ytd', reports)
+                if candidate['value'] is not None:
+                    value = {**candidate, 'label':label}
+                    break
+        debt_inputs.append(value)
+    values['debt'] = calculated('有息债务', debt_inputs,
+        '短期借款＋应付短期债券＋一年内到期的非流动负债＋长期借款＋应付债券＋租赁负债',
         lambda *v: sum(v), period)
+    values['debt']['note'] = ('按同一期合并资产负债表期末余额计算，租赁负债为非流动部分；'
+        '一年内到期的非流动负债可能含无息项目，其他流动负债和长期应付款中的有息部分未纳入。优先资产负债表，缺值回退关键指标；仅汇总有效分项，缺项未计入合计且不代表为零。')
+    absent = [x['label'] for x in debt_inputs if x['value'] is None]
+    available = [x['value'] for x in debt_inputs if x['value'] is not None]
+    values['debt'].update(value=sum(available) if available else None,
+                          reason=None if available else '该报告期全部有息债务分项缺失')
+    if absent:
+        values['debt']['note'] += ' 未计入的缺项：' + '、'.join(absent) + '。'
+    values['debt']['missing_fields'] = [x['field'] for x in debt_inputs if x['value'] is None]
+    values['debt']['partial'] = bool(absent and available)
     ratio = lambda a, b: a / b * 100 if b > 0 else None
     for key, label, fields, formula, operation in (
         ('leverage', '资产负债率', ['liabilities', 'assets'], '负债合计 ÷ 资产总计 × 100%', ratio),
         ('gross_margin', '毛利率', ['revenue', 'cost'], '（营业收入 − 营业成本）÷ 营业收入 × 100%',
          lambda r, c: (r-c)/r*100 if r > 0 else None),
+        ('parent_net_margin', '归母净利率', ['parent_profit', 'revenue'], '归母净利润 ÷ 营业收入 × 100%', ratio),
         ('net_margin', '合并净利率', ['net_profit', 'revenue'], '合并净利润 ÷ 营业收入 × 100%', ratio),
         ('cash_profit', '经营净现金／合并净利润', ['cfo', 'net_profit'], '经营净现金流 ÷ 合并净利润 × 100%', ratio),
-        ('cash_after_capex', '经营净现金减购建支出', ['cfo', 'capex'], '经营净现金流 − 购建长期资产现金支出', lambda a,b:a-b),
+        ('cash_after_capex', '自由现金流', ['cfo', 'capex'], '经营活动产生的现金流量净额（MANANETR） − 购建固定资产、无形资产和其他长期资产支付的现金（ACQUASSETCASH）', lambda a,b:a-b),
     ):
         values[key] = calculated(label, [values[x] for x in fields], formula, operation, period,
                                  '元' if key == 'cash_after_capex' else '%')
+    values['cash_after_capex']['note'] = '按经营现金流减资本支出口径计算；输入金额遵循所选累计／单季度期间，不等同于严格 FCFF／FCFE。'
+    values['debt_ratio'] = calculated('有息负债率',
+        [values['debt'], metric(reports, period, 'assets', 'ytd', balance_first=True)],
+        '有息债务（有效分项合计） ÷ 资产总额 × 100%', ratio, period, '%')
+    if values['debt']['partial']:
+        values['debt_ratio']['note'] = '有息债务存在未计入的缺项，分项及来源见下方明细。'
     # Source percentages are applicable only in cumulative mode with the same definition.
     for key, field in (('leverage','ASSLIABRT'), ('gross_margin','SGPMARGIN'), ('net_margin','SNPMARGINCONMS')):
         if mode == 'quarter' and key != 'leverage':
@@ -206,7 +238,7 @@ def summarize(reports, period, mode, financial):
             values[key] = {**extract(raw, item, 'gjzb', period, 'ytd', reports), 'label': values[key]['label'], 'unit':'%'}
     if financial:
         values['gross_margin'] = missing('毛利率（金融企业不适用）', period, '%')
-        values['cash_after_capex'] = missing('经营净现金减购建支出（金融企业不适用）', period)
+        values['cash_after_capex'] = missing('自由现金流（金融企业不适用）', period)
     return values
 
 
@@ -347,7 +379,7 @@ def read_statements(db, code, *, period=None, mode='ytd', comparison='yoy'):
                 result['sections'][kind]['warnings'].append(f'{label}勾稽差额 {difference:,.2f} 元，请核对修订与报表范围。')
     result['baseline_values'] = old_values if comparison != 'year_end' else {
         **old_values, **{k:v for k,v in summarize(reports,f'{year-1}{period[4:]}',mode,financial).items()
-                      if k not in {'assets','liabilities','equity','cash','receivables','inventory','goodwill','debt','leverage'}}}
+                      if k not in {'assets','liabilities','equity','cash','receivables','inventory','goodwill','debt','debt_ratio','leverage'}}}
     # Facts only, no model calls or investment verdicts.
     for key in ('revenue','receivables','inventory','net_profit','cfo','capex'):
         current = values[key]

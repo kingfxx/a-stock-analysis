@@ -80,8 +80,13 @@ def test_quarter_cash_opening_is_prior_closing_not_difference(facts):
     assert v['revenue']['value']==100
     assert v['assets']['value']==500
     assert v['gross_margin']['value']==50
+    assert v['capex']['value']==7.5
+    assert v['cash_after_capex']['value']==22.5
     assert next(x for x in data['sections']['lrb']['full_items'] if x['field']=='BASICEPS')['value'] is None
     assert v['cfo']['baseline_period']=='2025-03-31'
+    row=next(x for x in data['sections']['llb']['full_items'] if x['field']=='MANANETR')
+    assert [x['value'] for x in row['inputs']]==[60,30]
+    assert [x['period'] for x in row['inputs']]==['2025-06-30','2025-03-31']
 
 
 def test_quarter_fallback_is_per_stock_and_period(facts):
@@ -105,7 +110,7 @@ def test_missing_previous_and_invalid_zero_are_not_fabricated(facts):
         row=c.execute("SELECT raw_json FROM financial_reports WHERE report_type='fzb' AND period='2025-06-30'").fetchone()
         body=json.loads(row[0]);next(x for x in body['data'] if x['item_field']=='BDSPAYA')['item_value']=None
         c.execute("UPDATE financial_reports SET raw_json=? WHERE report_type='fzb' AND period='2025-06-30'",(json.dumps(body),))
-    assert read_statements(facts,'600519',period='2025-06-30')['values']['debt']['value'] is None
+    assert read_statements(facts,'600519',period='2025-06-30')['values']['debt']['value']==25
 
 
 def test_year_end_comparison_applies_only_to_balance(facts):
@@ -206,3 +211,95 @@ def test_financial_tabs_in_real_browser(facts,tmp_path,monkeypatch):
             try:browser.wait(timeout=5)
             except subprocess.TimeoutExpired:browser.kill();browser.wait(timeout=5)
         httpd.shutdown();httpd.server_close();thread.join(timeout=2)
+
+
+
+def replace_balance(db,period,record):
+    with db.connection(write=True) as conn:
+        conn.execute("UPDATE financial_reports SET raw_json=? WHERE report_type='fzb' AND period=?",
+                     (json.dumps(record),period))
+
+def test_debt_ratio_uses_six_items_and_matching_year_end(facts):
+    replace_balance(facts,'2024-12-31',raw('fzb',{'TOTASSET':100,'TOTLIAB':80,
+        'SHORTTERMBORR':1,'SHORTTERMBDSPAYA':2,'DUENONCLIAB':3,
+        'LONGBORR':4,'BDSPAYA':5,'LEASELIAB':6}))
+    d=read_statements(facts,'600519',period='2025-06-30',mode='quarter',comparison='year_end')
+    assert d['values']['debt']['value']==25
+    assert d['values']['debt_ratio']['value']==5
+    assert d['baseline_values']['debt']['value']==21
+    assert d['baseline_values']['debt_ratio']['value']==21
+    assert all(x['period']=='2024-12-31' for x in d['baseline_values']['debt_ratio']['inputs'])
+    assert len(d['values']['debt']['inputs'])==6
+
+
+def test_debt_prefers_balance_and_sums_available_items(facts):
+    save(facts,'gjzb',{'2025-06-30':raw('fzb',{'LONGBORR':30,'SHORTTERMBORR':None})})
+    d=read_statements(facts,'600519',period='2025-06-30')
+    assert d['values']['debt']['value']==25
+    assert d['values']['debt_ratio']['value']==5
+    assert d['values']['debt']['inputs'][3]['source']=='fzb'
+    assert d['values']['debt']['inputs'][0]['value']==0
+    replace_balance(facts,'2025-06-30',raw('fzb',{'TOTASSET':500,'LONGBORR':25}))
+    d=read_statements(facts,'600519',period='2025-06-30')
+    assert d['values']['debt']['value']==25
+    assert d['values']['debt_ratio']['value']==5
+    assert d['values']['debt']['partial']
+    assert '应付短期债券' in d['values']['debt']['note']
+    assert d['values']['debt']['inputs'][1]['field']=='SHORTTERMBDSPAYA'
+
+
+@pytest.mark.parametrize('assets',[0,-1,None])
+def test_debt_ratio_requires_positive_assets(facts,assets):
+    with facts.connection(write=True) as conn:
+        body=json.loads(conn.execute("SELECT raw_json FROM financial_reports WHERE report_type='fzb' AND period='2025-06-30'").fetchone()[0])
+    next(x for x in body['data'] if x['item_field']=='TOTASSET')['item_value']=assets
+    replace_balance(facts,'2025-06-30',body)
+    if assets is None:
+        replace_balance(facts,'2025-06-30',raw('fzb',{
+            'SHORTTERMBORR':0,'SHORTTERMBDSPAYA':0,'DUENONCLIAB':0,
+            'LONGBORR':25,'BDSPAYA':0,'LEASELIAB':0}))
+    d=read_statements(facts,'600519',period='2025-06-30')
+    assert d['values']['debt']['value']==25
+    assert d['values']['debt_ratio']['value'] is None
+
+
+def test_debt_fallback_all_missing_and_valid_zero(facts):
+    save(facts,'gjzb',{'2025-06-30':raw('fzb',{'LONGBORR':30,'TOTASSET':600})})
+    replace_balance(facts,'2025-06-30',raw('fzb',{'TOTASSET':500}))
+    d=read_statements(facts,'600519',period='2025-06-30')
+    assert d['values']['debt']['value']==30
+    assert d['values']['debt']['inputs'][3]['source']=='gjzb'
+    assert d['values']['debt_ratio']['value']==6
+    assert d['values']['debt_ratio']['inputs'][1]['source']=='fzb'
+    save(facts,'gjzb',{'2025-06-30':raw('fzb',{'LONGBORR':None})})
+    d=read_statements(facts,'600519',period='2025-06-30')
+    assert d['values']['debt']['value'] is None
+    assert d['values']['debt_ratio']['value'] is None
+    replace_balance(facts,'2025-06-30',raw('fzb',{'TOTASSET':500,'LONGBORR':0}))
+    d=read_statements(facts,'600519',period='2025-06-30')
+    assert d['values']['debt']['value']==0
+    assert d['values']['debt_ratio']['value']==0
+    assert d['values']['debt']['inputs'][3]['value']==0
+
+
+@pytest.mark.parametrize('profit,revenue,expected',[(45,200,22.5),(0,200,0),(-10,200,-5),(45,0,None),(45,-1,None),(None,200,None),(45,None,None)])
+def test_parent_net_margin_uses_parent_profit_and_valid_revenue(facts,profit,revenue,expected):
+    save(facts,'gjzb',{'2025-06-30':raw('lrb',{'PARENETP':profit,'BIZINCO':revenue,'NETPROFIT':99})})
+    with facts.connection(write=True) as conn:
+        conn.execute("UPDATE financial_reports SET raw_json=? WHERE report_type='lrb' AND period='2025-06-30'",
+                     (json.dumps(raw('lrb',{'PARENETP':profit,'BIZINCO':revenue,'NETPROFIT':99})),))
+    d=read_statements(facts,'600519',period='2025-06-30',comparison='year_end')
+    assert d['values']['parent_net_margin']['value']==expected
+    assert d['baseline_values']['parent_net_margin']['value']==22.5
+    assert [x['field'] for x in d['values']['parent_net_margin']['inputs']]==[
+        'PARENETP' if profit is not None else None,'BIZINCO' if revenue is not None else None]
+
+
+def test_parent_net_margin_quarter_uses_matching_flow_period(facts):
+    save(facts,'gjzb',{'2025-06-30':raw('lrb',{'PARENETP':60,'BIZINCO':250})})
+    d=read_statements(facts,'600519',period='2025-06-30',mode='quarter',comparison='year_end')
+    value=d['values']['parent_net_margin']
+    assert value['value']==25
+    assert [x['value'] for x in value['inputs']]==[37.5,150]
+    assert all(x['baseline_period']=='2025-03-31' for x in value['inputs'])
+    assert d['baseline_values']['parent_net_margin']['period']=='2024-06-30'

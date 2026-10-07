@@ -24,9 +24,31 @@ const fs=require('node:fs');
   assert.equal(await evaluate('document.getElementById("trend-panel").hidden'),true);
   assert.equal(await evaluate('document.getElementById("fs-period").value'),'2025-06-30');
   await wait('Boolean(document.getElementById("fs-chart")._fullLayout)');
+  assert.equal(await evaluate('document.querySelectorAll("#fs-metrics > .fs-metric").length'),4);
+  assert.equal(await evaluate('[...document.querySelectorAll("#fs-metrics > .fs-metric")].every(x=>x.querySelectorAll("summary").length===1)'),true,'one shared source control per card');
+  assert.equal(await evaluate('document.querySelector("#fs-metrics .fs-card-source").querySelectorAll(".fs-source-item").length'),2);
+  await evaluate('document.querySelector("#fs-metrics .fs-card-source").open=true');
+  assert.deepEqual(await evaluate('[...document.querySelector("#fs-metrics .fs-source-item").querySelectorAll("b")].map(x=>x.textContent)'),['指标意义：','计算方法／来源：','口径说明：']);
+  assert.equal(await evaluate('document.querySelector("#fs-metrics .fs-card-source").textContent.includes("原值")'),false);
+  assert.equal(await evaluate('[...document.querySelectorAll("#fs-metrics .fs-source-item")].every(x=>(x.textContent.match(/实际来源：/g)||[]).length===1)'),true);
+  assert.equal(await evaluate('[...document.querySelectorAll("#fs-metrics .fs-source-item")].every(x=>x.querySelectorAll(".fs-source-values")[1].querySelectorAll("li").length===0)'),true);
+  assert.match(await evaluate('document.querySelector("#fs-metrics .fs-card-source").textContent'),/比较期 2024-12-31/);
+  await evaluate('document.querySelector("#fs-metrics .fs-card-source").open=false');
+
+  assert.equal(await evaluate('document.querySelector("#fs-metrics .fs-metric-extra .fs-label").textContent'),'净资产');
+  assert.match(await evaluate('document.querySelector("#fs-metrics .fs-card-source").textContent'),/合并股东权益合计，包含少数股东权益/);
+
+  assert.match(await evaluate('document.querySelectorAll("#fs-metrics > .fs-metric")[1].textContent'),/有息负债率/);
+  assert.match(await evaluate('document.querySelectorAll("#fs-metrics > .fs-metric")[2].textContent'),/有息债务/);
+  assert.match(await evaluate('document.querySelectorAll("#fs-metrics > .fs-metric")[1].textContent'),/SHORTTERMBDSPAYA/);
+  assert.equal(await evaluate('document.querySelectorAll("#fs-metrics > .fs-metric")[1].querySelector(".fs-metric-extra strong").textContent'), '5.00 %');
   const count=requests.filter(x=>x.includes('/api/statements')).length;
   await click('fs-tab-lrb');await wait('document.getElementById("fs-chart").data?.[0]?.type==="waterfall"');
   assert.equal(requests.filter(x=>x.includes('/api/statements')).length,count,'statement switch reuses local response');
+  assert.equal(await evaluate('document.querySelectorAll("#fs-metrics .fs-label")[2].textContent'),'归母净利率');
+  assert.equal(await evaluate('document.querySelector("#fs-metrics .fs-metric-extra strong").textContent'),'22.50 %');
+  assert.match(await evaluate('document.querySelectorAll("#fs-metrics > .fs-metric")[1].querySelector(".fs-card-source").textContent'),/PARENETP/);
+
   assert.match(await evaluate('document.getElementById("fs-chart-title").textContent'),/净利润/);
   assert.equal(await evaluate('document.getElementById("fs-chart")._fullLayout.xaxis.tickangle'),0);
   assert.equal(await evaluate('document.getElementById("fs-chart")._fullLayout.xaxis.tickmode'),'array');
@@ -35,6 +57,11 @@ const fs=require('node:fs');
   assert.equal(new Set(tickLabels).size,tickLabels.length,'small-value ticks remain distinct after unit conversion');
   assert.equal(await evaluate('document.getElementById("fs-chart")._fullLayout.xaxis.ticktext.includes("其他营业损益<br>（净额）")'),true);
   await click('fs-tab-llb');
+  assert.equal(await evaluate('document.querySelectorAll("#fs-metrics .fs-label")[2].textContent'),'Capex（资本支出）');
+  assert.equal(await evaluate('document.querySelectorAll("#fs-metrics .fs-label")[3].textContent'),'自由现金流');
+  assert.match(await evaluate('document.querySelectorAll("#fs-metrics > .fs-metric")[2].textContent'),/ACQUASSETCASH/);
+  assert.match(await evaluate('document.querySelectorAll("#fs-metrics > .fs-metric")[3].textContent'),/MANANETR.*ACQUASSETCASH/);
+
   assert.match(await evaluate('document.getElementById("fs-chart-title").textContent'),/现金/);
   assert.equal(await evaluate('document.getElementById("fs-chart")._fullLayout.xaxis.tickangle'),0);
   assert.equal(await evaluate('document.getElementById("fs-chart")._fullLayout.xaxis.ticktext[0]'),'期初现金及<br>现金等价物');
@@ -51,16 +78,23 @@ const fs=require('node:fs');
   await change('fs-comparison','yoy');await wait('document.getElementById("fs-status").textContent.includes("比较期 2024-06-30")');
   await click('fs-tab-fzb');await change('fs-display','share');
   await wait('document.getElementById("fs-chart")._fullLayout.yaxis.title.text==="占对应合计 %"');
-  assert.equal(await evaluate('document.querySelectorAll("#fs-metrics .fs-label")[2].textContent'),'负债总额');
+  assert.equal(await evaluate('document.querySelectorAll("#fs-metrics > .fs-metric")[2].querySelector(".fs-label").textContent'),'负债总额');
   assert.equal(await evaluate('(()=>{const t=document.getElementById("fs-chart").data[0];return t.y[t.x.indexOf("LONGBORR")];})()'),12.5);
   assert.match(await evaluate('(()=>{const t=document.getElementById("fs-chart").data[0];return t.customdata[t.x.indexOf("LONGBORR")];})()'),/占总负债：12.50%/);
   assert.equal(await evaluate('document.getElementById("fs-chart").data[0].customdata.some(x=>x.includes("新浪")||x.includes("直接取数"))'),false);
   assert.equal(await evaluate('document.getElementById("fs-chart")._fullLayout.xaxis.tickmode'),'auto','balance axes do not retain waterfall tick labels');
   await change('fs-unit','元');
   assert.match(await evaluate('document.querySelector("#fs-metrics strong").textContent'),/500\.00/);
+  assert.equal(await evaluate('document.querySelector("#fs-metrics .fs-metric-extra strong").textContent'),'300.00 ');
+  assert.match(await evaluate('document.querySelector("#fs-metrics .fs-metric-extra small").textContent'),/150\.00/);
+
   await send('Emulation.setDeviceMetricsOverride',{width:390,height:1000,deviceScaleFactor:1,mobile:true});
   await evaluate('window.dispatchEvent(new Event("resize"))');await sleep(400);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'mobile page has no horizontal overflow');
+  await evaluate('[...document.querySelectorAll("#fs-metrics .fs-card-source")].forEach(x=>x.open=true)');
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'expanded shared sources fit mobile');
+  assert.equal(await evaluate('[...document.querySelectorAll("#fs-table .fs-source")].every(x=>x.querySelectorAll("b").length===3)'),true,'detail rows share the explanation format');
+
   fs.writeFileSync(mobile,Buffer.from((await send('Page.captureScreenshot')).data,'base64'));
   await send('Emulation.setDeviceMetricsOverride',{width:1350,height:1150,deviceScaleFactor:1,mobile:false});
   await change('fs-unit','亿元');await click('fs-tab-lrb');
