@@ -7,9 +7,22 @@
   const date=value=>!value?'未记录':new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
   window.initMaintenance=()=>{
     const panel=document.getElementById('maintenance-panel');
-    panel.innerHTML=`<div class="maintenance-head"><div><h2>后台维护</h2><p>日常数据库 · 表数据与空间占用</p></div><button id="maintenance-refresh" type="button">刷新本地统计</button></div>
+    panel.innerHTML=`<div class="maintenance-head"><div><h2>后台维护</h2><p>本地数据与股票维护</p></div><button id="maintenance-refresh" type="button">刷新本地统计</button></div>
+      <div class="maintenance-tabs" role="tablist" aria-label="后台维护分类"><button id="maintenance-database-tab" type="button" role="tab" aria-selected="true" aria-controls="maintenance-database-panel">数据库预览</button><button id="maintenance-stocks-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-stocks-panel" tabindex="-1">未关注股票管理</button></div>
+      <section id="maintenance-stocks-panel" role="tabpanel" aria-labelledby="maintenance-stocks-tab" hidden>
+      <section class="panel maintenance-unfollowed"><div class="maintenance-controls"><h3>已取消关注 <span id="maintenance-unfollowed-count"></span></h3><button id="maintenance-unfollowed-refresh" type="button">刷新列表</button></div>
+        <p>取消关注后保留财务数据、财报原件与研究历史，停止个股自动更新。恢复关注会重新加入“全部股票”和仍然存在的原分组；已删除的分组不会重建。</p>
+        <div class="maintenance-unfollowed-actions"><input id="maintenance-unfollowed-search" type="search" placeholder="搜索代码或名称" aria-label="搜索已取消关注的股票"><button id="maintenance-unfollowed-select" type="button">选择结果</button><button id="maintenance-unfollowed-restore" type="button" disabled>恢复关注</button><span id="maintenance-unfollowed-selected">0 只已选</span></div>
+        <p id="maintenance-unfollowed-status" role="status" aria-live="polite">切换到此页后读取列表。</p><div id="maintenance-unfollowed-list"></div>
+      </section>
+      <div id="maintenance-stock-cleanup"></div>
+      <section class="panel maintenance-restore"><h3>整理数据库空间</h3><p>清理记录后执行空间整理，将库内空闲空间归还磁盘。整理期间暂停其他请求，有运行任务时不能执行；数据库目录及临时目录需预留当前数据库大小两倍的空闲空间。整理不创建备份。</p><button id="maintenance-compact-open" type="button" disabled>整理数据库空间…</button><p id="maintenance-compact-status" role="status" aria-live="polite">整理完成后显示实际文件大小变化。</p></section>
+      <dialog id="maintenance-compact-dialog"><form method="dialog"><h3>确认整理数据库空间</h3><p>将整理当前日常数据库，不删除业务记录。期间暂停访问，可能需要数分钟，请等待完成。</p><div class="maintenance-dialog-actions"><button value="cancel">取消</button><button id="maintenance-compact-confirm" type="button">执行整理</button></div></form></dialog>
+      </section>
+      <section id="maintenance-database-panel" role="tabpanel" aria-labelledby="maintenance-database-tab">
       <p id="maintenance-status" role="status" aria-live="polite">切换到此页后读取统计。</p>
       <div id="maintenance-overview"></div>
+
       <section class="panel maintenance-restore"><h3>数据库恢复</h3><p>选择备份并校验，确认后恢复。当前数据库会先自动备份；PDF 和原始响应文件需单独保留。</p>
         <div class="maintenance-restore-source"><label>已有备份<select id="maintenance-backup"><option value="">请选择备份文件</option></select></label><span>或</span><label class="maintenance-file-label">选择本地文件<input id="maintenance-backup-file" type="file" accept=".sqlite3,.sqlite,.db"></label><button id="maintenance-restore-preview" type="button" disabled>校验备份</button></div>
         <p id="maintenance-restore-status" role="status" aria-live="polite">只校验不会替换当前数据。</p><div id="maintenance-restore-detail"></div><button id="maintenance-restore-open" type="button" hidden>恢复此备份…</button>
@@ -17,10 +30,61 @@
       <dialog id="maintenance-restore-dialog"><form method="dialog"><h3>确认恢复数据库</h3><p id="maintenance-restore-confirm-summary"></p><p>备份之后新增或修改的数据将被替换。系统会先保存当前数据库，恢复期间暂时停止访问，随后重新加载后台。</p><label>输入“恢复”以确认<input id="maintenance-restore-word" autocomplete="off"></label><div class="maintenance-dialog-actions"><button value="cancel">取消</button><button id="maintenance-restore-confirm" type="button" disabled>确认恢复</button></div></form></dialog>
       <section class="panel maintenance-inventory"><div class="maintenance-controls"><h3>数据表清单 <span id="maintenance-count"></span></h3><div><label>筛选<input id="maintenance-search" type="search" placeholder="表名或用途" aria-label="搜索表名或用途"></label><label>分类<select id="maintenance-category"><option value="">全部分类</option></select></label></div></div>
       <div class="maintenance-table-scroll"><table><thead><tr>${[['name','表名 / 分类'],['description','存储内容'],['rows','数据条数'],['table_bytes','表大小'],['index_bytes','索引大小'],['total_bytes','合计占用'],['updated_at','数据更新时间']].map(([key,label])=>`<th scope="col" data-column="${key}"><button type="button" data-maintenance-sort="${key}">${label}<span></span></button></th>`).join('')}</tr></thead><tbody id="maintenance-rows"><tr><td colspan="7">尚未读取统计</td></tr></tbody></table></div>
-      <div id="maintenance-notes" class="maintenance-notes"></div></section>`;
+      <div id="maintenance-notes" class="maintenance-notes"></div></section></section>`;
     const el=id=>document.getElementById(id);
-    let snapshot=null,loading=false,sort='total_bytes',direction=-1;
+    window.initStockCleanup(panel);
+    let snapshot=null,loading=false,compactBusy=false,sort='total_bytes',direction=-1;
     let session='',preview=null,restoreBusy=false,backupLoading=null;
+    let unfollowed=[],unfollowedLoaded=false,unfollowedBusy=false,unfollowedSelected=new Set();
+    const unfollowedResults=()=>{
+      const query=el('maintenance-unfollowed-search').value.trim().toLowerCase();
+      return unfollowed.filter(stock=>`${stock.code} ${stock.name||''}`.toLowerCase().includes(query));
+    };
+    function unfollowedControls(){
+      el('maintenance-unfollowed-selected').textContent=`${unfollowedSelected.size} 只已选`;
+      el('maintenance-unfollowed-restore').disabled=unfollowedBusy||!unfollowedSelected.size;
+      el('maintenance-unfollowed-refresh').disabled=unfollowedBusy;
+      el('maintenance-unfollowed-select').disabled=unfollowedBusy||!unfollowedResults().length;
+    }
+    function renderUnfollowed(){
+      const rows=unfollowedResults();
+      el('maintenance-unfollowed-count').textContent=`${rows.length} / ${unfollowed.length} 只`;
+      el('maintenance-unfollowed-list').innerHTML=rows.length?rows.map(stock=>`<label class="maintenance-unfollowed-row"><input type="checkbox" data-unfollowed-code="${esc(stock.code)}" ${unfollowedSelected.has(stock.code)?'checked':''} ${unfollowedBusy?'disabled':''}><span><strong>${esc(stock.name||'名称暂缺')} · ${esc(stock.code)}</strong><small>原分组：${esc(stock.groups.map(group=>group.name).join(' / ')||'无可恢复分组')}</small></span><time datetime="${esc(stock.unfollowed_at)}">${esc(date(stock.unfollowed_at))}</time></label>`).join(''):`<p class="maintenance-unfollowed-empty">${unfollowed.length?'没有匹配的股票':'暂无已取消关注的股票'}</p>`;
+      unfollowedControls();
+    }
+    async function loadUnfollowed(){
+      if(unfollowedBusy)return;
+      unfollowedBusy=true;unfollowedControls();el('maintenance-unfollowed-status').textContent='正在读取本地列表…';
+      try{
+        const response=await fetch('/api/maintenance/unfollowed',{cache:'no-store'}),data=await response.json();
+        if(!response.ok)throw new Error(data.error||'读取失败');
+        unfollowed=data.stocks;unfollowedLoaded=true;
+        unfollowedSelected=new Set([...unfollowedSelected].filter(code=>unfollowed.some(stock=>stock.code===code)));
+        el('maintenance-unfollowed-status').textContent='仅查看本地记录；恢复关注不会立即采集数据或调用模型。';
+      }catch(error){el('maintenance-unfollowed-status').textContent='列表未更新：'+error.message;}
+      finally{unfollowedBusy=false;renderUnfollowed();}
+    }
+    el('maintenance-unfollowed-refresh').addEventListener('click',loadUnfollowed);
+    el('maintenance-unfollowed-search').addEventListener('input',renderUnfollowed);
+    el('maintenance-unfollowed-select').addEventListener('click',()=>{unfollowedResults().forEach(stock=>unfollowedSelected.add(stock.code));renderUnfollowed();});
+    el('maintenance-unfollowed-list').addEventListener('change',event=>{
+      const input=event.target.closest('[data-unfollowed-code]');if(!input)return;
+      if(input.checked)unfollowedSelected.add(input.dataset.unfollowedCode);else unfollowedSelected.delete(input.dataset.unfollowedCode);
+      unfollowedControls();
+    });
+    el('maintenance-unfollowed-restore').addEventListener('click',async()=>{
+      if(unfollowedBusy||!unfollowedSelected.size)return;
+      const codes=[...unfollowedSelected];unfollowedBusy=true;renderUnfollowed();
+      try{
+        const response=await fetch('/api/maintenance/unfollowed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'restore',codes})}),data=await response.json();
+        if(!response.ok)throw new Error(data.error||'恢复失败');
+        unfollowed=data.stocks;unfollowedSelected.clear();
+        window.dispatchEvent(new CustomEvent('stock-library-updated',{detail:{library:data.library,restoredCodes:codes}}));
+        el('maintenance-unfollowed-status').textContent=`已恢复关注 ${codes.length} 只股票。可从“我的股票”打开，已有资料可继续使用。`;
+      }catch(error){el('maintenance-unfollowed-status').textContent='恢复未完成：'+error.message;}
+      finally{unfollowedBusy=false;renderUnfollowed();}
+    });
+    window.addEventListener('stock-library-updated',()=>{unfollowedLoaded=false;if(!panel.hidden&&!el('maintenance-stocks-panel').hidden&&!unfollowedBusy)loadUnfollowed();});
     const restoreStatus=message=>{el('maintenance-restore-status').textContent=message;};
     function invalidatePreview(){preview=null;el('maintenance-restore-open').hidden=true;el('maintenance-restore-detail').innerHTML='';}
     function sourceSelected(){return Boolean(el('maintenance-backup-file').files.length||el('maintenance-backup').value);}
@@ -42,6 +106,21 @@
       const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Local-Session':session},body:JSON.stringify(command)}),data=await response.json();
       if(!response.ok)throw new Error(data.error||'恢复操作失败');return data;
     }
+    el('maintenance-compact-open').addEventListener('click',()=>{
+      if(loading||compactBusy||restoreBusy)return;
+      el('maintenance-compact-dialog').showModal();
+    });
+    el('maintenance-compact-confirm').addEventListener('click',async()=>{
+      if(compactBusy||restoreBusy)return;
+      el('maintenance-compact-dialog').close();compactBusy=true;el('maintenance-compact-open').disabled=true;el('maintenance-refresh').disabled=true;restoreControls(true);
+      el('maintenance-compact-status').textContent='正在检查任务、磁盘空间并整理数据库，请等待完成，勿重复提交…';
+      try{
+        const result=await restoreApi('/api/maintenance/compact',{confirm:'整理'});
+        el('maintenance-compact-status').textContent=`整理完成：${size(result.before_bytes)} → ${size(result.after_bytes)}，释放 ${size(result.released_bytes)}。`;
+        await load(true);
+      }catch(error){el('maintenance-compact-status').textContent='整理未完成或结果待核对：'+error.message;}
+      finally{compactBusy=false;restoreControls(false);el('maintenance-compact-open').disabled=loading||!snapshot;el('maintenance-refresh').disabled=loading;}
+    });
     function restoreControls(busy){
       restoreBusy=busy;el('maintenance-backup').disabled=busy;el('maintenance-backup-file').disabled=busy;
       el('maintenance-restore-preview').disabled=busy||!sourceSelected();el('maintenance-restore-open').disabled=busy;
@@ -116,19 +195,35 @@
       renderRows();
     }
     async function load(refresh=false){
-      if(loading)return;loading=true;el('maintenance-refresh').disabled=true;
+      if(loading)return;loading=true;el('maintenance-refresh').disabled=true;el('maintenance-compact-open').disabled=true;
       el('maintenance-status').textContent='正在统计本地记录和 SQLite 占用页…';
       try{
         const response=await fetch('/api/maintenance/storage'+(refresh?'?refresh=1':''),{cache:'no-store'}),data=await response.json();
         if(!response.ok)throw new Error(data.error||'读取统计失败');
         snapshot=data;render();el('maintenance-status').textContent=`统计时间：${date(data.generated_at)} · 使用“刷新本地统计”更新`;await backups();
       }catch(error){el('maintenance-status').textContent='统计未更新：'+error.message;}
-      finally{loading=false;el('maintenance-refresh').disabled=false;}
+      finally{loading=false;el('maintenance-refresh').disabled=compactBusy;el('maintenance-compact-open').disabled=compactBusy||restoreBusy||!snapshot;}
     }
     el('maintenance-refresh').addEventListener('click',()=>load(true));
+    window.addEventListener('stock-cleanup-complete',()=>{load(true);loadUnfollowed();});
     el('maintenance-search').addEventListener('input',renderRows);el('maintenance-category').addEventListener('change',renderRows);
     panel.querySelector('thead').addEventListener('click',event=>{const button=event.target.closest('[data-maintenance-sort]');if(!button)return;const key=button.dataset.maintenanceSort;direction=key===sort?-direction:(['rows','table_bytes','index_bytes','total_bytes','updated_at'].includes(key)?-1:1);sort=key;renderRows();});
-    document.getElementById('maintenance-tab').addEventListener('click',()=>{if(!snapshot)load();});
-    if(!panel.hidden)load();
+    const tabs=[el('maintenance-database-tab'),el('maintenance-stocks-tab')];
+    function loadActiveTab(){
+      if(el('maintenance-stocks-panel').hidden){if(!snapshot)load();}
+      else if(!unfollowedLoaded)loadUnfollowed();
+    }
+    tabs.forEach((tab,index)=>{
+      tab.addEventListener('click',()=>{
+        tabs.forEach(item=>{const active=item===tab;item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;el(item.getAttribute('aria-controls')).hidden=!active;});
+        el('maintenance-refresh').hidden=index===1;loadActiveTab();
+      });
+      tab.addEventListener('keydown',event=>{
+        if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+        event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?1:1-index;tabs[next].focus();tabs[next].click();
+      });
+    });
+    document.getElementById('maintenance-tab').addEventListener('click',loadActiveTab);
+    if(!panel.hidden)loadActiveTab();
   };
 })();

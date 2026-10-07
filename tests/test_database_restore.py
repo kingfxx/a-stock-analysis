@@ -52,8 +52,11 @@ def test_old_schema_upgraded_in_copy_and_original_unchanged(tmp_path,monkeypatch
     uploaded=manager.upload(io.BytesIO(old.path.read_bytes()),old.path.stat().st_size,'old.sqlite3')
     preview=manager.prepare({'upload':uploaded['upload']})
     assert preview['upgraded'] and preview['source_version']==12 and preview['target_version']==MIGRATIONS[-1][0]
-    assert preview['source_table_count']==preview['table_count']-3
-    assert preview['added_tables']==[{'name':'sw_cap_provenance','rows':0},
+    assert preview['source_table_count']==preview['table_count']-6
+    assert preview['added_tables']==[{'name':'stock_cleanup_runs','rows':0},
+                                   {'name':'stock_unfollowed','rows':0},
+                                   {'name':'stock_unfollowed_groups','rows':0},
+                                   {'name':'sw_cap_provenance','rows':0},
                                    {'name':'sw_listing_sources','rows':0},
                                    {'name':'sw_membership_checks','rows':0}]
     assert digest(old.path)==original

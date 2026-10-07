@@ -37,7 +37,10 @@ window.initStockPicker = function (state) {
       const response = await fetch('/api/stock-groups', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(command)});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '保存分组失败');
-      library = data; selected = data.selected_group;
+      revision++; library = data; selected = data.selected_group;
+      state.cached_stocks = data.stocks;
+      window.dispatchEvent(new CustomEvent('stock-library-updated', {detail:{library:data,
+        unfollowedCodes:command.action==='unfollow'?command.codes:[],restoredCodes:command.action==='restore'?command.codes:[]}}));
       return true;
     } catch (error) { message(error.message); return false; }
     finally { busy = false; render(); }
@@ -162,7 +165,10 @@ window.initStockPicker = function (state) {
     if (!matched.length) { const text = document.createElement('p'); text.textContent = search.value.trim() ? '没有匹配的股票，可在股票代码栏查询新股票。' : selected === 'recent' ? '尚无最近查看记录，可切换“全部股票”。' : '本组暂无股票，可通过“管理分组”添加。';list.appendChild(text); }
     list.scrollTop = scrollTop; updateCount();
   }
-  function updateCount() { get('stock-selected-count').textContent = checked.size + ' 只已选'; }
+  function updateCount() {
+    get('stock-selected-count').textContent = checked.size + ' 只已选';
+    get('stock-unfollow').disabled = busy || !checked.size;
+  }
   function render() {
     if (!entries().some(entry => entry.key === selected)) selected = 'all';
     get('stock-picker-summary').textContent = '我的股票 · ' + entries().find(entry => entry.key === selected).name;
@@ -209,6 +215,14 @@ window.initStockPicker = function (state) {
     if(!checked.size){message('请先选择股票');return;}
     if(await change({action:'membership',id:Number(target),codes:[...checked],add})){checked.clear();render();}
   });
+  get('stock-unfollow').addEventListener('click', async () => {
+    if (!checked.size || busy) return;
+    const codes = [...checked];
+    if (!confirm(`取消关注这 ${codes.length} 只股票？\n\n将从所有分组、全部股票和最近查看中移除，并停止自动更新。已有财务数据、财报与研究历史保留，可在“后台维护 → 已取消关注”中恢复。`)) return;
+    if (await change({action:'unfollow',codes})) {
+      checked.clear();render();message(`已取消关注 ${codes.length} 只股票，已有数据保留。可在后台维护中恢复。`);
+    }
+  });
   get('stock-select-results').addEventListener('click', () => {results().forEach(stock=>checked.add(stock.code));renderList();});
   search.addEventListener('input', renderList);
   search.addEventListener('keydown', event => {
@@ -226,10 +240,17 @@ window.initStockPicker = function (state) {
   document.addEventListener('click', event => {if(picker.open && !picker.contains(event.target) && !busy)picker.open=false;});
   document.addEventListener('keydown', event => {if(event.key==='Escape' && drag){event.preventDefault();stopDrag();return;}if(event.key==='Escape' && picker.open){picker.open=false;get('stock-picker-summary').focus();}});
   render();
+  window.addEventListener('stock-library-updated', event => {
+    if (event.detail.library === library) return;
+    revision++;
+    library = event.detail.library;selected = library.selected_group;
+    state.cached_stocks = library.stocks;
+    checked = new Set([...checked].filter(code => stocks().some(stock => stock.code === code)));
+    render();
+  });
   return {setStocks(updated) {
     const old=JSON.stringify(stocks().map(stock=>[stock.code,stock.name]));
     if(old!==JSON.stringify(updated.map(stock=>[stock.code,stock.name]))) {
-      library.stocks=updated;render();
       const version = revision;
       fetch('/api/stock-groups',{cache:'no-store'}).then(response=>{if(!response.ok)throw new Error('读取分组失败');return response.json();}).then(data=>{if(!busy && revision===version){library=data;selected=data.selected_group;render();}}).catch(error=>{if(revision===version)message(error.message);});
     }

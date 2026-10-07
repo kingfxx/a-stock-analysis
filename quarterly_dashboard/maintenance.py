@@ -1,11 +1,45 @@
-"""Local database inventory. No source calls, model calls, or database writes."""
+"""Local database inventory and explicitly requested space compaction."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from threading import Lock
 from time import monotonic
+import shutil
+import sqlite3
+import tempfile
 
 from .sqlite_sizes import physical_sizes
+
+
+def compact_database(db, validate):
+    """VACUUM outside a transaction, while holding an exclusive SQLite lock."""
+    with db.connection():
+        pass  # Validate the project schema before opening an autocommit connection.
+    conn=sqlite3.connect(db.path.resolve().as_uri()+'?mode=rw',uri=True,timeout=1,isolation_level=None)
+    conn.row_factory=sqlite3.Row
+    try:
+        if conn.execute('PRAGMA journal_mode').fetchone()[0]!='delete':
+            raise ValueError('当前仅支持回滚日志模式的数据库空间整理')
+        conn.execute('PRAGMA synchronous=FULL')
+        conn.execute('PRAGMA locking_mode=EXCLUSIVE')
+        conn.execute('BEGIN EXCLUSIVE')
+        validate(conn)
+        before=db.path.stat().st_size
+        required=2*before
+        for folder in (db.path.parent,tempfile.gettempdir()):
+            if shutil.disk_usage(folder).free<required:
+                raise ValueError('数据库目录或临时目录磁盘空间不足，需至少预留当前数据库大小的两倍空闲空间')
+        if conn.execute('PRAGMA quick_check').fetchone()[0]!='ok' or conn.execute('PRAGMA foreign_key_check').fetchone():
+            raise ValueError('数据库完整性检查未通过，未执行空间整理')
+        conn.execute('COMMIT')  # EXCLUSIVE locking mode retains the lock until close.
+        conn.execute('VACUUM')
+        if conn.execute('PRAGMA quick_check').fetchone()[0]!='ok' or conn.execute('PRAGMA foreign_key_check').fetchone():
+            raise ValueError('整理后完整性检查未通过，请检查后台日志')
+        after=db.path.stat().st_size
+        return {'before_bytes':before,'after_bytes':after,'released_bytes':max(0,before-after),
+                'free_bytes':conn.execute('PRAGMA freelist_count').fetchone()[0]*conn.execute('PRAGMA page_size').fetchone()[0]}
+    finally:
+        conn.close()
 
 DESCRIPTIONS={
  'instruments':('个股数据','股票代码、交易所与名称'),
@@ -49,10 +83,14 @@ DESCRIPTIONS={
  'stock_group_members':('运行与配置','分组内股票及顺序'),
  'stock_picker_preferences':('运行与配置','股票选择器偏好'),
  'stock_recent_views':('运行与配置','最近浏览的股票'),
+ 'stock_unfollowed':('运行与配置','已取消关注的股票及取消时间；来源数据继续保留'),
+ 'stock_unfollowed_groups':('运行与配置','取消关注前的分组归属及顺序，用于恢复关注'),
+ 'stock_cleanup_runs':('运行与配置','未关注股票清理的提交记录、范围、备份及结果；用于中断恢复'),
 }
 TIME_COLUMNS=('updated_at','obtained_at','checked_at','completed_at','finished_at','validated_at',
-              'captured_at','imported_at','applied_at','viewed_at','created_at')
+              'captured_at','imported_at','applied_at','viewed_at','created_at','unfollowed_at')
 PARENT_TIMES={
+ 'stock_unfollowed_groups':('stock_unfollowed','instrument_id','instrument_id','unfollowed_at'),
  'adjusted_daily_prices':('adjusted_price_versions','version_id','id','created_at'),
  'industry_snapshots':('sync_runs','run_id','id','finished_at'),
  'sw_financial_facts':('sw_imports','import_id','id','obtained_at'),

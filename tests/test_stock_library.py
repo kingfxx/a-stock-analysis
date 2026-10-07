@@ -147,3 +147,130 @@ def test_group_http_routes_persist_and_reject_cross_site_writes(library, monkeyp
             assert b'initStockPicker' in response.read()
     finally:
         httpd.shutdown(); httpd.server_close(); thread.join(timeout=2)
+
+
+def test_unfollow_keeps_facts_and_files_and_restores_groups_after_reopen(library, tmp_path, monkeypatch):
+    from quarterly_dashboard.fundamental_service import FundamentalService
+    from quarterly_dashboard.maintenance import MaintenanceService
+
+    cache = tmp_path / 'fundamentals'; cache.mkdir()
+    (cache / '001309.json').write_text(json.dumps({'code':'001309','reports':[
+        {'period':'2025-12-31','publish_date':'2026-04-30','revenue_ytd':100,'profit_ytd':20}]}), encoding='utf-8')
+    FundamentalService(library.db, cache).import_legacy('001309')
+    pdf = tmp_path / 'company_reports' / 'sz001309' / '2025-12-31' / 'v1' / 'report.pdf'
+    pdf.parent.mkdir(parents=True); pdf.write_bytes(b'retained-report')
+    for name in ['重点关注','芯片']:
+        identity = library.change({'action':'create','name':name})['groups'][-1]['id']
+        library.change({'action':'membership','id':identity,'codes':['300750','001309','600938'],'add':True})
+    library.change({'action':'visit','code':'001309'})
+    with library.db.connection() as conn:
+        before = [tuple(row) for row in conn.execute('SELECT * FROM financial_reports')]
+        instruments = [tuple(row) for row in conn.execute('SELECT * FROM instruments')]
+    data = library.change({'action':'unfollow','codes':['001309','001309']})
+    assert [s['code'] for s in data['stocks']] == ['300750','600938']
+    assert data['recent'] == []
+    assert all(group['codes'] == ['300750','600938'] for group in data['groups'])
+    saved = library.unfollowed()
+    assert saved[0]['code'] == '001309' and len(saved[0]['groups']) == 2
+    library.change({'action':'unfollow','codes':['001309']})
+    library.change({'action':'visit','code':'001309'})
+    library.db.ensure_instrument('001309')  # A late update must not re-follow the stock.
+    assert library.unfollowed() == saved and library.read()['recent'] == []
+    assert StockLibrary(Database(library.db.path)).unfollowed() == saved
+    monkeypatch.setattr(server, 'DATABASE_PATH', library.db.path)
+    assert [s['code'] for s in server.cached_stocks()] == ['300750','600938']
+    with library.db.connection() as conn:
+        assert [tuple(row) for row in conn.execute('SELECT * FROM financial_reports')] == before
+        assert [tuple(row) for row in conn.execute('SELECT * FROM instruments')] == instruments
+    assert pdf.read_bytes() == b'retained-report'
+    inventory = {row['name']:row for row in MaintenanceService(library.db).read()['tables']}
+    assert inventory['stock_unfollowed']['rows'] == 1
+    assert inventory['stock_unfollowed_groups']['rows'] == 2
+    for table in ('stock_unfollowed','stock_unfollowed_groups'):
+        assert inventory[table]['category'] == '运行与配置'
+        assert inventory[table]['total_bytes'] > 0
+        assert inventory[table]['updated_at'] == saved[0]['unfollowed_at']
+        assert 'unfollowed_at' in inventory[table]['time_basis']
+    restored = StockLibrary(Database(library.db.path)).change({'action':'restore','codes':['001309']})
+    assert len(restored['stocks']) == 3 and library.unfollowed() == []
+    assert all(group['codes'] == ['300750','001309','600938'] for group in restored['groups'])
+    assert library.change({'action':'restore','codes':['001309']}) == restored
+
+
+def test_restore_skips_deleted_groups_and_restores_renamed_group(library):
+    first = library.change({'action':'create','name':'删除这个组'})['groups'][0]['id']
+    second = library.change({'action':'create','name':'保留这个组'})['groups'][-1]['id']
+    for identity in (first, second):
+        library.change({'action':'membership','id':identity,'codes':['001309','300750'],'add':True})
+    library.change({'action':'unfollow','codes':['300750','001309']})
+    library.change({'action':'delete','id':first})
+    library.change({'action':'rename','id':second,'name':'新名称'})
+    data = library.change({'action':'restore','codes':['300750','001309']})
+    assert data['groups'] == [{'id':second,'name':'新名称','codes':['001309','300750']}]
+    library.change({'action':'unfollow','codes':['001309']})
+    library.change({'action':'delete','id':second})
+    new = library.change({'action':'create','name':'新建同编号组'})['groups'][0]['id']
+    assert new == first  # SQLite may reuse deleted group IDs; saved FK rows were cascaded.
+    assert library.change({'action':'restore','codes':['001309']})['groups'][0]['codes'] == []
+
+
+@pytest.mark.parametrize('action',['unfollow','restore'])
+@pytest.mark.parametrize('codes',[None,[],['001309',123],['001309','999999']])
+def test_invalid_unfollow_restore_batch_is_atomic(library, action, codes):
+    before = library.read()
+    with pytest.raises(ValueError):
+        library.change({'action':action,'codes':codes})
+    assert library.read() == before and library.unfollowed() == []
+
+
+def test_unfollowed_cannot_be_added_back_by_stale_group_request(library):
+    identity = library.change({'action':'create','name':'关注'})['groups'][0]['id']
+    library.change({'action':'unfollow','codes':['001309']})
+    with pytest.raises(ValueError, match='已取消关注'):
+        library.change({'action':'membership','id':identity,'codes':['300750','001309'],'add':True})
+    assert library.read()['groups'][0]['codes'] == []
+
+
+def test_unfollowed_http_restore_and_update_guard(library, monkeypatch):
+    monkeypatch.setattr(server, 'DATABASE_PATH', library.db.path)
+    monkeypatch.setattr(server, 'price_bundle', lambda *a,**kw: pytest.fail('unfollowed stock requested prices'))
+    monkeypatch.setattr(server, 'load_chart_data', lambda *a,**kw: pytest.fail('unfollowed stock requested sources'))
+    httpd = server.ThreadingHTTPServer(('127.0.0.1',0), server.Handler)
+    thread = Thread(target=httpd.serve_forever, daemon=True); thread.start()
+    base = f'http://127.0.0.1:{httpd.server_port}'
+    def post(path, command, origin=base):
+        with urlopen(Request(base+path,data=json.dumps(command).encode(),headers={
+                'Content-Type':'application/json','Origin':origin}),timeout=5) as response:
+            return json.load(response)
+    try:
+        post('/api/stock-groups', {'action':'unfollow','codes':['001309']})
+        with urlopen(base+'/api/maintenance/unfollowed',timeout=5) as response:
+            assert json.load(response)['stocks'][0]['code'] == '001309'
+        for section in ['financial','dividends','valuation','shareholders','financing','prices']:
+            with pytest.raises(HTTPError) as failure:
+                urlopen(base+f'/api/{section}?code=001309&refresh=1',timeout=5)
+            assert '已取消关注' in json.load(failure.value)['error']
+        with pytest.raises(HTTPError) as failure:
+            post('/api/maintenance/unfollowed',{'action':'restore','codes':['001309']},'https://example.org')
+        assert failure.value.code == 400 and library.is_unfollowed('001309')
+        restored = post('/api/maintenance/unfollowed',{'action':'restore','codes':['001309']})
+        assert restored['stocks'] == [] and len(restored['library']['stocks']) == 3
+    finally:
+        httpd.shutdown(); httpd.server_close(); thread.join(timeout=2)
+
+
+def test_v14_upgrade_and_empty_inventory(tmp_path, monkeypatch):
+    from quarterly_dashboard.maintenance import MaintenanceService
+
+    db = Database(tmp_path/'v14.sqlite3')
+    with monkeypatch.context() as patch:
+        patch.setattr(storage,'MIGRATIONS',storage.MIGRATIONS[:14])
+        db.initialize(); db.ensure_instrument('001309','德明利')
+    db.initialize()
+    assert len(StockLibrary(db).read()['stocks']) == 1
+    rows = {r['name']:r for r in MaintenanceService(db).read()['tables']}
+    for name in ('stock_unfollowed','stock_unfollowed_groups'):
+        assert rows[name]['rows'] == 0 and rows[name]['updated_at'] is None
+        assert rows[name]['description'] != '尚未登记用途'
+    assert list((tmp_path/'backups').glob('pre-migration-*.sqlite3'))
+    assert db.check()['integrity'] == 'ok'

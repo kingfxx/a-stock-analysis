@@ -33,6 +33,7 @@ from .valuation_service import ValuationService
 from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update
 from .storage import SyncKey
 from .stock_library import StockLibrary
+from .stock_cleanup import StockCleanupService
 from .analysis_service import AnalysisService
 from .checklist_snapshot import capture as checklist_capture
 from .checklist_validation import prompt as checklist_prompt, validate_output as validate_checklist, OUTPUT_VERSION
@@ -431,7 +432,7 @@ def cached_stocks() -> list[dict]:
         db = services()[0].db
         with db.connection() as conn:
             return [{"code": row["code"], "name": row["name"]} for row in conn.execute(
-                "SELECT code,name FROM instruments ORDER BY code")]
+                "SELECT code,name FROM instruments WHERE id NOT IN (SELECT instrument_id FROM stock_unfollowed) ORDER BY code")]
     stocks = []
     for path in sorted(CACHE.glob("*.json")):
         try:
@@ -815,6 +816,7 @@ def render_page(code: str, refresh: bool) -> str:
         error = str(exc)
     payload["cached_stocks"] = cached_stocks()
     payload["stock_library"] = StockLibrary(services()[0].db).read() if Path(DATABASE_PATH).exists() else {}
+    payload["unfollowed"] = (StockLibrary(services()[0].db).is_unfollowed(code) if Path(DATABASE_PATH).exists() else False)
     payload['valuation'] = compact_valuation(payload['valuation'])
     embedded = json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
     return (TEMPLATE.replace("__PAYLOAD__", embedded)
@@ -837,7 +839,35 @@ class Handler(BaseHTTPRequestHandler):
         allowed={f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'}
         if self.headers.get('Origin') not in allowed or not secrets.compare_digest(
                 self.headers.get('X-Local-Session',''),LOCAL_SESSION_TOKEN):
-            raise ValueError('拒绝跨站或无本地会话的恢复操作，请刷新页面')
+            raise ValueError('拒绝跨站或无本地会话的维护操作，请刷新页面')
+
+    def _cleanup_service(self):
+        with _SERVICE_LOCK:
+            if not hasattr(self.server, 'stock_cleanup'):
+                self.server.stock_cleanup = StockCleanupService(Database(DATABASE_PATH), activity_check=_restore_activity)
+        return self.server.stock_cleanup
+
+    def _cleanup_post(self, path):
+        try:
+            self._maintenance_auth()
+            size = int(self.headers.get('Content-Length','0'))
+            if self.headers.get_content_type()!='application/json' or not 0<size<=8192:
+                raise ValueError('清理请求格式无效')
+            command = json.loads(self.rfile.read(size).decode('utf-8'))
+            service = self._cleanup_service()
+            if path=='/api/maintenance/compact':
+                data=service.compact(command,self.server.request_gate)
+                with _SERVICE_LOCK:
+                    _MAINTENANCE_SERVICES.clear()
+            elif path.endswith('/preview'):
+                data = service.preview(command)
+            else:
+                data = service.execute(command, self.server.request_gate)
+                with _SERVICE_LOCK:
+                    _MAINTENANCE_SERVICES.clear()
+            self._ai_reply(data)
+        except (ValueError,TypeError,UnicodeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+            self._ai_reply({'error':str(exc)},400)
 
     def _maintenance_post(self, path):
         scheduled=False
@@ -876,7 +906,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:self._ai_reply({'error':str(exc)},400)
             return
         if gate and not gate.enter():
-            self._ai_reply({'error':'数据库正在恢复，请稍候','restoring':True},503);return
+            self._ai_reply({'error':'后台维护正在执行，请稍候','restoring':True},503);return
         try:getattr(self,'_do_'+method)()
         finally:
             if gate:gate.leave()
@@ -1003,12 +1033,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_POST(self):
         path = urlparse(self.path).path
+        if path in {'/api/maintenance/compact','/api/maintenance/stock-cleanup/preview','/api/maintenance/stock-cleanup/execute'}:
+            self._cleanup_post(path);return
         if path in {'/api/maintenance/restore/upload','/api/maintenance/restore/preview','/api/maintenance/restore/confirm','/api/maintenance/restore/cancel'}:
             self._maintenance_post(path);return
         if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/"):
             self._ai_post(path)
             return
-        if path not in {"/api/stock-groups", "/api/industry/refresh"}:
+        if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh"}:
             self.send_error(404)
             return
         status = 200
@@ -1026,6 +1058,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(command,dict) or set(command)-{'action','target','recheck'} or not {'action','target'}<=set(command):
                     raise ValueError('行业更新须指定任务和报告期／季度')
                 data = industry_service().start_refresh(command['action'],command['target'],command.get('recheck',False))
+            elif path == '/api/maintenance/unfollowed':
+                if not isinstance(command, dict) or command.get('action') != 'restore':
+                    raise ValueError('此入口仅支持恢复关注')
+                library = StockLibrary(services()[0].db)
+                data = {'library':library.change(command), 'stocks':library.unfollowed()}
             else:
                 data = StockLibrary(services()[0].db).change(command)
         except (ValueError, TypeError, OSError, StorageError, sqlite3.DatabaseError) as exc:
@@ -1088,12 +1125,23 @@ class Handler(BaseHTTPRequestHandler):
             content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css",
                              "/financial-statements.js", "/financial-statements.css", "/industry.js", "/industry.css",
-                             "/maintenance.js", "/maintenance.css"}:
+                             "/maintenance.js", "/maintenance.css", "/stock-cleanup.js"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
             body = json.dumps(StockLibrary(services()[0].db).read(), ensure_ascii=False).encode("utf-8")
             content_type = "application/json; charset=utf-8"
+        elif parsed.path == '/api/maintenance/unfollowed':
+            body = json.dumps({'stocks':StockLibrary(services()[0].db).unfollowed()}, ensure_ascii=False).encode('utf-8')
+            content_type = 'application/json; charset=utf-8'
+        elif parsed.path == '/api/maintenance/stock-cleanup':
+            try:
+                self._ai_host()
+                data = {**self._cleanup_service().candidates(), 'session_token':LOCAL_SESSION_TOKEN}
+            except (ValueError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                status,data = 400,{'error':str(exc)}
+            body = json.dumps(data,ensure_ascii=False,allow_nan=False).encode('utf-8')
+            content_type = 'application/json; charset=utf-8'
         elif parsed.path == "/":
             query = parse_qs(parsed.query)
             code = query.get("code", ["601919"])[0]
@@ -1142,6 +1190,8 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             try:
                 code = query.get("code", ["601919"])[0]
+                if Path(DATABASE_PATH).exists() and StockLibrary(services()[0].db).is_unfollowed(normalize_code(code)):
+                    raise ValueError('该股票已取消关注，请在后台维护中恢复关注后更新数据')
                 version_key = "version" if parsed.path == "/api/prices" else "price_version"
                 version = int(query[version_key][0]) if version_key in query else None
                 if version is not None and version < 0:
@@ -1177,7 +1227,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _initialize_runtime(db, skip_legacy=False):
-    runtime=db.initialize();db.check();db.daily_backup()
+    runtime=db.initialize();StockCleanupService(db).recover();db.check();db.daily_backup()
     recovered=db.recover_interrupted_runs()
     industry_recovered=IndustryService(db).recover_interrupted_runs()
     ai_recovered=ai_service().repository.recover()

@@ -12,12 +12,15 @@ class StockLibrary:
 
     def read(self):
         with self.db.connection() as conn:
-            stocks = [dict(row) for row in conn.execute("SELECT code,name FROM instruments ORDER BY code")]
+            stocks = [dict(row) for row in conn.execute(
+                "SELECT code,name FROM instruments WHERE id NOT IN (SELECT instrument_id FROM stock_unfollowed) ORDER BY code")]
             groups = [dict(row) for row in conn.execute("SELECT id,name FROM stock_groups ORDER BY position,id")]
             members = conn.execute("SELECT group_id,code FROM stock_group_members JOIN instruments "
-                                   "ON instrument_id=instruments.id ORDER BY group_id,position,code,instruments.id").fetchall()
+                                   "ON instrument_id=instruments.id WHERE instrument_id NOT IN "
+                                   "(SELECT instrument_id FROM stock_unfollowed) ORDER BY group_id,position,code,instruments.id").fetchall()
             recent = [row[0] for row in conn.execute("SELECT code FROM stock_recent_views JOIN instruments "
-                      "ON instrument_id=instruments.id ORDER BY viewed_at DESC,instrument_id DESC LIMIT 20")]
+                      "ON instrument_id=instruments.id WHERE instrument_id NOT IN (SELECT instrument_id FROM stock_unfollowed) "
+                      "ORDER BY viewed_at DESC,instrument_id DESC LIMIT 20")]
             selected = conn.execute("SELECT selected_group FROM stock_picker_preferences WHERE id=1").fetchone()[0]
         for stock in stocks:
             name = stock["name"] or ""
@@ -27,11 +30,28 @@ class StockLibrary:
             group["codes"] = [row["code"] for row in members if row["group_id"] == group["id"]]
         return {"stocks": stocks, "groups": groups, "recent": recent, "selected_group": selected}
 
+    def is_unfollowed(self, code):
+        with self.db.connection() as conn:
+            return bool(conn.execute("SELECT 1 FROM stock_unfollowed u JOIN instruments i ON i.id=u.instrument_id "
+                                     "WHERE i.code=?", (code,)).fetchone())
+
+    def unfollowed(self):
+        with self.db.connection() as conn:
+            stocks = [dict(row) for row in conn.execute(
+                "SELECT i.id,i.code,i.name,u.unfollowed_at FROM stock_unfollowed u "
+                "JOIN instruments i ON i.id=u.instrument_id ORDER BY u.unfollowed_at DESC,i.code")]
+            groups = conn.execute("SELECT u.instrument_id,g.id,g.name FROM stock_unfollowed_groups u "
+                                  "JOIN stock_groups g ON g.id=u.group_id ORDER BY g.position,g.id").fetchall()
+        for stock in stocks:
+            identity = stock.pop('id')
+            stock['groups'] = [{'id':g['id'], 'name':g['name']} for g in groups if g['instrument_id'] == identity]
+        return stocks
+
     def change(self, command):
         if not isinstance(command, dict):
             raise ValueError("操作格式无效")
         action = command.get("action")
-        if action not in {"create", "rename", "delete", "reorder", "reorder_members", "membership", "select", "visit"}:
+        if action not in {"create", "rename", "delete", "reorder", "reorder_members", "membership", "select", "visit", "unfollow", "restore"}:
             raise ValueError("未知分组操作")
         backup_before_update(self.db)
         with self.db.connection(write=True) as conn:
@@ -89,11 +109,46 @@ class StockLibrary:
                     if not stock:
                         raise ValueError(f"{code} 尚未查询，请先查询股票")
                     if command["add"]:
+                        if conn.execute("SELECT 1 FROM stock_unfollowed WHERE instrument_id=?", (stock[0],)).fetchone():
+                            raise ValueError(f"{code} 已取消关注，请在后台维护中恢复关注")
                         conn.execute("INSERT OR IGNORE INTO stock_group_members(group_id,instrument_id,position) "
                                      "SELECT ?,?,coalesce(max(position),-1)+1 FROM stock_group_members WHERE group_id=?",
                                      (identity, stock[0], identity))
                     else:
                         conn.execute("DELETE FROM stock_group_members WHERE group_id=? AND instrument_id=?", (identity, stock[0]))
+            elif action in {"unfollow", "restore"}:
+                codes = command.get('codes')
+                if not isinstance(codes, list) or not codes or len(codes) > 2000 or any(not isinstance(code, str) for code in codes):
+                    raise ValueError("请选择要整理的股票")
+                identities = []
+                for code in dict.fromkeys(codes):
+                    stock = conn.execute("SELECT id FROM instruments WHERE code=?", (code,)).fetchone()
+                    if not stock:
+                        raise ValueError(f"{code} 尚未查询，请先查询股票")
+                    identities.append(stock[0])
+                if action == 'unfollow':
+                    now = utc_now()
+                    for identity in identities:
+                        if conn.execute("SELECT 1 FROM stock_unfollowed WHERE instrument_id=?", (identity,)).fetchone():
+                            continue  # Retried requests must preserve the original groups and timestamp.
+                        conn.execute("INSERT INTO stock_unfollowed VALUES (?,?)", (identity, now))
+                        conn.execute("INSERT INTO stock_unfollowed_groups SELECT instrument_id,group_id,position "
+                                     "FROM stock_group_members WHERE instrument_id=?", (identity,))
+                        conn.execute("DELETE FROM stock_group_members WHERE instrument_id=?", (identity,))
+                        conn.execute("DELETE FROM stock_recent_views WHERE instrument_id=?", (identity,))
+                else:
+                    # Restore saved positions in order; retain the relative order of current members.
+                    saved = conn.execute("SELECT instrument_id,group_id,position FROM stock_unfollowed_groups "
+                                         "ORDER BY group_id,position,instrument_id").fetchall()
+                    restoring = set(identities)
+                    for member in saved:
+                        if member['instrument_id'] not in restoring:
+                            continue
+                        conn.execute("UPDATE stock_group_members SET position=position+1 WHERE group_id=? AND position>=?",
+                                     (member['group_id'], member['position']))
+                        conn.execute("INSERT INTO stock_group_members(group_id,instrument_id,position) VALUES (?,?,?)",
+                                     (member['group_id'], member['instrument_id'], member['position']))
+                    conn.executemany("DELETE FROM stock_unfollowed WHERE instrument_id=?", ((identity,) for identity in identities))
             elif action == "select":
                 selected = command.get("group")
                 if selected not in {"recent", "all", "ungrouped"}:
@@ -103,7 +158,7 @@ class StockLibrary:
                 conn.execute("UPDATE stock_picker_preferences SET selected_group=? WHERE id=1", (selected,))
             elif action == "visit":
                 stock = conn.execute("SELECT id FROM instruments WHERE code=?", (command.get("code"),)).fetchone()
-                if stock:
+                if stock and not conn.execute("SELECT 1 FROM stock_unfollowed WHERE instrument_id=?", (stock[0],)).fetchone():
                     conn.execute("INSERT INTO stock_recent_views VALUES (?,?) ON CONFLICT(instrument_id) "
                                  "DO UPDATE SET viewed_at=excluded.viewed_at", (stock[0], utc_now()))
         return self.read()

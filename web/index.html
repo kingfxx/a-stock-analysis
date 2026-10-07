@@ -189,7 +189,8 @@
             <span id="stock-selected-count">0 只已选</span>
             <button type="button" id="stock-select-results">选择结果</button>
             <button type="button" id="stock-group-add">加入所选组</button>
-            <button type="button" id="stock-group-remove">移出所选组</button>
+            <button type="button" id="stock-group-remove">移出当前管理组</button>
+            <button type="button" id="stock-unfollow">取消关注</button>
           </div>
           <div class="stock-picker-footer"><span>搜索覆盖全部分组</span><button id="stock-manage" type="button">管理分组</button></div>
           <p id="stock-picker-message" role="status" aria-live="polite"></p>
@@ -444,8 +445,9 @@
 <script src="/financial-statements.js?v=20261004-sidebar-tabs"></script>
 <link rel="stylesheet" href="/industry.css?v=20261004-ranking">
 <script src="/industry.js?v=20261004-industry-comparison"></script>
-<link rel="stylesheet" href="/maintenance.css?v=20261004-storage">
-  <script src="/maintenance.js?v=20261004-restore-scope"></script>
+<link rel="stylesheet" href="/maintenance.css?v=20261007-compact-confirm">
+<script src="/stock-cleanup.js?v=20261007-no-cleanup-backup"></script>
+  <script src="/maintenance.js?v=20261007-compact-confirm"></script>
 <script>
 (() => {
   function expandValuationPayload(data) {
@@ -484,6 +486,20 @@
   renderCurrentStock();
   document.getElementById('refresh').href = '/?code=' + encodeURIComponent(state.code || '601919') + '&refresh=1';
   const stockPicker = window.initStockPicker(state);
+  function renderFollowState() {
+    const inactive = Boolean(state.unfollowed);
+    document.getElementById('full-audit').disabled = inactive || dashboardUpdating;
+    document.getElementById('refresh').setAttribute('aria-disabled', String(inactive || dashboardUpdating));
+    if (inactive) document.getElementById('prices-status').textContent = '已取消关注，展示保留的本地数据，自动更新已停止。可在“后台维护 → 未关注股票管理 → 已取消关注”中恢复。';
+  }
+  window.addEventListener('stock-library-updated', event => {
+    if (event.detail.unfollowedCodes?.includes(state.code)) state.unfollowed = true;
+    if (event.detail.restoredCodes?.includes(state.code)) {
+      state.unfollowed = false;
+      document.getElementById('prices-status').textContent = '已恢复关注，可点击“刷新数据”补齐最新数据。';
+    }
+    renderFollowState();
+  });
   function renderCachedStocks() { stockPicker.setStocks(state.cached_stocks || []); }
   renderCachedStocks();
   if (state.updated_at) document.getElementById('updated').textContent = new Date(state.updated_at).toLocaleString('zh-CN');
@@ -1098,6 +1114,7 @@
     if (typeof Plotly !== 'undefined') { render(); renderValuation(); renderChips('shareholders'); renderChips('financing'); }
   }
   async function loadDashboard(force = false, full = false) {
+    if (state.unfollowed) { renderFollowState(); return; }
     if (dashboardUpdating) return;
     const coordinated = Object.hasOwn(state, 'price_version');
     if (!force && !full && !Object.values(state.loading).some(Boolean) &&
@@ -1151,9 +1168,8 @@
     finally {
       dashboardUpdating = false;
       window.dispatchEvent(new CustomEvent('dashboard-data-state', {detail:{code:state.code, updating:false}}));
-      fullRefresh.disabled = false;
-      refresh.setAttribute('aria-disabled', 'false');
       refresh.textContent = '刷新数据';
+      renderFollowState();
     }
   }
   document.getElementById('refresh').addEventListener('click', event => {
@@ -1161,7 +1177,7 @@
     loadDashboard(true);
   });
   document.getElementById('full-audit').addEventListener('click', () => {
-    if (dashboardUpdating) return;
+    if (dashboardUpdating || state.unfollowed) return;
     const stock = state.code + (state.name ? ' · ' + state.name : '');
     if (!confirm(`全量刷新 ${stock}\n\n将重新获取数据源可提供的财务、分红、估值、股东人数、融资和股价历史，核对并更新本地数据。\n\n仅刷新当前股票，不会刷新其他缓存股票。请求较多，耗时通常比普通刷新更长；获取失败的数据项会保留已有记录。\n\n是否继续？`)) return;
     return loadDashboard(true, true);
