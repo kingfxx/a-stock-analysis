@@ -176,8 +176,27 @@ def metric(reports, period, key, mode, *, balance_first=False):
     return missing(LABELS[key], period)
 
 
+def roe_metric(reports, period, mode):
+    result = missing('ROE', period, '%')
+    result['note'] = ('采用归属于母公司股东的加权净资产收益率，包含非经常性损益；'
+        '直接使用所选期间披露值，不自行年化，不与摊薄或期初期末平均净资产估算值混用。')
+    if mode == 'quarter' and period[5:] != '03-31':
+        result['reason'] = '累计加权ROE不能直接差分为单季度ROE'
+        return result
+    raw = reports.get(period, {}).get('gjzb')
+    item = find(raw, 'zyb', 'ROEWEIGHTED')
+    if item:
+        value = extract(raw, item, 'gjzb', period, 'ytd', reports)
+        if value['value'] is not None:
+            return {**value, 'label':'ROE', 'unit':'%', 'note':result['note'],
+                    'formula':'直接读取新浪关键指标 ROEWEIGHTED（加权净资产收益率）。'}
+    result['reason'] = '缺少适用的加权ROE；三表余额无法准确还原加权净资产'
+    return result
+
+
 def summarize(reports, period, mode, financial):
     values = {key: metric(reports, period, key, mode) for key in FIELDS}
+    values['roe'] = roe_metric(reports, period, mode)
     values['capex']['note'] = '使用现金流量表字段 ACQUASSETCASH：购建固定资产、无形资产和其他长期资产支付的现金。'
     values['gross_profit'] = calculated('毛利润', [values['revenue'], values['cost']],
                                         '营业收入 − 营业成本', lambda r,c:r-c, period)

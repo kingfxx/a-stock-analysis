@@ -25,6 +25,20 @@ def checklist_service(db):
     return AnalysisService(db,ChecklistProvider(),snapshotter=lambda db,code:capture(db,code,as_of='2026-10-02'),prompt_factory=prompt,validator=validate_output,output_version=OUTPUT_VERSION)
 
 
+def test_run_exposes_corrected_product_display_without_mutating_history(database):
+    from test_report_business_metrics import JOINED_AMOUNTS
+    snap=capture(database,'600900',as_of='2026-10-02')
+    snap['input']['evidence'].append({'id':'bus.page','metric':'report_excerpt','value':[{
+        'text':JOINED_AMOUNTS,'business_metrics':{'revenue_mix':{'period':'2025-12-31',
+        'rows':[{'name':'客车产品3,622,876.432,712,654.55','revenue':25.12}]}}}]})
+    repo=AnalysisRepository(database)
+    run=repo.enqueue(snap,uuid4().hex,'test-model','test-account',prompt())
+    displayed=repo.run(run['id'])
+    assert displayed['product_display_corrections'][0]['metrics']['revenue_mix']['denominator']==3622876.43
+    assert displayed['input']==snap['input']
+    assert json.loads(repo.run(run['id'],internal=True)['input_json'])==snap['input']
+
+
 def test_local_snapshot_zero_gjzb_and_fallback_no_old_roe(database):
     key=SyncKey(database.ensure_instrument('600900'),'financial:gjzb','sina:gjzb')
     run=database.start_sync(key,parser_version='test',methodology_version='test')

@@ -36,3 +36,6 @@ data/ai-private/
 
 # Reusable official company reports and parsed artifacts.
 data/company_reports/
+
+# Local API credentials must never be committed.
+data/credentials/

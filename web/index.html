@@ -364,6 +364,11 @@
           <option value="5">最近 5 年</option>
           <option value="3">最近 3 年</option>
         </select>
+        <label for="valuation-benchmark">比较基准</label>
+        <select id="valuation-benchmark" aria-label="估值比较基准">
+          <option value="percentile" selected>历史分位</option>
+          <option value="stddev">均值 ±1 标准差</option>
+        </select>
         <label for="valuation-frequency">展示频率</label>
         <select id="valuation-frequency" aria-label="估值展示频率">
           <option value="auto" selected>自动</option>
@@ -394,7 +399,7 @@
     </div>
     <p id="valuation-status" class="note" role="status" aria-live="polite"></p>
     <p id="valuation-negative-note" class="note valuation-negative-note" role="status" aria-live="polite"></p>
-    <div id="valuation-chart" role="img" aria-label="估值走势与历史分位参考线"></div>
+    <div id="valuation-chart" role="img" aria-label="估值走势与历史基准参考线"></div>
     <p id="valuation-note" class="note valuation-note"></p>
   </section>
   <section class="chip-region" aria-label="筹码评估">
@@ -762,6 +767,12 @@
   const valuationNames = {pe:'市盈率 PE(TTM)',pb:'市净率 PB(MRQ)',ps:'市销率 PS(TTM)',dividend_yield:'股息率（近 12 个月已实施派息）'};
   const valuationRange = document.getElementById('valuation-range');
   const valuationFrequency = document.getElementById('valuation-frequency');
+  const valuationBenchmark = document.getElementById('valuation-benchmark');
+  const valuationBenchmarkKey = 'investment-valuation-benchmark-v1';
+  try {
+    const savedBenchmark = localStorage.getItem(valuationBenchmarkKey);
+    valuationBenchmark.value = savedBenchmark === 'stddev' ? 'stddev' : 'percentile';
+  } catch { valuationBenchmark.value = 'percentile'; }
   const valuationFrequencyKey = 'investment-valuation-frequency-v1';
   try {
     const savedFrequency = localStorage.getItem(valuationFrequencyKey);
@@ -806,13 +817,17 @@
       ? '负 PE 观察区间：' + negativeRanges.map(range => range.start === range.end ? range.start : `${range.start} 至 ${range.end}`).join('；') +
         '。图中以浅色区域标示；该期间 PE(TTM) 为负，不参与走势与估值分位计算，原始数据已保存。'
       : '';
+    const useStddev = valuationBenchmark.value === 'stddev';
+    const levels = useStddev
+      ? {high:view?.stddev_high, median:view?.mean, low:view?.stddev_low}
+      : {high:view?.high, median:view?.median, low:view?.low};
     const current = view?.current;
     document.getElementById('valuation-current-label').textContent = '最近观察 · ' + valuationNames[valuationMetric];
     document.getElementById('valuation-current').textContent = formattedValuation(current);
     document.getElementById('valuation-current-date').textContent = view?.current_date || '暂无有效观察';
-    document.getElementById('valuation-high').textContent = formattedValuation(view?.high);
-    document.getElementById('valuation-median').textContent = formattedValuation(view?.median);
-    document.getElementById('valuation-low').textContent = formattedValuation(view?.low);
+    document.getElementById('valuation-high').textContent = formattedValuation(levels.high);
+    document.getElementById('valuation-median').textContent = formattedValuation(levels.median);
+    document.getElementById('valuation-low').textContent = formattedValuation(levels.low);
     const isYield = valuationMetric === 'dividend_yield';
     const percentile = view?.percentile;
     const hasPosition = current != null && view?.count > 0 && Number.isFinite(percentile) && percentile >= 0 && percentile <= 100;
@@ -822,9 +837,9 @@
     position.setAttribute('data-tone', band < 0 ? '' : band === 2 ? 'middle' : (isYield ? band > 2 : band < 2) ? 'low' : 'high');
     position.setAttribute('title', '历史分位 P：P≤20% 为' + (isYield ? '低息' : '低位') + '，20%<P<40% 为偏低，40%≤P≤60% 为中值，60%<P<80% 为偏高，P≥80% 为' + (isYield ? '高息' : '高位') + '；仅表示自身历史位置。');
     document.getElementById('valuation-position-basis').textContent = hasPosition ? `近 ${years} 年 · 历史分位 ${percentile.toFixed(1)}%` : `近 ${years} 年 · 暂无有效分位`;
-    document.getElementById('valuation-high-label').textContent = isYield ? '高息（80% 分位）' : '高位（80% 分位）';
-    document.getElementById('valuation-median-label').textContent = '中值（50% 分位）';
-    document.getElementById('valuation-low-label').textContent = isYield ? '低息（20% 分位）' : '低位（20% 分位）';
+    document.getElementById('valuation-high-label').textContent = useStddev ? '上限（均值 +1σ）' : isYield ? '高息（80% 分位）' : '高位（80% 分位）';
+    document.getElementById('valuation-median-label').textContent = useStddev ? '均值' : '中值（50% 分位）';
+    document.getElementById('valuation-low-label').textContent = useStddev ? '下限（均值 −1σ）' : isYield ? '低息（20% 分位）' : '低位（20% 分位）';
     const highColor = isYield ? '#6ac9aa' : '#ed8180', lowColor = isYield ? '#ed8180' : '#6ac9aa';
     document.getElementById('valuation-high-dot').setAttribute('style', '--level-color:' + highColor);
     document.getElementById('valuation-low-dot').setAttribute('style', '--level-color:' + lowColor);
@@ -833,6 +848,8 @@
     history.textContent = !view?.count ? `历史：近 ${years} 年暂无可用的${valuationNames[valuationMetric]}数据。` :
       current == null || view.percentile == null ? `历史：近 ${years} 年有 ${view.count} 个${percentileFrequency}样本，暂无法计算当前分位。` :
       `历史：当前高于近 ${years} 年 ${view.percentile}% 的${percentileFrequency}样本（${view.count} 个）；切换展示频率不改变分位。`;
+    if (useStddev && view?.count) history.textContent +=
+      ` 参考线：均值 ${formattedValuation(view?.mean)}，总体标准差 ${formattedValuation(view?.stddev)}；使用同一组历史样本，切换展示频率不改变参考线。`;
     const industry = document.getElementById('valuation-industry');
     const relation = {higher:'高于',lower:'低于',equal:'等于'}[view?.industry_relation];
     const peers = state.valuation?.peer_count;
@@ -845,7 +862,7 @@
       '股息率＝截至观察日未复权收盘价前 365 天内已除权实施的税前每股现金分红之和 ÷ 该观察日未复权收盘价 × 100%；无已实施分红时显示 0%。分红事件来自东方财富，股价来自腾讯日 K。' : valuationMetric === 'ps' ?
       'PS 为百度总市值 ÷ 截至观察日已披露财报的 TTM 营收；历史财报可能包含后续修订。' :
       'PE(TTM) 与 PB 取百度股市通历史估值。';
-    note.textContent = sourceNote + ` 当前按${frequencyName}展示；周/月取周期内最后一条有效观察，悬停显示指标实际观察日；无效指标不纳入走势与分位。卡片按 20%/40%/60%/80% 分档，仅表示自身历史位置。高/中/低线分别为所选区间统一样本口径的 80%/50%/20% 分位。` + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
+    note.textContent = sourceNote + ` 当前按${frequencyName}展示；周/月取周期内最后一条有效观察，悬停显示指标实际观察日；无效指标不纳入走势与分位。卡片按 20%/40%/60%/80% 分档，仅表示自身历史位置。${useStddev ? '上/中/下线分别为所选区间统一历史样本的均值 +1σ、均值、均值 −1σ；σ 为总体标准差（除以样本数 N），下限不截断，参考区间不表示概率或投资结论。' : '高/中/低线分别为所选区间统一样本口径的 80%/50%/20% 分位。'}` + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
       (state.valuation?.updated_on || '未知') + '。' + (state.valuation?.warnings || []).join(' ');
     if (view?.sparse_hint) note.textContent += ' ' + view.sparse_hint;
     else if (frequency === 'day' && Number(years) > 3) note.textContent += ' 较早段可能只有稀疏观察；图中仅显示已有日期，不插值。';
@@ -859,9 +876,12 @@
       x:xs,y:ys,customdata:rows.map((row, index) => [observedDates[index], row.period_complete === false ? '（本周期未完结）' : '']),connectgaps:false,fill:'tozeroy',fillcolor:'rgba(84,151,220,0.11)',
       line:{color:'#69a9ed',width:2.8},marker:{color:'#69a9ed',size:5},
       hovertemplate:'展示日期：%{x|%Y-%m-%d}%{customdata[1]}<br>实际观察日：%{customdata[0]}<br>' + valuationNames[valuationMetric] + '：%{y:.2f}' + (isYield ? '%' : ' 倍') + '<extra></extra>'}];
-    for (const [key, label, color] of [['high',isYield ? '高息 · 80%' : '高位 · 80%',highColor],['median','中值 · 50%','#f4b560'],['low',isYield ? '低息 · 20%' : '低位 · 20%',lowColor]]) {
-      if (view?.[key] != null && first && last) traces.push({type:'scatter',mode:'lines',name:label,
-        x:[first,last],y:[view[key],view[key]],hoverinfo:'skip',
+    const referenceLines = useStddev
+      ? [['high','上限 · 均值 +1σ',highColor],['median','均值','#f4b560'],['low','下限 · 均值 −1σ',lowColor]]
+      : [['high',isYield ? '高息 · 80%' : '高位 · 80%',highColor],['median','中值 · 50%','#f4b560'],['low',isYield ? '低息 · 20%' : '低位 · 20%',lowColor]];
+    for (const [key, label, color] of referenceLines) {
+      if (levels[key] != null && first && last) traces.push({type:'scatter',mode:'lines',name:label,
+        x:[first,last],y:[levels[key],levels[key]],hoverinfo:'skip',
         line:{color,width:1.6,dash:'dash'}});
     }
     const priceRows = rows.filter(row => row.qfq_close != null || !row.qfq_no_trades);
@@ -891,6 +911,11 @@
     renderValuation();
   }));
   valuationRange.addEventListener('change', () => { saveSelections(); renderValuation(); });
+  valuationBenchmark.addEventListener('change', () => {
+    try { localStorage.setItem(valuationBenchmarkKey, valuationBenchmark.value); }
+    catch { /* A disabled storage backend must not stop chart updates. */ }
+    renderValuation();
+  });
   valuationFrequency.addEventListener('change', () => {
     try { localStorage.setItem(valuationFrequencyKey, valuationFrequency.value); }
     catch { /* A disabled storage backend must not stop chart updates. */ }

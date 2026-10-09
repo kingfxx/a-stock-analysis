@@ -48,6 +48,19 @@ assert.equal(telecomIncome.rows[0][2],'87.26%');
 assert.equal(telecomIncome.rows[1][2],'12.74%');
 assert.ok(telecomIncome.note.includes('天翼云618亿元另口径'));
 
+const corrections=[{period:'2025-12-31',evidence_id:'bus.page',metrics:{
+ revenue_mix:{period:'2025-12-31',unit:'万元',basis:'主营业务分产品收入',denominator:3622876.43,rows:[{name:'客车产品',revenue:3622876.43,share_pct:100}]},
+ profit_mix:{period:'2025-12-31',unit:'万元',basis:'毛利（营业收入减营业成本），非净利润',denominator:910221.88,rows:[{name:'客车产品',profit:910221.88,share_pct:100}]}
+}}];
+const repaired=parse('定性说明。\n2025年｜主营业务分产品收入；客车产品—25.12万元—100%。\n2025年｜毛利口径；客车产品—8.43—100%，最新中报未披露结构。',[],corrections);
+const repairedTables=repaired.filter(b=>b.type==='table');
+assert.equal(repairedTables.length,2);
+assert.equal(repairedTables[0].rows[0][1],'362.29亿元');
+assert.equal(repairedTables[1].rows[0][1],'91.02亿元');
+assert.equal(repairedTables[0].rows[0][0],'客车产品');
+assert.ok(!JSON.stringify(repaired.filter(b=>b.type==='text')).includes('8.43'));
+assert.equal(repaired[0].text,'定性说明。');
+
 // Model wording can add an amount label and use commas instead of a second dash.
 for(const prefix of ['', '收入']) {
  const ship=parse('定性说明。\n2026年上半年 | 主营业务收入口径；船舶造修及海洋工程 — '+prefix+'815.25亿元，毛利率17.21%；船舶配套、机电设备及其他 — '+prefix+'90.54亿元，毛利率16.83%；合计 — '+prefix+'905.79亿元，毛利率17.17%，收入占比未披露。\n2025年度 | 主营业务收入口径；船舶造修及海洋工程 — '+prefix+'1312.79亿元，毛利率11.72%；船舶配套、机电设备及其他 — '+prefix+'186.17亿元，毛利率16.15%；合计 — '+prefix+'1498.96亿元，毛利率12.27%。');

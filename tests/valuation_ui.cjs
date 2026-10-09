@@ -7,8 +7,9 @@ const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
 const decoder = page.slice(page.indexOf('  function expandValuationPayload('), page.indexOf('  const state ='));
 const source = decoder + page.slice(page.indexOf('  let valuationMetric ='), page.indexOf('  // Chip assessment charts.'));
 
-function fixture(range = '3', persistedFrequency = null) {
+function fixture(range = '3', persistedFrequency = null, persistedBenchmark = null) {
   const elements = new Map(), plots = [], requests = [], storage = new Map();
+  if (persistedBenchmark) storage.set('investment-valuation-benchmark-v1', persistedBenchmark);
   if (persistedFrequency) storage.set('investment-valuation-frequency-v1', persistedFrequency);
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
@@ -296,3 +297,32 @@ assert.match(ui.element('valuation-note').textContent, /较早段观测较稀疏
   assert.equal(ui.context.state.valuation.views['10'].pe.rows[0].qfq_close, 8);
   console.log('Valuation frequency, persistence, observation dates, sparse hint and stale responses passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+// Benchmark switches use server statistics, persist, and leave display sampling and percentiles intact.
+{
+  const ui = fixture('5');
+  const view = ui.context.state.valuation.views['5'].pe;
+  Object.assign(view, {mean:20, stddev:25, stddev_high:45, stddev_low:-5});
+  ui.render();
+  const position = ui.element('valuation-position-basis').textContent;
+  ui.change('valuation-benchmark', 'stddev');
+  assert.equal(ui.element('valuation-high').textContent, '45.00 倍');
+  assert.equal(ui.element('valuation-median-label').textContent, '均值');
+  assert.equal(ui.element('valuation-low').textContent, '-5.00 倍');
+  assert.equal(ui.element('valuation-position-basis').textContent, position);
+  assert.deepEqual(Array.from(ui.plots.at(-1).traces.slice(1), t => Array.from(t.y)), [[45,45],[20,20],[-5,-5]]);
+  assert.match(ui.element('valuation-note').textContent, /总体标准差/);
+  ui.change('valuation-frequency', 'day');
+  assert.equal(ui.element('valuation-high').textContent, '45.00 倍');
+  assert.equal(ui.storage.get('investment-valuation-benchmark-v1'), 'stddev');
+  assert.equal(fixture('5', null, 'stddev').element('valuation-benchmark').value, 'stddev');
+  ui.change('valuation-benchmark', 'percentile');
+  assert.equal(ui.element('valuation-high').textContent, '30.00 倍');
+  assert.equal(ui.element('valuation-median-label').textContent, '中值（50% 分位）');
+  ui.change('valuation-benchmark', 'stddev');
+  ui.context.state.valuation.views['5'].pe = {count:0};
+  ui.render();
+  assert.equal(ui.element('valuation-high').textContent, '—');
+  assert.equal(ui.plots.at(-1).traces.length, 1);
+  assert.equal(ui.requests.length, 0);
+}

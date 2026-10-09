@@ -14,7 +14,7 @@ from .report_business_metrics import business_metrics
 from .sources import normalize_code
 
 PARSER_VERSION = "pdfplumber_pages_v1"
-EXTRACTION_VERSION = "checklist_topics_v8"
+EXTRACTION_VERSION = "checklist_topics_v9"
 TOPICS = {
  "company": "公司全称|公司名称|中文名称|公司简介",
  "strategy": "愿景|战略定位|使命|经营战略|发展战略|战略规划",

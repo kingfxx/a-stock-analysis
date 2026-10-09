@@ -180,6 +180,12 @@ def test_frontend_formatting_handles_zero_units_and_escaping():
 
 
 def test_financial_tabs_in_real_browser(facts,tmp_path,monkeypatch):
+    save(facts,'gjzb',{'2025-06-30':raw('zyb',{'ROEWEIGHTED':8.5}),
+                       '2024-06-30':raw('zyb',{'ROEWEIGHTED':7})})
+    with facts.connection() as conn:
+        records=conn.execute("SELECT report_type,period,raw_json FROM financial_reports WHERE instrument_id=(SELECT id FROM instruments WHERE code='600519')").fetchall()
+    for kind in {x['report_type'] for x in records}:
+        save(facts,kind,{x['period']:json.loads(x['raw_json']) for x in records if x['report_type']==kind},'600066','另一测试企业')
     edge=shutil.which('msedge') or r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
     node=shutil.which('node')
     if not Path(edge).is_file() or not node:pytest.skip('Edge and Node are needed')
@@ -303,3 +309,32 @@ def test_parent_net_margin_quarter_uses_matching_flow_period(facts):
     assert [x['value'] for x in value['inputs']]==[37.5,150]
     assert all(x['baseline_period']=='2025-03-31' for x in value['inputs'])
     assert d['baseline_values']['parent_net_margin']['period']=='2024-06-30'
+
+
+@pytest.mark.parametrize('value',[8.5,0,-2])
+def test_weighted_roe_uses_exact_field_and_flow_comparison(facts,value):
+    save(facts,'gjzb',{'2025-06-30':raw('zyb',{'ROEWEIGHTED':value}),
+                       '2024-06-30':raw('zyb',{'ROEWEIGHTED':7}),
+                       '2024-12-31':raw('zyb',{'ROEWEIGHTED':15})})
+    d=read_statements(facts,'600519',period='2025-06-30',comparison='year_end')
+    assert d['values']['roe']['value']==value
+    assert d['values']['roe']['unit']=='%'
+    assert d['values']['roe']['field']=='ROEWEIGHTED'
+    assert d['values']['roe']['item_source']=='zyb'
+    assert d['baseline_values']['roe']['value']==7
+    assert d['baseline_values']['roe']['period']=='2024-06-30'
+    assert read_statements(facts,'600519',period='2025-06-30',mode='quarter')['values']['roe']['value'] is None
+
+
+def test_weighted_roe_q1_and_no_incompatible_fallback(facts):
+    save(facts,'gjzb',{'2025-03-31':raw('zyb',{'ROEWEIGHTED':3})})
+    assert read_statements(facts,'600519',period='2025-03-31',mode='quarter')['values']['roe']['value']==3
+    save(facts,'gjzb',{'2025-03-31':raw('zyb',{'ROEWEIGHTED':3}),
+                       '2025-06-30':raw('ysb',{'ROEDILUTED':99,'ROEAVG':98,'ROEWEIGHTED':97})})
+    assert read_statements(facts,'600519',period='2025-06-30')['values']['roe']['value'] is None
+    save(facts,'gjzb',{'2025-03-31':raw('zyb',{'ROEWEIGHTED':3}),
+                       '2025-06-30':raw('zyb',{'ROEWEIGHTED':None})})
+    assert read_statements(facts,'600519',period='2025-06-30')['values']['roe']['value'] is None
+    save(facts,'gjzb',{'2025-03-31':raw('zyb',{'ROEWEIGHTED':3}),
+                       '2025-06-30':raw('zyb',{'ROEWEIGHTED':9},rCurrency='USD')})
+    assert read_statements(facts,'600519',period='2025-06-30')['values']['roe']['value'] is None

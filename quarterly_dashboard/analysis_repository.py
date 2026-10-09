@@ -111,6 +111,9 @@ class AnalysisRepository:
             data[key] = json.loads(row[column]) if row[column] else None
         diagnostic = json.loads(row["diagnostic_json"]) if row["diagnostic_json"] else {}
         data["error"] = diagnostic.get("message")
+        if data.get("input"):
+            from .report_business_metrics import product_display_corrections
+            data["product_display_corrections"] = product_display_corrections(data["input"])
         return data
 
     def latest(self, code):

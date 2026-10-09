@@ -50,3 +50,8 @@
 - SQLite 备份不包含 PDF；完整资料迁移用 quarterly_dashboard.report_backup，验证哈希，恢复到不存在的新目录，不自动覆盖日常库。
 
 财报同一期文件按 `v1、v2…` 编号，完整 SHA256 仍登记数据库和 manifest 用于去重与校验；版本编号不会因删除而重排。旧哈希目录迁移后，历史快照原路径可通过内容哈希解析到当前路径，不改写历史报告。
+
+## 项目研报技能
+
+- `a-share-value-research` 的维护入口是 `.agents/skills/a-share-value-research/`，技能、框架、模板、脚本及测试随 Git 管理，不修改用户目录中的旧副本。迁移说明见该技能的 `references/installation.md`。
+- 默认数据配置使用项目相对路径，不写死盘符、用户名或 Python 缓存目录。新电脑先运行技能的 `doctor`；数据库及正式财报由现有备份恢复或采集流程准备，不随技能上传。

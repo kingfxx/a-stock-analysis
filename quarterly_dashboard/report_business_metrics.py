@@ -17,6 +17,22 @@ def _values(line):
     return [None if t in ('-', '—', '–') else float(t.replace(',', '')) for t in tokens]
 
 
+def product_display_corrections(snapshot):
+    """Repair this known extraction defect for display, preserving saved evidence."""
+    corrections=[]
+    for entry in snapshot.get('evidence',[]):
+        if entry.get('metric')!='report_excerpt':continue
+        for page in entry.get('value',[]):
+            old=page.get('business_metrics',{})
+            for metric in old.values():
+                if not any(re.search(r'\d[\d,]*\.\d+[,\d]*\.\d+',row.get('name','')) for row in metric.get('rows',[])):continue
+                period=metric['period']
+                corrected=business_metrics(page['text'],period,currency_context=metric.get('currency_basis'))
+                corrections.append({'evidence_id':entry['id'],'period':period,'metrics':corrected})
+                break
+    return corrections
+
+
 def _reconciles(values, total):
     return total is not None and total > 0 and abs(sum(v or 0 for v in values)-total) <= max(1, len(values))
 
@@ -25,12 +41,18 @@ def _operating_rows(section):
     rows=[];pending='';subtotal=None;total=None;wrapped=False
     for line in section.splitlines():
         line=re.sub(r'(?:增加|减少)\s*[-+]?\d+(?:\.\d+)?(?:个?百分点)?','',line).replace('个百分点','').strip()
-        match=re.search(r'(?:^|\s)(-?\d[\d,]*(?:\.\d+)?)(?=\s|$)',line)
+        # PDF extraction can join adjacent, two-decimal monetary columns.
+        # Split only the explicit thousands-grouped layout; never skip a bad
+        # amount and mistake the following percentage for revenue.
+        line=re.sub(r'(-?\d{1,3}(?:,\d{3})+\.\d{2})(?=-?\d{1,3},\d{3})',r'\1 ',line)
+        match=re.search(r'(?:^|\s)(?=-?\d)',line)
         if match:
             inline=re.sub(r'\s+','',line[:match.start()])
             label=inline or pending
-            values=re.findall(r'-?\d[\d,]*(?:\.\d+)?',line[match.start():])
-            if len(values)<2 or not label:continue
+            values=line[match.start():].split()
+            if not label:continue
+            if len(values)<2 or any(not re.fullmatch(_NUMBER,v) or v in ('-', '—', '–') for v in values[:2]):
+                return [],None,None
             revenue,cost=(float(v.replace(',','')) for v in values[:2])
             if label=='小计':subtotal=(revenue,cost)
             elif label=='合计':total=(revenue,cost);break

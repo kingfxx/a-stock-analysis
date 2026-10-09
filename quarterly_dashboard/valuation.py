@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from statistics import fmean, pstdev
 from bisect import bisect_right
 from datetime import date, timedelta
 
@@ -306,6 +307,15 @@ def _percentile(values: list[float], fraction: float) -> float:
     return values[lower] + (values[upper] - values[lower]) * (position - lower)
 
 
+def _standard_deviation_benchmark(values):
+    """Describe the selected historical population; keep negative lower bounds."""
+    mean = fmean(values) if values else None
+    stddev = pstdev(values, mu=mean) if values else None
+    return {"mean": mean, "stddev": stddev,
+            "stddev_high": mean + stddev if values else None,
+            "stddev_low": mean - stddev if values else None}
+
+
 def valuation_summary(rows: list[dict], metric: str, years: int, industry: dict,
                       as_of: str | None = None) -> dict:
     if metric not in ("pe", "pb", "ps", "dividend_yield") or years not in (3, 5, 10):
@@ -326,6 +336,7 @@ def valuation_summary(rows: list[dict], metric: str, years: int, industry: dict,
     return {
         "rows": window, "count": len(values), "current": current,
         "current_date": (latest.get(f"{metric}_date") or latest["date"]) if latest else None,
+        **_standard_deviation_benchmark(values),
         "high": _percentile(values, .8) if values else None,
         "median": _percentile(values, .5) if values else None,
         "low": _percentile(values, .2) if values else None,
@@ -467,6 +478,7 @@ def valuation_summary_observations(rows, metric, years, industry, *, as_of=None,
         "sparse_hint": ("较早段观测较稀疏；请以悬浮提示中的实际日期为准。" if not dense else None),
         "current": current,
         "current_date": latest.get(f"{metric}_date", latest["date"]) if latest else None,
+        **_standard_deviation_benchmark(values),
         "high": _percentile(values, .8) if values else None,
         "median": _percentile(values, .5) if values else None,
         "low": _percentile(values, .2) if values else None,

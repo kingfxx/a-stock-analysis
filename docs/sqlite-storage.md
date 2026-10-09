@@ -120,7 +120,7 @@
 | 行业成员 | `sw_membership_history` | 来源提供的行业归属生效及变更记录 | 保存分类变更依据；不等同于完整历史全市场名单 |
 | 上市日期来源 | `sw_listing_sources` | 沪深交易所名单中上市日期的共享证据及采集时间 | 当前上市日期来源追溯 |
 | 名单检查 | `sw_membership_checks` | 北京时间每日名单检查状态、时间与结果 | 当前日常采集前名单检查及去重 |
-| 公司市值 | `sw_cap_facts` | 公司交易日总市值；当前批量来源主要为东财 `RPT_VALUEANALYSIS_DET`，旧来源可含百度/腾讯 | 当前公司对比与行业市值计算 |
+| 公司市值 | `sw_cap_facts` | 公司交易日总市值；当前批量来源主要为东财 `RPT_VALUEANALYSIS_DET`，旧来源可含百度/腾讯；2016—2018 一次性缺口工具可写入历史未复权价格 × 历史总股本的计算值，详见[来源说明](data-sources/historical-market-cap-backfill.md) | 当前公司对比与行业市值计算 |
 | 市值来源 | `sw_cap_provenance` | 共享市值来源参数、字段、单位换算和文件证据 | 当前市值事实通过 `provenance_id` 解析来源 |
 | 季度市值成员 | `sw_cap_quarter_rosters` | 每季度冻结名单的目标日期、构成口径及成员版本 | 当前季度市值成员口径控制 |
 | 季度市值成员 | `sw_cap_quarter_members` | 冻结季度内逐公司行业归属 | 当前季度市值逐公司成员查询 |

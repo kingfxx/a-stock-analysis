@@ -41,6 +41,7 @@
     return `期初 ${amount({value:start,unit:'元'},unit)} → 期末 ${amount({value:end,unit:'元'},unit)}；${comparison}。`;
   };
   const meanings = {
+    roe:'每100元归属于母公司股东的加权净资产，在所选期间创造多少元归母净利润，帮助了解股东资本的盈利能力。',
     assets:'公司账面上拥有的全部资产，包括现金、存货、厂房设备和对外投资等，帮助了解资产规模。',
     equity:'全部资产扣除全部负债后，账面上属于股东的部分。',
     liabilities:'公司尚需偿还或履行的债务和付款义务，包括借款、应付货款等。',
@@ -289,13 +290,19 @@
     }
     tabKeys(['trend','statements','industry','maintenance'].map(key=>el(key+'-tab')),button=>button.click());
     const subtabButtons = [...panel.querySelectorAll('[data-statement]')];
-    subtabButtons.forEach(button=>button.addEventListener('click',()=>{
-      kind=button.dataset.statement;
-      subtabButtons.forEach(b=>{const on=b===button;b.setAttribute('aria-selected',String(on));b.tabIndex=on?0:-1;});
-      el('fs-content').setAttribute('aria-labelledby',button.id);
+    function selectStatement(selected) {
+      kind=selected;
+      try{sessionStorage.setItem('investment-statement-tab-v1',kind);}catch{}
+      subtabButtons.forEach(button=>{const on=button.dataset.statement===kind;button.setAttribute('aria-selected',String(on));button.tabIndex=on?0:-1;});
+      el('fs-content').setAttribute('aria-labelledby','fs-tab-'+kind);
       render();
-    }));
+    }
+    subtabButtons.forEach(button=>button.addEventListener('click',()=>selectStatement(button.dataset.statement)));
     tabKeys(subtabButtons,button=>button.click());
+    try{
+      const saved=sessionStorage.getItem('investment-statement-tab-v1');
+      if(Object.hasOwn(names,saved))selectStatement(saved);
+    }catch{}
     async function load() {
       const request=++sequence; controller?.abort();controller=new AbortController();loading=true;dirty=false;
       el('fs-status').textContent = '正在读取本地财报…';
@@ -468,7 +475,7 @@
         return `<span class="fs-label">${esc(x.label)}</span><strong>${esc(amount(x,unit).replace(/元$/,''))}</strong><small>比较期：${esc(amount(old,unit).replace(/元$/,''))}${x.reason?'<br>'+esc(x.reason):''}</small>`;
       };
       el('fs-metrics').innerHTML=metricKeys.map(key=>{
-        const extra=kind==='fzb'?{assets:'equity',leverage:'debt_ratio',liabilities:'debt'}[key]:kind==='lrb'&&key==='gross_margin'?'parent_net_margin':null;
+        const extra=kind==='fzb'?{assets:'equity',leverage:'debt_ratio',liabilities:'debt'}[key]:kind==='lrb'?{gross_margin:'parent_net_margin',parent_profit:'roe'}[key]:null;
         const keys=extra?[key,extra]:[key];
         const details=`<details class="fs-source fs-card-source"><summary>说明</summary>${keys.map(k=>sourceBodyHTML(metricItem(k,data.values),metricItem(k,data.baseline_values),unit,k,{kind,mode:data.mode})).join('')}</details>`;
         return `<div class="fs-metric${extra?' fs-metric-pair':''}"><div class="fs-metric-main">${metricHTML(key)}</div>${extra?`<div class="fs-metric-extra">${metricHTML(extra)}</div>`:''}${details}</div>`;

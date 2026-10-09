@@ -308,3 +308,39 @@ def test_segment_net_profit_wrapped_header_and_explicit_reporting_currency():
 ])
 def test_net_profit_unknown_currency_mismatch_or_missing_column_is_rejected(text,context):
     assert 'profit_mix' not in business_metrics(text,'2026-06-30',currency_context=context)
+
+
+JOINED_AMOUNTS='''单位：万元 币种：人民币
+主营业务分行业情况
+分行业 营业收入 营业成本 毛利率（%）
+工业 3,622,876.432,712,654.55 25.12 16.69 13.65 增加2.00个百分点
+主营业务分产品情况
+分产品 营业收入 营业成本 毛利率（%）
+客车产品 3,622,876.432,712,654.55 25.12 16.69 13.65 增加2.00个百分点
+主营业务分地区情况'''
+
+
+def test_joined_monetary_columns_do_not_shift_to_percentages():
+    m=business_metrics(JOINED_AMOUNTS,'2025-12-31')
+    assert m['revenue_mix']['denominator']==3622876.43
+    assert m['revenue_mix']['rows'][0]['name']=='客车产品'
+    assert m['profit_mix']['denominator']==910221.88
+    assert m['profit_mix']['rows'][0]['share_pct']==100
+
+
+def test_ambiguous_joined_columns_rejected_instead_of_skipping_amounts():
+    text=JOINED_AMOUNTS.replace('3,622,876.432,712,654.55','3622876.432712654.55')
+    assert not business_metrics(text,'2025-12-31')
+
+
+def test_historical_display_repair_preserves_snapshot():
+    import copy
+    from quarterly_dashboard.report_business_metrics import product_display_corrections
+    old={'revenue_mix':{'period':'2025-12-31','rows':[{'name':'客车产品3,622,876.432,712,654.55'}]}}
+    snapshot={'evidence':[{'id':'report.page','metric':'report_excerpt','value':[{'text':JOINED_AMOUNTS,'business_metrics':old}]}]}
+    saved=copy.deepcopy(snapshot)
+    correction=product_display_corrections(snapshot)[0]
+    assert correction['metrics']['revenue_mix']['denominator']==3622876.43
+    assert correction['evidence_id']=='report.page'
+    assert snapshot==saved
+    assert not product_display_corrections({'evidence':[]})

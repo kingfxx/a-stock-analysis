@@ -1,12 +1,27 @@
 /* Convert the existing product-summary format without changing saved reports. */
-window.checklistProductBlocks = function(text, evidence=[]) {
+window.checklistProductBlocks = function(text, evidence=[], corrections=[]) {
   const markers=[...text.matchAll(/(?:[\[【［]|^[ \t]*|\n[ \t]*)(20\d{2}年\s*(?:上半年|下半年|半年度|度|\d{1,2}\s*[-–—]\s*\d{1,2}月)?)(?:[\]】］]|\s*[｜|：:]\s*)/g)];
   if (!markers.length) return [{type:'text',text}];
   const blocks=[];
+  const correctedPeriods=new Set();
   const paragraph=value=>{const cleaned=value.replace(/^[；;\s]+|[；;\s]+$/g,'');if(cleaned && !/^[。.]$/.test(cleaned))blocks.push({type:'text',text:cleaned});};
   paragraph(text.slice(0,markers[0].index));
   for(let i=0;i<markers.length;i++) {
     const marker=markers[i], section=text.slice(marker.index+marker[0].length,markers[i+1]?.index ?? text.length);
+    const period=marker[1].slice(0,4)+(/上半年|半年度|1\s*[-–—]\s*6月/.test(marker[1]) ? '-06-30' : '-12-31');
+    const correction=corrections.find(c=>c.period===period);
+    if(correction) {
+      if(!correctedPeriods.has(period)) {
+        correctedPeriods.add(period);
+        paragraph('该期原数值解析有误，以下按保存的财报原文重新核算；原生成描述及证据保留供核对。');
+        for(const key of ['revenue_mix','profit_mix']) {
+          if(!correction.metrics[key])continue;
+          blocks.push({type:'table',caption:marker[1],headers:['产品 / 业务',key==='revenue_mix' ? '收入' : '毛利','占比'],rows:[],correction:correction.metrics[key],evidenceId:correction.evidence_id});
+        }
+        if(!Object.keys(correction.metrics).length)paragraph('该期表格无法可靠核算，金额及占比待核对。');
+      }
+      continue;
+    }
     const rows=[...section.matchAll(/(?:^|[；;\n])\s*([^；;\n—]+?)\s*—\s*(?:(?:营业收入|收入|毛利|分部净利润|税前利润|利润)\s*)?(-?[0-9][0-9,.]*)\s*(亿元|万元|千元|元)\s*(?:[—，,]\s*([^；;\n]+)|[（(]\s*([-+]?\d+(?:\.\d+)?%)\s*[）)])/g)];
     if(!rows.length){paragraph(marker[0]+section);continue;}
     const preamble=section.slice(0,rows[0].index).trim().replace(/[；;]$/,'');
@@ -43,6 +58,7 @@ window.checklistProductBlocks = function(text, evidence=[]) {
         if(!selected || metric.classification==='产品')selected={metric,id:entry.id};
       }
     }
+    if(block.correction)selected={metric:block.correction,id:block.evidenceId};
     if(!selected)continue;
     const m=selected.metric, measure=key==='revenue_mix' ? 'revenue' : 'profit';
     const label=key==='revenue_mix' ? '收入' : m.basis.includes('毛利') ? '毛利' : m.basis.includes('净利润') ? '分部净利润' : m.basis.includes('税前') ? '税前利润' : '利润';
@@ -275,7 +291,7 @@ window.initAIChecklist = function(state) {
       toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',evidence.id);
       meta.append(el('span',labels[item.status],'ai-meta'),toggle);
       const conclusion=item.id==='cycle' ? item.conclusion.replace(/判断\s*[\/／]\s*推断/g,'判断') : item.conclusion;
-      const blocks=item.id==='products' ? window.checklistProductBlocks(conclusion,report.input.evidence) : [{type:'text',text:conclusion}];
+      const blocks=item.id==='products' ? window.checklistProductBlocks(conclusion,report.input.evidence,report.product_display_corrections) : [{type:'text',text:conclusion}];
       for (const block of blocks) {
         if (block.type==='text') {cell.append(el('p',block.text));continue;}
         const wrap=el('div',undefined,'checklist-product-wrap');
@@ -290,6 +306,11 @@ window.initAIChecklist = function(state) {
         if(block.note)cell.append(el('p',block.note,'ai-meta'));
       }
       cell.append(meta,evidence);
+      if(item.id==='products' && report.product_display_corrections?.length) {
+        const original=el('details');
+        original.append(el('summary','查看原生成描述（含错误数值）'),el('p',conclusion));
+        evidence.append(original);
+      }
       evidenceLinks(evidence,[...new Set([...item.evidence_ids,...blocks.map(b=>b.evidenceId).filter(Boolean)])],report);row.append(title,cell);table.append(row);
     }
     dialog.append(table);

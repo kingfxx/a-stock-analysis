@@ -205,3 +205,31 @@ def test_negative_pe_ranges_clip_to_selected_window_and_distinguish_missing_and_
         {"start": day, "end": day} for day in ("2025-01-01", "2025-03-01", "2025-05-01")]
     summary = valuation_summary_observations(rows, "pe", 10, {}, as_of="2026-10-01")
     assert summary["negative_pe_ranges"][0] == {"start": "2022-01-01", "end": "2025-01-01"}
+
+
+@pytest.mark.parametrize("metric", ["pe", "pb", "ps", "dividend_yield"])
+def test_standard_deviation_uses_same_weekly_population_as_percentiles(metric):
+    rows = [{"date": day, metric: value} for day, value in (
+        ("2026-09-07", 999), ("2026-09-08", 10),
+        ("2026-09-14", 30), ("2026-09-21", -1), ("2026-09-22", None))]
+    summary = valuation_summary_observations(rows, metric, 5, {}, as_of="2026-09-30")
+    assert summary["count"] == 2
+    assert summary["mean"] == 20
+    assert summary["stddev"] == 10
+    assert summary["stddev_high"] == 30
+    assert summary["stddev_low"] == 10
+    assert summary["median"] == 20
+
+
+@pytest.mark.parametrize("values, expected", [
+    ([], (None, None, None, None)),
+    ([0], (0, 0, 0, 0)),
+    ([5, 5], (5, 0, 5, 5)),
+    ([0, 0, 30], (10, 200 ** .5, 10 + 200 ** .5, 10 - 200 ** .5)),
+])
+def test_standard_deviation_empty_constant_zero_and_negative_lower_bound(values, expected):
+    rows = [{"date": f"2026-0{index + 1}-01", "dividend_yield": value}
+            for index, value in enumerate(values)]
+    summary = valuation_summary_observations(rows, "dividend_yield", 10, {}, as_of="2026-09-30")
+    for key, value in zip(("mean", "stddev", "stddev_high", "stddev_low"), expected):
+        assert summary[key] == (None if value is None else pytest.approx(value))
