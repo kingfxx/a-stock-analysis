@@ -11,3 +11,22 @@ assert.equal(result.mode,'lines+markers');
 assert.match(result.note,/4 个季度点/);
 assert.match(result.note,/2025Q4—2026Q3/);
 console.log('market snapshot and history presentation checks passed');
+const periods=[];
+for(let year=2014;year<=2026;year++)for(const suffix of ['03-31','06-30','09-30','12-31']){
+  const period=`${year}-${suffix}`;
+  if(period>='2014-09-30'&&period<='2026-06-30')periods.push(period);
+}
+const filter=context.window.industryPeriodsInRange;
+assert.equal(filter(periods,'all').length,48);
+assert.equal(filter(periods,'10').length,40);
+assert.equal(filter(periods,'10')[0],'2016-09-30');
+assert.equal(filter(periods,'5').length,20);
+assert.equal(filter(periods,'5')[0],'2021-09-30');
+assert.equal(periods.length,48);
+const annual=periods.filter(p=>p.endsWith('12-31'));
+assert.equal(filter(annual,'10').length,10);
+assert.equal(filter(annual,'5').length,5);
+assert.equal(filter(annual,'5')[0],'2021-12-31');
+assert.equal(filter([],'10').length,0);
+assert.equal(filter(['2026-06-30'],'5').length,1);
+console.log('industry time range boundaries and annual/quarter counts passed');

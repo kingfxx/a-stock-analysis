@@ -6,6 +6,7 @@ import pytest
 from quarterly_dashboard.industry_service import IndustryService, aggregate, value_for
 from quarterly_dashboard.industry_sources import financial_rows, parse_quotes
 from quarterly_dashboard.storage import Database
+from industry_financial_fixture import PublishedIndustryService
 
 
 def fixture_bundle():
@@ -31,7 +32,7 @@ def service(tmp_path,monkeypatch):
     monkeypatch.setattr('quarterly_dashboard.industry_memberships.ensure_daily_memberships',
         lambda *a,**k:{'status':'complete','reused':True})
     db=Database(tmp_path/'industry.sqlite3');db.initialize()
-    return IndustryService(db)
+    return PublishedIndustryService(db)
 
 
 def test_missing_zero_quarter_ttm_and_same_cohort():
@@ -318,7 +319,8 @@ def test_stock_financial_refresh_does_not_collect_or_change_industry_snapshot(se
     save_local_financial(service.db,100,10)
     service.import_bundle(fixture_bundle())
     before=service.read(industry='630701',mode='ytd',period='2025-06-30')
-    assert before['series'][-1]['revenue']==130
+    # Industry reads Eastmoney observations even when individual Sina values differ.
+    assert before['series'][-1]['revenue']==45
     class Fundamentals:
         db=service.db
         def update(self,code,**options):
@@ -452,7 +454,7 @@ def test_ended_quarter_validation_calendar_weekend_and_exact_target(service,monk
 def test_target_period_source_filter_and_content_addressed_samples(monkeypatch,tmp_path):
     from quarterly_dashboard import industry_updates as updates
     payload={'success':True,'result':{'pages':1,'count':1,'data':[{'SECURITY_CODE':'300750',
-        'REPORT_DATE':'2025-06-30','NOTICE_DATE':'2025-08-01','TOTAL_OPERATE_INCOME':1,'PARENT_NETPROFIT':0}]}}
+        'REPORT_DATE':'2025-06-30','REPORTDATE':'2025-06-30','NOTICE_DATE':'2025-08-01','TOTAL_OPERATE_INCOME':1,'PARENT_NETPROFIT':0,'WEIGHTAVG_ROE':0}]}}
     params=[]
     class Response:
         def raise_for_status(self):pass
@@ -466,6 +468,8 @@ def test_target_period_source_filter_and_content_addressed_samples(monkeypatch,t
     updates.fetch_financial_period(tmp_path,['300750'],'2025-06-30')
     assert params[0]['filter']=='(REPORT_DATE=\'2025-06-30\')(SECURITY_CODE in ("300750"))'
     assert one[0]['parent_profit']==0 and 'raw' not in one[0]['provenance']
+    assert one[0]['weighted_roe']==0
+    assert params[1]['reportName']=='RPT_LICO_FN_CPD'
     assert len(list((tmp_path/'responses').iterdir()))==1
 
 

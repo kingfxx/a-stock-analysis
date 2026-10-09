@@ -8,11 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .industry_service import dumps, financial_signature
-from .industry_sources import EXTRA_FINANCIAL_FIELDS
+from .industry_sources import STORED_FINANCIAL_FIELDS
 from .industry_storage import latest_financial_rows, store_provenance
 from .storage import Database, DEFAULT_DATABASE, instance_lock
 
-AMOUNTS=('revenue','parent_profit',*EXTRA_FINANCIAL_FIELDS)
+AMOUNTS=('revenue','parent_profit',*STORED_FINANCIAL_FIELDS)
 
 
 def fingerprint(conn):
@@ -26,34 +26,30 @@ def fingerprint(conn):
 
 
 def prune_extension_predecessors(conn):
-    # Only the pre-backfill latest row can be superseded; earlier genuine revisions stay.
-    extension_ids=[r[0] for r in conn.execute("SELECT id FROM sw_imports WHERE "
-        "json_extract(source_manifest_json,'$.action')='financial_extensions' AND "
-        "json_extract(source_manifest_json,'$.base_metrics_preserved')=1")]
-    if not extension_ids:
+    # Only an explicitly declared field-extension import may supersede an old row.
+    eligible={r[0] for r in conn.execute("SELECT id FROM sw_imports WHERE "
+        "json_extract(source_manifest_json,'$.action') IN ('financial_extensions','performance_fields') AND "
+        "json_extract(source_manifest_json,'$.base_metrics_preserved')=1")}
+    if not eligible:
         return 0
-    cutoff=min(extension_ids)
-    slots=','.join('?' for _ in extension_ids)
-    sources={r['id']:r['provenance_json'] for r in conn.execute('SELECT * FROM sw_financial_provenance')}
-    query=('WITH old AS (SELECT stock_code,period,max(import_id) id FROM sw_financial_facts '
-           'WHERE import_id<? GROUP BY stock_code,period), '
-           f'new AS (SELECT stock_code,period,min(import_id) id FROM sw_financial_facts WHERE import_id IN ({slots}) '
-           'GROUP BY stock_code,period) SELECT o.rowid old_rowid,o.provenance_json old_json,o.provenance_id old_source,'
-           'n.provenance_json new_json,n.provenance_id new_source FROM old JOIN new USING(stock_code,period) '
-           'JOIN sw_financial_facts o ON o.stock_code=old.stock_code AND o.period=old.period AND o.import_id=old.id '
-           'JOIN sw_financial_facts n ON n.stock_code=new.stock_code AND n.period=new.period AND n.import_id=new.id '
-           'WHERE '+ ' AND '.join(f'o.{m} IS n.{m}' for m in ('revenue','parent_profit','notice_date'))+
-           ' AND '+ ' AND '.join(f'(o.{m} IS NULL OR o.{m} IS n.{m})' for m in EXTRA_FINANCIAL_FIELDS))
+    sources={r['id']:json.loads(r['provenance_json']) for r in conn.execute('SELECT * FROM sw_financial_provenance')}
     deletes=[]
-    for row in conn.execute(query,(cutoff,*extension_ids)):
-        old=json.loads(sources[row['old_source']] if row['old_source'] else row['old_json'])
-        new=json.loads(sources[row['new_source']] if row['new_source'] else row['new_json'])
-        # The original evidence must still be present, not just the amounts.
-        def base_definitions(provenance):
-            return financial_signature({'revenue':None,'parent_profit':None,'notice_date':None,
-                                        'provenance':provenance})[-1][:2]
-        if base_definitions(old)==base_definitions(new) and all(new.get(key)==value for key,value in old.items()):
-            deletes.append((row['old_rowid'],))
+    previous=None
+    for current in conn.execute('SELECT rowid AS fact_rowid,* FROM sw_financial_facts ORDER BY stock_code,period,import_id'):
+        if previous is not None and (previous['stock_code'],previous['period'])==(current['stock_code'],current['period']) and current['import_id'] in eligible:
+            old=sources[previous['provenance_id']] if previous['provenance_id'] is not None else json.loads(previous['provenance_json'])
+            new=sources[current['provenance_id']] if current['provenance_id'] is not None else json.loads(current['provenance_json'])
+            unchanged=all(previous[m] is None or previous[m]==current[m] for m in ('revenue','parent_profit','notice_date'))
+            complete=all(previous[m] is None or previous[m]==current[m] for m in STORED_FINANCIAL_FIELDS)
+            old_definitions=financial_signature(dict(previous,provenance=old))[-1]
+            new_definitions=financial_signature(dict(current,provenance=new))[-1]
+            definitions=all(previous[m] is None or old_definitions[i]==new_definitions[i]
+                for i,m in enumerate(('revenue','parent_profit',*STORED_FINANCIAL_FIELDS)))
+            # Retain a candidate if any original evidence was overwritten or lost.
+            evidence=all(new.get(key)==value for key,value in old.items())
+            if unchanged and complete and definitions and evidence:
+                deletes.append((previous['fact_rowid'],))
+        previous=current
     conn.executemany('DELETE FROM sw_financial_facts WHERE rowid=?',deletes)
     return len(deletes)
 
@@ -120,7 +116,7 @@ def write_report(directory, result):
         f"数据库：{result['before_bytes']/2**20:,.2f} MiB → {result['after_bytes']/2**20:,.2f} MiB。",
         f"财务明细：{result['before_rows']:,} → {result['after_rows']:,} 行；删除本次扩展完整替代的旧行 {result['deleted_rows']:,} 条。",
         f"共享来源说明 {result['provenance_profiles']:,} 份；原始响应文件保留，明细通过 provenance_id 引用。",'',
-        f"最新六个金额字段、披露日和完整来源信息一致：{result['latest_values_and_sources_unchanged']}。",
+        f"最新全部财务字段、披露日和完整来源信息一致：{result['latest_values_and_sources_unchanged']}。",
         f"最新记录 SHA256：{result['latest_sha256']}。",
         '真实修订版本保留。SQLite 完整性及外键检查通过。后续导入相同指标不增行，来源说明集中保存。',
         f"原业务表与行业分类、市值一致：{result.get('other_tables_unchanged','见单独校验记录')}。",'',

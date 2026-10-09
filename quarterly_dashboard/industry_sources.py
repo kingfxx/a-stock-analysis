@@ -29,6 +29,13 @@ EXTRA_FINANCIAL_FIELDS = {
     'deduct_parent_profit':'DEDUCT_PARENT_NETPROFIT', 'operating_profit':'OPERATE_PROFIT',
 }
 FINANCIAL_COLUMNS = 'SECURITY_CODE,REPORT_DATE,NOTICE_DATE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT,'+','.join(EXTRA_FINANCIAL_FIELDS.values())
+PERFORMANCE_FIELDS = {
+    'basic_eps':'BASIC_EPS', 'bps':'BPS', 'weighted_roe':'WEIGHTAVG_ROE',
+    'operating_cashflow_per_share':'MGJYXJJE', 'deduct_basic_eps':'DEDUCT_BASIC_EPS',
+    'dividend_yield':'ZXGXL', 'reported_gross_margin':'XSMLL',
+    'performance_notice_date':'NOTICE_DATE',
+}
+STORED_FINANCIAL_FIELDS = {**EXTRA_FINANCIAL_FIELDS, **PERFORMANCE_FIELDS}
 
 
 def number(value):

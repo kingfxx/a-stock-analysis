@@ -52,7 +52,14 @@ DESCRIPTIONS={
  'financing_daily':('个股数据','融资融券日度数据'),
  'shareholder_observations':('个股数据','股东户数观测及公告信息'),
  'industry_snapshots':('个股数据','个股历史行业分类快照'),
- 'sw_financial_facts':('行业数据','全市场轻量财务：营收、归母利润及四个扩展字段，含修订版本'),
+ 'sw_financial_facts':('行业数据','全市场轻量财务：六项金额、每股指标、加权 ROE、来源毛利率、股息率和公告日期，含修订版本'),
+ 'market_financial_income':('行业数据','全 A 股东财摘要利润表全部返回字段、来源引用及真实修订版本'),
+ 'market_financial_balance':('行业数据','全 A 股东财摘要资产负债表全部返回字段、来源引用及真实修订版本'),
+ 'market_financial_cashflow':('行业数据','全 A 股东财摘要现金流量表全部返回字段、来源引用及真实修订版本'),
+ 'market_financial_performance':('行业数据','全 A 股东财业绩指标全部返回字段（含每股指标、加权 ROE）、来源及真实修订版本'),
+ 'market_financial_industry':('行业数据','行业页面最新东财财务字段逻辑视图；不存储副本，不含行业或周期计算'),
+ 'market_financial_batches':('运行与配置','全市场三表及业绩指标采集批次、覆盖统计、状态与错误'),
+ 'market_financial_sources':('行业数据','全市场财务分页请求、gzip 原始响应路径、内容哈希及采集时间'),
  'sw_financial_provenance':('行业数据','共享财务来源说明；明细通过来源 ID 引用'),
  'sw_cap_facts':('行业数据','公司季末总市值明细，含来源与修订版本'),
  'sw_cap_provenance':('行业数据','共享市值来源说明；明细通过来源 ID 引用'),
@@ -149,6 +156,14 @@ class MaintenanceService:
         with self.db.connection() as conn:
             objects=[dict(r) for r in conn.execute("SELECT name,type,tbl_name,rootpage FROM sqlite_master "
                                                  "WHERE type IN ('table','index') ORDER BY name")]
+            views=[]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='view' ORDER BY name"):
+                name=row['name']
+                columns=[r['name'] for r in conn.execute('PRAGMA table_info('+quote(name)+')')]
+                updated,basis=table_time(conn,name,columns)
+                category,description=DESCRIPTIONS.get(name,('其他','尚未登记用途'))
+                views.append({'name':name,'category':category,'description':description,
+                              'updated_at':updated,'time_basis':basis,'total_bytes':0})
             page_size=conn.execute('PRAGMA page_size').fetchone()[0]
             page_count=conn.execute('PRAGMA page_count').fetchone()[0]
             free_bytes=conn.execute('PRAGMA freelist_count').fetchone()[0]*page_size
@@ -185,7 +200,7 @@ class MaintenanceService:
         summary['backups']={'count':len(entries),'total_bytes':sum(s.st_size for _,s in entries),
             'latest':{'name':latest[0].name,'bytes':latest[1].st_size,
                       'created_at':datetime.fromtimestamp(latest[1].st_mtime,timezone.utc).isoformat()} if latest else None}
-        return {'generated_at':datetime.now(timezone.utc).isoformat(),'summary':summary,'tables':tables,
+        return {'generated_at':datetime.now(timezone.utc).isoformat(),'summary':summary,'tables':tables,'views':views,
             'notes':['大小按已分配 SQLite 页统计，包含页内空余；表与索引分别列出。',
                      '记录数包含保留的历史版本；不同表的记录不能简单视为公司数。',
                      '更新时间来自已有采集、写入或关联批次字段，未记录的表不推算。',

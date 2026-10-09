@@ -22,6 +22,10 @@
 
 ## 新增表交付检查项
 
+Schema v19 新增 `market_financial_performance`，保存全 A 股业绩指标接口 ALL 的 37 个字段，与三表使用统一来源、批次和版本规则；更新时间为 `obtained_at`/`updated_at`。历史采集只更新四张新业务表，不改旧 `sw_financial_facts`。采集进度沿用行业任务状态，页面读取不受影响。
+
+Schema v18 新增 `market_financial_income`、`market_financial_balance`、`market_financial_cashflow`、`market_financial_sources` 和 `market_financial_batches`。三表为全 A 股东财摘要接口全部字段，保留真实修订；来源表保存 gzip 响应引用，批次表记录执行结果。业务表更新时间读取 `obtained_at`/`updated_at`，来源表读取 `obtained_at`，批次读取 `obtained_at`/`finished_at`；空表不推算时间。原始响应位于数据库目录下的 `market_financial_sources/`，单独占磁盘，不包含在 SQLite 表大小和单独数据库备份中。采集与字段说明见 [全市场三表采集](data-sources/market-financial-statements.md)。
+
 - [ ] 在 `quarterly_dashboard/maintenance.py` 的 `DESCRIPTIONS` 登记用途和分类；表改名或用途变更时同步更新。
 - [ ] 核对 `TIME_COLUMNS`、`PARENT_TIMES` 或 `table_time` 中的更新时间依据，明确实际字段或关联批次；无适用记录时说明原因并显示「未记录」，不使用报告期或交易日替代。
 - [ ] 在隔离数据库迁移后核对统计接口／维护页的表发现、用途、分类、记录数、大小和更新时间显示；特殊时间规则检查空表及缺值，并更新相关文档。
@@ -91,3 +95,7 @@ Schema v16 新增 `stock_cleanup_runs`，保存清理范围和结果（兼容字
 `POST /api/maintenance/compact` 要求同源、本地会话凭证及 `{"confirm":"整理"}`。执行与个股清理共用维护锁、请求冻结和财报准备锁，拒绝运行中的采集、行业、AI 任务及其他活动请求；获得 SQLite 排他锁后再次核对任务。执行前后检查 SQLite 完整性和外键，数据库目录及系统临时目录均须有至少当前库文件两倍的空闲空间，不足则拒绝整理。当前支持日常使用的 DELETE 回滚日志模式，SQLite 自身事务日志用于失败恢复。整理期间不可使用其他页面；失败或连接中断后应核对后台日志和统计，再决定是否重试。整理成功后旧清理预览失效，须重新预览。
 
 空间和事务要求依据 [SQLite VACUUM 官方说明](https://www.sqlite.org/lang_vacuum.html)。
+
+## 行业财务逻辑 View
+
+结构版本 20 增加 `market_financial_industry`，用途已登记。它不保存数据、不分配数据页，统计接口在 `views` 单独返回用途、分类、零存储大小及更新时间，不计入物理表数量、记录数或空间总和，避免重复统计基础表。更新时间取利润表、业绩指标最新行的实际 `updated_at`；空视图为未记录，不用报告期代替。

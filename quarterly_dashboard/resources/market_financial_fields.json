@@ -1,0 +1,1535 @@
+{
+  "income": {
+    "report": "RPT_DMSK_FN_INCOME",
+    "label": "利润表",
+    "definition_version": "eastmoney-summary-v1",
+    "fields": {
+      "SECUCODE": {
+        "column": "secucode",
+        "type": "TEXT",
+        "name": "SECUCODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SECURITY_CODE": {
+        "column": "security_code",
+        "type": "TEXT",
+        "name": "SECURITY_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INDUSTRY_CODE": {
+        "column": "industry_code",
+        "type": "TEXT",
+        "name": "INDUSTRY_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ORG_CODE": {
+        "column": "org_code",
+        "type": "TEXT",
+        "name": "ORG_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SECURITY_NAME_ABBR": {
+        "column": "security_name_abbr",
+        "type": "TEXT",
+        "name": "SECURITY_NAME_ABBR",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INDUSTRY_NAME": {
+        "column": "industry_name",
+        "type": "TEXT",
+        "name": "INDUSTRY_NAME",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "MARKET": {
+        "column": "market",
+        "type": "TEXT",
+        "name": "MARKET",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SECURITY_TYPE_CODE": {
+        "column": "security_type_code",
+        "type": "TEXT",
+        "name": "SECURITY_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TRADE_MARKET_CODE": {
+        "column": "trade_market_code",
+        "type": "TEXT",
+        "name": "TRADE_MARKET_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DATE_TYPE_CODE": {
+        "column": "date_type_code",
+        "type": "TEXT",
+        "name": "DATE_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "REPORT_TYPE_CODE": {
+        "column": "report_type_code",
+        "type": "TEXT",
+        "name": "REPORT_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DATA_STATE": {
+        "column": "data_state",
+        "type": "TEXT",
+        "name": "DATA_STATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "NOTICE_DATE": {
+        "column": "notice_date",
+        "type": "TEXT",
+        "name": "NOTICE_DATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "REPORT_DATE": {
+        "column": "source_report_date",
+        "type": "TEXT",
+        "name": "REPORT_DATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "PARENT_NETPROFIT": {
+        "column": "parent_netprofit",
+        "type": "REAL",
+        "name": "归母净利润",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOTAL_OPERATE_INCOME": {
+        "column": "total_operate_income",
+        "type": "REAL",
+        "name": "营业总收入",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOTAL_OPERATE_COST": {
+        "column": "total_operate_cost",
+        "type": "REAL",
+        "name": "营业总成本",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOE_RATIO": {
+        "column": "toe_ratio",
+        "type": "REAL",
+        "name": "TOE_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "OPERATE_COST": {
+        "column": "operate_cost",
+        "type": "REAL",
+        "name": "营业成本",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "OPERATE_EXPENSE": {
+        "column": "operate_expense",
+        "type": "REAL",
+        "name": "OPERATE_EXPENSE",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "OPERATE_EXPENSE_RATIO": {
+        "column": "operate_expense_ratio",
+        "type": "REAL",
+        "name": "OPERATE_EXPENSE_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SALE_EXPENSE": {
+        "column": "sale_expense",
+        "type": "REAL",
+        "name": "SALE_EXPENSE",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "MANAGE_EXPENSE": {
+        "column": "manage_expense",
+        "type": "REAL",
+        "name": "MANAGE_EXPENSE",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "FINANCE_EXPENSE": {
+        "column": "finance_expense",
+        "type": "REAL",
+        "name": "FINANCE_EXPENSE",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "OPERATE_PROFIT": {
+        "column": "operate_profit",
+        "type": "REAL",
+        "name": "营业利润",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOTAL_PROFIT": {
+        "column": "total_profit",
+        "type": "REAL",
+        "name": "TOTAL_PROFIT",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INCOME_TAX": {
+        "column": "income_tax",
+        "type": "REAL",
+        "name": "INCOME_TAX",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "OPERATE_INCOME": {
+        "column": "operate_income",
+        "type": "REAL",
+        "name": "营业收入（适用口径待按行业核对）",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INTEREST_NI": {
+        "column": "interest_ni",
+        "type": "REAL",
+        "name": "INTEREST_NI",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INTEREST_NI_RATIO": {
+        "column": "interest_ni_ratio",
+        "type": "REAL",
+        "name": "INTEREST_NI_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "FEE_COMMISSION_NI": {
+        "column": "fee_commission_ni",
+        "type": "REAL",
+        "name": "FEE_COMMISSION_NI",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "FCN_RATIO": {
+        "column": "fcn_ratio",
+        "type": "REAL",
+        "name": "FCN_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "OPERATE_TAX_ADD": {
+        "column": "operate_tax_add",
+        "type": "REAL",
+        "name": "OPERATE_TAX_ADD",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "MANAGE_EXPENSE_BANK": {
+        "column": "manage_expense_bank",
+        "type": "REAL",
+        "name": "MANAGE_EXPENSE_BANK",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "FCN_CALCULATE": {
+        "column": "fcn_calculate",
+        "type": "REAL",
+        "name": "FCN_CALCULATE",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INTEREST_NI_CALCULATE": {
+        "column": "interest_ni_calculate",
+        "type": "REAL",
+        "name": "INTEREST_NI_CALCULATE",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "EARNED_PREMIUM": {
+        "column": "earned_premium",
+        "type": "REAL",
+        "name": "EARNED_PREMIUM",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "EARNED_PREMIUM_RATIO": {
+        "column": "earned_premium_ratio",
+        "type": "REAL",
+        "name": "EARNED_PREMIUM_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INVEST_INCOME": {
+        "column": "invest_income",
+        "type": "REAL",
+        "name": "INVEST_INCOME",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SURRENDER_VALUE": {
+        "column": "surrender_value",
+        "type": "REAL",
+        "name": "SURRENDER_VALUE",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "COMPENSATE_EXPENSE": {
+        "column": "compensate_expense",
+        "type": "REAL",
+        "name": "COMPENSATE_EXPENSE",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOI_RATIO": {
+        "column": "toi_ratio",
+        "type": "REAL",
+        "name": "TOI_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "OPERATE_PROFIT_RATIO": {
+        "column": "operate_profit_ratio",
+        "type": "REAL",
+        "name": "OPERATE_PROFIT_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "PARENT_NETPROFIT_RATIO": {
+        "column": "parent_netprofit_ratio",
+        "type": "REAL",
+        "name": "PARENT_NETPROFIT_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DEDUCT_PARENT_NETPROFIT": {
+        "column": "deduct_parent_netprofit",
+        "type": "REAL",
+        "name": "扣非归母净利润",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DPN_RATIO": {
+        "column": "dpn_ratio",
+        "type": "REAL",
+        "name": "DPN_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      }
+    }
+  },
+  "balance": {
+    "report": "RPT_DMSK_FN_BALANCE",
+    "label": "资产负债表",
+    "definition_version": "eastmoney-summary-v1",
+    "fields": {
+      "SECUCODE": {
+        "column": "secucode",
+        "type": "TEXT",
+        "name": "SECUCODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SECURITY_CODE": {
+        "column": "security_code",
+        "type": "TEXT",
+        "name": "SECURITY_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INDUSTRY_CODE": {
+        "column": "industry_code",
+        "type": "TEXT",
+        "name": "INDUSTRY_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ORG_CODE": {
+        "column": "org_code",
+        "type": "TEXT",
+        "name": "ORG_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SECURITY_NAME_ABBR": {
+        "column": "security_name_abbr",
+        "type": "TEXT",
+        "name": "SECURITY_NAME_ABBR",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INDUSTRY_NAME": {
+        "column": "industry_name",
+        "type": "TEXT",
+        "name": "INDUSTRY_NAME",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "MARKET": {
+        "column": "market",
+        "type": "TEXT",
+        "name": "MARKET",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SECURITY_TYPE_CODE": {
+        "column": "security_type_code",
+        "type": "TEXT",
+        "name": "SECURITY_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TRADE_MARKET_CODE": {
+        "column": "trade_market_code",
+        "type": "TEXT",
+        "name": "TRADE_MARKET_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DATE_TYPE_CODE": {
+        "column": "date_type_code",
+        "type": "TEXT",
+        "name": "DATE_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "REPORT_TYPE_CODE": {
+        "column": "report_type_code",
+        "type": "TEXT",
+        "name": "REPORT_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DATA_STATE": {
+        "column": "data_state",
+        "type": "TEXT",
+        "name": "DATA_STATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "NOTICE_DATE": {
+        "column": "notice_date",
+        "type": "TEXT",
+        "name": "NOTICE_DATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "REPORT_DATE": {
+        "column": "source_report_date",
+        "type": "TEXT",
+        "name": "REPORT_DATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOTAL_ASSETS": {
+        "column": "total_assets",
+        "type": "REAL",
+        "name": "资产总额",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "FIXED_ASSET": {
+        "column": "fixed_asset",
+        "type": "REAL",
+        "name": "FIXED_ASSET",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "MONETARYFUNDS": {
+        "column": "monetaryfunds",
+        "type": "REAL",
+        "name": "货币资金",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "MONETARYFUNDS_RATIO": {
+        "column": "monetaryfunds_ratio",
+        "type": "REAL",
+        "name": "MONETARYFUNDS_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ACCOUNTS_RECE": {
+        "column": "accounts_rece",
+        "type": "REAL",
+        "name": "ACCOUNTS_RECE",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ACCOUNTS_RECE_RATIO": {
+        "column": "accounts_rece_ratio",
+        "type": "REAL",
+        "name": "ACCOUNTS_RECE_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INVENTORY": {
+        "column": "inventory",
+        "type": "REAL",
+        "name": "INVENTORY",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INVENTORY_RATIO": {
+        "column": "inventory_ratio",
+        "type": "REAL",
+        "name": "INVENTORY_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOTAL_LIABILITIES": {
+        "column": "total_liabilities",
+        "type": "REAL",
+        "name": "负债总额",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ACCOUNTS_PAYABLE": {
+        "column": "accounts_payable",
+        "type": "REAL",
+        "name": "ACCOUNTS_PAYABLE",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ACCOUNTS_PAYABLE_RATIO": {
+        "column": "accounts_payable_ratio",
+        "type": "REAL",
+        "name": "ACCOUNTS_PAYABLE_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ADVANCE_RECEIVABLES": {
+        "column": "advance_receivables",
+        "type": "REAL",
+        "name": "ADVANCE_RECEIVABLES",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ADVANCE_RECEIVABLES_RATIO": {
+        "column": "advance_receivables_ratio",
+        "type": "REAL",
+        "name": "ADVANCE_RECEIVABLES_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOTAL_EQUITY": {
+        "column": "total_equity",
+        "type": "REAL",
+        "name": "所有者权益合计",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOTAL_EQUITY_RATIO": {
+        "column": "total_equity_ratio",
+        "type": "REAL",
+        "name": "TOTAL_EQUITY_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOTAL_ASSETS_RATIO": {
+        "column": "total_assets_ratio",
+        "type": "REAL",
+        "name": "TOTAL_ASSETS_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TOTAL_LIAB_RATIO": {
+        "column": "total_liab_ratio",
+        "type": "REAL",
+        "name": "TOTAL_LIAB_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "CURRENT_RATIO": {
+        "column": "current_ratio",
+        "type": "REAL",
+        "name": "CURRENT_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DEBT_ASSET_RATIO": {
+        "column": "debt_asset_ratio",
+        "type": "REAL",
+        "name": "DEBT_ASSET_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "CASH_DEPOSIT_PBC": {
+        "column": "cash_deposit_pbc",
+        "type": "REAL",
+        "name": "CASH_DEPOSIT_PBC",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "CDP_RATIO": {
+        "column": "cdp_ratio",
+        "type": "REAL",
+        "name": "CDP_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "LOAN_ADVANCE": {
+        "column": "loan_advance",
+        "type": "REAL",
+        "name": "LOAN_ADVANCE",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "LOAN_ADVANCE_RATIO": {
+        "column": "loan_advance_ratio",
+        "type": "REAL",
+        "name": "LOAN_ADVANCE_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "AVAILABLE_SALE_FINASSET": {
+        "column": "available_sale_finasset",
+        "type": "REAL",
+        "name": "AVAILABLE_SALE_FINASSET",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ASF_RATIO": {
+        "column": "asf_ratio",
+        "type": "REAL",
+        "name": "ASF_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "LOAN_PBC": {
+        "column": "loan_pbc",
+        "type": "REAL",
+        "name": "LOAN_PBC",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "LOAN_PBC_RATIO": {
+        "column": "loan_pbc_ratio",
+        "type": "REAL",
+        "name": "LOAN_PBC_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ACCEPT_DEPOSIT": {
+        "column": "accept_deposit",
+        "type": "REAL",
+        "name": "ACCEPT_DEPOSIT",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ACCEPT_DEPOSIT_RATIO": {
+        "column": "accept_deposit_ratio",
+        "type": "REAL",
+        "name": "ACCEPT_DEPOSIT_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SELL_REPO_FINASSET": {
+        "column": "sell_repo_finasset",
+        "type": "REAL",
+        "name": "SELL_REPO_FINASSET",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SRF_RATIO": {
+        "column": "srf_ratio",
+        "type": "REAL",
+        "name": "SRF_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SETTLE_EXCESS_RESERVE": {
+        "column": "settle_excess_reserve",
+        "type": "REAL",
+        "name": "SETTLE_EXCESS_RESERVE",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SER_RATIO": {
+        "column": "ser_ratio",
+        "type": "REAL",
+        "name": "SER_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "BORROW_FUND": {
+        "column": "borrow_fund",
+        "type": "REAL",
+        "name": "BORROW_FUND",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "BORROW_FUND_RATIO": {
+        "column": "borrow_fund_ratio",
+        "type": "REAL",
+        "name": "BORROW_FUND_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "AGENT_TRADE_SECURITY": {
+        "column": "agent_trade_security",
+        "type": "REAL",
+        "name": "AGENT_TRADE_SECURITY",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ATS_RATIO": {
+        "column": "ats_ratio",
+        "type": "REAL",
+        "name": "ATS_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "PREMIUM_RECE": {
+        "column": "premium_rece",
+        "type": "REAL",
+        "name": "PREMIUM_RECE",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "PREMIUM_RECE_RATIO": {
+        "column": "premium_rece_ratio",
+        "type": "REAL",
+        "name": "PREMIUM_RECE_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SHORT_LOAN": {
+        "column": "short_loan",
+        "type": "REAL",
+        "name": "SHORT_LOAN",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SHORT_LOAN_RATIO": {
+        "column": "short_loan_ratio",
+        "type": "REAL",
+        "name": "SHORT_LOAN_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ADVANCE_PREMIUM": {
+        "column": "advance_premium",
+        "type": "REAL",
+        "name": "ADVANCE_PREMIUM",
+        "unit": "元",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ADVANCE_PREMIUM_RATIO": {
+        "column": "advance_premium_ratio",
+        "type": "REAL",
+        "name": "ADVANCE_PREMIUM_RATIO",
+        "unit": "待核对",
+        "basis": "期末余额",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      }
+    }
+  },
+  "cashflow": {
+    "report": "RPT_DMSK_FN_CASHFLOW",
+    "label": "现金流量表",
+    "definition_version": "eastmoney-summary-v1",
+    "fields": {
+      "SECUCODE": {
+        "column": "secucode",
+        "type": "TEXT",
+        "name": "SECUCODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SECURITY_CODE": {
+        "column": "security_code",
+        "type": "TEXT",
+        "name": "SECURITY_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INDUSTRY_CODE": {
+        "column": "industry_code",
+        "type": "TEXT",
+        "name": "INDUSTRY_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ORG_CODE": {
+        "column": "org_code",
+        "type": "TEXT",
+        "name": "ORG_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SECURITY_NAME_ABBR": {
+        "column": "security_name_abbr",
+        "type": "TEXT",
+        "name": "SECURITY_NAME_ABBR",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INDUSTRY_NAME": {
+        "column": "industry_name",
+        "type": "TEXT",
+        "name": "INDUSTRY_NAME",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "MARKET": {
+        "column": "market",
+        "type": "TEXT",
+        "name": "MARKET",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SECURITY_TYPE_CODE": {
+        "column": "security_type_code",
+        "type": "TEXT",
+        "name": "SECURITY_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "TRADE_MARKET_CODE": {
+        "column": "trade_market_code",
+        "type": "TEXT",
+        "name": "TRADE_MARKET_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DATE_TYPE_CODE": {
+        "column": "date_type_code",
+        "type": "TEXT",
+        "name": "DATE_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "REPORT_TYPE_CODE": {
+        "column": "report_type_code",
+        "type": "TEXT",
+        "name": "REPORT_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DATA_STATE": {
+        "column": "data_state",
+        "type": "TEXT",
+        "name": "DATA_STATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "NOTICE_DATE": {
+        "column": "notice_date",
+        "type": "TEXT",
+        "name": "NOTICE_DATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "REPORT_DATE": {
+        "column": "source_report_date",
+        "type": "TEXT",
+        "name": "REPORT_DATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "NETCASH_OPERATE": {
+        "column": "netcash_operate",
+        "type": "REAL",
+        "name": "经营活动现金流量净额",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "NETCASH_OPERATE_RATIO": {
+        "column": "netcash_operate_ratio",
+        "type": "REAL",
+        "name": "NETCASH_OPERATE_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SALES_SERVICES": {
+        "column": "sales_services",
+        "type": "REAL",
+        "name": "SALES_SERVICES",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "SALES_SERVICES_RATIO": {
+        "column": "sales_services_ratio",
+        "type": "REAL",
+        "name": "SALES_SERVICES_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "PAY_STAFF_CASH": {
+        "column": "pay_staff_cash",
+        "type": "REAL",
+        "name": "PAY_STAFF_CASH",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "PSC_RATIO": {
+        "column": "psc_ratio",
+        "type": "REAL",
+        "name": "PSC_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "NETCASH_INVEST": {
+        "column": "netcash_invest",
+        "type": "REAL",
+        "name": "投资活动现金流量净额",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "NETCASH_INVEST_RATIO": {
+        "column": "netcash_invest_ratio",
+        "type": "REAL",
+        "name": "NETCASH_INVEST_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "RECEIVE_INVEST_INCOME": {
+        "column": "receive_invest_income",
+        "type": "REAL",
+        "name": "RECEIVE_INVEST_INCOME",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "RII_RATIO": {
+        "column": "rii_ratio",
+        "type": "REAL",
+        "name": "RII_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "CONSTRUCT_LONG_ASSET": {
+        "column": "construct_long_asset",
+        "type": "REAL",
+        "name": "购建固定资产、无形资产和其他长期资产支付的现金",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "CLA_RATIO": {
+        "column": "cla_ratio",
+        "type": "REAL",
+        "name": "CLA_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "NETCASH_FINANCE": {
+        "column": "netcash_finance",
+        "type": "REAL",
+        "name": "筹资活动现金流量净额",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "NETCASH_FINANCE_RATIO": {
+        "column": "netcash_finance_ratio",
+        "type": "REAL",
+        "name": "NETCASH_FINANCE_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "CCE_ADD": {
+        "column": "cce_add",
+        "type": "REAL",
+        "name": "CCE_ADD",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "CCE_ADD_RATIO": {
+        "column": "cce_add_ratio",
+        "type": "REAL",
+        "name": "CCE_ADD_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "CUSTOMER_DEPOSIT_ADD": {
+        "column": "customer_deposit_add",
+        "type": "REAL",
+        "name": "CUSTOMER_DEPOSIT_ADD",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "CDA_RATIO": {
+        "column": "cda_ratio",
+        "type": "REAL",
+        "name": "CDA_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DEPOSIT_IOFI_OTHER": {
+        "column": "deposit_iofi_other",
+        "type": "REAL",
+        "name": "DEPOSIT_IOFI_OTHER",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "DIO_RATIO": {
+        "column": "dio_ratio",
+        "type": "REAL",
+        "name": "DIO_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "LOAN_ADVANCE_ADD": {
+        "column": "loan_advance_add",
+        "type": "REAL",
+        "name": "LOAN_ADVANCE_ADD",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "LAA_RATIO": {
+        "column": "laa_ratio",
+        "type": "REAL",
+        "name": "LAA_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "RECEIVE_INTEREST_COMMISSION": {
+        "column": "receive_interest_commission",
+        "type": "REAL",
+        "name": "RECEIVE_INTEREST_COMMISSION",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "RIC_RATIO": {
+        "column": "ric_ratio",
+        "type": "REAL",
+        "name": "RIC_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "INVEST_PAY_CASH": {
+        "column": "invest_pay_cash",
+        "type": "REAL",
+        "name": "INVEST_PAY_CASH",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "IPC_RATIO": {
+        "column": "ipc_ratio",
+        "type": "REAL",
+        "name": "IPC_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "BEGIN_CCE": {
+        "column": "begin_cce",
+        "type": "REAL",
+        "name": "BEGIN_CCE",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "BEGIN_CCE_RATIO": {
+        "column": "begin_cce_ratio",
+        "type": "REAL",
+        "name": "BEGIN_CCE_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "END_CCE": {
+        "column": "end_cce",
+        "type": "REAL",
+        "name": "END_CCE",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "END_CCE_RATIO": {
+        "column": "end_cce_ratio",
+        "type": "REAL",
+        "name": "END_CCE_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "RECEIVE_ORIGIC_PREMIUM": {
+        "column": "receive_origic_premium",
+        "type": "REAL",
+        "name": "RECEIVE_ORIGIC_PREMIUM",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "ROP_RATIO": {
+        "column": "rop_ratio",
+        "type": "REAL",
+        "name": "ROP_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "PAY_ORIGIC_COMPENSATE": {
+        "column": "pay_origic_compensate",
+        "type": "REAL",
+        "name": "PAY_ORIGIC_COMPENSATE",
+        "unit": "元",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      },
+      "POC_RATIO": {
+        "column": "poc_ratio",
+        "type": "REAL",
+        "name": "POC_RATIO",
+        "unit": "待核对",
+        "basis": "本年累计；比例/辅助字段另核对",
+        "scope": "来源原值；金融行业适用性需单独判断"
+      }
+    }
+  },
+  "performance": {
+    "report": "RPT_LICO_FN_CPD",
+    "label": "业绩指标",
+    "date_field": "REPORTDATE",
+    "definition_version": "eastmoney-performance-all-v1",
+    "fields": {
+      "SECURITY_CODE": {
+        "column": "security_code",
+        "type": "TEXT",
+        "name": "SECURITY_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "SECURITY_NAME_ABBR": {
+        "column": "security_name_abbr",
+        "type": "TEXT",
+        "name": "SECURITY_NAME_ABBR",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "TRADE_MARKET_CODE": {
+        "column": "trade_market_code",
+        "type": "TEXT",
+        "name": "TRADE_MARKET_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "TRADE_MARKET": {
+        "column": "trade_market",
+        "type": "TEXT",
+        "name": "TRADE_MARKET",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "SECURITY_TYPE_CODE": {
+        "column": "security_type_code",
+        "type": "TEXT",
+        "name": "SECURITY_TYPE_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "SECURITY_TYPE": {
+        "column": "security_type",
+        "type": "TEXT",
+        "name": "SECURITY_TYPE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "UPDATE_DATE": {
+        "column": "update_date",
+        "type": "TEXT",
+        "name": "UPDATE_DATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "REPORTDATE": {
+        "column": "source_report_date",
+        "type": "TEXT",
+        "name": "REPORTDATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "BASIC_EPS": {
+        "column": "basic_eps",
+        "type": "REAL",
+        "name": "基本每股收益",
+        "unit": "元/股",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "DEDUCT_BASIC_EPS": {
+        "column": "deduct_basic_eps",
+        "type": "REAL",
+        "name": "扣非基本每股收益",
+        "unit": "元/股",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "TOTAL_OPERATE_INCOME": {
+        "column": "total_operate_income",
+        "type": "REAL",
+        "name": "营业总收入",
+        "unit": "元",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "PARENT_NETPROFIT": {
+        "column": "parent_netprofit",
+        "type": "REAL",
+        "name": "归母净利润",
+        "unit": "元",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "WEIGHTAVG_ROE": {
+        "column": "weightavg_roe",
+        "type": "REAL",
+        "name": "加权净资产收益率",
+        "unit": "%",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "YSTZ": {
+        "column": "ystz",
+        "type": "REAL",
+        "name": "YSTZ",
+        "unit": "%",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "SJLTZ": {
+        "column": "sjltz",
+        "type": "REAL",
+        "name": "SJLTZ",
+        "unit": "%",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "BPS": {
+        "column": "bps",
+        "type": "REAL",
+        "name": "每股净资产",
+        "unit": "元/股",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "MGJYXJJE": {
+        "column": "mgjyxjje",
+        "type": "REAL",
+        "name": "每股经营现金流量",
+        "unit": "元/股",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "XSMLL": {
+        "column": "xsmll",
+        "type": "REAL",
+        "name": "销售毛利率",
+        "unit": "%",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "YSHZ": {
+        "column": "yshz",
+        "type": "REAL",
+        "name": "YSHZ",
+        "unit": "%",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "SJLHZ": {
+        "column": "sjlhz",
+        "type": "REAL",
+        "name": "SJLHZ",
+        "unit": "%",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "ASSIGNDSCRPT": {
+        "column": "assigndscrpt",
+        "type": "TEXT",
+        "name": "ASSIGNDSCRPT",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "PAYYEAR": {
+        "column": "payyear",
+        "type": "TEXT",
+        "name": "PAYYEAR",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "PUBLISHNAME": {
+        "column": "publishname",
+        "type": "TEXT",
+        "name": "PUBLISHNAME",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "ZXGXL": {
+        "column": "zxgxl",
+        "type": "REAL",
+        "name": "股息率（价格基准待核对）",
+        "unit": "%",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "NOTICE_DATE": {
+        "column": "notice_date",
+        "type": "TEXT",
+        "name": "NOTICE_DATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "ORG_CODE": {
+        "column": "org_code",
+        "type": "TEXT",
+        "name": "ORG_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "TRADE_MARKET_ZJG": {
+        "column": "trade_market_zjg",
+        "type": "TEXT",
+        "name": "TRADE_MARKET_ZJG",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "ISNEW": {
+        "column": "isnew",
+        "type": "TEXT",
+        "name": "ISNEW",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "QDATE": {
+        "column": "qdate",
+        "type": "TEXT",
+        "name": "QDATE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "DATATYPE": {
+        "column": "datatype",
+        "type": "TEXT",
+        "name": "DATATYPE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "DATAYEAR": {
+        "column": "datayear",
+        "type": "TEXT",
+        "name": "DATAYEAR",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "DATEMMDD": {
+        "column": "datemmdd",
+        "type": "TEXT",
+        "name": "DATEMMDD",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "EITIME": {
+        "column": "eitime",
+        "type": "TEXT",
+        "name": "EITIME",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "SECUCODE": {
+        "column": "secucode",
+        "type": "TEXT",
+        "name": "SECUCODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "BOARD_NAME": {
+        "column": "board_name",
+        "type": "TEXT",
+        "name": "BOARD_NAME",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "ORI_BOARD_CODE": {
+        "column": "ori_board_code",
+        "type": "TEXT",
+        "name": "ORI_BOARD_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      },
+      "BOARD_CODE": {
+        "column": "board_code",
+        "type": "TEXT",
+        "name": "BOARD_CODE",
+        "unit": "来源文本/代码/日期",
+        "basis": "来源原值；累计、期末或比例按具体字段核对",
+        "scope": "来源原值；加权 ROE 与三表估算 ROE 区分"
+      }
+    }
+  }
+}

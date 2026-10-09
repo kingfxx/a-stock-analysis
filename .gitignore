@@ -20,6 +20,7 @@ data/fundamentals/
 data/valuation/
 data/chips/
 data/industry_sources/
+data/market_financial_sources/
 
 # Local report checks and UI screenshots are separate from application data.
 data/verification/

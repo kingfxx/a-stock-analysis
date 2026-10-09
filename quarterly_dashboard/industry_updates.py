@@ -39,8 +39,9 @@ def validate_request(action, target, recheck=False, *, today=None):
         raise ValueError('仅支持独立的行业财务或季度市值任务')
     if end >= today:
         raise ValueError('仅更新已结束的报告期或季度')
-    if end.year < today.year-10:
-        raise ValueError('仅允许最近十年范围内的报告期或季度')
+    years = 12 if action == 'financial_period' else 10
+    if end.year < today.year-years:
+        raise ValueError(f'仅允许最近{years}年范围内的报告期或季度')
 
 
 def _response(session, directory, url, params=None, *, binary=False):
@@ -80,6 +81,20 @@ def fetch_financial_period(directory, stocks, period):
         raise ValueError('指定报告期财务重复')
     for row in rows:
         attach_financial_source(row,source)
+    from .industry_performance import REPORT, COLUMNS, attach_performance
+    params={**params,'reportName':REPORT,'columns':COLUMNS,
+        'filter':f'(REPORTDATE=\'{period}\')(SECURITY_CODE in ({stock_filter}))'}
+    with create_data_session() as session:
+        payload,source=_response(session,directory,EM,params)
+    if not payload.get('success') and payload.get('code')!=9201:
+        raise ValueError('指定报告期业绩指标接口失败')
+    result=payload.get('result') or {}
+    raw=result.get('data') or []
+    if result.get('pages',0)>1 or result.get('count',0)!=len(raw):
+        raise ValueError('指定报告期业绩指标数据不完整')
+    if any(r['SECURITY_CODE'] not in stocks for r in raw):
+        raise ValueError('业绩指标股票超出请求范围')
+    attach_performance(rows,raw,[source],period,date.today().isoformat())
     return rows
 
 
@@ -191,6 +206,18 @@ def fetch_cap_quarter(db, directory, stocks, target_date, progress, *, reuse_loc
 
 
 def perform(service, action, target, recheck, progress):
+    validate_request(action,target,recheck)
+    from .market_financial import begin_batch, fail_batch
+    batch_id=begin_batch(service.db,target) if action=='financial_period' else None
+    try:
+        return _perform(service,action,target,recheck,progress,batch_id)
+    except Exception as exc:
+        if batch_id is not None:
+            fail_batch(service.db,batch_id,exc)
+        raise
+
+
+def _perform(service, action, target, recheck, progress, batch_id):
     # Import lazily: the bulk history collector also uses calendar/roster helpers here.
     from .industry_bulk import RequestPacer, cap_rows, fetch_pages
     validate_request(action,target,recheck)
@@ -216,27 +243,16 @@ def perform(service, action, target, recheck, progress):
             session.headers.update({'User-Agent':'Mozilla/5.0','Referer':'https://data.eastmoney.com/'})
             return fetch_pages(session,directory,report,columns,filter_,progress,pacer)
     if action=='financial_period':
-        local=service.local_period(target,stocks)
+        from . import market_financial
         required=stocks
-        progress(f'全市场财务 {target} · {len(stocks)} 家 · 批量核对指定报告期')
-        raw,sources=fetch('RPT_DMSK_FN_INCOME',
-            FINANCIAL_COLUMNS,
-            f"(REPORT_DATE='{target}')")
-        if any(r['REPORT_DATE'][:10]!=target for r in raw):
-            raise ValueError('财务返回报告期不匹配，未发布')
         universe=set(stocks)
-        source_by_code={r['SECURITY_CODE']:sources[i//500] for i,r in enumerate(raw)}
-        rows={r['stock_code']:r for r in financial_rows(raw,bundle['asof']) if r['stock_code'] in universe}
-        for stock,row in rows.items():
-            attach_financial_source(row,source_by_code[stock])
-        for stock,value in local.items():
-            row=rows.setdefault(stock,{'stock_code':stock,'period':target,'notice_date':None,
-                                      'revenue':None,'parent_profit':None,'provenance':{}})
-            for metric in ('revenue','parent_profit'):
-                if value.get(metric) is not None:
-                    row[metric]=value[metric]
-                    row['provenance'][metric]=value[metric+'_provenance']
-        bundle['financials']=list(rows.values())
+        progress(f'全市场财务 {target} · 全 A 股三表及业绩指标 · 行业展示 {len(stocks)} 家沪深公司')
+        with service.db.connection() as conn:
+            previous=conn.execute('SELECT status FROM market_financial_batches WHERE report_date=? AND id<? '
+                                  'ORDER BY id DESC LIMIT 1',(target,batch_id)).fetchone()
+        datasets=market_financial.collect(service.db.path.parent/'market_financial_sources',target,pacer,progress,
+                                         resume=bool(previous and previous['status']=='failed'))
+        sources=[source for data in datasets for source in data['sources']]
         failures=[]
     else:
         target_date=target_trade_date(service.db,target,directory)
@@ -257,15 +273,27 @@ def perform(service, action, target, recheck, progress):
         bundle.update(caps=caps,cap_roster=roster)
         bundle['manifest'].update(cap_quarter=target,market_date=target_date,
                                   composition=roster['composition'])
-    bundle['manifest'].update(files=sources,network_requests=pacer.requests)
     progress('来源已完成，正在保存新增／修订指标并汇总所选一期')
-    import_id=service.import_bundle(bundle,capture_local=False)
+    statement_summary={}
     if action=='financial_period':
-        effective=service._load()['facts']
+        with service.db.connection(write=True) as conn:
+            statement_summary=market_financial.publish(conn,batch_id,target,datasets)
+        market_financial.clear_checkpoints(datasets)
+    else:
+        bundle['manifest'].update(files=sources,network_requests=pacer.requests)
+        import_id=service.import_bundle(bundle,capture_local=False)
+    if action=='financial_period':
+        data=service._load()
+        import_id=data['import']['id']
+        effective=service._financial_reader.window(data['token'],data['import']['member_import_id'],
+                                                   data['nonfinancial'],target,'ytd')
         failures=[{'stock_code':s,'error':'指定报告期营收或归母净利润待补'} for s in stocks
                   if any(effective.get((s,target),{}).get(m) is None for m in ('revenue','parent_profit'))]
     result={'import_id':import_id,'action':action,'target':target,'scope_count':len(stocks),'membership_check':membership_check,
-            'requested_count':len(required),'returned_count':len(bundle['financials'] if action=='financial_period' else bundle['caps']),
+            'requested_count':len(required),'returned_count':sum(r['SECURITY_CODE'] in universe for r in next(d for d in datasets if d['dataset']=='income')['rows'])
+                if action=='financial_period' else len(bundle['caps']),
             'network_requests':pacer.requests,'files':sources,'failures':failures}
+    if batch_id is not None:
+        result.update(market_financial_batch_id=batch_id,statements=statement_summary,legacy_updated=False)
     (directory/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
     return result

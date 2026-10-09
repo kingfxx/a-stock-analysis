@@ -161,6 +161,8 @@ def collect(service, directory, *, today=None, progress=print, years=1, cache_di
                         row[metric] = local[row['stock_code']][metric]
                         row['provenance'][metric] = local[row['stock_code']][metric + '_provenance']
             financials.extend(rows)
+            from .industry_performance import supplement
+            files.extend(supplement(session,directory,rows,period,progress,pacer,cache_directory))
             checks.append({'kind': 'financial', 'period': period, 'source_count': len(raw),
                            'eligible_count': len(rows), 'revenue_count': sum(r['revenue'] is not None for r in rows),
                            'profit_count': sum(r['parent_profit'] is not None for r in rows)})

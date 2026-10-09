@@ -162,7 +162,7 @@ def test_maintenance_purpose_and_times_for_empty_and_populated_tables(service):
 
 
 def test_finance_and_cap_tasks_share_one_daily_check(service,monkeypatch):
-    from quarterly_dashboard import industry_bulk, industry_updates
+    from quarterly_dashboard import industry_bulk, industry_updates, market_financial
     bundle=fixture_bundle()
     for i in range(3997):
         bundle['members'].append({**bundle['members'][0],'stock_code':f'600{i:03d}'})
@@ -175,6 +175,9 @@ def test_finance_and_cap_tasks_share_one_daily_check(service,monkeypatch):
         calls.append(1);return official
     monkeypatch.setattr(members,'fetch_directory',fetch)
     monkeypatch.setattr(industry_bulk,'fetch_pages',lambda *a:([],[]))
+    monkeypatch.setattr(market_financial,'collect',lambda *a,**k:[
+        {'dataset':name,'rows':[],'sources':[],'checkpoint':service.directory/'unused-checkpoint'}
+        for name in market_financial.FIELDS])
     monkeypatch.setattr(industry_updates,'target_trade_date',lambda *a:'2026-09-30')
     financial=industry_updates.perform(service,'financial_period','2025-06-30',False,lambda _:None)
     cap=industry_updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)
