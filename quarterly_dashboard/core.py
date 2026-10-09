@@ -105,15 +105,31 @@ def disclosure_reference_snapshots(reports: list[dict], daily_prices: list[dict]
     return references
 
 
+def period_end_snapshots(reports: list[dict], daily_prices: list[dict]) -> list[dict]:
+    """Match report ends to prior raw closes, leaving long trading gaps empty."""
+    by_date = {price["date"]: price for price in daily_prices}
+    dates = sorted(by_date)
+    snapshots = []
+    for period in sorted({r["period"] for r in reports if r.get("period")}):
+        index = bisect_right(dates, period) - 1
+        if index < 0 or (date.fromisoformat(period) - date.fromisoformat(dates[index])).days > 15:
+            continue
+        price = by_date[dates[index]]
+        snapshots.append({"period": period, "date": price["date"], "close": price["close"]})
+    return snapshots
+
+
 def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: list[dict],
                       raw_references: list[dict] | None = None,
                       qfq_references: list[dict] | None = None,
-                      dividend_events: list[dict] | None = None) -> list[dict]:
+                      dividend_events: list[dict] | None = None,
+                      period_end_prices: list[dict] | None = None) -> list[dict]:
     by_period = {r["period"]: r for r in reports}
     raw_by_disclosure = {p["publish_date"]: p for p in raw_prices}
     qfq_by_disclosure = {p["publish_date"]: p for p in qfq_prices}
     raw_ref_by_disclosure = {p["publish_date"]: p for p in (raw_references or [])}
     qfq_ref_by_disclosure = {p["publish_date"]: p for p in (qfq_references or [])}
+    raw_by_period = {p["period"]: p for p in (period_end_prices or [])}
     rows = []
     for period in sorted(by_period):
         report = by_period[period]
@@ -136,6 +152,8 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
         raw_close = raw.get("close") if raw else None
         qfq_close = qfq.get("close") if qfq else None
         shares = report.get("shares")
+        period_end = raw_by_period.get(period)
+        period_end_close = period_end.get("close") if period_end else None
         cash_quarter = quarter_value("operating_cash_flow_ytd")
         capex_quarter = quarter_value("capex_ytd")
         cash_ytd = report.get("operating_cash_flow_ytd")
@@ -169,6 +187,9 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             "price_date": raw.get("date") if raw else None,
             "qfq_price_date": qfq.get("date") if qfq else None,
             "market_cap": raw_close * shares if raw_close is not None and shares is not None else None,
+            "period_end_market_cap": period_end_close * shares if period_end_close is not None and shares is not None else None,
+            "period_end_price": period_end_close,
+            "period_end_price_date": period_end.get("date") if period_end else None,
             "qfq_price_reference": qfq_ref.get("close") if qfq_ref else None,
             "qfq_price_reference_date": qfq_ref.get("date") if qfq_ref else None,
             "qfq_price_reference_lag_days": qfq_ref.get("lag_days") if qfq_ref else None,

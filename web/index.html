@@ -263,6 +263,7 @@
           <option value="capex">资本开支 CapEx</option>
           <option value="interest_bearing_debt">有息负债（简化）</option>
           <option value="net_cash">净现金／净负债</option>
+          <option value="period_end_market_cap">季末市值</option>
           <option value="market_cap">披露日估算市值</option>
           <option value="qfq_price">披露日前复权股价</option>
         </select>
@@ -288,6 +289,7 @@
           <option value="capex">资本开支 CapEx</option>
           <option value="interest_bearing_debt">有息负债（简化）</option>
           <option value="net_cash">净现金／净负债</option>
+          <option value="period_end_market_cap">季末市值</option>
           <option value="market_cap">披露日估算市值</option>
           <option value="qfq_price">披露日前复权股价</option>
         </select>
@@ -313,6 +315,7 @@
           <option value="capex">资本开支 CapEx</option>
           <option value="interest_bearing_debt">有息负债（简化）</option>
           <option value="net_cash">净现金／净负债</option>
+          <option value="period_end_market_cap">季末市值</option>
           <option value="market_cap">披露日估算市值</option>
           <option value="qfq_price" selected>披露日前复权股价</option>
         </select>
@@ -340,7 +343,7 @@
   </section>
   <div class="below">
     <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。新浪部分历史披露日期错位，按上一年同报告期记录校正；无法可靠推断则留空。股价取校正披露日或此前最近交易日的收盘价。相隔超过 15 天的价格不算披露日价格；若处于有前后交易记录的长间隔内，以空心圆点标出最近收盘参考值，与相邻价格点之间用虚线连接。悬停可查看实际交易日。</p></section>
-    <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的不复权及前复权价格来自腾讯日 K。日线统一存储、供各图表复用，财务图按披露日期匹配价格快照及长间隔参考点。市值为披露日价格×报告期末股本的估算值；缺少正式价格或股本时正式值留空。</p></section>
+    <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的不复权及前复权价格来自腾讯日 K。日线统一存储、供各图表复用，财务图按披露日期匹配价格快照及长间隔参考点。季末市值按季末当日或此前最近交易日的不复权收盘价×该报告期末总股本计算，实际价格日期见悬浮提示；相隔超过 15 天则留空。披露日估算市值按披露日价格×报告期末股本计算；缺少价格或股本时留空。</p></section>
   </div>
   <section class="panel valuation-panel" aria-label="估值与历史分位">
     <div class="panel-head">
@@ -529,6 +532,7 @@
     capex: {name:'资本开支 CapEx', unit:'亿元', scale:1e8},
     interest_bearing_debt: {name:'有息负债（简化）', unit:'亿元', scale:1e8},
     net_cash: {name:'净现金／净负债', unit:'亿元', scale:1e8},
+    period_end_market_cap: {name:'季末市值', unit:'亿元', scale:1e8, dateKey:'period_end_price_date'},
     market_cap: {name:'披露日估算市值', unit:'亿元', scale:1e8, dateKey:'price_date', referenceKey:'market_cap_reference'},
     qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date', referenceKey:'qfq_price_reference'}
   };
@@ -580,7 +584,7 @@
     }));
     const axisGroups = [];
     for (const series of active) {
-      const axisKey = series.key === 'market_cap' ? 'market_cap' : series.metric.unit;
+      const axisKey = ['market_cap','period_end_market_cap'].includes(series.key) ? 'market_cap' : series.metric.unit;
       let group = axisGroups.find(item => item.key === axisKey);
       if (!group) {
         group = {key:axisKey, unit:series.metric.unit, names:[], color:series.color};
@@ -606,7 +610,7 @@
       (hasYoy ? '；%{customdata[6]}' : '') +
       (metric === metrics.cash_dividend && selectedPeriod === 'year' ? '<br>%{customdata[7]}' : '') +
       '<br>报告期：%{customdata[1]}<br>披露日：%{customdata[2]}' +
-      (metric.dateKey ? '<br>价格交易日：%{customdata[' + (metric.dateKey === 'price_date' ? 3 : 4) + ']}' : '') +
+      (metric.dateKey ? '<br>价格交易日：%{customdata[' + (metric.dateKey === 'period_end_price_date' ? 8 : metric.dateKey === 'price_date' ? 3 : 4) + ']}' : '') +
       (metric === metrics.cash_dividend ? '<br>归属报告期 → 实际除权日：%{customdata[5]}' : '') +
       '<extra></extra>';
     const traces = [];
@@ -622,7 +626,7 @@
           : row.dividend_payout_ratio != null ? '分红率：' + row.dividend_payout_ratio.toFixed(2) + '%（仅已实施口径）'
           : row.profit == null || row.cash_dividend == null ? '分红率：—（数据缺失）'
           : row.profit <= 0 ? '分红率：—（归母净利润非正）' : '分红率：—（数据缺失）';
-        return [...item, row.yoy?.[series.key] || '同比 —（缺少上年同期）', payout];
+        return [...item, row.yoy?.[series.key] || '同比 —（缺少上年同期）', payout, row.period_end_price_date || '无价格'];
       });
       const width = barCount ? (.72 - .04 * (barCount - 1)) / barCount : 0;
       const offset = -.36 + barIndex * (width + .04);
@@ -708,7 +712,7 @@
     }
     Plotly.react('chart', traces, layout, {responsive:true,displaylogo:false,locale:'zh-CN'});
     const selectedMetrics = new Set(active.map(series => series.key));
-    const hasFinancial = [...selectedMetrics].some(metric => !['market_cap','qfq_price','interest_bearing_debt','net_cash','cash_dividend'].includes(metric));
+    const hasFinancial = [...selectedMetrics].some(metric => !['market_cap','period_end_market_cap','qfq_price','interest_bearing_debt','net_cash','cash_dividend'].includes(metric));
     const hasBalance = selectedMetrics.has('interest_bearing_debt') || selectedMetrics.has('net_cash');
     const hasMarket = selectedMetrics.has('market_cap') || selectedMetrics.has('qfq_price');
     const hasNegativeAdjusted = selectedMetrics.has('qfq_price') && rows.some(row => row.qfq_price != null && row.qfq_price < 0);
@@ -719,6 +723,7 @@
     note.textContent = (!active.length ? '请选择柱形或折线，显示至少一个指标。' : '') +
       (hasFinancial ? (selectedPeriod === 'quarter' ? '单季度财务值由当年累计报表差分得到。' : selectedPeriod === 'ttm' ? '财务 TTM 为连续四个单季度之和；缺期则留空。' : '年度财务值取当年年报累计数。') : '') +
       (hasMarket ? (hasFinancial ? ' ' : '') + '市场指标正式值取对应报告披露日附近的价格快照。' : '') +
+      (selectedMetrics.has('period_end_market_cap') ? ' 季末市值＝季末当日或此前最近交易日的不复权收盘价×该报告期末总股本；价格相隔超过 15 天或股本缺失时留空。年度显示年末值，TTM 保留各季末时点值，不加总。' : '') +
       (selectedMetrics.has('market_cap') ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : '') +
       (selectedMetrics.has('qfq_price') ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
       (hasNegativeAdjusted ? ' 部分历史前复权值为负，图中保留数据源原值；它不是当时的未复权成交价。' : '') +

@@ -3,7 +3,7 @@
 from bisect import bisect_right
 from datetime import date
 
-from .core import disclosure_reference_snapshots, disclosure_snapshots
+from .core import disclosure_reference_snapshots, disclosure_snapshots, period_end_snapshots
 from .price_service import month_closes
 from .valuation import merge_adjusted_prices
 
@@ -13,6 +13,7 @@ def financial_prices(data, raw, qfq):
         return {}
     prices = dict(data.get("prices", {})) if data.get("price_basis") == "disclosure" else {}
     reports = data.get("reports", [])
+    prices["raw_period_end"] = period_end_snapshots(reports, raw)
     if raw:
         prices["raw"] = disclosure_snapshots(reports, raw)
         prices["raw_reference"] = disclosure_reference_snapshots(reports, raw)

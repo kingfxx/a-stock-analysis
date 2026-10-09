@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, urlparse, unquote
 import requests
 from plotly.offline import get_plotlyjs
 
-from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
+from .core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, period_end_snapshots, view_rows
 from .network import create_data_session
 from .storage import DEFAULT_DATABASE, Database, StorageError, instance_lock
 from .price_service import PriceService, PriceVersionUnavailable, month_closes
@@ -256,6 +256,8 @@ def _disclosure_prices(code: str, reports: list[dict], session: requests.Session
             daily = fetch_daily_prices(code, session, adjust, dates[0], dates[-1]) if dates else []
             prices[key] = disclosure_snapshots(reports, daily)
             prices[reference_key] = disclosure_reference_snapshots(reports, daily)
+            if key == "raw":
+                prices["raw_period_end"] = period_end_snapshots(reports, daily)
         except (requests.RequestException, ValueError, KeyError) as exc:
             complete = False
             prices[key] = (old or {}).get("prices", {}).get(key, []) if (old or {}).get("price_basis") == "disclosure" else []
@@ -470,7 +472,8 @@ def _financial_payload(data: dict) -> dict:
               and data.get("report_date_basis") == REPORT_DATE_BASIS else {})
     rows = build_period_rows(reports, prices.get("raw", []), prices.get("qfq", []),
                              prices.get("raw_reference"), prices.get("qfq_reference"),
-                             data.get("dividend_events") or None)
+                             data.get("dividend_events") or None,
+                             period_end_prices=prices.get("raw_period_end"))
     return {"code": data["code"], "name": data.get("name"), "updated_at": data.get("updated_at"),
             "views": {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")},
             "warnings": data.get("warnings", []), "needs_dividends": _needs_dividends(data)}
