@@ -295,5 +295,9 @@ def _perform(service, action, target, recheck, progress, batch_id):
             'network_requests':pacer.requests,'files':sources,'failures':failures}
     if batch_id is not None:
         result.update(market_financial_batch_id=batch_id,statements=statement_summary,legacy_updated=False)
+    if action=='cap_quarter':
+        from .industry_prices import sync_quarter
+        result['quarter_prices']=sync_quarter(service,foundation,quarter_end(target).isoformat(),
+                                              target_date,stocks,recheck,progress)
     (directory/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
     return result

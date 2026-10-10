@@ -2,7 +2,7 @@
 
 导航：[财务共同规则](#2-四张财务表的共同规则) · [四表字段](#3-四张财务表的全部源字段) · [批次与来源](#4-批次分页来源与逻辑-view) · [行业及市值字段](#5-行业分类成员市值及旧表完整字段) · [追溯与备份](#7-原始响应追溯时间与备份) · [查询示例](#8-常用只读查询)
 
-更新日期：2026-10-09。依据本项目迁移 009—020、字段映射及当前读取/采集代码整理。本文描述已落库字段和程序实际使用方式；来源辅助字段尚未确认的单位、公式和枚举明确标为待核对，不把字段名推测当作已验证定义。
+更新日期：2026-10-10。依据本项目迁移 009—022、字段映射及当前读取/采集代码整理。本文描述已落库字段和程序实际使用方式；来源辅助字段尚未确认的单位、公式和枚举明确标为待核对，不把字段名推测当作已验证定义。
 
 ## 1. 范围与数据流
 
@@ -17,6 +17,7 @@
 | `market_financial_batches` | 每个报告期的四表发布批次 | 本地采集程序 |
 | `market_financial_sources` | 每个接口分页的请求及原始响应引用 | 本地采集程序 |
 | `market_financial_industry` | 行业页面轻量读取 View，无独立存储 | 最新利润表左连接最新业绩指标 |
+| `market_quarterly_prices` / `market_price_sources` / `market_price_batches` | 当前沪深名单回溯的季末未复权收盘价、共享来源及批次 | BigQuant `cn_stock_real_bar1d.close`、腾讯指数交易日历；独立一次性工具 |
 | `sw_industries` / `sw_memberships` / `sw_membership_history` | 申万层级、沪深成员版本及分类变更 | 申万官方分类文件、沪深交易所名单 |
 | `sw_imports` / `sw_membership_checks` / `sw_listing_sources` | 名单/市值导入审计、名单检查及上市日期证据 | 本地任务与对应来源 |
 | `sw_cap_facts` / `sw_cap_provenance` | 公司总市值及共享证据 | 当前批量接口主要为东财 `RPT_VALUEANALYSIS_DET`，旧记录可含百度/腾讯 |
@@ -334,6 +335,7 @@
 | `operating_revenue` | income.operate_income | 营业收入，元，本年累计 |
 | `operating_cost` | income.operate_cost | 营业成本，元，本年累计 |
 | `weighted_roe` | performance.weightavg_roe | 所选报告期累计加权 ROE，%，允许空 |
+| `bps` | performance.bps | 所选报告期每股净资产，元/股，允许空；PB 分母 |
 | `income_source_id` | income.source_id | 利润表分页来源引用 |
 | `performance_source_id` | performance.source_id | 业绩指标分页来源引用，允许空 |
 | `updated_at` | 两行 updated_at 的较新值 | 本地更新/核对时间；只有利润表时取利润表时间 |
@@ -659,6 +661,14 @@ WHERE m.import_id = (
 ```
 
 ## 9. 维护入口与结构依据
+
+结构 21 的全市场季度末未复权价格独立存储于 `market_quarterly_prices`，共享来源为 `market_price_sources`，批次为 `market_price_batches`；不绑定用户关注列表。字段、时间及采集流程见[专项来源说明](data-sources/market-quarterly-prices.md)。
+
+行业内公司表新增可排序的 PE（TTM）、PB，不展示估值同比。PE 固定为所选财报季度对应的总市值（元）÷ TTM 归母净利润（元），利润来自 `market_financial_industry.parent_profit`，按本期累计＋上年全年－上年同期累计计算，年末直接使用全年值；不随页面累计／单季度切换改变。市值来自原季度名单和 `sw_cap_facts` 最新有效版本。利润非正、市值非正或任一必要输入缺失时显示 `—`。
+
+PB = `market_quarterly_prices.close` 季末最后市场交易日未复权收盘价（元/股）÷ 同报告期最新 `market_financial_performance.bps`（元/股），结果为倍。BPS 统一通过结构 22 的 `market_financial_industry.bps` 读取，不按季度差分、不相加、不随页面周期模式改变；最新财务修订使缓存失效。价格按股票和自然季度末精确匹配，若已有市值季末交易日还须一致。价格缺失、BPS 缺失或非正时显示 `—`，不回退其他报告期、腾讯／百度现成 PB 或含少数股东权益的总权益；无市值但具备有效季末股价及同报告期 BPS 时仍可计算 PB。查看行业表不会自动联网补采。API 返回 `bps` 和 `pb_trade_date` 便于复核，表格提示显示日期与 BPS。两项均为历史估值参考，使用该报告期最新财务修订，不能作为当时已披露口径的无偏回测。
+
+公司表金额单位统一在表下注明亿元，金额最多两位小数；同比、毛利率及 ROE 显示一位小数，PE/PB 显示两位小数（倍）。显示精度不改变计算及排序精度。桌面采用紧凑固定列布局，小屏保留横向滚动。
 
 - [SQLite 存储、更新与备份](sqlite-storage.md)
 - [全市场四表采集、发布及历史补采](data-sources/market-financial-statements.md)

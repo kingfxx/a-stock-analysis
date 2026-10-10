@@ -149,6 +149,12 @@ def aggregate(stocks, facts, period, mode):
     return result
 
 
+def company_valuation(cap, profit, close=None, bps=None):
+    """Quarter-end PE uses TTM earnings; PB uses raw close / report-period BPS."""
+    return {'pe':cap/profit if cap is not None and cap>0 and profit is not None and profit>0 else None,
+            'pb':close/bps if close is not None and close>0 and bps is not None and bps>0 else None}
+
+
 class IndustryService:
     def __init__(self, db, directory=None):
         self.db = db
@@ -169,6 +175,14 @@ class IndustryService:
                 progress = json.loads(run['result_json'] or '{}')
                 status.update(running=True,action=run['action'],target=run['target'],error=None,
                               message=progress.get('message',f"行业任务运行中 · {run['target']}"))
+            elif run and run['action']=='cap_quarter':
+                from .industry_prices import price_status
+                result=json.loads(run['result_json'] or '{}')
+                message=(f"全市场市值更新完成 · {run['target']} · 待补 {len(result.get('failures',[]))} 家"
+                         if run['status']=='complete' else '市值更新失败，已有版本继续可用')
+                warning=result.get('membership_check',{}).get('warning')
+                status.update(running=False,action=run['action'],target=run['target'],error=run['error'],result=result,
+                              message=message+price_status(result)+(' · '+warning if warning else ''))
             elif run and run['action']=='financial_history':
                 result=json.loads(run['result_json'] or '{}')
                 total=result.get('total_periods',len(result.get('periods',[])))
@@ -682,8 +696,27 @@ class IndustryService:
         market_history = self.market_history(selected,bycode) if selected else []
         selected_quarter = f"{period[:4]}Q{(int(period[5:7])-1)//3+1}" if period else None
         company_caps = self.company_market_values(groups.get(selected,[]),period)
+        valuation_facts = reader.window(data['token'],data['import']['member_import_id'],
+                                        data['nonfinancial'],period,'ttm') if period else {}
+        company_prices = {}
+        if period and groups.get(selected):
+            stocks = groups[selected]
+            with self.db.connection() as conn:
+                rows = conn.execute('SELECT security_code,trade_date,close FROM market_quarterly_prices '
+                    'WHERE quarter_end=? AND adjustment=\'raw\' AND security_code IN ('+
+                    ','.join('?' for _ in stocks)+')', [period,*stocks])
+                for row in rows:
+                    cap_date=company_caps.get(row['security_code'],{}).get('cap_trade_date')
+                    if cap_date is None or cap_date==row['trade_date']:
+                        company_prices[row['security_code']]={'close':row['close'],'pb_trade_date':row['trade_date']}
         companies = [{ 'code':m['stock_code'],'name':m['name'],'listing_date':m.get('listing_date'),
                        'weighted_roe':facts.get((m['stock_code'],period),{}).get('weighted_roe'),
+                       **company_valuation(company_caps.get(m['stock_code'],{}).get('total_cap'),
+                           value_for(valuation_facts,m['stock_code'],period,'parent_profit','ttm') if period else None,
+                           company_prices.get(m['stock_code'],{}).get('close'),
+                           valuation_facts.get((m['stock_code'],period),{}).get('bps')),
+                       'bps':valuation_facts.get((m['stock_code'],period),{}).get('bps'),
+                       'pb_trade_date':company_prices.get(m['stock_code'],{}).get('pb_trade_date'),
                        'metrics':aggregate([m['stock_code']],facts,period,mode) if period else None,
                        **company_caps.get(m['stock_code'],{})}
                      for m in data['members'] if selected in paths.get(m['stock_code'],[])]

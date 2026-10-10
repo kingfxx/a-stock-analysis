@@ -31,6 +31,7 @@ def publish_financials(db, rows):
                         record[field]=fact.get(metric)
                 if dataset=='performance':
                     record['WEIGHTAVG_ROE']=fact.get('weighted_roe')
+                    record['BPS']=fact.get('bps')
                 records.append(record)
             datasets.append({'dataset':dataset,'rows':records,'sources':[
                 {'page_number':1,'url':'https://example.test','params':{'columns':'ALL'},

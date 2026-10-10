@@ -30,7 +30,9 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (16, "016_stock_cleanup.sql"), (17, "017_sw_performance.sql"),
               (18, "018_market_financial_statements.sql"),
               (19, "019_market_financial_performance.sql"),
-              (20, "020_industry_financial_view.sql"))
+              (20, "020_industry_financial_view.sql"),
+              (21, "021_market_quarterly_prices.sql"),
+              (22, "022_industry_bps.sql"))
 
 
 class StorageError(RuntimeError):

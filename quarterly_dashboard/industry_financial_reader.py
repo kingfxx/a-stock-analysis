@@ -59,7 +59,7 @@ class IndustryFinancialReader:
         for row in conn.execute(sql, args):
             stock = row['security_code']
             values = {k:row[k] for k in ('revenue','parent_profit','operating_revenue','operating_cost',
-                                        'weighted_roe','income_source_id','performance_source_id')}
+                                        'weighted_roe','bps','income_source_id','performance_source_id')}
             values['gross_margin_applicable'] = stock in nonfinancial
             # INCOME.TOTAL_OPERATE_INCOME is consolidated cumulative yuan.
             values['gross_margin_total_revenue_equivalent'] = stock in nonfinancial

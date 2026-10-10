@@ -42,3 +42,21 @@
 .sw-company-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:16px}.sw-company-toolbar .sw-company-tabs{border-bottom:0;margin-bottom:0}.sw-ranking-levels{display:flex;align-items:center;gap:4px;margin-bottom:12px}.sw-ranking-levels>span{font-size:12px;color:var(--muted);margin-right:8px}.sw-ranking-levels button{padding:6px 12px;font-size:12px;border:1px solid var(--line);border-radius:5px;background:transparent;color:var(--muted)}.sw-ranking-levels button[aria-pressed="true"]{color:var(--cyan);border-color:#416677;background:#20353f}.sw-ranking-levels button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 
 .sw-trend-heading{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}.sw-trend-heading h3{margin:0}.sw-trend-toggles .metric-mode{display:inline-flex;align-items:center;gap:7px;padding:7px 12px}.sw-trend-toggles i{width:9px;height:9px;border-radius:2px;background:var(--series-color)}.sw-trend-toggles .metric-mode[aria-pressed="false"]{opacity:.55}.sw-trend-toggles .metric-mode:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+
+/* Thirteen company columns fit the desktop content area; small screens retain scrolling. */
+#sw-companies .sw-company-compact{table-layout:fixed;min-width:1080px;font-size:12px}
+#sw-companies .sw-company-compact th,#sw-companies .sw-company-compact td{padding:10px 7px}
+#sw-companies .sw-company-compact thead tr:nth-child(2) th{padding:6px 4px 8px}
+#sw-companies .sw-company-compact thead th{font-size:12px}
+#sw-companies .sw-company-compact button{font-size:11px;padding:3px 0}
+#sw-companies .sw-company-compact button span{margin-left:3px;font-size:10px}
+#sw-companies .sw-company-name{min-width:0;white-space:normal;overflow-wrap:anywhere}
+#sw-companies .sw-company-amount{font-size:13px}
+#sw-companies .sw-current-tag{display:block;width:max-content;margin:4px 0 0}
+#sw-companies .sw-col-name{width:14%}
+#sw-companies .sw-col-amount{width:9%}
+#sw-companies .sw-col-yoy{width:6.5%}
+#sw-companies .sw-col-ratio{width:7%}
+#sw-companies .sw-col-value{width:6%}
+#sw-companies .sw-col-date{width:7%}
+#sw-companies-panel .sw-company-footer{flex-wrap:wrap;justify-content:flex-start;gap:3px 16px}
