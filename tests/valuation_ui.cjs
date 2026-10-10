@@ -157,7 +157,7 @@ assert.match(ui.element('valuation-note').textContent, /较早段观测较稀疏
 // Historical position follows the selected metric/range, including exact boundaries and zero yield.
 {
   const positionUi = fixture('3');
-  const cases = [[0,0],[20,0],[20.1,1],[39.9,1],[40,2],[50,2],[60,2],[60.1,3],[79.9,3],[80,4],[100,4]];
+  const cases = [[0,0],[3.3,0],[5,0],[5.1,0],[20,0],[20.1,1],[39.9,1],[40,2],[50,2],[60,2],[60.1,3],[79.9,3],[80,4],[94.9,4],[95,4],[100,4]];
   for (const metric of ['pe','pb','ps','dividend_yield']) {
     const view = structuredClone(positionUi.context.state.valuation.views['3'].pe);
     positionUi.context.state.valuation.views['3'][metric] = view;
@@ -165,9 +165,11 @@ assert.match(ui.element('valuation-note').textContent, /较早段观测较稀疏
     for (const [percentile,band] of cases) {
       view.percentile = percentile;
       vm.runInContext(`valuationMetric='${metric}';renderValuation();`,positionUi.context);
-      assert.equal(positionUi.element('valuation-position').textContent,labels[band]);
+      assert.equal(positionUi.element('valuation-position').textContent,percentile <= 5 ? '极低' : percentile >= 95 ? '极高' : labels[band]);
       assert.equal(positionUi.element('valuation-position-basis').textContent,`近 3 年 · 历史分位 ${percentile.toFixed(1)}%`);
-      const tone = band === 2 ? 'middle' : (metric === 'dividend_yield' ? band > 2 : band < 2) ? 'low' : 'high';
+      const rank = percentile <= 5 ? 0 : percentile >= 95 ? 6 : band + 1;
+      const tones = ['extreme-low','low','slightly-low','middle','slightly-high','high','extreme-high'];
+      const tone = tones[metric === 'dividend_yield' ? 6 - rank : rank];
       assert.equal(positionUi.element('valuation-position').getAttribute('data-tone'),tone);
     }
     assert.equal(positionUi.plots.at(-1).traces[1].line.color,metric === 'dividend_yield' ? '#6ac9aa' : '#ed8180');
@@ -178,7 +180,7 @@ assert.match(ui.element('valuation-note').textContent, /较早段观测较稀疏
   const view = positionUi.context.state.valuation.views['3'].dividend_yield;
   view.current = 0;view.percentile = 0;
   positionUi.render();
-  assert.equal(positionUi.element('valuation-position').textContent,'低息');
+  assert.equal(positionUi.element('valuation-position').textContent,'极低');
   assert.equal(positionUi.element('valuation-current').textContent,'0.00%');
   for (const change of [{percentile:null},{percentile:NaN},{percentile:-1},{percentile:101},{count:0},{current:null}]) {
     Object.assign(view,{current:0,count:24,percentile:0},change);

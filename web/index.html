@@ -115,9 +115,13 @@
     .valuation-current strong { display:block; color:#fff; font-size:34px; line-height:1.25; font-variant-numeric:tabular-nums; }
     .valuation-current span { color:var(--muted); font-size:12px; }
     .valuation-position { display:inline-block; margin:9px 0 6px; padding:3px 9px; border-radius:5px; color:#afc2c9; background:#30434d; font-size:16px; font-weight:650; }
-    .valuation-position[data-tone="low"] { color:#86d7be; background:rgba(106,201,170,.12); }
+    .valuation-position[data-tone="extreme-low"] { color:#70f0ad; background:rgba(46,204,113,.24); }
+    .valuation-position[data-tone="low"] { color:#86d7be; background:rgba(106,201,170,.16); }
+    .valuation-position[data-tone="slightly-low"] { color:#a5cedb; background:rgba(113,173,194,.10); }
     .valuation-position[data-tone="middle"] { color:#f4cf94; background:rgba(244,181,96,.12); }
-    .valuation-position[data-tone="high"] { color:#f3a1a0; background:rgba(237,129,128,.12); }
+    .valuation-position[data-tone="slightly-high"] { color:#efb28a; background:rgba(230,153,104,.10); }
+    .valuation-position[data-tone="high"] { color:#f3a1a0; background:rgba(237,129,128,.16); }
+    .valuation-position[data-tone="extreme-high"] { color:#ff7d96; background:rgba(244,74,109,.24); }
     .valuation-current .valuation-position-basis { margin:6px 0 4px; line-height:1.5; }
     .valuation-summary { display:flex; justify-content:center; flex-direction:column; gap:7px; min-width:0; }
     .valuation-summary p { margin:0; color:#dce8e8; line-height:1.6; font-size:15px; }
@@ -833,9 +837,11 @@
     const hasPosition = current != null && view?.count > 0 && Number.isFinite(percentile) && percentile >= 0 && percentile <= 100;
     const band = !hasPosition ? -1 : percentile <= 20 ? 0 : percentile < 40 ? 1 : percentile <= 60 ? 2 : percentile < 80 ? 3 : 4;
     const position = document.getElementById('valuation-position');
-    position.textContent = band < 0 ? '待判断' : (isYield ? ['低息','偏低','中值','偏高','高息'] : ['低位','偏低','中值','偏高','高位'])[band];
-    position.setAttribute('data-tone', band < 0 ? '' : band === 2 ? 'middle' : (isYield ? band > 2 : band < 2) ? 'low' : 'high');
-    position.setAttribute('title', '历史分位 P：P≤20% 为' + (isYield ? '低息' : '低位') + '，20%<P<40% 为偏低，40%≤P≤60% 为中值，60%<P<80% 为偏高，P≥80% 为' + (isYield ? '高息' : '高位') + '；仅表示自身历史位置。');
+    position.textContent = band < 0 ? '待判断' : percentile <= 5 ? '极低' : percentile >= 95 ? '极高' : (isYield ? ['低息','偏低','中值','偏高','高息'] : ['低位','偏低','中值','偏高','高位'])[band];
+    const positionRank = !hasPosition ? -1 : percentile <= 5 ? 0 : percentile >= 95 ? 6 : band + 1;
+    const positionTones = ['extreme-low','low','slightly-low','middle','slightly-high','high','extreme-high'];
+    position.setAttribute('data-tone', positionRank < 0 ? '' : positionTones[isYield ? 6 - positionRank : positionRank]);
+    position.setAttribute('title', '历史分位 P：P≤5% 为极低，5%<P≤20% 为' + (isYield ? '低息' : '低位') + '，20%<P<40% 为偏低，40%≤P≤60% 为中值，60%<P<80% 为偏高，80%≤P<95% 为' + (isYield ? '高息' : '高位') + '，P≥95% 为极高；仅表示自身历史位置。');
     document.getElementById('valuation-position-basis').textContent = hasPosition ? `近 ${years} 年 · 历史分位 ${percentile.toFixed(1)}%` : `近 ${years} 年 · 暂无有效分位`;
     document.getElementById('valuation-high-label').textContent = useStddev ? '上限（均值 +1σ）' : isYield ? '高息（80% 分位）' : '高位（80% 分位）';
     document.getElementById('valuation-median-label').textContent = useStddev ? '均值' : '中值（50% 分位）';
@@ -862,7 +868,7 @@
       '股息率＝截至观察日未复权收盘价前 365 天内已除权实施的税前每股现金分红之和 ÷ 该观察日未复权收盘价 × 100%；无已实施分红时显示 0%。分红事件来自东方财富，股价来自腾讯日 K。' : valuationMetric === 'ps' ?
       'PS 为百度总市值 ÷ 截至观察日已披露财报的 TTM 营收；历史财报可能包含后续修订。' :
       'PE(TTM) 与 PB 取百度股市通历史估值。';
-    note.textContent = sourceNote + ` 当前按${frequencyName}展示；周/月取周期内最后一条有效观察，悬停显示指标实际观察日；无效指标不纳入走势与分位。卡片按 20%/40%/60%/80% 分档，仅表示自身历史位置。${useStddev ? '上/中/下线分别为所选区间统一历史样本的均值 +1σ、均值、均值 −1σ；σ 为总体标准差（除以样本数 N），下限不截断，参考区间不表示概率或投资结论。' : '高/中/低线分别为所选区间统一样本口径的 80%/50%/20% 分位。'}` + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
+    note.textContent = sourceNote + ` 当前按${frequencyName}展示；周/月取周期内最后一条有效观察，悬停显示指标实际观察日；无效指标不纳入走势与分位。卡片按 5%/20%/40%/60%/80%/95% 分档，仅表示自身历史位置。${useStddev ? '上/中/下线分别为所选区间统一历史样本的均值 +1σ、均值、均值 −1σ；σ 为总体标准差（除以样本数 N），下限不截断，参考区间不表示概率或投资结论。' : '高/中/低线分别为所选区间统一样本口径的 80%/50%/20% 分位。'}` + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
       (state.valuation?.updated_on || '未知') + '。' + (state.valuation?.warnings || []).join(' ');
     if (view?.sparse_hint) note.textContent += ' ' + view.sparse_hint;
     else if (frequency === 'day' && Number(years) > 3) note.textContent += ' 较早段可能只有稀疏观察；图中仅显示已有日期，不插值。';
