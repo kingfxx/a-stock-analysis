@@ -74,7 +74,7 @@ def test_region_scope_and_reconciliation_are_required(text):
 
 def test_new_prompt_retains_simple_schema_and_distinguishes_numeric_scope():
     p=prompt()
-    assert p['version']=='stock_checklist_prompt_v7'
+    assert p['version']=='stock_checklist_prompt_v11'
     assert p['output_version']=='stock_checklist_output_v1'
     for phrase in ['分部税前利润','百分点','非同比','生命周期','产能排名','business_metrics']:
         assert phrase in p['instructions']
@@ -344,3 +344,19 @@ def test_historical_display_repair_preserves_snapshot():
     assert correction['evidence_id']=='report.page'
     assert snapshot==saved
     assert not product_display_corrections({'evidence':[]})
+
+
+def test_wrapped_labels_and_percentage_fragments_from_saved_report():
+    import copy,json
+    from pathlib import Path
+    from quarterly_dashboard.report_business_metrics import product_display_corrections
+    sample=json.loads((Path(__file__).parent/'fixtures/checklist-601766-table-source.json').read_text(encoding='utf-8'))
+    snapshot={'evidence':sample['evidence']}
+    original=copy.deepcopy(snapshot)
+    corrections=product_display_corrections(snapshot)
+    assert len(corrections)==2
+    for correction in corrections:
+        for key in ('revenue_mix','profit_mix'):
+            assert [row['name'] for row in correction['metrics'][key]['rows']]==['铁路装备','城轨与城市基础设施','新产业','现代服务']
+        assert correction['metrics']['revenue_mix']['denominator'] in (131682442,273063098)
+    assert snapshot==original

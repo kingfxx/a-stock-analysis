@@ -88,6 +88,7 @@
 .checklist-product-table caption { text-align:left; color:#9aadb3; font-size:12px; padding:0 0 7px; }
 .checklist-table .checklist-product-table th,.checklist-table .checklist-product-table td { width:auto; padding:7px 8px; border-bottom:1px solid #304049; font-weight:normal; }
 .checklist-product-table thead th { color:#9aadb3; background:#1a2227; }
+.checklist-product-table td:not(:last-child) { white-space:nowrap; }
 .checklist-table .checklist-product-table th:not(:first-child),.checklist-table .checklist-product-table td { text-align:right; }
 
 .business-dialog .business-position-company { background:#dcebd5; font-weight:600; }

@@ -132,6 +132,8 @@ class AnalysisRepository:
             from .checklist_valuation import correct_valuation
             data['result']=correct_valuation(data['result'],data['input'])
             data['summary']=data['result']['summary']
+            from .checklist_product_math import enrich_products
+            data['result']=enrich_products(data['result'],data['input'])
         if data.get("input"):
             from .report_business_metrics import product_display_corrections
             data["product_display_corrections"] = product_display_corrections(data["input"])

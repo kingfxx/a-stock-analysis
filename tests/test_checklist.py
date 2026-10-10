@@ -13,7 +13,7 @@ from test_ai_assessment import database,FakeProvider,service,wait_terminal
 
 def result(data):
     return {'schema_version':OUTPUT_VERSION,'code':data['instrument']['code'],'items':[
-        {'id':key,'conclusion':'资料不足，待补充。','status':'limited','evidence_ids':['context.data_quality']} for key,_ in ITEMS]}
+        {'id':key,'conclusion':'资料不足，待补充。','status':'limited','evidence_ids':['context.data_quality'],**({'tables':[]} if key in ('products','market') else {})} for key,_ in ITEMS]}
 
 class ChecklistProvider(FakeProvider):
     def infer(self,run_id,model,instructions,data,cancelled):
@@ -130,6 +130,12 @@ def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypa
         if bare_period:products['conclusion']=products['conclusion'].replace('[2026年上半年]', '2026年上半年｜').replace('[2025年度]', '2025年度 |')
         if bare_period=='range':
             products['conclusion']=products['conclusion'].replace('2026年上半年','2026年1-6月').replace('221.34亿元 — 毛利贡献56.03%','221.34亿元（56.03%）').replace('136.24亿元 — 34.48%','136.24亿元（34.48%）')
+        products['tables']=[
+            {'period':'2026-06-30','classification':'产品','measure':'income','basis':'主营业务收入','unit':'亿元','denominator':None,
+             'rows':[{'name':'液体乳','amount':365.90,'share_pct':None},{'name':'奶粉及奶制品','amount':168.45,'share_pct':None}],'evidence_ids':['context.data_quality']},
+            {'period':'2025-12-31','classification':'产品','measure':'gross_profit','basis':'主营业务毛利','unit':'亿元','denominator':395.08,
+             'rows':[{'name':'液体乳','amount':221.34,'share_pct':56.03},{'name':'奶粉及奶制品','amount':136.24,'share_pct':34.48}],'evidence_ids':['context.data_quality']},
+        ]
         return out
     monkeypatch.setattr(__import__(__name__), 'result', table_result)
     original=server.render_page

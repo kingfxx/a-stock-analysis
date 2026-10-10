@@ -18,19 +18,78 @@ def _values(line):
 
 
 def product_display_corrections(snapshot):
-    """Repair this known extraction defect for display, preserving saved evidence."""
+    """Repair known extraction defects and calculate verified standalone ratios."""
     corrections=[]
+    corrected_periods=set()
     for entry in snapshot.get('evidence',[]):
         if entry.get('metric')!='report_excerpt':continue
         for page in entry.get('value',[]):
             old=page.get('business_metrics',{})
+            operating={key:value for key,value in old.items() if value.get('reconciliation') and key in ('revenue_mix','profit_mix')}
+            if operating:
+                period=next(iter(operating.values()))['period']
+                fresh=business_metrics(page.get('text',''),period,currency_context=next(iter(operating.values())).get('currency_basis'))
+                if all(key in fresh and fresh[key]['denominator']==metric['denominator'] and
+                       [row.get('revenue',row.get('profit')) for row in fresh[key]['rows']]==[row.get('revenue',row.get('profit')) for row in metric['rows']]
+                       for key,metric in operating.items()) and any(
+                       [row['name'] for row in fresh[key]['rows']]!=[row['name'] for row in metric['rows']] for key,metric in operating.items()):
+                    corrections.append({'evidence_id':entry['id'],'period':period,'metrics':fresh,
+                        'notice':'业务名称按保存的财报原文合并折行，金额及占比口径保留。'})
+                    corrected_periods.add(period)
+                    continue
             for metric in old.values():
                 if not any(re.search(r'\d[\d,]*\.\d+[,\d]*\.\d+',row.get('name','')) for row in metric.get('rows',[])):continue
                 period=metric['period']
                 corrected=business_metrics(page['text'],period,currency_context=metric.get('currency_basis'))
-                corrections.append({'evidence_id':entry['id'],'period':period,'metrics':corrected})
+                corrections.append({'evidence_id':entry['id'],'period':period,'metrics':corrected,
+                    'notice':'该期原数值解析有误，以下按保存的财报原文重新核算；原生成描述及证据保留供核对。'})
+                corrected_periods.add(period)
                 break
+            period=entry.get('observed_on')
+            if not period or period in corrected_periods:continue
+            metric=_standalone_product_revenue_mix(page.get('text',''),period)
+            if metric:
+                corrections.append({'evidence_id':entry['id'],'period':period,'metrics':{'revenue_mix':metric},
+                    'notice':metric['note']})
+                corrected_periods.add(period)
     return corrections
+
+
+def _standalone_product_revenue_mix(text, period):
+    """Calculate individual product revenue ratios against reconciled geographic revenue."""
+    marker=text.find('占公司营业收入或营业利润10%以上的行业、产品或地区情况')
+    if marker<0:return None
+    unit_match=re.search(r'单位[：:]\s*(千元|万元|亿元|元)',text)
+    if not unit_match:return None
+    body=text[marker:]
+    product=re.search(r'(?m)^分产品\s*$',body)
+    if not product:return None
+    remainder=body[product.end():]
+    end=re.search(r'(?m)^分地区\s*$',remainder)
+    if not end:return None
+    rows=[]
+    row_pattern=re.compile(r'^\s*(.+?)\s+(-?\d[\d,]*)\s+(-?\d[\d,]*)\s+[-+]?\d+(?:\.\d+)?%')
+    for line in remainder[:end.start()].splitlines():
+        match=row_pattern.match(line)
+        if match:rows.append({'name':match[1].strip(),'revenue':int(match[2].replace(',',''))})
+    if len(rows)<2:return None
+    region=re.search(r'(?m)^分地区\s*$',text)
+    if not region:return None
+    regional={};regional_shares={}
+    for line in text[region.end():marker].splitlines():
+        match=re.match(r'^\s*(国内|海外)\s+(-?\d[\d,]*)\s+[-+]?\d+(?:\.\d+)?%',line)
+        if match:
+            regional[match[1]]=int(match[2].replace(',',''))
+            regional_shares[match[1]]=float(re.search(r'([-+]?\d+(?:\.\d+)?)%',line).group(1))
+    if set(regional)!={'国内','海外'} or abs(sum(regional_shares.values())-100)>0.1:return None
+    denominator=regional['国内']+regional['海外']
+    if denominator<=0:return None
+    non_additive=sum(row['revenue'] for row in rows)>denominator
+    return {'period':period,'unit':unit_match[1],'currency':'CNY','basis':'产品单项营业收入 / 合并营业收入',
+        'classification':'产品（按报告披露分项口径）','denominator':denominator,
+        'denominator_label':'合并营业收入（国内与海外对外收入合计）',
+        'rows':[{'name':row['name'],'revenue':row['revenue'],'share_pct':round(row['revenue']/denominator*100,4)} for row in rows],
+        'note':'按报告金额逐项计算占合并营业收入比例；'+('分项比例合计超过100%，分类不可视为互斥构成，不作归一化。' if non_additive else '仅列报告披露的分项，不将未列项目推断为零。')}
 
 
 def _reconciles(values, total):
@@ -40,7 +99,9 @@ def _reconciles(values, total):
 def _operating_rows(section):
     rows=[];pending='';subtotal=None;total=None;wrapped=False
     for line in section.splitlines():
-        line=re.sub(r'(?:增加|减少)\s*[-+]?\d+(?:\.\d+)?(?:个?百分点)?','',line).replace('个百分点','').strip()
+        line=re.sub(r'(?:增加|减少)\s*[-+]?\d+(?:\.\d+)?(?:个?百分点|个百)?','',line)
+        line=re.sub(r'个百分点|分点|与上年持平|与上年持','',line).strip()
+        if not line or line=='平':continue
         # PDF extraction can join adjacent, two-decimal monetary columns.
         # Split only the explicit thousands-grouped layout; never skip a bad
         # amount and mistake the following percentage for revenue.
@@ -48,7 +109,8 @@ def _operating_rows(section):
         match=re.search(r'(?:^|\s)(?=-?\d)',line)
         if match:
             inline=re.sub(r'\s+','',line[:match.start()])
-            label=inline or pending
+            had_pending=bool(pending)
+            label=pending+inline if pending else inline
             values=line[match.start():].split()
             if not label:continue
             if len(values)<2 or any(not re.fullmatch(_NUMBER,v) or v in ('-', '—', '–') for v in values[:2]):
@@ -57,8 +119,8 @@ def _operating_rows(section):
             if label=='小计':subtotal=(revenue,cost)
             elif label=='合计':total=(revenue,cost);break
             else:rows.append({'name':label,'revenue':revenue,'cost':cost})
-            wrapped=not bool(inline);pending=''
-        elif re.fullmatch(r'[\u4e00-\u9fff]{1,12}',line.strip()):
+            wrapped=had_pending or not bool(inline);pending=''
+        elif re.fullmatch(r'[\u4e00-\u9fff、，（）()]{1,30}',line.strip()):
             label=line.strip()
             if label in ('个百分点','营业收入','营业成本','毛利率'):continue
             if rows and (wrapped or label in ('业务','间相互抵销')):
@@ -176,6 +238,11 @@ def _narrative_revenue_mix(text, period):
 
 def business_metrics(text, period, preceding_text='', *, currency_context=None):
     result = _narrative_revenue_mix(text,period)
+    from .checklist_product_math import product_components
+    components=product_components(text)
+    if components:
+        result['product_components']={'period':period,'tables':components,
+            'note':'同表披露的产品营业收入及营业成本；毛利=收入−成本。未披露完整分类合计时，占比可按所列产品各自合计计算，不能冒称全公司占比。'}
     unit_match = re.search(r'单位[：:]\s*(千元|万元|亿元|元)', text)
     # Do not assume the currency/unit from a page header or another table.
     local_currency=re.search(r'币种[：:]\s*([^\s]+)',text)

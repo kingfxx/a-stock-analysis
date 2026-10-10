@@ -150,4 +150,5 @@ def capture(db, code, *, as_of=None):
     add('context.data_quality','data_quality',quality,None,'local')
     if not selected and not selected_docs:raise SnapshotError('没有可用财务或公司资料，请先更新数据或准备财报')
     data={'schema_version':INPUT_VERSION,'calculation_version':CALCULATION_VERSION,'instrument':{'code':code,'name':instrument['name']},'analysis_profile':PROFILE,'checklist_items':[{'id':i,'title':t} for i,t in ITEMS],'evidence':evidence,'allowed_evidence_ids':[e['id'] for e in evidence],'quality':quality,'limitations':['每项一至两句，缺失明确标注；报告期景气不等于实时景气；不产生投资评分或买卖结论。']}
+    data['numeric_tables_version']='v1'
     return {'instrument_id':identity,'input':data,'hash':digest(data),'manifest':manifest,'quality':quality,'captured_at':utc_now()}

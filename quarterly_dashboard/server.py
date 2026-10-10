@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import shutil
 import time
@@ -61,6 +62,7 @@ _INDUSTRY_SERVICES = {}
 _MAINTENANCE_SERVICES = {}
 LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+CHECKLIST_DISPLAY_VERSION = hashlib.sha256((ROOT / 'web' / 'ai-checklist.js').read_bytes()).hexdigest()[:12]
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
 CASH_FLOW_BASIS = "sina_cash_flow_ytd_v1"
@@ -961,6 +963,7 @@ class Handler(BaseHTTPRequestHandler):
                 data = {"models": service.provider.models()}
             elif parsed.path == "/api/analysis":
                 data = service.overview(query.get("code", [""])[0])
+                data['display_version'] = CHECKLIST_DISPLAY_VERSION
             elif parsed.path == "/api/analysis/history":
                 data = service.repository.history(normalize_code(query.get("code", [""])[0]), query.get("cursor", [None])[0])
             elif parsed.path.startswith("/api/analysis/runs/"):

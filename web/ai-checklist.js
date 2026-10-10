@@ -1,3 +1,9 @@
+/* Display conversions keep saved amounts and their original units intact. */
+window.checklistAmountYi = function(value,unit) {
+  const scale={'元':1,'千元':1000,'万元':10000,'亿元':100000000}[unit];
+  if(value===null || scale===undefined)return '未披露';
+  return new Intl.NumberFormat('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}).format(value*scale/100000000)+'亿元';
+};
 /* Convert the existing product-summary format without changing saved reports. */
 window.checklistProductBlocks = function(text, evidence=[], corrections=[]) {
   const markers=[...text.matchAll(/(?:[\[【［]|^[ \t]*|\n[ \t]*)(20\d{2}年\s*(?:上半年|下半年|半年度|度|\d{1,2}\s*[-–—]\s*\d{1,2}月)?)(?:[\]】］]|\s*[｜|：:]\s*)/g)];
@@ -13,7 +19,7 @@ window.checklistProductBlocks = function(text, evidence=[], corrections=[]) {
     if(correction) {
       if(!correctedPeriods.has(period)) {
         correctedPeriods.add(period);
-        paragraph('该期原数值解析有误，以下按保存的财报原文重新核算；原生成描述及证据保留供核对。');
+        paragraph(correction.notice || '该期原数值解析有误，以下按保存的财报原文重新核算；原生成描述及证据保留供核对。');
         for(const key of ['revenue_mix','profit_mix']) {
           if(!correction.metrics[key])continue;
           blocks.push({type:'table',caption:marker[1],headers:['产品 / 业务',key==='revenue_mix' ? '收入' : '毛利','占比'],rows:[],correction:correction.metrics[key],evidenceId:correction.evidence_id});
@@ -22,27 +28,21 @@ window.checklistProductBlocks = function(text, evidence=[], corrections=[]) {
       }
       continue;
     }
-    const rows=[...section.matchAll(/(?:^|[；;\n])\s*([^；;\n—]+?)\s*—\s*(?:(?:营业收入|收入|毛利|分部净利润|税前利润|利润)\s*)?(-?[0-9][0-9,.]*)\s*(亿元|万元|千元|元)\s*(?:[—，,]\s*([^；;\n]+)|[（(]\s*([-+]?\d+(?:\.\d+)?%)\s*[）)])/g)];
+    const rows=[...section.matchAll(/(?:^|[；;\n])\s*([^；;\n—]+?)\s*—\s*(?:(?:营业收入|收入|毛利|分部净利润|净利润|净利|税前利润|利润)\s*)?(-?[0-9][0-9,.]*)\s*(亿元|万元|千元|元)\s*(?:[—，,]\s*([^；;\n]+)|[（(]\s*(?:毛利贡献(?:占比)?|收入占比|贡献占比|占比)?\s*([-+]?\d+(?:\.\d+)?%)\s*[）)])/g)];
     if(!rows.length){paragraph(marker[0]+section);continue;}
-    const preamble=section.slice(0,rows[0].index).trim().replace(/[；;]$/,'');
+    const rowPrefix=rows[0][1].includes('：') ? rows[0][1].slice(0,rows[0][1].lastIndexOf('：')) : '';
+    const preamble=section.slice(0,rows[0].index).trim().replace(/[；;]$/,'') || rowPrefix;
     const rowIncome=rows.some(row=>/收入占|营收占|营业收入/.test(row[4] || ''));
-    const basis=/毛利/.test(preamble) ? '毛利' : /(?:收入|营收)/.test(preamble) ? '收入' : /税前/.test(preamble) ? '税前利润' : /净利润/.test(preamble) ? '分部净利润' : rowIncome ? '收入' : '金额';
-    // Keep different units explicit rather than silently converting amounts.
-    const units=new Set(rows.map(row=>row[3]));
-    const unit=units.size===1 ? rows[0][3] : null;
+    const basis=/毛利/.test(preamble) ? '毛利' : /(?:收入|营收)/.test(preamble) ? '收入' : /税前/.test(preamble) ? '税前利润' : /分部净利/.test(preamble) ? '分部净利润' : /净利/.test(preamble) ? '净利润' : rowIncome ? '收入' : '金额';
     blocks.push({type:'table',caption:marker[1]+(preamble ? ' · '+preamble : ''),
-      headers:['产品 / 业务',(basis==='金额' ? '金额' : basis)+(unit ? '（'+unit+'）' : ''),'占比 / 说明'],
-      rows:rows.map(row=>[row[1].trim(),row[2]+(unit ? '' : row[3]),(row[4] || row[5]).trim().replace(/[。.]$/,'')])});
+      headers:['产品 / 业务',basis==='金额' ? '金额' : basis+'金额',basis==='收入' ? '收入占比 / 说明' : basis==='毛利' ? '毛利贡献占比 / 说明' : '占比 / 说明'],
+      rows:rows.map(row=>[row[1].slice(row[1].lastIndexOf('：')+1).trim(),window.checklistAmountYi(Number(row[2].replace(/,/g,'')),row[3]),(row[4] || row[5]).trim().replace(/[。.]$/,'').replace(/^(?:毛利贡献|收入占比|占比)\s*([-+]?\d+(?:\.\d+)?%)$/,'$1').replace(/([-+]?\d+(?:\.\d+)?)%/g,(_,value)=>Number(value).toFixed(2)+'%')])});
     let cursor=0;
     for(const row of rows){if(row.index>cursor && cursor>0)paragraph(section.slice(cursor,row.index));cursor=row.index+row[0].length;}
     paragraph(section.slice(cursor));
   }
   // For new snapshots, display verified numbers independently of model wording.
-  const amount=(value,unit)=>{
-    const yuan=value*({'元':1,'千元':1000,'万元':10000,'亿元':100000000}[unit]);
-    const scale=Math.abs(yuan)>=100000000 ? 100000000 : Math.abs(yuan)>=10000 ? 10000 : 1;
-    return new Intl.NumberFormat('zh-CN',{maximumFractionDigits:2}).format(yuan/scale)+({1:'元',10000:'万元',100000000:'亿元'}[scale]);
-  };
+  const amount=window.checklistAmountYi;
   for(const block of blocks) {
     if(block.type!=='table')continue;
     if(block.headers[1].startsWith('金额'))continue;
@@ -55,23 +55,141 @@ window.checklistProductBlocks = function(text, evidence=[], corrections=[]) {
       for(const page of entry.value) {
         const metric=page.business_metrics?.[key];
         if(metric?.period!==period || !Array.isArray(metric.rows) || !['元','千元','万元','亿元'].includes(metric.unit))continue;
+        if(key==='profit_mix' && /毛利/.test(block.headers[1])!==/毛利/.test(metric.basis))continue;
+        if(key==='profit_mix' && !/毛利/.test(metric.basis) && /净利/.test(block.headers[1])!==/净利/.test(metric.basis))continue;
         if(!selected || metric.classification==='产品')selected={metric,id:entry.id};
       }
     }
     if(block.correction)selected={metric:block.correction,id:block.evidenceId};
     if(!selected)continue;
     const m=selected.metric, measure=key==='revenue_mix' ? 'revenue' : 'profit';
-    const label=key==='revenue_mix' ? '收入' : m.basis.includes('毛利') ? '毛利' : m.basis.includes('净利润') ? '分部净利润' : m.basis.includes('税前') ? '税前利润' : '利润';
+    const label=key==='revenue_mix' ? '收入' : m.basis.includes('毛利') ? '毛利' : m.basis.includes('分部净利润') ? '分部净利润' : m.basis.includes('净利润') ? '净利润' : m.basis.includes('税前') ? '税前利润' : '利润';
     block.caption=block.caption.split(' · ')[0]+' · '+m.basis+' · 合计'+amount(m.denominator,m.unit);
     block.headers=['产品 / 业务',label+'金额',label==='收入' ? '收入占比' : '贡献占比'];
     block.rows=m.rows.map(row=>[row.name,row[measure]===null ? '资料缺失' : amount(row[measure],m.unit),row.share_pct===null ? '资料缺失' : row.share_pct.toFixed(2)+'%']);
     block.evidenceId=selected.id;
     block.note=m.note;
   }
+  // Combine matching product classifications for the same period in one table.
+  const combined=[];
+  for(const block of blocks) {
+    if(block.type!=='table'){combined.push(block);continue;}
+    const period=block.caption.split(' · ')[0];
+    const basis=block.headers[1];
+    const periodKey=period.slice(0,4)+(/上半年|半年度|1\s*[-–—]\s*6月/.test(period) ? '-06-30' : '-12-31');
+    const measure=label=>/收入/.test(label) ? '收入' : /毛利/.test(label) ? '毛利' : /净利/.test(label) ? '净利' : /税前/.test(label) ? '税前利润' : /利润/.test(label) ? '利润' : '金额';
+    const match=combined.find(b=>b.type==='table' && b.periodKey===periodKey &&
+      measure(basis)!=='金额' && !b.headers.some((header,index)=>index%2===1 && measure(header)===measure(basis)) &&
+      b.rows.length===block.rows.length && b.rows.every(row=>block.rows.some(other=>other[0]===row[0])));
+    const note=block.caption.split(' · ').slice(1).join(' · ');
+    block.caption=period;
+    block.periodKey=periodKey;
+    block.note=[note,block.note].filter(Boolean).join('；');
+    if(match) {
+      match.headers.push(...block.headers.slice(1));
+      for(const row of match.rows)row.push(...block.rows.find(other=>other[0]===row[0]).slice(1));
+      match.note=[match.note,block.note].filter(Boolean).join('；');
+      match.evidenceIds=[...new Set([...(match.evidenceIds || []),block.evidenceId].filter(Boolean))];
+    } else {
+      block.evidenceIds=block.evidenceId ? [block.evidenceId] : [];
+      combined.push(block);
+    }
+  }
+  for(const block of combined) {
+    if(block.type!=='table' || block.headers.length<5)continue;
+    const priority=header=>/收入/.test(header) ? 0 : /毛利/.test(header) ? 1 : /净利/.test(header) ? 2 : 3;
+    const columns=[];
+    for(let index=1;index<block.headers.length;index+=2)columns.push(index);
+    columns.sort((a,b)=>priority(block.headers[a])-priority(block.headers[b]));
+    block.rows=block.rows.map(row=>[row[0],...columns.flatMap(index=>row.slice(index,index+2))]);
+    block.headers=[block.headers[0],...columns.flatMap(index=>block.headers.slice(index,index+2))];
+  }
+  return combined;
+};
+
+window.checklistMarketBlocks = function(text) {
+  const periods=[...text.matchAll(/(20\d{2}年(?:上半年|下半年|半年度|度|\d{1,2}\s*[-–—]\s*\d{1,2}月)?)\s*[：:]/g)];
+  if(!periods.length)return [{type:'text',text}];
+  const blocks=[],notes=[];
+  const table={type:'table',caption:'地区收入及占比',headers:['报告期','地区','收入','占比'],rows:[]};
+  const paragraph=value=>{const cleaned=value.replace(/^[、，,；;。\s]+|[、，,；;\s]+$/g,'');if(cleaned && !/^[。.]$/.test(cleaned))blocks.push({type:'text',text:cleaned});};
+  paragraph(text.slice(0,periods[0].index));
+  for(let i=0;i<periods.length;i++) {
+    const period=periods[i];
+    const section=text.slice(period.index+period[0].length,periods[i+1]?.index ?? text.length);
+    const regions=[...section.matchAll(/(国内|境内|海外|国外|境外|中国大陆|其他国家(?:或|和)地区)(?:销售)?(?:收入)?\s*(?:([\d,]+(?:\.\d+)?)\s*(亿元|万元|千元|元)(?:\s*[（(]\s*(?:(?:占营业收入|占比)?\s*([\d.]+)%|占比未披露)\s*[）)])?|未披露(?:金额(?:及|和|与)占比|金额|占比)?)/g)];
+    if(!regions.length){paragraph(period[0]+section);continue;}
+    if(!table.rows.length)blocks.push(table);
+    const scales={'元':1,'千元':1000,'万元':10000,'亿元':100000000};
+    const amounts=regions.map(region=>region[2]===undefined ? null : Number(region[2].replace(/,/g,''))*scales[region[3]]);
+    const total=amounts.reduce((sum,value)=>sum+(value ?? 0),0);
+    const domestic=region=>/国内|境内|中国大陆/.test(region[1]);
+    const calculate=regions.length===2 && domestic(regions[0])!==domestic(regions[1]) &&
+      amounts.every(value=>value!==null && Number.isFinite(value) && value>=0) && total>0 && regions.every(region=>!region[4]);
+    let cursor=0,remainder='';
+    regions.forEach((region,index)=>{
+      const share=region[4] ? Number(region[4]).toFixed(2)+'%' : calculate ? (amounts[index]/total*100).toFixed(2)+'%（计算）' : '未披露';
+      table.rows.push([period[1],region[1],region[2]===undefined ? '未披露' : window.checklistAmountYi(Number(region[2].replace(/,/g,'')),region[3]),share]);
+      remainder+=section.slice(cursor,region.index);
+      cursor=region.index+region[0].length;
+    });
+    remainder+=section.slice(cursor);
+    if(calculate) {
+      const denominator=window.checklistAmountYi(total,'元');
+      notes.push(period[1]+'：占比按所列两项地区收入合计计算，分母'+denominator);
+      remainder=remainder.replace(/[，,；;]?\s*报告未披露占比/g,'');
+    }
+    paragraph(remainder);
+  }
+  if(!table.rows.length)return [{type:'text',text}];
+  table.note=notes.join('\n');
   return blocks;
 };
 
 /* Local reads never trigger inference. Model operations have explicit buttons. */
+window.checklistStructuredBlocks = function(item) {
+  const blocks=[{type:'text',text:item.conclusion}],groups=new Map();
+  const domestic=name=>/^(国内|境内|中国大陆|中国境内)$/.test(name);
+  const foreign=name=>/^(海外|国外|境外|中国大陆以外|其他国家(?:或|和)地区)$/.test(name);
+  const priority={income:0,gross_profit:1,net_profit:2,pre_tax_profit:3,profit:4};
+  const periodLabel=period=>period.endsWith('-12-31') ? period.slice(0,4)+'年度' : period.endsWith('-06-30') ? period.slice(0,4)+'年上半年' : period;
+  for(const table of item.tables) {
+    const region=item.id==='market';
+    const explicit=table.denominator!==null && table.denominator>0;
+    let denominator=explicit ? table.denominator : null;
+    const amounts=table.rows.map(row=>row.amount);
+    if(region && denominator===null && table.rows.length===2 &&
+      table.rows.every(row=>row.share_pct===null && row.amount!==null && row.amount>=0) &&
+      ((domestic(table.rows[0].name) && foreign(table.rows[1].name)) || (foreign(table.rows[0].name) && domestic(table.rows[1].name)))) {
+      const sum=amounts.reduce((a,b)=>a+b,0);
+      if(sum>0)denominator=sum;
+    }
+    if(region && explicit && amounts.every(value=>value!==null) && amounts.reduce((a,b)=>a+b,0)>denominator+Math.max(1,table.rows.length))denominator=null;
+    const values=table.rows.map(row=>({name:row.name,amount:row.amount===null ? '未披露' : window.checklistAmountYi(row.amount,table.unit)+(row.amount_method ? '（'+row.amount_method+'）' : ''),
+      share:row.share_pct!==null ? row.share_pct.toFixed(2)+'%' : row.amount!==null && denominator!==null ? (row.amount/denominator*100).toFixed(2)+'%（计算）' : '未披露'}));
+    const note=table.basis+(denominator!==null ? '；分母'+window.checklistAmountYi(denominator,table.unit)+(explicit ? '' : '（所列两项收入合计）') : '');
+    if(region) {
+      blocks.push({type:'table',caption:periodLabel(table.period)+' · '+table.classification,headers:['报告期','地区','收入','占比'],
+        rows:values.map(row=>[periodLabel(table.period),row.name,row.amount,row.share]),note,evidenceIds:table.evidence_ids});
+      continue;
+    }
+    const key=table.period+'|'+table.classification;
+    if(!groups.has(key))groups.set(key,{period:table.period,classification:table.classification,columns:[],names:[],notes:[],ids:[]});
+    const group=groups.get(key);
+    for(const row of values)if(!group.names.includes(row.name))group.names.push(row.name);
+    const label=table.measure==='income' ? '收入' : table.measure==='gross_profit' ? '毛利' : table.measure==='net_profit' ? (/分部/.test(table.basis) ? '分部净利润' : '净利润') : table.measure==='pre_tax_profit' ? '税前利润' : '利润';
+    group.columns.push({measure:table.measure,label,values});group.notes.push(note);group.ids.push(...table.evidence_ids);
+  }
+  for(const group of groups.values()) {
+    group.columns.sort((a,b)=>priority[a.measure]-priority[b.measure]);
+    blocks.push({type:'table',caption:periodLabel(group.period)+' · '+group.classification,
+      headers:['产品 / 业务',...group.columns.flatMap(column=>[column.label+'金额',column.label==='收入' ? '收入占比' : column.label+'贡献占比'])],
+      rows:group.names.map(name=>[name,...group.columns.flatMap(column=>{const row=column.values.find(value=>value.name===name);return row ? [row.amount,row.share] : ['未披露','未披露'];})]),
+      note:group.notes.join('；'),evidenceIds:[...new Set(group.ids)]});
+  }
+  return blocks;
+};
+
 window.initAIChecklist = function(state) {
   const el = (tag, text, className) => {
     const node = document.createElement(tag);
@@ -150,6 +268,11 @@ window.initAIChecklist = function(state) {
     const sequence = ++epoch, code = state.code;
     const data = await api('/api/analysis?code=' + encodeURIComponent(code));
     if (sequence !== epoch || code !== state.code) return;
+    if (/^[a-f0-9]{12}$/.test(data.display_version || '') && window.checklistDisplayVersion!==data.display_version) {
+      await import('/ai-checklist.js?v='+data.display_version);
+      window.checklistDisplayVersion=data.display_version;
+      if (sequence !== epoch || code !== state.code) return;
+    }
     overview = data; renderSummary();
     if (dialog.open && view === 'report') {
       if (!currentReport || currentReport.id === overview.report?.id || currentReport.status !== 'succeeded') currentReport = overview.report;
@@ -292,7 +415,7 @@ window.initAIChecklist = function(state) {
       toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',evidence.id);
       meta.append(el('span',labels[item.status],'ai-meta'),toggle);
       const conclusion=item.id==='cycle' ? item.conclusion.replace(/判断\s*[\/／]\s*推断/g,'判断') : item.conclusion;
-      const blocks=item.id==='products' ? window.checklistProductBlocks(conclusion,report.input.evidence,report.product_display_corrections) : [{type:'text',text:conclusion}];
+      const blocks=Array.isArray(item.tables) ? window.checklistStructuredBlocks(item) : item.id==='products' ? window.checklistProductBlocks(conclusion,report.input.evidence,report.product_display_corrections) : item.id==='market' ? window.checklistMarketBlocks(conclusion) : [{type:'text',text:conclusion}];
       for (const block of blocks) {
         if (block.type==='text') {cell.append(el('p',block.text));continue;}
         const wrap=el('div',undefined,'checklist-product-wrap');
@@ -309,10 +432,10 @@ window.initAIChecklist = function(state) {
       cell.append(meta,evidence);
       if(item.id==='products' && report.product_display_corrections?.length) {
         const original=el('details');
-        original.append(el('summary','查看原生成描述（含错误数值）'),el('p',conclusion));
+        original.append(el('summary','查看原生成描述（保留模型原文）'),el('p',conclusion));
         evidence.append(original);
       }
-      evidenceLinks(evidence,[...new Set([...item.evidence_ids,...blocks.map(b=>b.evidenceId).filter(Boolean)])],report);row.append(title,cell);table.append(row);
+      evidenceLinks(evidence,[...new Set([...item.evidence_ids,...blocks.flatMap(b=>b.evidenceIds || [b.evidenceId]).filter(Boolean)])],report);row.append(title,cell);table.append(row);
     }
     dialog.append(table);
     const facts=el('details');facts.append(el('summary','生成时的数据与来源'),el('pre',JSON.stringify(report.input,null,2)));dialog.append(facts);
