@@ -161,7 +161,7 @@ class AnalysisService:
                                 'supplemental_evidence': [supplemental] if supplemental else [], 'provider':output.get('diagnostic'),
                                 'response_id':output.get('response_id'), 'model':output.get('model'), 'usage':output.get('usage'),
                                 'source_catalog':output.get('source_catalog'), 'pipeline':output.get('pipeline')},
-                                getattr(self.provider,'record',None) or {}) if business and output else None}))
+                                getattr(self.provider,'record',None) or {}) if output and (business or run['output_schema_version']=='stock_checklist_output_v1') else None}))
             finally:
                 with self.lock:
                     self.events.pop(run["id"], None)

@@ -62,3 +62,43 @@ def test_duplicate_period_classification_measure_rejected():
     data,out,table=payload()
     next(item for item in out['items'] if item['id']=='market')['tables'].append(copy.deepcopy(table))
     with pytest.raises(ValueError,match='重复'):validate_output(json.dumps(out),data)
+
+
+def test_valid_table_source_is_merged_into_parent_item():
+    data,out,table=payload()
+    data['allowed_evidence_ids'].append('table-page')
+    table['evidence_ids']=['table-page']
+    verified=validate_output(json.dumps(out),data)
+    item=next(item for item in verified['items'] if item['id']=='market')
+    assert item['evidence_ids']==['page','table-page']
+    assert item['tables'][0]['evidence_ids']==['table-page']
+
+
+def test_unknown_table_source_reports_item_table_and_bad_id():
+    from quarterly_dashboard.analysis_validation import ReportValidationError
+    data,out,table=payload()
+    table['evidence_ids']=['nonexistent-page']
+    with pytest.raises(ReportValidationError) as error:
+        validate_output(json.dumps(out),data)
+    assert error.value.diagnostic['field']=='items.market.tables[0].evidence_ids'
+    assert error.value.diagnostic['unknown_evidence_ids']==['nonexistent-page']
+
+
+@pytest.mark.parametrize('name',['内部抵消数','分部间抵销'])
+def test_negative_elimination_cost_preserved(name):
+    data,out,table=payload()
+    table['measure']='income'
+    item=next(item for item in out['items'] if item['id']=='products')
+    item['tables']=[copy.deepcopy(table)]
+    item['tables'][0]['rows']=[{'name':name,'amount':-100,'share_pct':None,'cost':-80}]
+    verified=validate_output(json.dumps(out),data)
+    assert next(i for i in verified['items'] if i['id']=='products')['tables'][0]['rows'][0]['cost']==-80
+
+
+def test_negative_ordinary_product_cost_still_rejected():
+    data,out,table=payload()
+    item=next(item for item in out['items'] if item['id']=='products')
+    item['tables']=[copy.deepcopy(table)]
+    item['tables'][0]['rows']=[{'name':'普通产品','amount':100,'share_pct':None,'cost':-80}]
+    with pytest.raises(ValueError,match='普通业务营业成本'):
+        validate_output(json.dumps(out),data)

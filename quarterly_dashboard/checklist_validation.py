@@ -1,6 +1,7 @@
 """Versioned qualitative checklist; no investment verdict."""
 import json
 import math
+import re
 from datetime import date
 from pathlib import Path
 from .analysis_validation import ReportValidationError
@@ -23,7 +24,7 @@ def _validate_tables(item, allowed, required):
     if not isinstance(tables,list) or len(tables)>12:raise ValueError('数字表格列表无效')
     number=lambda value:value is None or (isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value))
     seen=set()
-    for table in tables:
+    for index,table in enumerate(tables):
         if not isinstance(table,dict) or set(table)!={'period','classification','measure','basis','unit','denominator','rows','evidence_ids'}:raise ValueError('数字表格字段无效')
         try:
             if not isinstance(table['period'],str) or len(table['period'])!=10:raise ValueError()
@@ -38,7 +39,17 @@ def _validate_tables(item, allowed, required):
         seen.add(identity)
         if not number(table['denominator']):raise ValueError('数字表格分母无效')
         ids=table['evidence_ids']
-        if not isinstance(ids,list) or not ids or any(not isinstance(i,str) or i not in allowed or i not in item['evidence_ids'] for i in ids) or len(set(ids))!=len(ids):raise ValueError('数字表格证据无效')
+        field=f"items.{item['id']}.tables[{index}].evidence_ids"
+        if not isinstance(ids,list) or not ids or any(not isinstance(i,str) for i in ids):
+            raise ReportValidationError(field,'数字表格证据须为非空编号列表')
+        unknown=[i for i in ids if i not in allowed]
+        if unknown:
+            raise ReportValidationError(field,'数字表格引用不属于本次输入资料',unknown_evidence_ids=unknown)
+        if len(set(ids))!=len(ids):
+            raise ReportValidationError(field,'数字表格证据编号重复')
+        # Table sources are item sources too. Requiring a second copy in the
+        # model's parent list rejected otherwise valid, attributable tables.
+        item['evidence_ids'].extend(i for i in ids if i not in item['evidence_ids'])
         rows=table['rows']
         if not isinstance(rows,list) or not 1<=len(rows)<=30:raise ValueError('数字表格行无效')
         names=set()
@@ -47,7 +58,9 @@ def _validate_tables(item, allowed, required):
             if set(row)&{'cost','gross_margin_pct'} and (item['id']!='products' or table['measure']!='income'):raise ValueError('成本与毛利率仅适用于产品收入表')
             for field in ('cost','gross_margin_pct'):
                 if field in row and not number(row[field]):raise ValueError('成本及毛利率须为数字或 null')
-            if row.get('cost') is not None and row['cost']<0:raise ValueError('营业成本不能为负')
+            elimination=isinstance(row.get('name'),str) and bool(re.search(r'抵[销消]',row['name']))
+            if row.get('cost') is not None and row['cost']<0 and not elimination:
+                raise ValueError('普通业务营业成本不能为负；负数抵销须保留原抵销名称')
             if row.get('gross_margin_pct') is not None and row['gross_margin_pct']>100:raise ValueError('毛利率超出有效范围')
             if not isinstance(row['name'],str) or not row['name'].strip() or len(row['name'])>100 or row['name'] in names:raise ValueError('数字表格名称为空或重复')
             names.add(row['name'])

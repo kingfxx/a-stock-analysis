@@ -154,6 +154,15 @@ class CompanyReportService:
             re.sub(r"\s+", "", page["text"])[:200]
         ) for page in pages[:12])
         title_matches = title_matches or bool(re.search(year+r"年?"+expected,compact))
+        # Some bilingual reports have an image-only cover and identify the
+        # period on page two as “本半年度报告” plus “Interim Report 2026”.
+        # Accept that explicit pairing while still requiring the stock code
+        # in the opening pages below.
+        if document["report_type"]=="interim":
+            title_matches = title_matches or bool(
+                re.search(r"本半年度报告",compact) and
+                re.search(r"InterimReport\s*"+year,compact,re.I)
+            )
         if not re.search(r"(?<!\d)"+code+r"(?!\d)",preview) or not title_matches or "年度报告摘要" in compact:
             raise ValueError("财报股票或年度不匹配，请核对下载文件")
         if sum(len(p["text"].strip()) for p in pages) < 500:

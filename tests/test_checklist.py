@@ -25,6 +25,27 @@ def checklist_service(db):
     return AnalysisService(db,ChecklistProvider(),snapshotter=lambda db,code:capture(db,code,as_of='2026-10-02'),prompt_factory=prompt,validator=validate_output,output_version=OUTPUT_VERSION)
 
 
+def test_failed_checklist_validation_retains_redacted_output(database,monkeypatch):
+    new=checklist_service(database)
+    def invalid_output(run_id,model,instructions,data,cancelled):
+        out=result(data)
+        market=next(item for item in out['items'] if item['id']=='market')
+        market['tables']=[{'period':'2026-06-30','classification':'地区','measure':'income','basis':'收入',
+            'unit':'亿元','denominator':100,'rows':[{'name':'境内','amount':100,'share_pct':None}],
+            'evidence_ids':['nonexistent-page']}]
+        return {'text':json.dumps(out),'model':model,'diagnostic':{'Authorization':'Bearer secret'}}
+    monkeypatch.setattr(new.provider,'infer',invalid_output)
+    run=new.create({'code':'600900','model':'test-model','request_key':uuid4().hex})
+    assert wait_terminal(new,run['id'])['status']=='failed'
+    if new.worker:new.worker.join(3)
+    raw=new.repository.run(run['id'],internal=True)
+    diagnostic=json.loads(raw['diagnostic_json'])
+    assert diagnostic['validation']['unknown_evidence_ids']==['nonexistent-page']
+    assert json.loads(diagnostic['replay']['text'])['code']=='600900'
+    assert diagnostic['replay']['provider']['Authorization']=='[REDACTED]'
+    assert 'replay' not in new.repository.run(run['id'])
+
+
 def test_run_exposes_corrected_product_display_without_mutating_history(database):
     from test_report_business_metrics import JOINED_AMOUNTS
     snap=capture(database,'600900',as_of='2026-10-02')

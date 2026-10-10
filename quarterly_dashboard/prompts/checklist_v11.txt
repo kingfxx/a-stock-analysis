@@ -20,7 +20,7 @@
 
 数字表格协议（所有公司使用同一结构）：
 每个 tables 元素只有以下字段：
-{"period":"2026-06-30","classification":"原报告分类，例如产品/业务分部/地区","measure":"income","basis":"原始指标口径及分母定义","unit":"千元","denominator":null,"rows":[{"name":"原始分类名称","amount":115478800,"share_pct":null}],"evidence_ids":["本项evidence_ids中已有且支持该表的证据ID"]}
+{"period":"2026-06-30","classification":"原报告分类，例如产品/业务分部/地区","measure":"income","basis":"原始指标口径及分母定义","unit":"千元","denominator":null,"rows":[{"name":"原始分类名称","amount":115478800,"share_pct":null}],"evidence_ids":["输入allowed_evidence_ids中已有且支持该表的完整证据ID"]}
 period 使用报告所属期末 YYYY-MM-DD；半年为06-30，年报为12-31；不是发布日期或生成日。classification 是同一分类体系的名称，同一期收入、毛利和净利润属于相同业务分类时保持完全一致，用于合并展示。basis 保留实际口径；不要塞进 row.name。
 measure 只允许 income（收入）、gross_profit（毛利）、net_profit（净利润）、pre_tax_profit（税前利润）、profit（其他利润）。market 只用 income；分部净利润仍用 net_profit，但 basis 明确“分部净利润，非归母净利润”。没有净利润证据时不把毛利改名为净利润。
 unit 只允许元、千元、万元、亿元，逐表保留原始金额单位；amount、share_pct、denominator 为 JSON 数字或 null，不包含逗号、单位、百分号或“未披露”。share_pct 的42.19代表42.19%，不是0.4219。名称保持完整，不省略、不重写；null代表缺资料，与0不同。
@@ -54,3 +54,7 @@ cycle：给“行业生命周期：引导期/成长期/成熟期/衰退期（判
 competition：有证据列市场份额及期间、地区、产品和口径，或具体排名及指标；公司自述注明公司披露。只有排名不推算份额，产能排名不能冒称市场份额；无数字明确缺失。
 
 输出前自查：18项齐全、引用有效、JSON无额外字段；products/market包含tables；所有已知金额与比例进入对应表，不仅藏在conclusion；名称完整、日期标准化、金额单位逐表确认、零值/亏损/抵销未丢失；占比没有混入同比或毛利率；仅有一侧数据没有导致整表消失；分类和利润口径未被改写。
+
+表格引用须来自本次输入 allowed_evidence_ids，保留完整ID且不重复。项目 evidence_ids 可列定性依据；表格的有效引用由程序自动汇入项目引用，不因项目列表遗漏已存在的表格引用而拒绝。不得创造、截短或改写证据ID。
+
+内部抵销/抵消项的收入和成本可能为负，按原名称和原负数保留；不能删除、改正值或套用普通业务成本非负规则。毛利按含抵销的收入减成本计算，占比分母保留抵销及亏损。
