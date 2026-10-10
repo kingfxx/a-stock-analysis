@@ -30,17 +30,31 @@
       <label>市值季度<select id="sw-update-quarter"></select></label><button type="button" id="sw-refresh-cap">补齐季度市值</button>
       <label class="sw-toggle"><input id="sw-recheck-cap" type="checkbox">核对已有市值修订</label></div>
       <p id="sw-job-status" class="sw-status" role="status" aria-live="polite">财务仅更新指定报告期；市值默认补缺，同时补齐季末未复权股价。</p>
-      <div class="sw-controls"><label>一级行业<select id="sw-first"><option value="">全部一级</option></select></label><label>二级行业<select id="sw-second"><option value="">全部二级</option></select></label><label>三级行业<select id="sw-third"><option value="">全部三级</option></select></label>
+      <div class="sw-controls sw-industry-filters"><label>一级行业<select id="sw-first"><option value="">全部一级</option></select></label><label>二级行业<select id="sw-second"><option value="">全部二级</option></select></label><label>三级行业<select id="sw-third"><option value="">全部三级</option></select></label>
       <label>排行层级<select id="sw-level"><option value="1">一级</option><option value="2">二级</option><option value="3" selected>三级</option></select></label>
       <label>财务口径<select id="sw-mode"><option value="ttm">滚动十二个月 TTM</option><option value="quarter">单季度</option><option value="ytd">本年累计</option><option value="annual">全年</option></select></label>
       <label title="以当前财务口径的最新可用报告期为基准，筛选报告期、趋势图及历史数据表">时间范围<select id="sw-range"><option value="all">全部时间</option><option value="10" selected>最近10年</option><option value="5">最近5年</option></select></label>
-      <label>报告期<select id="sw-period"></select></label><label class="sw-toggle"><input id="sw-covered" type="checkbox" checked>仅看营收同比 / 毛利率覆盖 ≥95%</label></div>
+      <label>报告期<select id="sw-period"></select></label><div class="sw-period-nav" role="group" aria-label="报告期快速切换"><button type="button" id="sw-period-prev">上一期</button><button type="button" id="sw-period-step" aria-pressed="false" title="点击切换季度或年度步长">季度</button><button type="button" id="sw-period-next">下一期</button></div><label class="sw-toggle"><input id="sw-covered" type="checkbox" checked>仅看营收同比 / 毛利率覆盖 ≥95%</label></div>
       <div class="sw-metrics-scroll" tabindex="0" role="region" aria-label="行业汇总，可横向滚动"><div id="sw-metrics" class="fs-metrics"></div></div>
       <section class="panel fs-panel"><div class="sw-trend-heading"><h3 id="sw-title">行业趋势</h3><div class="metric-mode-group sw-trend-toggles" role="group" aria-label="行业趋势指标显示"><button type="button" class="metric-mode" id="sw-show-revenue" aria-pressed="true" aria-controls="sw-chart" style="--series-color:#38c4dc"><i aria-hidden="true"></i>营收</button><button type="button" class="metric-mode" id="sw-show-profit" aria-pressed="true" aria-controls="sw-chart" style="--series-color:#b9a0f5"><i aria-hidden="true"></i>利润</button><button type="button" class="metric-mode" id="sw-show-cap" aria-pressed="true" aria-controls="sw-chart" style="--series-color:#f4d35e"><i aria-hidden="true"></i>市值</button></div></div><p id="sw-chart-note"></p><div id="sw-chart" class="sw-chart"></div><div id="sw-market"></div></section>
       <section class="panel fs-panel"><div class="sw-company-toolbar"><div class="sw-company-tabs" role="tablist" aria-label="行业与公司"><button type="button" id="sw-companies-tab" role="tab" aria-selected="true" aria-controls="sw-companies-panel">行业内公司 <small id="sw-company-total"></small></button><button type="button" id="sw-rank-tab" role="tab" aria-selected="false" aria-controls="sw-rank-panel" tabindex="-1">行业排行</button><button type="button" id="sw-child-rank-tab" role="tab" aria-selected="false" aria-controls="sw-child-rank-panel" tabindex="-1" hidden>子行业统计</button></div><div class="sw-ranking-levels" role="group" aria-label="快速切换排行层级"><span>排行层级</span>${[1,2,3].map(level=>`<button type="button" id="sw-rank-level-${level}" data-rank-level="${level}" aria-pressed="${level===3}">${['一级','二级','三级'][level-1]}</button>`).join('')}</div></div><div id="sw-rank-panel" role="tabpanel" aria-labelledby="sw-rank-tab" hidden><p id="sw-rank-note" class="sw-note"></p><div id="sw-ranking" class="sw-company-scroll"></div></div><div id="sw-child-rank-panel" role="tabpanel" aria-labelledby="sw-child-rank-tab" hidden><h4 id="sw-child-ranking-title"></h4><p id="sw-child-rank-note" class="sw-note"></p><div id="sw-child-ranking" class="sw-company-scroll"></div></div><div id="sw-companies-panel" role="tabpanel" aria-labelledby="sw-companies-tab"><div class="sw-company-info"><div id="sw-company-context"></div><input id="sw-company-search" type="search" aria-label="搜索公司名称或代码" placeholder="搜索公司名称 / 代码"></div><div id="sw-companies" class="sw-company-scroll"></div><div class="sw-company-footer"><span id="sw-company-count"></span><span>金额单位：亿元 · 毛利率同比：百分点 · ROE：报告期累计加权 · PE：季末市值 / TTM归母净利润 · PB：季末未复权股价 / 同期每股净资产 · 估值单位：倍，非实时行情 · 亏损 / 缺失显示 — · 点击表头排序 · 缺失值排在末尾</span></div></div></section>
       <section class="panel fs-panel"><h3>与已保存的股票及分析对照</h3><p id="sw-compare-note"></p><div id="sw-saved" class="sw-scroll"></div></section>
       <details class="panel fs-panel sw-notes"><summary>数据来源与汇总口径</summary><div id="sw-notes"></div></details>`;
-    let data=null,seq=0,controller=null,loaded=false,selected=null,parent=null,period=null,pollTimer=null;
+    const sidebarFilters=document.getElementById('industry-filter-details');
+    const shell=document.querySelector('.shell');
+    sidebarFilters.querySelector('.industry-filter-body').append(panel.querySelector('.sw-industry-filters'));
+    document.querySelector('.research-tabs').addEventListener('click',event=>{
+      const tab=event.target.closest('[role="tab"]');
+      if(tab){
+        const active=tab.id==='industry-tab';
+        sidebarFilters.hidden=!active;
+        shell.classList.toggle('industry-filters-active',active);
+      }
+    });
+    const active=panel.hidden===false;
+    sidebarFilters.hidden=!active;
+    shell.classList.toggle('industry-filters-active',active);
+    let data=null,seq=0,controller=null,loaded=false,selected=null,parent=null,period=null,pollTimer=null,periodStep='quarter';
     let companySort='revenue',companyDirection=-1;
     const chartVisibility={revenue:true,profit:true,cap:true};
     let rankingSort='revenue_yoy',rankingDirection=-1;
@@ -120,7 +134,7 @@
       choices('sw-third',data.catalog.filter(r=>r.level===3&&(!path[1]||r.parent_code===path[1].code)),path[2]?.code,'三级');
       const cutoff=periodCutoff(data.periods,el('sw-range').value),inRange=p=>!cutoff||p>cutoff;
       const series=data.series.filter(r=>inRange(r.period));
-      el('sw-period').innerHTML=data.periods.filter(inRange).map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');el('sw-period').value=data.period||'';
+      el('sw-period').innerHTML=data.periods.filter(inRange).map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');el('sw-period').value=data.period||'';updatePeriodNav();
       el('sw-path').textContent=`当前股票 ${state.code}：`+(data.stock_path.length?data.stock_path.map(r=>r.name).join(' → '):'分类待补');
       const timeText=value=>value?new Date(value).toLocaleString('zh-CN'):'未记录';
       el('sw-status').textContent=`申万 2021 · ${data.catalog.filter(r=>r.level===1).length} / ${data.catalog.filter(r=>r.level===2).length} / ${data.catalog.filter(r=>r.level===3).length} 个行业 · 分类覆盖 ${data.classified_count}/${data.universe_count} · 财务更新 ${timeText(data.obtained_at)} · 名单采集 ${timeText(data.membership_obtained_at)}`;
@@ -201,7 +215,30 @@
       }
       load();
     });
-    el('sw-period').addEventListener('change',()=>{period=el('sw-period').value||null;load();});
+    function updatePeriodNav(){
+      const options=[...el('sw-period').options].map(option=>option.value),current=el('sw-period').value,index=options.indexOf(current);
+      const target=direction=>{
+        if(index<0)return -1;
+        if(periodStep==='quarter')return index+direction>=0&&index+direction<options.length?index+direction:-1;
+        const [year,month,day]=current.split('-').map(Number),targetDate=`${year+direction}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        const candidates=options.filter(p=>direction<0?p<current&&p<=targetDate:p>current&&p>=targetDate);
+        return candidates.length?options.indexOf(direction<0?candidates.at(-1):candidates[0]):-1;
+      };
+      el('sw-period-prev').disabled=target(-1)<0;el('sw-period-next').disabled=target(1)<0;
+      el('sw-period-step').textContent=periodStep==='quarter'?'季度':'年度';
+      el('sw-period-step').setAttribute('aria-pressed',String(periodStep==='year'));
+      el('sw-period-step').title=`当前按${periodStep==='quarter'?'季度':'年度'}跳转，点击切换`;
+      return target;
+    }
+    function navigatePeriod(direction){
+      const target=updatePeriodNav()(direction);
+      if(target<0)return;
+      el('sw-period').selectedIndex=target;period=el('sw-period').value||null;load();
+    }
+    el('sw-period-prev').addEventListener('click',()=>navigatePeriod(-1));
+    el('sw-period-next').addEventListener('click',()=>navigatePeriod(1));
+    el('sw-period-step').addEventListener('click',()=>{periodStep=periodStep==='quarter'?'year':'quarter';updatePeriodNav();});
+    el('sw-period').addEventListener('change',()=>{period=el('sw-period').value||null;updatePeriodNav();load();});
     el('sw-range').addEventListener('change',()=>{
       if(!data||data.empty)return;
       if(data.period&&!periodsInRange(data.periods,el('sw-range').value).includes(data.period)){period=null;load();}

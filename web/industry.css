@@ -1,4 +1,22 @@
 #industry-panel[hidden]{display:none!important}
+.industry-filter-details{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);max-height:calc(100dvh - 260px);overflow:auto;scrollbar-color:#526c78 #182227}
+.industry-filter-details[hidden]{display:none}
+.industry-filter-details>summary{cursor:pointer;color:var(--cyan);font-size:13px;list-style:none}
+.industry-filter-details>summary::-webkit-details-marker{display:none}
+.industry-filter-details>summary::after{content:'＋';float:right;color:var(--muted)}
+.industry-filter-details[open]>summary::after{content:'−'}
+.industry-filter-body .sw-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:10px;margin:12px 0 4px}
+.industry-filter-body .sw-controls label{min-width:0;width:100%;gap:4px}
+.industry-filter-body .sw-controls select{width:100%;min-width:0;max-width:none;padding:8px 7px;font-size:12px}
+.industry-filter-body .sw-controls .sw-toggle{grid-column:1/-1;align-items:flex-start;padding:2px 0;line-height:1.5}
+.industry-filter-body .sw-controls .sw-toggle input{margin-top:3px;flex:0 0 auto}
+.industry-filter-body .sw-period-nav{grid-column:1/-1;display:grid;grid-template-columns:1fr auto 1fr;gap:6px}
+.industry-filter-body .sw-period-nav button{padding:7px 8px;border:1px solid var(--line);border-radius:5px;background:#202e35;color:var(--ink);font-size:12px}
+.industry-filter-body .sw-period-nav button:disabled{opacity:.4;cursor:default}
+.industry-filter-body .sw-period-nav button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+@media(min-width:1808px){.shell.industry-filters-active{max-width:1760px;margin-left:calc((100% - 1580px)/2 - 180px);margin-right:auto;grid-template-columns:360px minmax(0,1fr)}}
+@media(min-width:801px) and (max-width:1807px){.industry-filter-body .sw-controls{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:800px){.industry-filter-details{grid-column:1/-1;max-height:calc(100dvh - 180px)}}
 .sw-head{display:flex;justify-content:space-between;align-items:start;gap:16px;flex-wrap:wrap}
 .sw-head h2{margin:0 0 8px;font-size:26px}.sw-head p,.sw-note{color:var(--muted);font-size:13px;line-height:1.8}
 .sw-controls{display:flex;flex-wrap:wrap;align-items:end;gap:12px;margin:20px 0}
