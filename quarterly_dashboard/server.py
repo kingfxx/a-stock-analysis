@@ -836,6 +836,17 @@ def ai_service():
         return _AI_SERVICES[key]
 
 
+def business_service():
+    shared = ai_service()
+    key = str(Path(DATABASE_PATH).resolve()) + ':business'
+    with _SERVICE_LOCK:
+        if key not in _AI_SERVICES:
+            from . import business_judgment as business
+            _AI_SERVICES[key] = AnalysisService(shared.db, shared.provider, snapshotter=business.capture,
+                prompt_factory=business.prompt, validator=business.validate, output_version=business.OUTPUT_VERSION, shared=shared)
+        return _AI_SERVICES[key]
+
+
 class Handler(BaseHTTPRequestHandler):
     def _maintenance_auth(self):
         self._ai_host()
@@ -941,7 +952,8 @@ class Handler(BaseHTTPRequestHandler):
     def _ai_get(self, parsed):
         try:
             self._ai_host()
-            service = ai_service()
+            service = business_service() if parsed.path.startswith('/api/business-judgment') else ai_service()
+            parsed = parsed._replace(path=parsed.path.replace('/api/business-judgment', '/api/analysis', 1))
             query = parse_qs(parsed.query)
             if parsed.path == "/api/ai/status":
                 data = {**service.status(), "session_token": LOCAL_SESSION_TOKEN}
@@ -978,12 +990,16 @@ class Handler(BaseHTTPRequestHandler):
             command = json.loads(self.rfile.read(size).decode("utf-8"))
             if not isinstance(command, dict):
                 raise ValueError("AI 请求必须为对象")
-            service = ai_service()
+            business = path.startswith('/api/business-judgment')
+            service = business_service() if business else ai_service()
+            path = path.replace('/api/business-judgment', '/api/analysis', 1)
             status = 200
             if path == "/api/analysis":
                 data = service.create(command)
                 status = 202 if data.get("accepted") else 200
             elif path == "/api/analysis/prepare":
+                if business:
+                    raise ValueError('经营判断无需准备财报')
                 if set(command) - {"code", "refresh"} or type(command.get("refresh", False)) is not bool:
                     raise ValueError("财报准备请求无效")
                 data = CompanyReportService(service.db).prepare(command.get("code", ""), refresh=command.get("refresh", False))
@@ -1040,7 +1056,7 @@ class Handler(BaseHTTPRequestHandler):
             self._cleanup_post(path);return
         if path in {'/api/maintenance/restore/upload','/api/maintenance/restore/preview','/api/maintenance/restore/confirm','/api/maintenance/restore/cancel'}:
             self._maintenance_post(path);return
-        if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/"):
+        if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/") or path == '/api/business-judgment' or path.startswith('/api/business-judgment/'):
             self._ai_post(path)
             return
         if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh"}:
@@ -1110,7 +1126,7 @@ class Handler(BaseHTTPRequestHandler):
                     'restore_status':self.server.restore_manager.state})
             except ValueError as exc:self._ai_reply({'error':str(exc)},400)
             return
-        if parsed.path.startswith("/api/ai/") or parsed.path == "/api/analysis" or parsed.path.startswith("/api/analysis/"):
+        if parsed.path.startswith("/api/ai/") or parsed.path == "/api/analysis" or parsed.path.startswith("/api/analysis/") or parsed.path == '/api/business-judgment' or parsed.path.startswith('/api/business-judgment/'):
             self._ai_get(parsed)
             return
         if parsed.path == "/auth/callback":
@@ -1126,7 +1142,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/samples/industry-summary.html":
             body = (ROOT / "web" / "samples" / "industry-summary.html").read_bytes()
             content_type = "text/html; charset=utf-8"
-        elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css",
+        elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
                              "/financial-statements.js", "/financial-statements.css", "/industry.js", "/industry.css",
                              "/maintenance.js", "/maintenance.css", "/stock-cleanup.js"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()

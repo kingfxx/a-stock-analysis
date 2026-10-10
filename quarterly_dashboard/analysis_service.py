@@ -7,17 +7,19 @@ from threading import Event, Lock, Thread
 from .analysis_snapshot import capture, changes, encoded, SnapshotError
 from .analysis_repository import AnalysisRepository, ACTIVE
 from .analysis_validation import validate_output, prompt, ReportValidationError
-from .ai_provider import ProviderError
+from .ai_provider import ProviderError, redact_diagnostic
 from .sources import normalize_code
 
 
 class AnalysisService:
-    def __init__(self, db, provider, *, snapshotter=capture, prompt_factory=prompt, validator=validate_output, output_version=None):
+    def __init__(self, db, provider, *, snapshotter=capture, prompt_factory=prompt, validator=validate_output, output_version=None, shared=None):
         self.db, self.provider, self.snapshotter = db, provider, snapshotter
         self.repository = AnalysisRepository(db, output_version=output_version)
         self.prompt_factory, self.validator = prompt_factory, validator
-        self.events = {}
-        self.lock = Lock()
+        self.events = shared.events if shared else {}
+        self.lock = shared.lock if shared else Lock()
+        self.handlers = shared.handlers if shared else {}
+        self.handlers[prompt_factory()['output_version']] = validator
         self.worker = None
 
     def status(self):
@@ -27,7 +29,7 @@ class AnalysisService:
         code = normalize_code(code)
         data = self.repository.latest(code)
         data.update(changed=False, change_types=[], quality=None, data_error=None)
-        if self.repository.output_version:
+        if self.repository.output_version and self.repository.output_version != 'business_judgment_v1':
             from .company_report_service import CompanyReportService
             data['company_reports']=CompanyReportService(self.db).cached_documents(code)
         try:
@@ -88,14 +90,59 @@ class AnalysisService:
                     self.worker = None
                     return
                 event = self.events.setdefault(run["id"], Event())
+            output = None
+            business = False
             try:
                 if self.provider.status()["account_ref"] != run["account_ref"]:
                     raise ProviderError("分析账号已断开")
-                output = self.provider.infer(run["id"], run["model"], json.loads(run["prompt_json"])["instructions"],
-                                             json.loads(run["input_json"]), event)
+                business = run['output_schema_version'] == 'business_judgment_v1'
+                validator = self.handlers.get(run['output_schema_version'])
+                if validator is None:
+                    raise ValueError('任务类型不受当前后台支持，请重新生成')
+                input_data = json.loads(run['input_json'])
+                supplemental = None
+                supplemental_error = None
+                if business:
+                    from .industry_position import collect
+                    try:
+                        supplemental = collect(input_data, event)
+                    except Exception:
+                        # Preserve model web search as fallback; never invent unavailable facts.
+                        supplemental_error = '行业地位直接采集未成功，请在本次联网检索中补充排名和份额。'
+                    if supplemental:
+                        input_data = {**input_data, 'evidence': [*input_data['evidence'], supplemental]}
+                    if supplemental_error:
+                        input_data = {**input_data, 'limitations': [*input_data['limitations'], supplemental_error]}
+                structured = business and run['prompt_version']=='business_judgment_prompt_v15'
+                if structured:
+                    from .business_contract import generate
+                    output=generate(self.provider,run,json.loads(run['prompt_json'])['instructions'],input_data,event)
+                else:
+                    output = self.provider.infer(run["id"], run["model"], json.loads(run["prompt_json"])["instructions"],
+                                                 input_data, event, **({'web_search': True} if business else {}))
                 if event.is_set() or not self.repository.transition(run["id"], "running", "validating"):
                     continue
-                result = self.validator(output["text"], json.loads(run["input_json"]))
+                if business:
+                    input_data = {**input_data, 'web_sources': output.get('web_sources', []), 'require_industry_position': run['prompt_version'] in ('business_judgment_prompt_v11','business_judgment_prompt_v12','business_judgment_prompt_v13','business_judgment_prompt_v14','business_judgment_prompt_v15')}
+                try:
+                    report_text=output['text']
+                    if structured:
+                        from .business_contract import bind_report
+                        report_text=encoded(bind_report(report_text,input_data,output['source_catalog']))
+                    result = validator(report_text, input_data)
+                except ReportValidationError as exc:
+                    exc.diagnostic['provider'] = output.get('diagnostic')
+                    raise
+                if business and supplemental:
+                    result['supplemental_evidence'] = [supplemental]
+                    if result.get('industry_position'):
+                        result['industry_position_direct'] = supplemental['value']
+                    else:
+                        result['industry_position'] = supplemental['value']
+                if structured:
+                    result['retrieval'].update(source_catalog=output['source_catalog'],pipeline=output['pipeline'])
+                if business and supplemental_error:
+                    result.setdefault('unknowns', []).append(supplemental_error)
                 self.repository.transition(run["id"], "validating", "succeeded", result_json=encoded(result),
                     verdict=result.get("verdict", "checklist"), summary=result["summary"], validation_json=encoded({"version": "v2", "valid": True,
                         "provider": output.get("diagnostic")}),
@@ -109,7 +156,12 @@ class AnalysisService:
                     self.repository.transition(run["id"], expected, "failed",
                         diagnostic_json=encoded({"message": message, "category": type(exc).__name__,
                             "provider": exc.diagnostic if isinstance(exc, ProviderError) else None,
-                            "validation": exc.diagnostic if isinstance(exc, ReportValidationError) else None}))
+                            "validation": exc.diagnostic if isinstance(exc, ReportValidationError) else None,
+                            "replay": redact_diagnostic({'text':output.get('text'), 'web_sources':output.get('web_sources',[]),
+                                'supplemental_evidence': [supplemental] if supplemental else [], 'provider':output.get('diagnostic'),
+                                'response_id':output.get('response_id'), 'model':output.get('model'), 'usage':output.get('usage'),
+                                'source_catalog':output.get('source_catalog'), 'pipeline':output.get('pipeline')},
+                                getattr(self.provider,'record',None) or {}) if business and output else None}))
             finally:
                 with self.lock:
                     self.events.pop(run["id"], None)
@@ -126,5 +178,9 @@ class AnalysisService:
         with self.db.connection() as conn:
             ids = [r[0] for r in conn.execute("SELECT id FROM ai_analysis_runs WHERE status IN ('queued','running','validating')")]
         for run_id in ids:
-            self.cancel(run_id)
+            AnalysisRepository(self.db).cancel(run_id)
+            with self.lock:
+                if run_id in self.events:
+                    self.events[run_id].set()
+            self.provider.cancel(run_id)
         return self.provider.disconnect()

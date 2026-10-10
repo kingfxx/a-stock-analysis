@@ -179,9 +179,9 @@ def test_migration_preserves_facts_and_groups_and_prebackup(database,tmp_path,mo
     monkeypatch.setattr(storage,'MIGRATIONS',tuple(m for m in old if m[0]<7))
     previous=Database(tmp_path/'version6.sqlite3'); previous.initialize()
     identity=previous.ensure_instrument('600900','原名称')
-    from quarterly_dashboard.stock_library import StockLibrary
-    # Create through actual repository contract rather than bypassing its constraints.
-    StockLibrary(previous).change({'action':'create','name':'原分组'})
+    # Seed the v6 contract; today's StockLibrary also reads the v15 unfollow table.
+    with previous.connection(write=True) as conn:
+        conn.execute('INSERT INTO stock_groups(name,position) VALUES (?,0)', ('原分组',))
     monkeypatch.setattr(storage,'MIGRATIONS',old)
     previous.initialize()
     assert previous.check()['schema_version']==storage.MIGRATIONS[-1][0]

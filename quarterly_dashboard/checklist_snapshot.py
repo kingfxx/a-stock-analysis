@@ -13,7 +13,7 @@ from .core import build_period_rows, view_rows
 from .checklist_validation import ITEMS
 from .company_report_service import PARSER_VERSION, EXTRACTION_VERSION
 INPUT_VERSION="stock_checklist_input_v1"
-CALCULATION_VERSION="stock_checklist_calc_v3"
+CALCULATION_VERSION="stock_checklist_calc_v4"
 PROFILE={"style":"qualitative_checklist","chips_window":"one_year_weekly","holders_periods":3,"valuation_years":10}
 FIELDS={'revenue':'BIZTOTINCO','profit':'PARENETP','profit_cut':'NPCUT','cash_flow':'MANANETR','roe':'ROEWEIGHTED','debt_ratio':'ASSLIABRT','cash':'CURFDS'}
 FALLBACK={'revenue':'revenue_ytd','profit':'profit_ytd','cash_flow':'operating_cash_flow_ytd','cash':'monetary_funds'}
@@ -92,6 +92,7 @@ def capture(db, code, *, as_of=None):
         for metric in ('pe','pb'):
             summary=valuation_summary_observations(obs,metric,10,{},as_of=end,trading_dates=trade_dates)
             summary={k:v for k,v in summary.items() if k not in ('rows','rows_by_frequency','negative_pe_ranges')}
+            summary.update(percentile_unit='%',percentile_scale='0-100',percentile_methodology='低于当前估值的有效历史样本占比；0.8表示0.8%，不是80%')
             latest_metric=next((r for r in reversed(obs) if metric in r),None)
             if latest_metric and (number(latest_metric[metric]) is None or latest_metric[metric]<=0):
                 summary.update(current=None,current_date=latest_metric['date'],percentile=None,unavailable_reason='最新值非正数，不能解释正值历史分位')

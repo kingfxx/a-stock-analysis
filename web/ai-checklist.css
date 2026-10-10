@@ -32,6 +32,34 @@
 .ai-fact-table th { color:#9aadb3; }
 .ai-dialog select { width:100%; box-sizing:border-box; padding:10px; background:#1a2227; color:#edf4f4; border:1px solid #304049; }
 .ai-dialog a { color:#38c4dc; }
+.business-dialog { width:min(1200px,92vw); }
+.business-thesis { padding:16px; border-left:3px solid #38c4dc; background:#1a2227; }
+.business-table-wrap { overflow-x:auto; }
+.business-table { width:100%; min-width:720px; border-collapse:collapse; table-layout:fixed; }
+.business-table th,.business-table td { text-align:left; vertical-align:top; padding:12px; border-bottom:1px solid #304049; overflow-wrap:anywhere; }
+.business-table th { color:#9aadb3; }
+.business-table th:nth-child(3) { width:32%; }
+.business-table p { margin:0 0 8px; }
+.business-table details { font-size:12px; }
+.business-dialog { background:#eef6e9; color:#202124; border-left:1px solid #d9dee5; font-size:16px; line-height:1.8; color-scheme:light; padding:28px 32px; }
+.business-dialog header { background:#eef6e9; color:#202124; }
+.business-dialog h3 { font-size:19px; margin:30px 0 14px; }
+.business-dialog .ai-button { color:#235bb5; border-color:#cdd5df; background:#eef6e9; }
+.business-dialog .ai-button:hover { background:#e4efdf; }
+.business-dialog .ai-meta,.business-dialog pre { color:#626b77; }
+.business-dialog .ai-message { color:#916118; }
+.business-dialog a { color:#245bb4; text-decoration:none; }
+.business-dialog a:hover { text-decoration:underline; }
+.business-dialog details { border-color:#e0e4ea; background:#e9f2e4; }
+.business-dialog summary { color:#245bb4; }
+.business-dialog .business-thesis { background:#e4efdf; border-color:#245bb4; }
+.business-dialog .business-table th,.business-dialog .business-table td { border-color:#e8eaed; padding:16px 12px; }
+.business-dialog .business-table th { color:#202124; font-weight:600; }
+.business-framework-table th:first-child { width:16%; }
+.business-framework-table th:nth-child(2) { width:29%; }
+.business-framework-table th:nth-child(3) { width:29%; }
+.business-dialog .ai-fact-table th,.business-dialog .ai-fact-table td { border-color:#e0e4ea; color:#202124; }
+.business-inline-sources { font-size:14px; }
 .ai-history-item { display:block; width:100%; text-align:left; margin:10px 0; line-height:1.7; }
 .ai-research-item { margin:16px 0; }
 .ai-research-item .ai-history-item { box-sizing:border-box; text-decoration:none; }
@@ -61,3 +89,5 @@
 .checklist-table .checklist-product-table th,.checklist-table .checklist-product-table td { width:auto; padding:7px 8px; border-bottom:1px solid #304049; font-weight:normal; }
 .checklist-product-table thead th { color:#9aadb3; background:#1a2227; }
 .checklist-table .checklist-product-table th:not(:first-child),.checklist-table .checklist-product-table td { text-align:right; }
+
+.business-dialog .business-position-company { background:#dcebd5; font-weight:600; }

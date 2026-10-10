@@ -17,7 +17,9 @@ class AnalysisRepository:
         with self.db.connection() as conn:
             row = conn.execute("SELECT model FROM ai_analysis_preferences WHERE id=1").fetchone()
         profile=PROFILE
-        if self.output_version:
+        if self.output_version == 'business_judgment_v1':
+            from .business_judgment import PROFILE as profile
+        elif self.output_version:
             from .checklist_snapshot import PROFILE as checklist_profile
             profile=checklist_profile
         return {"model": row[0] if row else None, "analysis_profile": profile}
@@ -35,12 +37,14 @@ class AnalysisRepository:
         with self.db.connection(write=True) as conn:
             previous = conn.execute("SELECT * FROM ai_analysis_runs WHERE request_key=?", (request_key,)).fetchone()
             if previous:
-                if previous["instrument_id"] != identity or previous["model"] != model or previous["account_ref"] != account_ref:
+                if previous["instrument_id"] != identity or previous["model"] != model or previous["account_ref"] != account_ref or previous['output_schema_version'] != prompt['output_version']:
                     raise ValueError("幂等键已经用于另一分析请求")
                 return dict(previous)
             active = conn.execute("SELECT * FROM ai_analysis_runs WHERE instrument_id=? AND status IN ('queued','running','validating')",
                                   (identity,)).fetchone()
             if active:
+                if active['output_schema_version'] != prompt['output_version']:
+                    raise ValueError('当前股票已有其他类型的 AI 任务，请完成或取消后再生成')
                 return dict(active)
             if not force:
                 successful = conn.execute("SELECT r.* FROM ai_analysis_runs r JOIN ai_analysis_snapshots s ON s.id=r.snapshot_id "
@@ -101,7 +105,7 @@ class AnalysisRepository:
         with self.db.connection() as conn:
             row = conn.execute("SELECT r.*,i.code,i.name,s.input_json,s.snapshot_hash,s.quality_json FROM ai_analysis_runs r "
                 "JOIN instruments i ON i.id=r.instrument_id JOIN ai_analysis_snapshots s ON s.id=r.snapshot_id WHERE r.id=?", (run_id,)).fetchone()
-        if not row or (self.output_version and row["output_schema_version"] != self.output_version):
+        if not row or (not internal and self.output_version and row["output_schema_version"] != self.output_version):
             raise ValueError("研判任务不存在")
         if internal:
             return dict(row)
@@ -109,8 +113,25 @@ class AnalysisRepository:
                                     "created_at", "started_at", "completed_at", "output_schema_version")}
         for key, column in (("result", "result_json"), ("input", "input_json"), ("quality", "quality_json"), ("usage", "usage_json")):
             data[key] = json.loads(row[column]) if row[column] else None
+        if data.get('result') and data.get('input'):
+            data['input']['evidence'].extend(data['result'].get('supplemental_evidence', []))
         diagnostic = json.loads(row["diagnostic_json"]) if row["diagnostic_json"] else {}
         data["error"] = diagnostic.get("message")
+        if data['output_schema_version'] == 'business_judgment_v1':
+            validation = diagnostic.get('validation') or {}
+            unmatched = validation.get('unmatched_url')
+            from .business_judgment import public_url
+            if public_url(unmatched):
+                from difflib import get_close_matches
+                from urllib.parse import urlsplit
+                candidates = [source.get('url') for source in validation.get('retrieved_sources', [])
+                              if public_url(source.get('url')) and urlsplit(source['url']).hostname == urlsplit(unmatched).hostname]
+                data['source_error'] = {'model_url': unmatched,
+                                       'retrieved_candidates': get_close_matches(unmatched, candidates, n=3, cutoff=0.75)}
+        if data['output_schema_version']=='stock_checklist_output_v1' and data.get('result') and data.get('input'):
+            from .checklist_valuation import correct_valuation
+            data['result']=correct_valuation(data['result'],data['input'])
+            data['summary']=data['result']['summary']
         if data.get("input"):
             from .report_business_metrics import product_display_corrections
             data["product_display_corrections"] = product_display_corrections(data["input"])

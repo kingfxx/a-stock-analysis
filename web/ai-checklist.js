@@ -93,6 +93,7 @@ window.initAIChecklist = function(state) {
   const researchEntry = button('AI 研报', openResearch);
   const settingsEntry = button('AI 设置', openSettings);
   actions.append(entry, researchEntry, settingsEntry); document.querySelector('.context').append(actions);
+  window.initBusinessJudgment?.(state, actions, openSettings);
   const dialog = el('dialog', undefined, 'ai-dialog'); dialog.setAttribute('aria-label','投资 checklist');
   const settings = el('dialog', undefined, 'ai-dialog'); settings.setAttribute('aria-label','AI 设置');
   const research = el('dialog', undefined, 'ai-dialog'); research.setAttribute('aria-label','AI 研报');
@@ -434,7 +435,7 @@ window.initAIChecklist = function(state) {
       }
     }
     const link=el('a','ChatGPT 额度与授权管理'); link.href='https://chatgpt.com/#settings/Usage'; link.target='_blank'; link.rel='noopener noreferrer';
-    settings.append(el('p','分析视角：18 项定性检查'),link); dataRange(settings);
+    settings.append(el('p','Checklist 与经营判断共用当前账号、额度授权及模型。经营判断生成需要联网搜索权限。'),link); dataRange(settings);
   }
   function waitLogin() {
     clearTimeout(loginTimer); const deadline=Date.now()+600000;

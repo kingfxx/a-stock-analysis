@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from ctypes import wintypes
 import hashlib
 import json
+from itertools import chain
 import os
 import re
 from pathlib import Path
@@ -303,15 +304,20 @@ class ChatGPTProvider:
             self.error = None if confirmed else "本地已断开，远程撤销未确认，可在 ChatGPT 设置中断开应用"
             return self.status()
 
-    def infer(self, run_id, model, instructions, input_data, cancelled):
+    def infer(self, run_id, model, instructions, input_data, cancelled, *, web_search=False, output_schema=None):
         if cancelled.is_set():
             raise ProviderError("分析已取消")
         token = self._access()
         if cancelled.is_set():
             raise ProviderError("分析已取消")
+        payload = {"model": model, "instructions": instructions, "input": [{"role": "user", "content": json.dumps(input_data, ensure_ascii=False)}],
+                   "store": False, "stream": True}
+        if output_schema is not None:
+            payload['text']={'format':{'type':'json_schema','name':'business_judgment','strict':True,'schema':output_schema}}
+        if web_search:
+            payload.update(tools=[{'type': 'web_search'}], tool_choice='required', include=['web_search_call.action.sources'])
         response = self.session.post(RESOURCE + "/responses", headers={"Authorization": "Bearer " + token},
-            json={"model": model, "instructions": instructions, "input": [{"role": "user", "content": json.dumps(input_data, ensure_ascii=False)}],
-                  "store": False, "stream": True}, stream=True, timeout=(15, 60))
+            json=payload, stream=True, timeout=(15, 60))
         credentials = {**self.record, 'access_token': token}
         response_headers = getattr(response, 'headers', {})
         diagnostic = {
@@ -323,6 +329,7 @@ class ChatGPTProvider:
             'registered_subject_matches': bool(self.record.get('subject')) and self.config.get('subject') == self.record.get('subject'),
             'workspace_independently_verified': False,
             'automatic_retries': 0,
+            'strict_schema_requested': output_schema is not None,
         }
         try:
             check_http(response)
@@ -347,16 +354,22 @@ class ChatGPTProvider:
             raise
         with self.lock:
             self.responses[run_id] = response
-        timer = Timer(180, response.close)
+        deadline = 480 if web_search or output_schema is not None else 180
+        timer = Timer(deadline, response.close)
         timer.daemon = True
         timer.start()
         started, buffer = time.monotonic(), []
         text_parts, text_size = [], 0
+        web_items = []
+        web_annotations = []
+        web_messages = []
         try:
-            for line in response.iter_lines(chunk_size=1, decode_unicode=False):
+            # EOF can terminate a complete SSE event without a final blank
+            # separator. Flush that event, but still require response.completed.
+            for line in chain(response.iter_lines(chunk_size=1, decode_unicode=False),(b'',)):
                 if cancelled.is_set():
                     raise ProviderError("分析已取消")
-                if time.monotonic() - started > 180:
+                if time.monotonic() - started > deadline:
                     raise ProviderError("分析超时，请手动重试")
                 if line.startswith(b"data:"):
                     buffer.append(line[5:].strip().decode("utf-8"))
@@ -369,6 +382,19 @@ class ChatGPTProvider:
                         continue
                     event = json.loads(text)
                     kind = event.get("type")
+                    diagnostic['last_stream_event']=kind
+                    counts=diagnostic.setdefault('stream_event_counts',{})
+                    counts[kind]=counts.get(kind,0)+1
+                    if event.get('response',{}).get('id'):
+                        diagnostic['response_id']=event['response']['id']
+                    if web_search and kind == 'response.output_item.done' and event.get('item', {}).get('type') == 'web_search_call':
+                        web_items.append(event['item'])
+                    if web_search and kind == 'response.output_item.done' and event.get('item', {}).get('type') == 'message':
+                        web_messages.append(event['item'])
+                        for part in event['item'].get('content', []):
+                            web_annotations.extend(part.get('annotations', []))
+                    if web_search and kind == 'response.output_text.annotation.added':
+                        web_annotations.append(event.get('annotation', {}))
                     if kind == "response.output_text.delta":
                         delta = event.get("delta")
                         if not isinstance(delta, str):
@@ -394,12 +420,50 @@ class ChatGPTProvider:
                         if any(p.get("type") == "refusal" for p in content):
                             raise ProviderError("模型拒绝分析")
                         output = "".join(p.get("text", "") for p in content if p.get("type") == "output_text")
+                        if web_search:
+                            # Search responses can contain preambles before the
+                            # final JSON message. Do not concatenate messages.
+                            messages = [item for item in result.get('output', []) if item.get('type') == 'message'] or web_messages
+                            finals = [item for item in messages if item.get('phase') == 'final_answer']
+                            candidates = finals or [item for item in messages if item.get('phase') != 'commentary']
+                            if messages:
+                                if not candidates:
+                                    raise ProviderError('模型仅返回过程说明，缺少最终经营判断，本次未保存')
+                                output = ''.join(part.get('text', '') for part in candidates[-1].get('content', []) if part.get('type') == 'output_text')
+                                if not output:
+                                    raise ProviderError('模型最终经营判断为空，本次未保存')
+                            diagnostic['output_message_count'] = len(messages)
+                            diagnostic['selected_output_phase'] = candidates[-1].get('phase') if candidates else None
                         if not output:
                             output = "".join(text_parts)
                         if not output or len(output) > 65536:
                             raise ProviderError("模型输出为空或超过限制")
+                        sources = {}
+                        if web_search:
+                            from .business_judgment import public_url
+                            calls = web_items + [item for item in result.get('output', []) if item.get('type') == 'web_search_call']
+                            if not any(item.get('status') == 'completed' for item in calls):
+                                raise ProviderError('所选模型或账号未完成联网搜索，经营判断未保存；请检查 AI 设置或账号权限')
+                            for item in calls:
+                                if item.get('status') != 'completed':
+                                    continue
+                                action = item.get('action', {})
+                                if action.get('type') in ('open_page', 'find_in_page') and public_url(action.get('url')):
+                                    sources[action['url']] = {'url': action['url'], 'title': '', 'provenance': action['type']}
+                                for source in item.get('action', {}).get('sources', []):
+                                    if public_url(source.get('url')):
+                                        sources[source['url']] = {'url': source['url'], 'title': str(source.get('title', ''))[:300]}
+                            annotations = web_annotations + [a for part in content for a in part.get('annotations', [])]
+                            for annotation in annotations:
+                                if annotation.get('type') == 'url_citation' and public_url(annotation.get('url')):
+                                    sources[annotation['url']] = {'url': annotation['url'], 'title': str(annotation.get('title', ''))[:300]}
+                            if not sources or len(sources) > 200:
+                                raise ProviderError('联网搜索未返回有效来源，经营判断未保存；请手动重试')
                         return {"text": output, "response_id": result.get("id"), "model": result.get("model"),
-                                "usage": result.get("usage"), "diagnostic": redact_diagnostic(diagnostic, credentials)}
+                                "usage": result.get("usage"), "diagnostic": redact_diagnostic(diagnostic, credentials),
+                                **({'web_sources': list(sources.values()),
+                                    'web_annotations':[a for item in (candidates[-1:] if candidates else []) for part in item.get('content',[]) for a in part.get('annotations',[])]} if web_search else {})}
+            diagnostic['partial_output_chars']=text_size
             raise ProviderError("响应流中断，未收到成功终态")
         except (requests.RequestException, OSError, ValueError) as exc:
             if isinstance(exc, ProviderError):
