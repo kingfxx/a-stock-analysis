@@ -66,9 +66,48 @@ for (const period of ['quarter', 'year', 'ttm']) {
         assert.equal(trace.y[0], 17.28);
         assert.match(context.note.textContent, /全部货币资金/);
       }
-      assert.match(hover, /报告期：2025-12-31/);
-      assert.match(hover, /披露日：2026-04-30/);
+      if (['qfq_price', 'market_cap'].includes(key)) {
+        assert.match(hover, /价格交易日：/);
+        assert.doesNotMatch(hover, /报告期：|披露日：/);
+        assert.match(hover, /同比 —（缺少比较期）/);
+        assert.match(hover, /环比 —（缺少比较期）/);
+      } else if (key === 'period_end_market_cap') {
+        assert.match(hover, /季末日期：2025-12-31/);
+        assert.doesNotMatch(hover, /披露日：|价格交易日：/);
+      } else {
+        assert.match(hover, /报告期：2025-12-31/);
+        assert.match(hover, /披露日：2026-04-30/);
+      }
     }
   }
+}
+{
+  const rows = [
+    {period:'2024-12-31', publish_date:'2025-04-30', profit:80e8, revenue:900e8, qfq_price:10, market_cap:100e8,
+      yoy:{profit:'同比 +8.00%', revenue:'同比 +9.00%'}},
+    {period:'2025-12-31', publish_date:'2026-04-30', profit:100e8, revenue:1000e8, qfq_price:12, market_cap:150e8,
+      yoy:{profit:'同比 +25.00%', revenue:'同比 +11.11%'}}
+  ];
+  const context = {
+    state:{views:{year:rows}}, selectedPeriod:'year', comparisonRange:{value:'all'},
+    seriesControls:['profit','revenue','qfq_price','market_cap'].map((key, i) => ({
+      label:'ABCD'[i], color:'#38c4dc', kind:'line', control:{value:key}
+    })), modeOf:series => series.kind, note:{},
+    document:{getElementById:() => ({classList:{toggle() {}}, textContent:''})},
+    Plotly:{react:(id, traces) => { context.traces = traces; }}
+  };
+  vm.createContext(context);
+  vm.runInContext(metricCode + renderCode + '\nrender();', context);
+  const financialHovers = context.traces.slice(0, 2).map(trace =>
+    trace.hovertemplate.replace(/%\{customdata\[(\d+)\]\}/g,
+      (_, index) => trace.customdata[1][index]));
+  assert.ok(context.traces.every(trace => !trace.hovertemplate.includes('%{customdata[0]}')));
+  assert.equal(financialHovers.filter(hover => hover.includes('报告期：2025-12-31')).length, 1);
+  assert.equal(financialHovers.filter(hover => hover.includes('披露日：2026-04-30')).length, 1);
+  assert.ok(context.traces.slice(2).filter(trace => trace.hovertemplate.includes('%{customdata[10]}')).length === 1);
+  const qfqHover = context.traces[2].hovertemplate.replace(/%\{customdata\[(\d+)\]\}/g,
+    (_, index) => context.traces[2].customdata[1][index]);
+  assert.match(qfqHover, /同比 20\.00%/);
+  assert.match(qfqHover, /环比 20\.00%/);
 }
 console.log('42 chart hover combinations passed');

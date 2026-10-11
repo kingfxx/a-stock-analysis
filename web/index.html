@@ -592,7 +592,8 @@
     const cutoff = new Date();
     cutoff.setHours(0, 0, 0, 0);
     if (comparisonRange.value !== 'all') cutoff.setFullYear(cutoff.getFullYear() - Number(comparisonRange.value));
-    const rows = (state.views?.[selectedPeriod] || []).filter(row =>
+    const allRows = state.views?.[selectedPeriod] || [];
+    const rows = allRows.filter(row =>
       comparisonRange.value === 'all' || new Date(row.period + 'T00:00:00') >= cutoff);
     const labels = rows.map(label);
     const xs = positions(rows);
@@ -624,27 +625,58 @@
       row.price_date || '无价格', row.qfq_price_date || '无价格',
       row.cash_dividend_details || '该报告期暂无已实施分红'
     ]);
-    const hover = (metric, hasYoy) => '%{customdata[0]}<br>' + metric.name + '：%{y:,.2f} ' + metric.unit +
-      (hasYoy ? '；%{customdata[6]}' : '') +
-      (metric === metrics.cash_dividend && selectedPeriod === 'year' ? '<br>%{customdata[7]}' : '') +
-      '<br>报告期：%{customdata[1]}<br>披露日：%{customdata[2]}' +
-      (metric.dateKey ? '<br>价格交易日：%{customdata[' + (metric.dateKey === 'period_end_price_date' ? 8 : metric.dateKey === 'price_date' ? 3 : 4) + ']}' : '') +
+    const isPriceOrCap = key => ['qfq_price','market_cap'].includes(key);
+    const hasMarketComparisons = key => isPriceOrCap(key) || key === 'period_end_market_cap';
+    const comparisonText = (row, key, months, labelText) => {
+      const date = new Date(row.period + 'T00:00:00Z');
+      date.setUTCDate(1);
+      date.setUTCMonth(date.getUTCMonth() - months);
+      const monthEnd = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
+      const targetPeriod = monthEnd.toISOString().slice(0, 10);
+      const previous = allRows.find(item => item.period === targetPeriod)?.[key];
+      const current = row[key];
+      if (current == null || previous == null) return labelText + ' —（缺少比较期）';
+      if (previous <= 0) return labelText + ' —（基期非正，不计算百分比）';
+      return labelText + ' ' + ((current / previous - 1) * 100).toFixed(2) + '%';
+    };
+    const periodOffsets = {yoy:12,qoq:selectedPeriod === 'year' ? 12 : 3};
+    const hover = (metric, key, showFinanceDates, showMarketDate, hasYoy) => metric.name + '：%{y:,.2f} ' + metric.unit +
+      (hasYoy && !hasMarketComparisons(key) ? '；%{customdata[8]}' : '') +
+      (metric === metrics.cash_dividend && selectedPeriod === 'year' ? '<br>%{customdata[6]}' : '') +
+      (hasMarketComparisons(key) ? '<br>%{customdata[8]}<br>%{customdata[9]}' : '') +
       (metric === metrics.cash_dividend ? '<br>归属报告期 → 实际除权日：%{customdata[5]}' : '') +
+      (metric === metrics.period_end_market_cap ? '<br>季末日期：%{customdata[1]}' :
+        showFinanceDates ? '<br>报告期：%{customdata[1]}<br>披露日：%{customdata[2]}' :
+          showMarketDate ? '<br>%{customdata[10]}' : '') +
       '<extra></extra>';
     const traces = [];
     const barCount = active.filter(series => series.kind === 'bar').length;
     let barIndex = 0;
     let referenceCount = 0;
+    const financeSeries = active.filter(series => !isPriceOrCap(series.key) && series.key !== 'period_end_market_cap');
+    const marketDateSeries = active.filter(series => isPriceOrCap(series.key));
     for (const series of active) {
       const metric = series.metric;
       const hasYoy = rows.some(row => row.yoy?.[series.key] != null);
+      const showFinanceDates = financeSeries.at(-1)?.key === series.key;
+      const showMarketDate = marketDateSeries.at(-1)?.key === series.key;
       const seriesCustom = custom.map((item, index) => {
         const row = rows[index];
         const payout = selectedPeriod !== 'year' || metric !== metrics.cash_dividend ? ''
           : row.dividend_payout_ratio != null ? '分红率：' + row.dividend_payout_ratio.toFixed(2) + '%（仅已实施口径）'
           : row.profit == null || row.cash_dividend == null ? '分红率：—（数据缺失）'
           : row.profit <= 0 ? '分红率：—（归母净利润非正）' : '分红率：—（数据缺失）';
-        return [...item, row.yoy?.[series.key] || '同比 —（缺少上年同期）', payout, row.period_end_price_date || '无价格'];
+        return [...item, payout, row.period_end_price_date || '无价格',
+          hasMarketComparisons(series.key) ? comparisonText(row, series.key, periodOffsets.yoy, '同比')
+            : row.yoy?.[series.key] || '同比 —（缺少上年同期）',
+          hasMarketComparisons(series.key) ? comparisonText(row, series.key, periodOffsets.qoq, '环比') : '',
+          (() => {
+            const priceDate = row.price_date;
+            const qfqDate = row.qfq_price_date;
+            if (priceDate && qfqDate && priceDate === qfqDate) return '价格交易日：' + priceDate;
+            if (priceDate && qfqDate) return '不复权交易日：' + priceDate + '；前复权交易日：' + qfqDate;
+            return priceDate ? '价格交易日：' + priceDate : qfqDate ? '价格交易日：' + qfqDate : '价格交易日：无价格';
+          })()];
       });
       const width = barCount ? (.72 - .04 * (barCount - 1)) / barCount : 0;
       const offset = -.36 + barIndex * (width + .04);
@@ -652,13 +684,13 @@
       if (series.kind === 'bar') {
         traces.push({type:'bar', name:series.label + ' 柱形 · ' + metric.name, x:xs, y:series.values,
           yaxis:series.axis, width, offset, customdata:seriesCustom,
-          marker:{color:series.color}, hovertemplate:hover(metric, hasYoy)});
+          marker:{color:series.color}, hovertemplate:hover(metric, series.key, showFinanceDates, showMarketDate, hasYoy)});
         barIndex++;
       } else {
         traces.push({type:'scatter', mode:'lines+markers', name:series.label + ' 折线 · ' + metric.name,
           x:xs, y:series.values, yaxis:series.axis, customdata:seriesCustom, connectgaps:false,
           line:{color:series.color,width:3}, marker:{size:5,color:series.color},
-          hovertemplate:hover(metric, hasYoy)});
+          hovertemplate:hover(metric, series.key, showFinanceDates, showMarketDate, hasYoy)});
       }
       if (!metric.referenceKey) continue;
       const references = rows.map(row => row[metric.referenceKey] == null ? null : row[metric.referenceKey] / metric.scale);
@@ -680,7 +712,6 @@
           row[metric.referenceKey + '_date'], row[metric.referenceKey + '_lag_days']]),
         marker:{symbol:'circle-open',size:11,color:series.color,line:{color:series.color,width:2}},
         hovertemplate:'%{customdata[0]}<br>' + metric.name + '参考值：%{y:,.2f} ' + metric.unit +
-          '<br>报告期：%{customdata[1]}<br>披露日：%{customdata[2]}' +
           '<br>实际交易日：%{customdata[3]}（相隔 %{customdata[4]} 天）' +
           '<br>长间隔参考值，非披露日成交价<extra></extra>'});
     }

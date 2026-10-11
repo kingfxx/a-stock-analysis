@@ -8,11 +8,12 @@ assert.equal((page.match(/<option value="period_end_market_cap">季末市值<\/o
 const metricCode = page.slice(page.indexOf('  const metrics = {'), page.indexOf('  let selectedPeriod ='));
 const renderCode = page.slice(page.indexOf('  function label(row)'), page.indexOf('  seriesControls.forEach(series => {'));
 for (const period of ['quarter', 'year', 'ttm']) {
-  const row = {period:'2023-12-31', publish_date:'2024-04-20', profit:1e8,
-    period_end_market_cap:10e8, period_end_price_date:'2023-12-29',
-    market_cap:20e8, price_date:'2024-04-19'};
+  const periods = period === 'year' ? ['2022-12-31','2023-12-31'] : ['2023-09-30','2023-12-31'];
+  const rows = periods.map((date, i) => ({period:date, publish_date:'2024-04-20', profit:1e8,
+    period_end_market_cap:(i + 1) * 5e8, period_end_price_date:i ? '2023-12-29' : '2023-09-29',
+    market_cap:20e8, price_date:'2024-04-19'}));
   const context = {
-    state:{views:{[period]:[row]}}, selectedPeriod:period, comparisonRange:{value:'all'},
+    state:{views:{[period]:rows}}, selectedPeriod:period, comparisonRange:{value:'all'},
     seriesControls:['profit','period_end_market_cap','market_cap'].map((key, i) => ({
       label:'ABC'[i], color:'#38c4dc', kind:i ? 'line' : 'bar', control:{value:key}
     })), modeOf:series => series.kind, note:{},
@@ -23,12 +24,16 @@ for (const period of ['quarter', 'year', 'ttm']) {
   vm.runInContext(metricCode + renderCode + '\nrender();', context);
   const cap = context.traces.find(t => t.name?.includes('季末市值'));
   const disclosure = context.traces.find(t => t.name?.includes('披露日估算市值'));
-  assert.equal(cap.y[0], 10);
+  assert.equal(cap.y[1], 10);
   assert.equal(cap.yaxis, disclosure.yaxis);
   assert.notEqual(cap.yaxis, context.traces[0].yaxis);
   const hover = cap.hovertemplate.replace(/%\{customdata\[(\d+)\]\}/g,
-    (_, index) => cap.customdata[0][index]);
-  assert.match(hover, /价格交易日：2023-12-29/);
+    (_, index) => cap.customdata[1][index]);
+  assert.match(hover, /季末日期：2023-12-31/);
+  assert.match(hover, /环比 100\.00%/);
+  if (period === 'year') assert.match(hover, /同比 100\.00%/);
+  else assert.match(hover, /同比 —（缺少比较期）/);
+  assert.doesNotMatch(hover, /价格交易日：|披露日：/);
   assert.match(context.note.textContent, /不复权收盘价×该报告期末总股本/);
   assert.match(context.note.textContent, /TTM 保留各季末时点值，不加总/);
 }
