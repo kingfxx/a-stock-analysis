@@ -4,8 +4,8 @@
 
 | 任务 | 必读规则 |
 |---|---|
-| 新增／改造批量采集、采集元数据迁移、历史回填及覆盖验收 | [批量采集规则](E:/07_git/01_python/02_personal/investment/docs/agent-rules/collection.md) |
-| 财务指标、行业财务、Checklist、正式财报、研报技能 | [财务与财报规则](E:/07_git/01_python/02_personal/investment/docs/agent-rules/finance-and-reports.md) 的对应章节 |
+| 新增／改造批量采集、采集元数据迁移、历史回填及覆盖验收 | [批量采集规则](./docs/agent-rules/collection.md) |
+| 财务指标、行业财务、Checklist、正式财报、研报技能 | [财务与财报规则](./docs/agent-rules/finance-and-reports.md) 的对应章节 |
 
 ## Git
 
@@ -30,11 +30,11 @@
 
 - 新增表、改名或调整用途时，同步在 `quarterly_dashboard/maintenance.py` 的 `DESCRIPTIONS` 登记用途与分类，不能遗留「尚未登记用途」或落入默认分类。
 - 真实采集／写入时间用 `TIME_COLUMNS` 识别，关联时间用 `PARENT_TIMES` 或 `table_time` 明确路径；报告期、交易日不能代替更新时间。无适用记录显示「未记录」，并在相关文档解释。
-- 隔离库迁移后核对维护页／统计接口的表发现、用途、分类、记录数、大小及时间依据；特殊时间规则检查空表、缺值并同步文档。详见 [数据库维护](E:/07_git/01_python/02_personal/investment/docs/database-maintenance.md)。
+- 隔离库迁移后核对维护页／统计接口的表发现、用途、分类、记录数、大小及时间依据；特殊时间规则检查空表、缺值并同步文档。详见 [数据库维护](./docs/database-maintenance.md)。
 
 ## 验证资料与文档
 
 - 测试完成后清理过期测试库、测试备份、浏览器缓存、预览截图和一次性脚本；保留来源样本、验收报告、常用工具及当前后台日志。不得清理日常数据库、正式备份、正式财报或影响运行后台。
 - 新资料放入 `data/verification/` 对应目录，不散放根目录：`samples/` 来源响应、`reports/` 验收／刷新报告、`audits/` 财报核对、`tools/` 维护工具、`logs/` 后台日志。整理后同步文档及脚本路径。
-- 「企业经营趋势」指标变更同步维护 [指标说明](E:/07_git/01_python/02_personal/investment/docs/enterprise-trend-metrics.md) 的含义、公式、实际来源表／字段、周期、单位、缺值与限制；只描述已实现行为，README 仅留概览和入口。
+- 「企业经营趋势」指标变更同步维护 [指标说明](./docs/enterprise-trend-metrics.md) 的含义、公式、实际来源表／字段、周期、单位、缺值与限制；只描述已实现行为，README 仅留概览和入口。
 - 研报技能维护入口为 `.agents/skills/a-share-value-research/`，随 Git 管理，不修改用户目录旧副本；配置使用项目相对路径。迁移和新电脑准备要求见财务与财报规则。
