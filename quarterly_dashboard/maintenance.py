@@ -42,6 +42,9 @@ def compact_database(db, validate):
         conn.close()
 
 DESCRIPTIONS={
+ 'index_price_definitions':('指数数据','指数点位来源字段、点数单位、采样频率及缺值规则的版本定义'),
+ 'index_price_series':('指数数据','宽基、行业、策略共用的点位序列身份；提供方、频率及收益口径独立'),
+ 'index_price_observations':('指数数据','指数收盘点位和来源实际提供的开高低点；来源、真实取得时间及修订版本'),
  'collection_batches':('运行与配置','公共采集批次、操作范围、执行状态及独立覆盖判定；未迁移旧采集'),
  'collection_sources':('指数数据','公共逐次请求来源、原始响应双哈希、解析状态及真实取得时间'),
  'collection_provider_state':('运行与配置','指数来源共享请求预算、拒绝原因及跨任务冷却截止时间'),
@@ -50,7 +53,7 @@ DESCRIPTIONS={
  'index_provider_codes':('指数数据','指数提供方原始代码与稳定身份的有效期映射'),
  'index_metric_definitions':('指数数据','估值序列字段、统计方法、利润期间、单位和证据的版本定义'),
  'index_valuation_series':('指数数据','指数估值序列身份：指数、提供方、口径、频率及定义版本；整数 ID 供事实引用'),
- 'index_read_revisions':('指数数据','指数读取缓存版本号：仅指数估值、目录、序列、口径定义及行业关系写入时递增'),
+ 'index_read_revisions':('指数数据','Index chart cache revision; incremented only by committed index valuation, index point, catalog, definition, sequence and industry taxonomy changes'),
  'index_valuation_observations':('指数数据','整数序列 ID 引用的指数估值事实、原始来源及真实修订版本'),
  'index_collection_operations':('运行与配置','指数采集操作、取消请求、分段进度和结果'),
  'instruments':('个股数据','股票代码、交易所与名称'),

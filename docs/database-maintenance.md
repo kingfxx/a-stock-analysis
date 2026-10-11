@@ -1,5 +1,7 @@
 # 后台维护页
 
+结构 v27 新增 `index_price_definitions / index_price_series / index_price_observations`，均归入「指数数据」。更新时间分别依据 `updated_at`、`created_at`、`updated_at, obtained_at`，不使用观察日；空表显示暂无数据。用途、大小和索引由维护统计自动发现。方案见[指数点位存储](index-price-storage.md)。
+
 经营判断复用 AI 任务和输入快照表；用途说明包含随结果保存的联网来源，更新时间继续使用任务/快照的实际写入时间。没有新增表。详见 [经营判断](business-judgment.md)。
 
 侧边栏「后台维护」展示当前日常 SQLite 的只读统计。进入页面时读取一次，点击「刷新本地统计」重新统计；不会触发个股采集、行业更新或模型调用。接口为 `GET /api/maintenance/storage`，默认复用最多 60 秒的内存快照，`?refresh=1` 强制重新统计。

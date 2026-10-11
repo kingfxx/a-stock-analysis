@@ -1122,7 +1122,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path in {'/api/indices/catalog','/api/indices/status','/api/indices/chart'}:
+        if parsed.path in {'/api/indices/catalog','/api/indices/status','/api/indices/chart','/api/indices/price'}:
             try:
                 with _SERVICE_LOCK:
                     if not hasattr(self.server, 'index_reader'):
@@ -1133,6 +1133,8 @@ class Handler(BaseHTTPRequestHandler):
                     body = reader.catalog()
                 elif parsed.path.endswith('/status'):
                     body = reader.status()
+                elif parsed.path.endswith('/price'):
+                    body = reader.price_overlay(query.get('code',[None])[0])
                 else:
                     body = reader.chart(code=query.get('code',[None])[0],provider=query.get('provider',[None])[0],
                         series=query.get('series',[None])[0],definition=query.get('definition',['v1'])[0],metric=query.get('metric',[None])[0])

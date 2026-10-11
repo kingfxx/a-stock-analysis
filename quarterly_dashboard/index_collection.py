@@ -22,6 +22,7 @@ from .collection import (Cancelled, ProviderBlocked, RequestCollector, archive_s
                          begin_batch, digest, encoded, finish_batch, parsed_source, read_source)
 from .index_definitions import BOARD_CODES, CS_CODES, CS_CANDIDATES, DEFINITIONS, LG_CODES, METRICS, STRATEGY_CODES, canonical
 from .index_repository import catalog, publish
+from .index_prices import parse_prices, publish_prices, price_coverage
 from .storage import DEFAULT_DATABASE, Database, instance_lock, utc_now
 
 CS_HISTORY='https://www.csindex.com.cn/csindex-home/perf/index-perf'
@@ -146,24 +147,31 @@ def parse_rows(rows, *, provider, series_keys, code_key, name_key, date_key, sta
     return observations,list(identities.values()),anomalies
 
 
-def publish_segment(db, batch_id, observations, identities, result, *, complete=True, coverage='unknown', check_cancelled=lambda: None):
+def publish_segment(db, batch_id, observations, identities, result, *, complete=True, coverage='unknown', check_cancelled=lambda: None, prices=()):
     # Entire page set has already validated; bounded fact transactions follow.
     counts=dict(inserted=0,revised=0,unchanged=0)
+    if prices:
+        result={**result,'price_coverage':price_coverage(prices)}
+    price_counts=dict(inserted=0,revised=0,unchanged=0)
     groups={}
     for row in observations:
-        groups.setdefault(row['observation_date'][:7],[]).append(row)
+        groups.setdefault(row['observation_date'][:7],dict(valuations=[],prices=[]))['valuations'].append(row)
+    for row in prices:
+        groups.setdefault(row['observation_date'][:7],dict(valuations=[],prices=[]))['prices'].append(row)
     with db.connection(write=True) as conn:
         for item in identities:
             catalog(conn,**{k:v for k,v in item.items() if k!='observed_on'})
     for month,rows in sorted(groups.items()):
         check_cancelled()
         with db.connection(write=True) as conn:
-            published=publish(conn,rows)
+            published=publish(conn,rows['valuations']) if rows['valuations'] else dict.fromkeys(counts,0)
+            points=publish_prices(conn,rows['prices']) if rows['prices'] else dict.fromkeys(price_counts,0)
             for key in counts:
                 counts[key]+=published[key]
+                price_counts[key]+=points[key]
             conn.execute('UPDATE collection_batches SET result_json=? WHERE id=?',
-                (encoded({**result,**counts,'last_published_month':month}),batch_id))
-    result={**result,**counts,'observations':len(observations)}
+                (encoded({**result,**counts,'price_counts':price_counts,'last_published_month':month}),batch_id))
+    result={**result,**counts,'observations':len(observations),'price_counts':price_counts,'price_observations':len(prices)}
     if complete:
         finish_batch(db,batch_id,'complete',coverage,result=result)
     return result
@@ -340,12 +348,14 @@ class IndexCollector:
                 rows,identities,anomalies=parse_rows(raw,provider='csindex',series_keys=['history.rolling'],code_key='indexCode',
                     name_key='indexNameCn',date_key='tradeDate',start=code_start,end=end,trading_days=self.trading_days,
                     batch_id=batch,source_id=source,expected_code=code)
+                prices,price_anomalies=parse_prices(raw,provider='csindex',series_key='history.points',code_key='indexCode',
+                    date_key='tradeDate',start=code_start,end=end,trading_days=self.trading_days,batch_id=batch,source_id=source,expected_code=code)
                 parsed_source(self.db,source,fields=set().union(*(r.keys() for r in raw)) if raw else [])
                 state,coverage=coverage_summary(rows,self.trading_days,code_start,end,
                     expected_codes=[canonical(code,'csindex')] if code in CS_CODES else None)
                 if state!='complete' and rows and code in CS_CODES:
                     state='partial'
-                publish_segment(self.db,batch,rows,identities,dict(coverage=coverage,anomalies=anomalies,**self.http.report()),coverage=state,check_cancelled=self.http.check_cancelled)
+                publish_segment(self.db,batch,rows,identities,dict(coverage=coverage,anomalies=anomalies,price_anomalies=price_anomalies,**self.http.report()),coverage=state,check_cancelled=self.http.check_cancelled,prices=prices)
             except Exception as exc:
                 self.failed(batch,source,exc)
                 raise
@@ -445,9 +455,11 @@ class IndexCollector:
                     records=[{**r,'_code':code,'_name':name} for r in raw]
                     rows,identities,anomalies=parse_rows(records,provider='legu',series_keys=[dataset+'.'+method for method in ('ordinary','equal','median')],
                         code_key='_code',name_key='_name',date_key='date',start=dataset_start,end=end,trading_days=self.trading_days,batch_id=batch,source_id=source)
+                    prices,price_anomalies=parse_prices(records,provider='legu',series_key=dataset+'.points',code_key='_code',
+                        date_key='date',start=dataset_start,end=end,trading_days=self.trading_days,batch_id=batch,source_id=source,expected_code=code)
                     parsed_source(self.db,source,fields=set().union(*(r.keys() for r in raw)) if raw else [])
                     state,coverage=coverage_summary(rows,self.trading_days,dataset_start,end,monthly=True)
-                    publish_segment(self.db,batch,rows,identities,dict(coverage=coverage,anomalies=anomalies,**self.http.report()),coverage=state,check_cancelled=self.http.check_cancelled)
+                    publish_segment(self.db,batch,rows,identities,dict(coverage=coverage,anomalies=anomalies,price_anomalies=price_anomalies,**self.http.report()),coverage=state,check_cancelled=self.http.check_cancelled,prices=prices)
                 except Exception as exc:
                     self.failed(batch,source,exc)
                     raise
@@ -477,6 +489,8 @@ class IndexCollector:
                 try:
                     self.progress(f'申万{label} · {begin}—{finish}')
                     all_rows=[]
+                    all_prices=[]
+                    price_anomalies=[]
                     identities={}
                     anomalies=[]
                     page=1
@@ -501,6 +515,10 @@ class IndexCollector:
                         rows,cats,bad=parse_rows(raw['results'],provider='sws',series_keys=['analysis.daily'],
                             code_key='swindexcode',name_key='swindexname',date_key='bargaindate',start=begin,end=finish,
                             trading_days=self.trading_days,batch_id=batch,source_id=source,level=level)
+                        prices,price_bad=parse_prices(raw['results'],provider='sws',series_key='analysis.points',code_key='swindexcode',
+                            date_key='bargaindate',start=begin,end=finish,trading_days=self.trading_days,batch_id=batch,source_id=source)
+                        all_prices+=prices
+                        price_anomalies+=price_bad
                         for row in raw['results']:
                             key=(str(row['swindexcode']),day(row['bargaindate']))
                             if key in seen:
@@ -516,7 +534,7 @@ class IndexCollector:
                         page+=1
                     state,coverage=coverage_summary(all_rows,self.trading_days,begin,finish)
                     publish_segment(self.db,batch,all_rows,list(identities.values()),dict(coverage=coverage,anomalies=anomalies,
-                        returned=returned,reported_total=total,classification_history='pending',**self.http.report()),coverage=state,check_cancelled=self.http.check_cancelled)
+                        returned=returned,reported_total=total,price_anomalies=price_anomalies,classification_history='pending',**self.http.report()),coverage=state,check_cancelled=self.http.check_cancelled,prices=all_prices)
                 except Exception as exc:
                     # No facts from this month are published until all pages validate.
                     self.failed(batch,sources[-1] if sources else None,exc)

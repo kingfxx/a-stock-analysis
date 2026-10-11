@@ -71,6 +71,92 @@ def test_index_http_read_collect_cancel_and_cross_origin(index_server):
         assert json.loads(operation['scope_json'])['providers']==['csindex']
 
 
+def test_index_point_overlay_http_reports_selected_real_series(index_server):
+    from quarterly_dashboard.index_prices import publish_prices
+    from test_index_prices import point as index_point,seed as point_seed
+    base,_,db=index_server
+    batch,sid,code=point_seed(db)
+    with db.connection(write=True) as conn:
+        publish_prices(conn,[index_point(batch,sid,code,observation_date='2026-10-08',close=4550),
+                             index_point(batch,sid,code,observation_date='2026-10-09',close=4600)])
+    response=requests.get(base+'/api/indices/price?code=cn:000300',timeout=5)
+    assert response.ok
+    body=response.json()
+    assert body['available'] and body['provider']=='csindex' and body['frequency']=='daily'
+    assert [(row['observation_date'],row['close']) for row in body['rows']]==[
+        ('2026-10-08',4550),('2026-10-09',4600)]
+    missing=requests.get(base+'/api/indices/price?code=sw:missing',timeout=5).json()
+    assert not missing['available'] and missing['rows']==[]
+
+
+def test_browser_toggles_real_index_points_on_right_axis(index_server):
+    playwright=pytest.importorskip('playwright.sync_api')
+    from quarterly_dashboard.index_prices import publish_prices
+    from test_index_prices import point as index_point,seed as point_seed
+    base,_,db=index_server
+    batch,sid,code=point_seed(db)
+    with db.connection(write=True) as conn:
+        publish_prices(conn,[index_point(batch,sid,code,observation_date='2026-10-09',close=4600)])
+    with playwright.sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page()
+            errors=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/indices',wait_until='networkidle')
+            page.wait_for_function("document.getElementById('current').textContent==='13.10 倍'")
+            button=page.locator('#point-overlay')
+            assert button.is_enabled() and button.get_attribute('aria-pressed')=='false'
+            button.click()
+            page.wait_for_function("document.getElementById('chart').data?.some(t=>t.name==='指数点位')")
+            price=page.locator('#chart').evaluate("node=>node.data.find(t=>t.name==='指数点位')")
+            assert price['y']==[4600] and price['customdata']==['2026-10-09']
+            assert page.locator('#chart').evaluate("node=>node._fullLayout.yaxis2.side")=='right'
+            assert '中证指数' in page.locator('#point-overlay-note').inner_text()
+            button.click()
+            page.wait_for_function("!document.getElementById('chart').data.some(t=>t.name==='指数点位')")
+            assert button.get_attribute('aria-pressed')=='false' and not errors
+        finally:browser.close()
+
+
+def test_browser_overlay_follows_index_selection_and_legend_is_named_below_chart(index_server):
+    playwright=pytest.importorskip('playwright.sync_api')
+    from quarterly_dashboard.collection import finish_batch
+    from quarterly_dashboard.index_prices import publish_prices
+    from quarterly_dashboard.index_repository import publish
+    from test_index_prices import point as index_point,seed as point_seed
+    base,_,db=index_server
+    batch,sid,code=point_seed(db)
+    other_batch,other_sid,other_code=point_seed(db,code='000001')
+    with db.connection(write=True) as conn:
+        publish_prices(conn,[index_point(batch,sid,code,close=4600),
+                             index_point(other_batch,other_sid,other_code,close=3900)])
+        publish(conn,[dict(index_code=other_code,provider='csindex',series_key='history.rolling',
+            observation_date='2026-10-09',frequency='daily',pe_rolling=21.2,
+            batch_id=other_batch,source_id=other_sid)])
+    finish_batch(db,other_batch,'complete')
+    with playwright.sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page()
+            errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/indices',wait_until='networkidle')
+            page.wait_for_function("document.getElementById('current').textContent==='13.10 倍'")
+            page.locator('#point-overlay').click()
+            page.wait_for_function("document.getElementById('chart').data?.some(t=>t.name==='指数点位')")
+            page.locator('#code').select_option(other_code)
+            page.wait_for_function("document.getElementById('current').textContent==='21.20 倍' && document.getElementById('chart').data?.some(t=>t.name==='指数点位' && t.y.includes(3900))")
+            chart=page.locator('#chart')
+            assert page.locator('#point-overlay').get_attribute('aria-pressed')=='true'
+            valuation=chart.evaluate("n=>n.data[0].name")
+            assert valuation=='市盈率 PE（滚动）'
+            legend=chart.evaluate("n=>n._fullLayout.legend")
+            assert legend['orientation']=='h' and legend['y']<0 and legend['xanchor']=='center'
+            assert all(not name.lower().startswith('trace ') for name in chart.evaluate("n=>n.data.map(t=>t.name)"))
+            assert not errors
+        finally:browser.close()
+
+
 def test_browser_explicit_series_filters_sources_and_no_auto_collection(index_server):
     playwright=pytest.importorskip('playwright.sync_api')
     base,calls,db=index_server
@@ -117,6 +203,29 @@ def test_browser_explicit_series_filters_sources_and_no_auto_collection(index_se
             page.wait_for_function("document.getElementById('chart').data?.[0]?.y?.length===1")
             page.set_viewport_size({'width':390,'height':844})
             page.wait_for_function('document.documentElement.scrollWidth<=window.innerWidth')
+            assert not errors
+        finally:browser.close()
+
+
+def test_browser_index_sidebar_restores_shared_stock_picker(index_server):
+    playwright=pytest.importorskip('playwright.sync_api')
+    base,_,database=index_server
+    database.ensure_instrument('600000','浦发银行')
+    with playwright.sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page(viewport={'width':390,'height':844})
+            errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/indices',wait_until='networkidle')
+            picker=page.locator('#cached-picker')
+            assert picker.count()==1
+            page.wait_for_function("document.getElementById('stock-picker-summary').textContent.includes('最近查看')")
+            picker.locator('summary').click()
+            assert page.locator('#cached-search').is_visible()
+            assert page.locator('#stock-groups').inner_text().find('全部股票')>=0
+            page.locator('#stock-groups .stock-group-row button').nth(1).click()
+            assert '浦发银行' in page.locator('#cached-list').inner_text()
+            assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')
             assert not errors
         finally:browser.close()
 

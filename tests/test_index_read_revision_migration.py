@@ -25,9 +25,9 @@ def test_revision_migration_preserves_facts_and_tracks_transaction(tmp_path,monk
         assert revision[0]==0 and revision[1]
         assert conn.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
         assert not conn.execute('PRAGMA foreign_key_check').fetchall()
-        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'index_read_%'").fetchone()[0]==15
+        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'index_read_%'").fetchone()[0]==24
     table=next(t for t in MaintenanceService(db).read()['tables'] if t['name']=='index_read_revisions')
-    assert table['category']=='指数数据' and table['rows']==1
+    assert table['category']=='\u6307\u6570\u6570\u636e' and table['rows']==1
     assert table['time_basis']=='updated_at' and table['updated_at']==revision[1]
     backup=next((tmp_path/'backups').glob('pre-migration-*.sqlite3'))
     with sqlite3.connect(backup) as conn:assert conn.execute('PRAGMA user_version').fetchone()[0]==25

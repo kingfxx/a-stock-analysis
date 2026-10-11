@@ -8,6 +8,7 @@ import uuid
 
 from .index_definitions import METRICS
 from .index_repository import index_valuation_views, read_indices
+from .index_prices import read_overlay
 
 
 def encode(value):
@@ -98,4 +99,22 @@ class IndexReadService:
                 while len(self.cache)>self.max_entries or self.cache_bytes>self.max_bytes:
                     _, evicted = self.cache.popitem(last=False)
                     self.cache_bytes -= len(evicted)
+            return body
+
+    def price_overlay(self, code):
+        if not code:
+            raise ValueError('缺少指数代码')
+        with self.lock:
+            self._revision()
+            key=('point_overlay',code)
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                return self.cache[key]
+            body=encode(dict(revision=self._revision(),**read_overlay(self.db,code)))
+            if len(body)<=self.max_bytes:
+                self.cache[key]=body
+                self.cache_bytes+=len(body)
+                while len(self.cache)>self.max_entries or self.cache_bytes>self.max_bytes:
+                    _,evicted=self.cache.popitem(last=False)
+                    self.cache_bytes-=len(evicted)
             return body

@@ -28,6 +28,7 @@
 
 ## SQLite 表变更
 
+- 新增任何数据库表，须同步更新 [SQLite 存储说明](./docs/sqlite-storage.md) 对应章节；详细设计另有文档时附链接。
 - 新增表、改名或调整用途时，同步在 `quarterly_dashboard/maintenance.py` 的 `DESCRIPTIONS` 登记用途与分类，不能遗留「尚未登记用途」或落入默认分类。
 - 真实采集／写入时间用 `TIME_COLUMNS` 识别，关联时间用 `PARENT_TIMES` 或 `table_time` 明确路径；报告期、交易日不能代替更新时间。无适用记录显示「未记录」，并在相关文档解释。
 - 隔离库迁移后核对维护页／统计接口的表发现、用途、分类、记录数、大小及时间依据；特殊时间规则检查空表、缺值并同步文档。详见 [数据库维护](./docs/database-maintenance.md)。

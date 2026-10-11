@@ -2,7 +2,17 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>指数分析</title><link rel="stylesheet" href="/indices.css"><link rel="stylesheet" href="/financial-statements.css"></head>
 <body><main class="shell">
-<aside class="stock-sidebar" aria-label="当前指数和研究视图"><div class="current-stock"><span class="current-stock-caption">当前指数</span><strong id="current-index-name">指数分析</strong><span id="current-index-code">—</span></div>
+<aside class="stock-sidebar" aria-label="当前指数、股票选择和研究视图"><div class="current-stock"><span class="current-stock-caption">当前指数</span><strong id="current-index-name">指数分析</strong><span id="current-index-code">—</span></div>
+<details class="cached-picker" id="cached-picker">
+<summary id="stock-picker-summary">我的股票</summary>
+<div class="cached-menu">
+<input id="cached-search" type="search" placeholder="搜索全部股票：代码、名称或拼音首字母" aria-label="搜索全部股票">
+<div id="stock-group-target" class="stock-group-target" hidden><label for="stock-target-group">当前管理组</label><select id="stock-target-group" aria-label="当前管理组"></select></div>
+<div id="stock-group-edit" class="stock-group-edit" hidden><input id="stock-group-name" maxlength="20" placeholder="分组名称（最多 20 个字）" aria-label="分组名称"><button type="button" id="stock-group-create">新建</button><button type="button" id="stock-group-rename">重命名</button><button type="button" id="stock-group-delete">删除组</button></div>
+<div class="stock-picker-body"><nav id="stock-groups" class="stock-groups" aria-label="股票分组"></nav><div><div id="stock-results-label" aria-live="polite"></div><div id="cached-list" class="cached-list" aria-label="股票列表"></div></div></div>
+<div id="stock-batch" class="stock-batch" hidden><span id="stock-selected-count">0 只已选</span><button type="button" id="stock-select-results">选择结果</button><button type="button" id="stock-group-add">加入所选组</button><button type="button" id="stock-group-remove">移出当前管理组</button><button type="button" id="stock-unfollow">取消关注</button></div>
+<div class="stock-picker-footer"><span>搜索覆盖全部分组</span><button id="stock-manage" type="button">管理分组</button></div><p id="stock-picker-message" role="status" aria-live="polite"></p>
+</div></details>
 <nav class="research-tabs" aria-label="研究视图"><a class="nav-link" data-view="trend" href="/?tab=trend">企业经营趋势</a><a class="nav-link" data-view="statements" href="/?tab=statements">财务分析</a><a class="nav-link" data-view="industry" href="/?tab=industry">行业内对比</a><a class="nav-link" href="/indices" aria-current="page">指数分析</a><a class="nav-link" data-view="maintenance" href="/?tab=maintenance">后台维护</a></nav></aside>
 <div class="workspace-content">
 <header><div><h1>指数分析</h1><p>宽基、申万行业与红利策略；不同来源和统计口径分别展示。</p></div></header>
@@ -24,12 +34,12 @@
 <label>时间范围<select id="range"><option value="10">最近 10 年</option><option value="5">最近 5 年</option><option value="3">最近 3 年</option></select></label>
 <label>比较基准<select id="benchmark"><option value="percentile">历史分位</option><option value="stddev">均值 ±1 标准差</option></select></label>
 <label>展示频率<select id="frequency"><option value="auto">自动</option><option value="day">日</option><option value="week">周</option><option value="month">月</option></select></label>
-<button type="button" disabled title="当前指数来源未采集价格序列">叠加指数点位（待采集）</button>
+<button id="point-overlay" type="button" aria-pressed="false" title="使用所选指数的真实收盘点位，在图表右轴叠加">叠加指数点位</button>
 </div></div>
 <div class="valuation-overview"><div class="valuation-current"><small id="current-label">最近观察</small><div id="position" class="valuation-position">待判断</div><strong id="current">—</strong><small id="basis">暂无有效分位</small><span id="current-date">暂无有效观察</span></div>
 <div class="valuation-summary"><p id="history-summary"></p><p id="comparison">指数按自身历史比较；不同来源与统计口径分别展示。</p></div></div>
 <div class="valuation-levels"><span><i id="high-dot"></i><small id="high-label">高位（80% 分位）</small><b id="high">—</b></span><span><i style="background:#f4b560"></i><small id="median-label">中值（50% 分位）</small><b id="median">—</b></span><span><i id="low-dot"></i><small id="low-label">低位（20% 分位）</small><b id="low">—</b></span></div>
 <p id="negative-note" class="note negative-note"></p><div id="chart" role="img" aria-label="指数估值走势与历史参考线"></div>
-<p id="coverage" class="note"></p><p id="definition" class="note muted"></p><p id="methodology" class="note muted"></p>
+<p id="point-overlay-note" class="note muted" hidden></p><p id="coverage" class="note"></p><p id="definition" class="note muted"></p><p id="methodology" class="note muted"></p>
 </section>
-</div></main><script src="/plotly.min.js"></script><script src="/indices.js"></script></body></html>
+</div></main><script src="/plotly.min.js"></script><script src="/stock-picker.js"></script><script src="/indices.js"></script></body></html>
