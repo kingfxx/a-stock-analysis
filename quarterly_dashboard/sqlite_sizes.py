@@ -32,7 +32,10 @@ def physical_sizes(conn, path):
     roots=[(r[0],r[1]) for r in conn.execute("SELECT name,rootpage FROM sqlite_master WHERE rootpage>0")]
     roots.append(('sqlite_schema',1))
     sizes={}
-    with path.open('rb') as source:
+    # SQLite reserves locking bytes at 1 GiB. Buffered read-ahead can cross
+    # that page on Windows even when the requested B-tree page is outside it.
+    # Read exactly the requested bytes while the caller holds its snapshot.
+    with path.open('rb', buffering=0) as source:
         header=source.read(100)
         if len(header)!=100 or header[:16]!=b'SQLite format 3\x00':
             raise ValueError('SQLite 文件头不匹配')

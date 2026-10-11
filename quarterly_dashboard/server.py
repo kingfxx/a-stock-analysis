@@ -28,6 +28,10 @@ from .fundamental_service import FundamentalService
 from .statements import read_statements
 from .industry_service import IndustryService
 from .maintenance import MaintenanceService
+from .index_collection import start_operation, run_operation, cancel_operation, recover_operations
+from .index_repository import read_indices
+from .index_read_service import IndexReadService
+from .collection import read_source
 from .database_restore import RestoreManager, RequestGate, MAX_UPLOAD
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
@@ -937,14 +941,18 @@ class Handler(BaseHTTPRequestHandler):
         super().log_message(format, *args)
 
     def _ai_reply(self, data, status=200):
-        body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        body = data if isinstance(data, bytes) else json.dumps(data, ensure_ascii=False, allow_nan=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # A rapid index switch can abort the previous browser fetch.
+            return
 
     def _ai_host(self):
         port = self.server.server_port
@@ -1062,7 +1070,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/") or path == '/api/business-judgment' or path.startswith('/api/business-judgment/'):
             self._ai_post(path)
             return
-        if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh"}:
+        if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh", "/api/indices/collect", "/api/indices/cancel"}:
             self.send_error(404)
             return
         status = 200
@@ -1076,7 +1084,22 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < size <= 65536:
                 raise ValueError("分组请求大小无效")
             command = json.loads(self.rfile.read(size).decode("utf-8"))
-            if path == '/api/industry/refresh':
+            if path in {'/api/indices/collect','/api/indices/cancel'}:
+                if not isinstance(command,dict):
+                    raise ValueError('指数采集请求须为对象')
+                db=Database(DATABASE_PATH)
+                if path.endswith('/cancel'):
+                    if command:
+                        raise ValueError('取消请求无需参数')
+                    cancel_operation(db)
+                    data={'cancel_requested':True}
+                else:
+                    if set(command)-{'mode','providers','start','end'}:
+                        raise ValueError('指数采集参数无效')
+                    operation=start_operation(db,command.get('mode','incremental'),command.get('providers',['csindex','legu','sws']),command.get('start'),command.get('end'))
+                    Thread(target=run_operation,args=(db,operation),daemon=True).start()
+                    data={'operation_id':operation,'status':'running'}
+            elif path == '/api/industry/refresh':
                 if not isinstance(command,dict) or set(command)-{'action','target','recheck'} or not {'action','target'}<=set(command):
                     raise ValueError('行业更新须指定任务和报告期／季度')
                 data = industry_service().start_refresh(command['action'],command['target'],command.get('recheck',False))
@@ -1099,6 +1122,52 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path in {'/api/indices/catalog','/api/indices/status','/api/indices/chart'}:
+            try:
+                with _SERVICE_LOCK:
+                    if not hasattr(self.server, 'index_reader'):
+                        self.server.index_reader = IndexReadService(Database(DATABASE_PATH))
+                    reader = self.server.index_reader
+                query = parse_qs(parsed.query)
+                if parsed.path.endswith('/catalog'):
+                    body = reader.catalog()
+                elif parsed.path.endswith('/status'):
+                    body = reader.status()
+                else:
+                    body = reader.chart(code=query.get('code',[None])[0],provider=query.get('provider',[None])[0],
+                        series=query.get('series',[None])[0],definition=query.get('definition',['v1'])[0],metric=query.get('metric',[None])[0])
+                self._ai_reply(body)
+            except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                self._ai_reply({'error':str(exc)},400)
+            return
+        if parsed.path=='/api/indices':
+            try:
+                query=parse_qs(parsed.query)
+                data=read_indices(Database(DATABASE_PATH),code=query.get('code',[None])[0],kind=query.get('kind',[None])[0],
+                    level=query.get('level',[None])[0],provider=query.get('provider',[None])[0],series=query.get('series',[None])[0],
+                    definition_version=query.get('definition',['v1'])[0],start=query.get('start',[None])[0],end=query.get('end',[None])[0],weekly=query.get('weekly')==['1'])
+                self._ai_reply(data)
+            except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                self._ai_reply({'error':str(exc)},400)
+            return
+        if parsed.path=='/api/indices/source':
+            try:
+                raw,item=read_source(Database(DATABASE_PATH),int(parse_qs(parsed.query).get('id',['0'])[0]))
+                # Escape arbitrary source text and keep it inert in the browser.
+                self._ai_reply({'metadata':item,'body':raw.decode('utf-8',errors='replace') if item['content_type'] and ('json' in item['content_type'] or 'text' in item['content_type']) else '二进制响应；文件路径及双哈希见元数据'})
+            except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                self._ai_reply({'error':str(exc)},400)
+            return
+        if parsed.path in {'/indices','/indices.js','/indices.css'}:
+            name='indices.html' if parsed.path=='/indices' else parsed.path.lstrip('/')
+            body=(ROOT/'web'/name).read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type',{'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[name.rsplit('.',1)[1]])
+            self.send_header('Content-Length',str(len(body)))
+            self.send_header('Cache-Control','no-store')
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if parsed.path == '/api/research-reports':
             try:
                 self._ai_host()
@@ -1250,6 +1319,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def _initialize_runtime(db, skip_legacy=False):
     runtime=db.initialize();StockCleanupService(db).recover();db.check();db.daily_backup()
+    recover_operations(db)
     recovered=db.recover_interrupted_runs()
     industry_recovered=IndustryService(db).recover_interrupted_runs()
     ai_recovered=ai_service().repository.recover()
@@ -1270,7 +1340,9 @@ def _initialize_runtime(db, skip_legacy=False):
 
 def _restore_activity():
     with _SERVICE_LOCK:
-        return any(s.status()['running'] for s in _INDUSTRY_SERVICES.values()) or any(
+        with Database(DATABASE_PATH).connection() as conn:
+            index_running=bool(conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone())
+        return index_running or any(s.status()['running'] for s in _INDUSTRY_SERVICES.values()) or any(
             s.worker and s.worker.is_alive() for s in _AI_SERVICES.values())
 
 
@@ -1290,6 +1362,8 @@ def serve(port: int = 8765, open_browser: bool = False):
             finally:
                 # Drain request threads and release all connections before replacing SQLite.
                 server.server_close()
+                if hasattr(server, 'index_reader'):
+                    server.index_reader.close()
             if not manager.pending:return
             result=manager.execute()
             print('数据库恢复：'+json.dumps(result,ensure_ascii=False),flush=True)

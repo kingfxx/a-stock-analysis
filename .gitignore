@@ -14,16 +14,8 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Downloaded stock data is rebuilt on demand. Keep the old path ignored too.
-data/cache/
-data/fundamentals/
-data/valuation/
-data/chips/
-data/industry_sources/
-data/market_financial_sources/
-
-# Local report checks and UI screenshots are separate from application data.
-data/verification/
+# Project-local data, generated reports, source captures and credentials are not synced.
+data/
 
 # Local SQLite files, runtime locks and consistent backups are not Git artifacts.
 *.sqlite3

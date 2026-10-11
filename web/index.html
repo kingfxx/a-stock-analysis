@@ -204,6 +204,7 @@
     <button id="trend-tab" type="button" role="tab" aria-selected="true" aria-controls="trend-panel">企业经营趋势</button>
     <button id="statements-tab" type="button" role="tab" aria-selected="false" aria-controls="statements-panel" tabindex="-1">财务分析</button>
     <button id="industry-tab" type="button" role="tab" aria-selected="false" aria-controls="industry-panel" tabindex="-1">行业内对比</button>
+    <a id="indices-link" class="nav-link" href="/indices">指数分析</a>
     <button id="maintenance-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-panel" tabindex="-1">后台维护</button>
   </nav>
   <details id="industry-filter-details" class="industry-filter-details" hidden>
@@ -483,6 +484,9 @@
     return data;
   }
   const state = JSON.parse(document.getElementById('payload').textContent);
+  document.getElementById('indices-link').addEventListener('click', event => {
+    event.currentTarget.href = '/indices?' + new URLSearchParams({stock:state.code || ''});
+  });
   state.valuation = expandValuationPayload(state.valuation);
   window.initAIChecklist(state);
   window.initFinancialStatements(state);

@@ -40,3 +40,9 @@
 .fs-source-item b{color:var(--ink);font-weight:600}
 .fs-source-values{padding-left:8px;border-left:2px solid var(--line);margin:8px 0}
 .fs-source-values li{margin:4px 0}
+
+.research-tabs .nav-link{display:block;background:transparent;color:var(--muted);border:1px solid transparent;border-radius:6px;text-decoration:none;font:inherit}
+.stock-sidebar .research-tabs .nav-link{width:100%;text-align:left;font-size:13px;font-weight:700;padding:11px 10px;white-space:nowrap}
+.research-tabs .nav-link[aria-current="page"]{color:var(--cyan);background:#18313a;border-color:#2e6473}
+.stock-sidebar .research-tabs .nav-link:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+@media(max-width:800px){.stock-sidebar .research-tabs .nav-link{flex:1;min-width:0;text-align:center;font-size:12px;padding:9px 5px}.stock-sidebar .research-tabs{flex-wrap:wrap}}

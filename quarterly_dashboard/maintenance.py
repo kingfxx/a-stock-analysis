@@ -42,6 +42,17 @@ def compact_database(db, validate):
         conn.close()
 
 DESCRIPTIONS={
+ 'collection_batches':('运行与配置','公共采集批次、操作范围、执行状态及独立覆盖判定；未迁移旧采集'),
+ 'collection_sources':('指数数据','公共逐次请求来源、原始响应双哈希、解析状态及真实取得时间'),
+ 'collection_provider_state':('运行与配置','指数来源共享请求预算、拒绝原因及跨任务冷却截止时间'),
+ 'index_identities':('指数数据','带发布体系命名空间的稳定指数身份'),
+ 'index_catalog':('指数数据','指数名称、类别、行业体系与层级、父级及历史有效期；未知期明确标记'),
+ 'index_provider_codes':('指数数据','指数提供方原始代码与稳定身份的有效期映射'),
+ 'index_metric_definitions':('指数数据','估值序列字段、统计方法、利润期间、单位和证据的版本定义'),
+ 'index_valuation_series':('指数数据','指数估值序列身份：指数、提供方、口径、频率及定义版本；整数 ID 供事实引用'),
+ 'index_read_revisions':('指数数据','指数读取缓存版本号：仅指数估值、目录、序列、口径定义及行业关系写入时递增'),
+ 'index_valuation_observations':('指数数据','整数序列 ID 引用的指数估值事实、原始来源及真实修订版本'),
+ 'index_collection_operations':('运行与配置','指数采集操作、取消请求、分段进度和结果'),
  'instruments':('个股数据','股票代码、交易所与名称'),
  'financial_reports':('个股数据','新浪关键指标和三表原始财报，按公司及报告期保存'),
  'raw_daily_prices':('个股数据','不复权日线行情及来源记录'),
@@ -97,7 +108,7 @@ DESCRIPTIONS={
  'stock_unfollowed_groups':('运行与配置','取消关注前的分组归属及顺序，用于恢复关注'),
  'stock_cleanup_runs':('运行与配置','未关注股票清理的提交记录、范围、备份及结果；用于中断恢复'),
 }
-TIME_COLUMNS=('updated_at','obtained_at','checked_at','completed_at','finished_at','validated_at',
+TIME_COLUMNS=('updated_at','obtained_at','checked_at','completed_at','finished_at','started_at','validated_at',
               'captured_at','imported_at','applied_at','viewed_at','created_at','unfollowed_at')
 PARENT_TIMES={
  'stock_unfollowed_groups':('stock_unfollowed','instrument_id','instrument_id','unfollowed_at'),

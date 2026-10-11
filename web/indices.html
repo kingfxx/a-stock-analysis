@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>指数分析</title><link rel="stylesheet" href="/indices.css"><link rel="stylesheet" href="/financial-statements.css"></head>
+<body><main class="shell">
+<aside class="stock-sidebar" aria-label="当前指数和研究视图"><div class="current-stock"><span class="current-stock-caption">当前指数</span><strong id="current-index-name">指数分析</strong><span id="current-index-code">—</span></div>
+<nav class="research-tabs" aria-label="研究视图"><a class="nav-link" data-view="trend" href="/?tab=trend">企业经营趋势</a><a class="nav-link" data-view="statements" href="/?tab=statements">财务分析</a><a class="nav-link" data-view="industry" href="/?tab=industry">行业内对比</a><a class="nav-link" href="/indices" aria-current="page">指数分析</a><a class="nav-link" data-view="maintenance" href="/?tab=maintenance">后台维护</a></nav></aside>
+<div class="workspace-content">
+<header><div><h1>指数分析</h1><p>宽基、申万行业与红利策略；不同来源和统计口径分别展示。</p></div></header>
+<section aria-label="采集任务"><h2>采集进度</h2><div class="controls">
+<button id="incremental" title="只补最后已有日期之后的数据，日期已最新时跳过估值请求">更新近期估值</button><button id="review" title="重新核对最近10个交易日；乐咕核对最近4个月，用于检查来源修订">核对近期修订</button><button id="full">采集／恢复十年历史</button><button id="audit">轮换核对历史月份</button><button id="cancel" disabled>停止采集</button>
+</div><p id="progress" role="status" aria-live="polite">正在读取…</p><p id="cooldowns"></p>
+<p class="muted">同源串行，间隔至少10秒并随机延迟，遇拒绝访问停止并冷却。历史任务可能持续数小时，已提交分段保留。主题指数本次不采集。</p></section>
+<section class="valuation-panel" aria-label="指数估值与分位">
+<div class="panel-head"><h2>估值与分位</h2><p class="muted">指数估值走势 · 所选区间历史分布与当前历史位置</p>
+<div class="controls index-controls">
+<label>指数类别<select id="kind"><option value="broad">宽基</option><option value="industry">行业</option><option value="strategy">策略</option></select></label>
+<label id="parent-control" hidden>一级行业<select id="parent"></select></label>
+<label id="second-control" hidden>二级行业<select id="industry-second"><option value="">全部二级行业</option></select></label>
+<label id="code-control"><span id="code-label">指数选择</span><select id="code"></select></label>
+</div>
+<div class="controls valuation-controls">
+<div id="metric-tabs" class="metric-tabs" role="group" aria-label="估值指标"></div><select id="metric" hidden aria-label="当前估值指标"></select>
+<label id="series-control">估值口径<select id="series"></select></label><span id="industry-source" class="muted" hidden>数据来源：申万宏源</span>
+<label>时间范围<select id="range"><option value="10">最近 10 年</option><option value="5">最近 5 年</option><option value="3">最近 3 年</option></select></label>
+<label>比较基准<select id="benchmark"><option value="percentile">历史分位</option><option value="stddev">均值 ±1 标准差</option></select></label>
+<label>展示频率<select id="frequency"><option value="auto">自动</option><option value="day">日</option><option value="week">周</option><option value="month">月</option></select></label>
+<button type="button" disabled title="当前指数来源未采集价格序列">叠加指数点位（待采集）</button>
+</div></div>
+<div class="valuation-overview"><div class="valuation-current"><small id="current-label">最近观察</small><div id="position" class="valuation-position">待判断</div><strong id="current">—</strong><small id="basis">暂无有效分位</small><span id="current-date">暂无有效观察</span></div>
+<div class="valuation-summary"><p id="history-summary"></p><p id="comparison">指数按自身历史比较；不同来源与统计口径分别展示。</p></div></div>
+<div class="valuation-levels"><span><i id="high-dot"></i><small id="high-label">高位（80% 分位）</small><b id="high">—</b></span><span><i style="background:#f4b560"></i><small id="median-label">中值（50% 分位）</small><b id="median">—</b></span><span><i id="low-dot"></i><small id="low-label">低位（20% 分位）</small><b id="low">—</b></span></div>
+<p id="negative-note" class="note negative-note"></p><div id="chart" role="img" aria-label="指数估值走势与历史参考线"></div>
+<p id="coverage" class="note"></p><p id="definition" class="note muted"></p><p id="methodology" class="note muted"></p>
+</section>
+</div></main><script src="/plotly.min.js"></script><script src="/indices.js"></script></body></html>

@@ -1,0 +1,331 @@
+"""Public request provenance and conservative, cross-process provider pacing.
+
+Only the new index collectors use this module. Network waits never hold a SQLite
+transaction. The provider file lock covers all hosts, endpoints and retries.
+"""
+from __future__ import annotations
+
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+import gzip
+import hashlib
+import json
+import os
+from pathlib import Path
+import random
+import time
+from threading import Lock
+from uuid import uuid4
+
+import requests
+
+from .network import create_data_session
+from .storage import StorageError, instance_lock, utc_now
+
+_PROVIDER_LOCKS={}
+_PROVIDER_LOCKS_GUARD=Lock()
+
+
+def encoded(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def digest(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def atomic_write(path, content):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + '.' + uuid4().hex + '.tmp')
+    try:
+        with temporary.open('wb') as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+class Cancelled(RuntimeError):
+    pass
+
+
+class ProviderBlocked(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class PacingPolicy:
+    interval: float = 10
+    jitter: float = 5
+    window: float = 60
+    window_requests: int = 5
+    rest_every: int = 20
+    rest_min: float = 60
+    rest_max: float = 120
+    cooldown: float = 3600
+    max_attempts: int = 3
+
+    def __post_init__(self):
+        # Public configuration can tighten these defaults, never silently bypass them.
+        if (self.interval < 10 or self.jitter < 0 or self.window < 60 or not 1 <= self.window_requests <= 5
+                or not 1 <= self.rest_every <= 20 or self.rest_min < 60 or self.rest_max < self.rest_min
+                or self.cooldown < 3600 or not 1 <= self.max_attempts <= 3):
+            raise ValueError('指数采集限速配置不能低于保守默认要求')
+
+
+def begin_batch(db, operation_id, dataset, provider, start=None, end=None, *, scope=None,
+                frequency=None, trigger='manual', idempotency_key=None):
+    with db.connection(write=True) as conn:
+        return conn.execute('INSERT INTO collection_batches(operation_id,domain,dataset,source_system,scope_start,scope_end,'
+            'scope_json,frequency,trigger_type,status,started_at,parser_version,definition_version,idempotency_key) '
+            "VALUES(?,'market',?,?,?,?,?,?,?,'running',?,'index-v2','v1',?)",
+            (operation_id,dataset,provider,start,end,encoded(scope or {}),frequency,trigger,utc_now(),idempotency_key)).lastrowid
+
+
+def finish_batch(db, batch_id, status, coverage='unknown', *, result=None, error=None):
+    with db.connection(write=True) as conn:
+        conn.execute('UPDATE collection_batches SET status=?,coverage_status=?,finished_at=?,result_json=?,error=? WHERE id=?',
+                     (status,coverage,utc_now(),encoded(result or {}),str(error) if error else None,batch_id))
+
+
+def archive_source(db, batch_id, provider, dataset, request, attempt, *, raw=None, response=None,
+                   request_status='success', obtained_at=None, error=None, reused_source_id=None):
+    """Archive the actual decompressed HTTP entity, then register the request attempt."""
+    metadata = {}
+    if raw is not None:
+        stored = gzip.compress(raw, mtime=0)
+        relative = Path('collection_sources')/provider/dataset/(uuid4().hex+'.raw.gz')
+        path = db.path.parent/relative
+        atomic_write(path, stored)
+        if digest(path.read_bytes()) != digest(stored):
+            raise OSError('来源落盘哈希校验失败')
+        metadata = dict(file_path=relative.as_posix(),compression='gzip',raw_sha256=digest(raw),
+                        stored_sha256=digest(stored),hash_basis='http_decoded_entity / gzip_file',
+                        raw_bytes=len(raw),stored_bytes=len(stored))
+    request_key = digest(encoded(request).encode())
+    metadata.update(batch_id=batch_id,source_system=provider,dataset=dataset,request_key=request_key,
+                    attempt_no=attempt,request_json=encoded(request),request_status=request_status,
+                    parse_status='pending' if raw is not None else 'not_applicable',
+                    http_status=response.status_code if response is not None else None,
+                    content_type=response.headers.get('Content-Type') if response is not None else None,
+                    error=error,obtained_at=obtained_at or utc_now(),reused_source_id=reused_source_id)
+    columns=tuple(metadata)
+    with db.connection(write=True) as conn:
+        return conn.execute('INSERT INTO collection_sources('+','.join(columns)+') VALUES ('+
+                            ','.join('?' for _ in columns)+')',tuple(metadata.values())).lastrowid
+
+
+def parsed_source(db, source_id, *, fields=None, error=None):
+    with db.connection(write=True) as conn:
+        conn.execute('UPDATE collection_sources SET parse_status=?,fields_json=?,error=coalesce(?,error) WHERE id=?',
+                     ('failed' if error else 'complete',encoded(sorted(fields)) if fields is not None else None,
+                      str(error) if error else None,source_id))
+
+
+def read_source(db, source_id):
+    with db.connection() as conn:
+        item=dict(conn.execute('SELECT * FROM collection_sources WHERE id=?',(source_id,)).fetchone())
+    path=(db.path.parent/item['file_path']).resolve()
+    root=(db.path.parent/'collection_sources').resolve()
+    if not path.is_relative_to(root):
+        raise ValueError('来源文件不在登记的公共来源目录内')
+    stored=path.read_bytes()
+    if digest(stored)!=item['stored_sha256']:
+        raise ValueError('来源存储哈希不符')
+    raw=gzip.decompress(stored)
+    if digest(raw)!=item['raw_sha256']:
+        raise ValueError('来源原文哈希不符')
+    return raw,item
+
+
+def retry_after(value, now):
+    try:
+        return now+max(0,float(value))
+    except (ValueError,TypeError):
+        try:
+            stamp=parsedate_to_datetime(value)
+            if stamp.tzinfo is None:
+                stamp=stamp.replace(tzinfo=timezone.utc)
+            return stamp.timestamp()
+        except (ValueError,TypeError,OverflowError):
+            return now
+
+
+class RequestCollector:
+    def __init__(self, db, *, session=None, policy=None, cancelled=lambda: False,
+                 clock=time.time, sleep=time.sleep, uniform=random.uniform, progress=lambda message: None):
+        self.db=db
+        self.session=session or create_data_session()
+        self.policy=policy or PacingPolicy()
+        self.cancelled=cancelled
+        self.clock=clock
+        self.sleep=sleep
+        self.uniform=uniform
+        self.progress=progress
+        self.halted={}
+        self.requests=0
+        self.retries=0
+
+    def check_cancelled(self):
+        if self.cancelled():
+            raise Cancelled('用户取消采集；已发布分段保留')
+
+    def wait(self, seconds):
+        deadline=self.clock()+max(0,seconds)
+        while True:
+            self.check_cancelled()
+            remaining=deadline-self.clock()
+            if remaining<=0:
+                break
+            self.sleep(min(1,remaining))
+        self.check_cancelled()
+
+    @contextmanager
+    def provider_lock(self, provider):
+        # Database directory is the scope of the shared cross-process budget.
+        path=self.db.path.parent/'collection_sources'/('provider-'+provider)
+        with _PROVIDER_LOCKS_GUARD:
+            thread_lock=_PROVIDER_LOCKS.setdefault(str(path),Lock())
+        while not thread_lock.acquire(timeout=.1):
+            self.check_cancelled()
+        try:
+            seed_failures=0
+            while True:
+                self.check_cancelled()
+                context=instance_lock(path)
+                try:
+                    context.__enter__()
+                    break
+                except StorageError:
+                    self.wait(.25)
+                except PermissionError:
+                    # Windows can deny the competing initializer's first flush.
+                    # Retry only a bounded number of times; real permissions errors fail.
+                    seed_failures+=1
+                    if seed_failures>=3:
+                        raise
+                    self.wait(.25)
+            try:
+                yield
+            finally:
+                context.__exit__(None,None,None)
+        finally:
+            thread_lock.release()
+
+    def state(self, provider):
+        with self.db.connection() as conn:
+            row=conn.execute('SELECT * FROM collection_provider_state WHERE source_system=?',(provider,)).fetchone()
+        return dict(row) if row else dict(source_system=provider,cooldown_until=None,reason=None,denials=0,budget_json='{}')
+
+    def save_state(self, state):
+        with self.db.connection(write=True) as conn:
+            conn.execute('INSERT INTO collection_provider_state VALUES(?,?,?,?,?,?) ON CONFLICT(source_system) DO UPDATE SET '
+                'cooldown_until=excluded.cooldown_until,reason=excluded.reason,denials=excluded.denials,'
+                'budget_json=excluded.budget_json,updated_at=excluded.updated_at',
+                (state['source_system'],state['cooldown_until'],state['reason'],state['denials'],state['budget_json'],utc_now()))
+
+    def block(self, provider, state, reason, response=None):
+        now=self.clock()
+        deadline=max(now+self.policy.cooldown*(2**min(state['denials'],4)),
+                     retry_after(response.headers.get('Retry-After'),now) if response is not None else now)
+        state.update(cooldown_until=datetime.fromtimestamp(deadline,timezone.utc).isoformat(),reason=reason,
+                     denials=state['denials']+1)
+        self.save_state(state)
+        self.halted[provider]=dict(reason=reason,cooldown_until=state['cooldown_until'])
+        raise ProviderBlocked(f'{provider} {reason}；停止本轮同源请求，冷却至 {state["cooldown_until"]}')
+
+    def report(self):
+        return dict(policy=asdict(self.policy),network_requests=self.requests,retries=self.retries,halted=self.halted)
+
+    def get(self, batch_id, provider, dataset, url, params=None, *, headers=None, expect='json'):
+        # Authentication is sent, but never persisted in request identity or logs.
+        request=dict(transport='http',method='GET',url=url,
+                     params={k:v for k,v in (params or {}).items() if k.lower() not in ('token','apikey','api_key')})
+        key=digest(encoded(request).encode())
+        for attempt in range(1,self.policy.max_attempts+1):
+            if provider in self.halted:
+                raise ProviderBlocked(f'{provider} 本轮已停止')
+            if attempt>1:
+                self.retries+=1
+                self.wait(60*(attempt-1)+self.uniform(0,5))
+            with self.provider_lock(provider):
+                state=self.state(provider)
+                probe=state['cooldown_until'] is not None
+                if probe and datetime.fromisoformat(state['cooldown_until']).timestamp()>self.clock():
+                    self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
+                    raise ProviderBlocked(f'{provider} 仍在冷却至 {state["cooldown_until"]}')
+                budget=json.loads(state['budget_json'])
+                starts=[t for t in budget.get('starts',[]) if t>self.clock()-self.policy.window]
+                ready=budget.get('ready_at',0)
+                if len(starts)>=self.policy.window_requests:
+                    ready=max(ready,starts[-self.policy.window_requests]+self.policy.window+.001)
+                if ready>self.clock():
+                    self.progress(f'{provider} 限速等待 {round(ready-self.clock())} 秒')
+                    self.wait(ready-self.clock())
+                stamp=datetime.fromtimestamp(self.clock(),timezone.utc).isoformat()
+                starts=[t for t in starts if t>self.clock()-self.policy.window]+[self.clock()]
+                with self.db.connection() as conn:
+                    attempt_no=conn.execute('SELECT coalesce(max(attempt_no),0)+1 FROM collection_sources WHERE batch_id=? '
+                                           'AND dataset=? AND request_key=?',(batch_id,dataset,key)).fetchone()[0]
+                # Reserve the budget before sending, so a crash cannot reset pacing.
+                state['budget_json']=encoded(dict(starts=starts,ready_at=self.clock()+90+self.policy.interval,count=budget.get('count',0)))
+                self.save_state(state)
+                self.requests+=1
+                response=None
+                network_error=None
+                try:
+                    response=self.session.get(url,params=params,headers=headers,timeout=(15,60))
+                except requests.RequestException as exc:
+                    network_error=type(exc).__name__  # exception URLs may contain credentials
+                finally:
+                    count=budget.get('count',0)+1
+                    ready=self.clock()+self.policy.interval+self.uniform(0,self.policy.jitter)
+                    if count%self.policy.rest_every==0:
+                        ready+=self.uniform(self.policy.rest_min,self.policy.rest_max)
+                    state['budget_json']=encoded(dict(starts=starts,ready_at=ready,count=count))
+                    self.save_state(state)
+                source_id=archive_source(self.db,batch_id,provider,dataset,request,attempt_no,
+                    raw=response.content if response is not None else None,response=response,obtained_at=stamp,
+                    request_status='failed' if network_error or response.status_code>=400 else 'success',error=network_error)
+                if network_error:
+                    if probe:
+                        self.halted[provider]=dict(reason='恢复验证网络失败',cooldown_until=state['cooldown_until'])
+                        raise ProviderBlocked(f'{provider} 恢复验证失败，停止本轮')
+                    if attempt==self.policy.max_attempts:
+                        raise RuntimeError(f'{provider} 网络请求失败：{network_error}')
+                    continue
+                text=response.text[:100000].lower()
+                anti_bot=any(marker in text for marker in ('captcha','验证码','访问过于频繁','访问频率','too many requests','access denied'))
+                html=text.lstrip().startswith(('<!doctype html','<html')) or 'text/html' in response.headers.get('Content-Type','')
+                if response.status_code in (403,429) or anti_bot or (expect=='json' and response.status_code==200 and html):
+                    reason=f'HTTP {response.status_code}' if response.status_code in (403,429) else '验证码／反爬响应'
+                    parsed_source(self.db,source_id,error=reason)
+                    self.block(provider,state,reason,response)
+                if response.status_code in (500,502,503,504):
+                    parsed_source(self.db,source_id,error=f'HTTP {response.status_code}')
+                    if probe or attempt==self.policy.max_attempts:
+                        raise RuntimeError(f'{provider} HTTP {response.status_code}')
+                    continue
+                if response.status_code>=400:
+                    parsed_source(self.db,source_id,error=f'HTTP {response.status_code}')
+                    raise ValueError(f'{provider} HTTP {response.status_code}')
+                if probe:
+                    # A blocked provider resumes only after one structurally healthy response.
+                    healthy=False
+                    try:
+                        payload=response.json() if expect=='json' else None
+                        healthy=(isinstance(payload,dict) and isinstance(payload.get('data'),(list,dict))
+                            and str(payload.get('code','200')) in ('0','200') and payload.get('success') is not False) if expect=='json' else ('_csrf' in text if expect=='html' else len(response.content)>0)
+                    except ValueError:
+                        pass
+                    if not healthy:
+                        self.block(provider,state,'恢复验证响应无效',response)
+                    state.update(cooldown_until=None,reason=None,denials=0)
+                    self.save_state(state)
+                return response,source_id
+        raise RuntimeError('请求尝试耗尽')

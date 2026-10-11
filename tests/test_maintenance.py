@@ -27,12 +27,44 @@ def test_fallback_reads_only_one_page_at_a_time(tmp_path):
         def read(self,size):reads.append(size);return self.file.read(size)
 
     class BoundedPath:
-        def open(self,*args):return Reader()
+        def open(self,*args,**kwargs):
+            assert kwargs=={'buffering':0}
+            return Reader()
 
     sizes,method=physical_sizes(FallbackConnection(),BoundedPath())
     assert method=='sqlite_pages' and sum(sizes.values())==sizes_expected
     assert max(reads)==4096 and reads[0]==100
     conn.close()
+
+
+def test_windows_page_before_sqlite_lock_bytes(tmp_path):
+    msvcrt=pytest.importorskip('msvcrt')
+    path=tmp_path/'lock-boundary.sqlite3'
+    boundary=0x40000000;page_size=4096
+    header=bytearray(100);header[:16]=b'SQLite format 3\x00'
+    header[16:18]=page_size.to_bytes(2,'big')
+    with path.open('w+b',buffering=0) as locked:
+        locked.truncate(boundary+8192)
+        locked.write(header)
+        locked.write(bytes([13])+bytes(page_size-101))
+        locked.seek(boundary-page_size)
+        locked.write(bytes([13])+bytes(page_size-1))
+        locked.seek(boundary+200)
+        msvcrt.locking(locked.fileno(),msvcrt.LK_NBLCK,1)
+        class Connection:
+            def execute(self,sql):
+                if 'FROM dbstat' in sql:
+                    raise sqlite3.OperationalError('no such table: dbstat')
+                if 'journal_mode' in sql:
+                    return sqlite3.connect(':memory:').execute("SELECT 'delete'")
+                return [('sample',boundary//page_size)]
+        try:
+            sizes,method=physical_sizes(Connection(),path)
+            assert method=='sqlite_pages'
+            assert sizes=={'sample':page_size,'sqlite_schema':page_size}
+        finally:
+            locked.seek(boundary+200)
+            msvcrt.locking(locked.fileno(),msvcrt.LK_UNLCK,1)
 
 
 @pytest.mark.parametrize('page_size',[512,4096,65536])

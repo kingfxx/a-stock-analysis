@@ -66,6 +66,7 @@ HTTPS 证书验证保持启用；代理地址应按实际环境设置。
 | [SQLite 存储说明](docs/sqlite-storage.md) | 表结构、迁移、同步和维护命令 |
 | [后台维护说明](docs/database-maintenance.md) | 统计、取消关注、数据清理与空间整理 |
 | [行业数据说明](docs/industry-data-schema.md) | 行业分类、财务及市值数据结构与取数规则 |
+| [指数估值采集说明](docs/index-valuation-collection.md) | 统一宽基／行业／策略估值、日月频口径、限速与分段恢复；主页“指数估值”入口 |
 | [Checklist 说明](docs/ai-stock-assessment.md) | 手动生成、正式财报、历史和完整资料备份 |
 | [经营判断说明](docs/business-judgment.md) | 联网结论表、改变条件、独立历史与共享 AI 设置 |
 | [项目研报技能](.agents/skills/a-share-value-research/SKILL.md) | 公司价值研究与 Markdown／HTML 研报生成 |
