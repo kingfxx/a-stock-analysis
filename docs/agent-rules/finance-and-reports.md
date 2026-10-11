@@ -1,6 +1,6 @@
 # 财务、Checklist 与公司财报开发规则
 
-本文件是根目录 AGENTS.md 的按任务补充指令。修改财务指标、行业财务、Checklist、正式财报或研报技能前必须阅读对应章节。涉及批量采集时同时阅读 [采集规则](./collection.md)。
+本文件是根目录 AGENTS.md 的按任务补充指令。修改财务指标、行业财务、Checklist、正式财报或研报技能前必须阅读对应章节。涉及批量采集时同时阅读 [采集规则](/docs/agent-rules/collection.md)。
 
 ## 财务指标取数优先级
 
