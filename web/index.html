@@ -140,8 +140,21 @@
     .chip-panel h3 { margin:0 0 6px; font-size:21px; }
     .chip-chart { height:390px; }
     .chip-summary { padding:18px 27px 12px; color:var(--ink); font-size:14px; line-height:1.7; }
+    .chip-table-wrap { max-width:100%; overflow-x:auto; margin:0 27px 14px; border:1px solid #304049; border-radius:6px; }
+    .chip-data-table { width:max-content; min-width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+    .chip-data-table th,.chip-data-table td { min-width:126px; padding:10px 13px; text-align:right; white-space:nowrap; border-right:1px solid #304049; border-bottom:1px solid #304049; }
+    .chip-data-table th:first-child,.chip-data-table td:first-child { position:sticky; left:0; min-width:160px; text-align:left; }
+    .chip-data-table th:first-child { z-index:3; background:#202e35; }
+    .chip-data-table td:first-child { z-index:1; background:#1a2227; color:var(--muted); }
+    .chip-data-table th { color:var(--muted); background:#202e35; font-weight:500; }
+    .chip-data-table td { background:#1a2227; }
+    .chip-data-table tbody tr:last-child td { border-bottom:0; }
+    .chip-data-table .chip-table-label { display:block; color:var(--ink); font-weight:600; }
+    .chip-data-table .chip-table-empty { text-align:left; color:var(--muted); }
+    .chip-data-table .chip-positive { color:#f09a75; }
+    .chip-data-table .chip-negative { color:#72c9b3; }
     .chip-panel .note { padding-bottom:14px; }
-    @media(max-width:800px) { .chip-chart{height:340px} .chip-summary{padding:16px 15px 10px} .chip-panel .valuation-controls{width:100%} }
+    @media(max-width:800px) { .chip-chart{height:340px} .chip-summary{padding:16px 15px 10px} .chip-table-wrap{margin:0 15px 14px} .chip-panel .valuation-controls{width:100%} }
     .error,.warning { border-radius:8px; margin-bottom:15px; padding:12px 16px; font-size:14px; }
     .error { background:#442729; color:#ffe2df; }
     .warning { background:#4a3c22; color:#ffe5a1; }
@@ -427,6 +440,12 @@
       <div id="shareholders-summary" class="chip-summary">等待股东人数数据…</div>
       <p id="shareholders-status" class="note" role="status" aria-live="polite"></p>
       <div id="shareholders-chart" class="chip-chart" role="img" aria-label="股东人数与股价双轴趋势图"></div>
+      <div class="chip-table-wrap" role="region" aria-label="股东人数按日期横向排列的历史数据表" tabindex="0">
+        <table class="chip-data-table">
+          <thead id="shareholders-table-head"><tr><th scope="col">指标 / 日期</th></tr></thead>
+          <tbody id="shareholders-table-body"><tr><td class="chip-table-label">股东人数</td><td class="chip-table-empty">等待股东人数数据…</td></tr></tbody>
+        </table>
+      </div>
       <p class="note">横轴为统计截止日，公告日单独保留。总人数不一定仅含 A 股股东；不同来源/口径分别展示，未知口径不与总人数拼接。价格取统计日或此前最近交易日，相隔超过 15 天留空。前复权使用当前调整后的历史价格，可能为负值。</p>
       <p id="shareholders-note" class="note"></p>
     </section>
@@ -456,9 +475,9 @@
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script src="/plotly.min.js"></script>
 <script src="/stock-picker.js"></script>
-<link rel="stylesheet" href="/ai-checklist.css?v=20261010-combined-product-table">
+<link rel="stylesheet" href="/ai-checklist.css?v=20261012-checklist-light">
 <script src="/business-judgment.js"></script>
-<script src="/ai-checklist.js?v=20261011-amount-yi-v11"></script>
+<script src="/ai-checklist.js?v=20261012-light-theme"></script>
 <link rel="stylesheet" href="/financial-statements.css?v=20261004-sidebar-tabs">
 <script src="/financial-statements.js?v=20261004-sidebar-tabs"></script>
 <link rel="stylesheet" href="/industry.css?v=20261010-period-nav">
@@ -1034,6 +1053,7 @@
       holderSeriesSelect.value = data.series.some(s => s.id === selected) ? selected : data.series[0].id;
       rows = data.series.find(s => s.id === holderSeriesSelect.value).rows;
     }
+    const allHolderRows = financing ? [] : rows;
     const adjustment = document.getElementById(section + '-adjustment').value || 'qfq';
     const priceName = adjustment === 'qfq' ? '前复权收盘价' : '不复权收盘价';
     if (!financing && shareholdersRange.value !== 'all') {
@@ -1041,6 +1061,63 @@
       cutoff.setFullYear(cutoff.getFullYear() - Number(shareholdersRange.value));
       const day = cutoff.getFullYear() + '-' + String(cutoff.getMonth()+1).padStart(2,'0') + '-' + String(cutoff.getDate()).padStart(2,'0');
       rows = rows.filter(row => row.date >= day);
+    }
+    if (!financing) {
+      const head = document.getElementById('shareholders-table-head');
+      const body = document.getElementById('shareholders-table-body');
+      head.replaceChildren(); body.replaceChildren();
+      const header = document.createElement('tr'), labelHead = document.createElement('th');
+      labelHead.scope = 'col'; labelHead.textContent = '指标 / 日期'; header.append(labelHead);
+      if (!rows.length) {
+        const dateHead = document.createElement('th'); dateHead.scope = 'col'; dateHead.textContent = '—'; header.append(dateHead);
+        const tr = document.createElement('tr'), label = document.createElement('td'), empty = document.createElement('td');
+        label.className = 'chip-table-label'; label.textContent = '股东人数';
+        empty.colSpan = 1; empty.className = 'chip-table-empty';
+        empty.textContent = data.empty ? '数据源暂无股东人数记录。' : '暂无股东人数记录';
+        tr.append(label, empty); body.append(tr);
+      } else {
+        const ordered = [...allHolderRows].sort((a,b) => a.date.localeCompare(b.date));
+        const indexByDate = new Map(ordered.map((row,index) => [row.date,index]));
+        const displayRows = [...rows].sort((a,b) => b.date.localeCompare(a.date));
+        for (const row of displayRows) {
+          const dateHead = document.createElement('th'); dateHead.scope = 'col';
+          dateHead.textContent = row.date || '—'; header.append(dateHead);
+        }
+        head.append(header);
+        const addMetricRow = (labelText, valueForRow, classForRow) => {
+          const tr = document.createElement('tr'), label = document.createElement('td');
+          label.className = 'chip-table-label'; label.textContent = labelText; tr.append(label);
+          for (const row of displayRows) {
+            const cell = document.createElement('td');
+            const result = valueForRow(row);
+            if (result instanceof Node) cell.append(result);
+            else cell.textContent = result;
+            const cellClass = classForRow?.(row);
+            if (cellClass) cell.classList.add(cellClass);
+            tr.append(cell);
+          }
+          body.append(tr);
+        };
+        addMetricRow('股东人数', row => row.holders == null ? '—' : Number(row.holders).toLocaleString('zh-CN'));
+        addMetricRow('较上期变化', row => {
+          const currentIndex = indexByDate.get(row.date);
+          const previous = currentIndex > 0 ? ordered[currentIndex - 1]?.holders : null;
+          const current = Number(row.holders);
+          return row.holders == null || !Number.isFinite(current) ? '—（数据缺失）'
+            : previous == null ? '—（缺少上期）'
+              : !Number.isFinite(Number(previous)) || Number(previous) <= 0 ? '—（基期无效）'
+                : ((current / Number(previous) - 1) * 100).toFixed(2) + '%';
+        }, row => {
+          const currentIndex = indexByDate.get(row.date), previous = currentIndex > 0 ? ordered[currentIndex - 1]?.holders : null;
+          if (row.holders == null || previous == null || Number(previous) <= 0) return '';
+          return Number(row.holders) > Number(previous) ? 'chip-positive' : Number(row.holders) < Number(previous) ? 'chip-negative' : '';
+        });
+        addMetricRow('前复权', row => {
+          const qfq = row.qfq_close == null ? null : Number(row.qfq_close);
+          return qfq == null || !Number.isFinite(qfq) ? '—' : qfq.toFixed(2);
+        });
+      }
+      if (!rows.length) head.append(header);
     }
     const metric = financing ? financingMetricSelect.value : 'holders';
     const name = financing ? financingNames[metric] + (weekly && metric === 'net_buy' ? '（周合计）' : '') : '股东人数';

@@ -212,7 +212,7 @@ window.initAIChecklist = function(state) {
   const settingsEntry = button('AI 设置', openSettings);
   actions.append(entry, researchEntry, settingsEntry); document.querySelector('.context').append(actions);
   window.initBusinessJudgment?.(state, actions, openSettings);
-  const dialog = el('dialog', undefined, 'ai-dialog'); dialog.setAttribute('aria-label','投资 checklist');
+  const dialog = el('dialog', undefined, 'ai-dialog checklist-dialog'); dialog.setAttribute('aria-label','投资 checklist');
   const settings = el('dialog', undefined, 'ai-dialog'); settings.setAttribute('aria-label','AI 设置');
   const research = el('dialog', undefined, 'ai-dialog'); research.setAttribute('aria-label','AI 研报');
   document.body.append(dialog, settings, research);

@@ -92,3 +92,26 @@
 .checklist-table .checklist-product-table th:not(:first-child),.checklist-table .checklist-product-table td { text-align:right; }
 
 .business-dialog .business-position-company { background:#dcebd5; font-weight:600; }
+
+.checklist-dialog { background:#eef6e9; color:#202124; border-left:1px solid #d9dee5; font-size:16px; line-height:1.8; color-scheme:light; padding:28px 32px; }
+.checklist-dialog header { background:#eef6e9; color:#202124; }
+.checklist-dialog h3 { font-size:19px; margin:30px 0 14px; }
+.checklist-dialog .ai-button { color:#235bb5; border-color:#cdd5df; background:#eef6e9; }
+.checklist-dialog .ai-button:hover { background:#e4efdf; }
+.checklist-dialog .ai-meta,.checklist-dialog pre { color:#626b77; }
+.checklist-dialog .ai-message { color:#916118; }
+.checklist-dialog a,.checklist-dialog summary { color:#245bb4; }
+.checklist-dialog details { border-color:#e0e4ea; background:#e9f2e4; }
+.checklist-dialog .ai-summary,.checklist-dialog .ai-dimension { border-color:#e0e4ea; background:#e9f2e4; }
+.checklist-dialog .checklist-report-cache { border-color:#e0e4ea; }
+.checklist-dialog .ai-fact-table th,.checklist-dialog .ai-fact-table td { border-color:#e0e4ea; color:#202124; }
+.checklist-dialog .ai-fact-table th,.checklist-dialog .checklist-product-table caption { color:#626b77; }
+.checklist-dialog select { background:#fff; color:#202124; border-color:#cdd5df; }
+.checklist-dialog .ai-badge { color:#3f5666; border-color:#9aa9b8; }
+.checklist-dialog .ai-badge[data-verdict="买入候选"] { border-color:#398e80; color:#28715f; }
+.checklist-dialog .ai-badge[data-verdict="谨慎"] { border-color:#a27d40; color:#916118; }
+.checklist-dialog .ai-badge[data-verdict="回避"] { border-color:#a4656a; color:#9a4248; }
+.checklist-dialog .ai-badge[data-verdict="信息不足"] { color:#626b77; }
+.checklist-dialog .checklist-table th,.checklist-dialog .checklist-table td { border-color:#e8eaed; }
+.checklist-dialog .checklist-product-table thead th { color:#626b77; background:#e4efdf; }
+.checklist-dialog .checklist-table .checklist-product-table th,.checklist-dialog .checklist-table .checklist-product-table td { border-color:#e0e4ea; }
