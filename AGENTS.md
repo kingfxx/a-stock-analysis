@@ -39,3 +39,11 @@
 - 新资料放入 `data/verification/` 对应目录，不散放根目录：`samples/` 来源响应、`reports/` 验收／刷新报告、`audits/` 财报核对、`tools/` 维护工具、`logs/` 后台日志。整理后同步文档及脚本路径。
 - 「企业经营趋势」指标变更同步维护 [指标说明](./docs/enterprise-trend-metrics.md) 的含义、公式、实际来源表／字段、周期、单位、缺值与限制；只描述已实现行为，README 仅留概览和入口。
 - 研报技能维护入口为 `.agents/skills/a-share-value-research/`，随 Git 管理，不修改用户目录旧副本；配置使用项目相对路径。迁移和新电脑准备要求见财务与财报规则。
+
+## Agent 协作规范
+
+- 计划目录：每个开发任务在 plans/YYYYMMDD_计划名称/ 下建立独立文件夹，包含 PLAN.md、DECISIONS.md、PROGRESS.md。
+- Sol（规划）：创建计划目录，编写 PLAN.md 和 DECISIONS.md。
+- Luna（执行）：读取对应计划的三个文件，按计划开发测试，持续更新 PROGRESS.md。
+- Sol（审查）：读取对应计划的三个文件及 Git diff，审查实现结果，必要时更新计划和决策。
+- 协作原则：所有读写仅针对当前计划目录，不混用其他计划的状态

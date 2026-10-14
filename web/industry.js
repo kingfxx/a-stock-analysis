@@ -6,9 +6,9 @@
   const sourceLabel=v=>({'eastmoney:market_trade_snapshot':'东方财富原始快照','composite:historical-composite-v1':'历史多源合成','composite:historical-suspended-preclose-v1':'停牌参考价估值（已核验股本）','legacy:sw_cap_facts':'旧市值来源','bigquant:market_quarterly_prices':'BigQuant季度未复权价格'}[v]||'来源待核实');
   const pct=v=>v===null||v===undefined?'待补':`${v>=0?'+':''}${v.toFixed(2)}%`;
   const marketDisplay=series=>({mode:series.length>1?'lines+markers':'markers',
-    label:series.length===1?'总市值快照（仅1期）':'季度总市值（已覆盖）',
+    label:series.length===1?'行业市值汇总（仅1期）':'季度行业总市值（已覆盖）',
     note:series.length>1?`市值已有 ${series.length} 个季度点（${series[0].quarter}—${series.at(-1).quarter}），更早季度待补。`:
-      series.length===1?'市值仅有 1 个季度快照，图中为黄色点，尚不能形成趋势线；历史季度待补。':'尚无市值快照，图中只展示营收与归母利润；市值历史待补。'});
+      series.length===1?'市值仅有 1 个已发布季度汇总，图中为黄色点，尚不能形成趋势线；历史季度待补。':'尚无已发布市值汇总，图中只展示营收与归母利润；市值历史待补。'});
   window.industryMarketDisplay=marketDisplay;
   // Anchor to the latest available report: 10 years = 40 quarterly reports.
   const periodCutoff=(periods,range)=>{

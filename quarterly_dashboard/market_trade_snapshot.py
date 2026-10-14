@@ -280,6 +280,8 @@ def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress
     item=collect_day(db,operation,day,quarter=quarter,http=http,recheck=recheck,progress=progress,
                      universe_version=str(foundation['member_import_id']))
     freeze_roster(db,quarter,day)
+    from .industry_cap_summary import aggregate_quarter
+    aggregation=aggregate_quarter(db,quarter,run[0],operation)
     with db.connection() as conn:
         stocks=[r[0] for r in conn.execute('SELECT stock_code FROM sw_cap_quarter_members WHERE quarter=?',(quarter,))]
         found={r[0] for r in conn.execute('SELECT security_code FROM market_trade_snapshot WHERE trade_date=? AND is_latest=1 '
@@ -289,6 +291,7 @@ def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress
     return dict(import_id=latest,action='cap_quarter',target=quarter,scope_count=len(stocks),requested_count=len(stocks),
                 returned_count=len(set(stocks)&found),membership_check=membership_check,failures=failures,
                 network_requests=http.requests,files=[],snapshot=item,legacy_updated=False,
+                aggregation=aggregation,
                 quarter_prices=dict(status='complete' if not failures else 'partial',source=DATASET,
                                     message='未复权股价随东财全字段快照同步保存'))
 
@@ -340,8 +343,15 @@ def run(db,start,end,report,*,recheck=False):
     def progress(message):
         print(message,flush=True)
         with db.connection(write=True) as conn:
+            row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=? AND status=\'running\'',(run_id,)).fetchone()
+            try:
+                saved=json.loads(row['result_json'] or '{}') if row else {}
+            except json.JSONDecodeError:
+                saved={}
+            payload={**saved,'message':message,'completed_quarters':len(result['periods']),
+                     'total_quarters':len(selected),'report':str(report)}
             conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=? AND status=\'running\'',
-                         (encoded(dict(message=message,completed_quarters=len(result['periods']),total_quarters=len(selected),report=str(report))),run_id))
+                         (encoded(payload),run_id))
     http=RequestCollector(db,cancelled=cancelled,progress=progress)
     try:
         previous=json.loads(Path(report).read_text(encoding='utf-8')) if Path(report).exists() else {}
@@ -355,6 +365,9 @@ def run(db,start,end,report,*,recheck=False):
             http.check_cancelled();progress(f'季度 {len(result["periods"])+1}/{len(selected)} · {q}')
             item=collect_day(db,operation,dates[q],quarter=q,http=http,recheck=recheck,progress=progress)
             freeze_roster(db,q,dates[q])
+            from .industry_cap_summary import aggregate_quarter
+            aggregation=aggregate_quarter(db,q,run_id,operation)
+            result.setdefault('aggregation_results',{})[q]=aggregation
             result['periods'].append(item);result['requests']=http.report()
             atomic_write(report,encoded(result).encode())
         progress('正在复核全部原文双哈希及来源/事实双向一致性')
@@ -369,6 +382,13 @@ def run(db,start,end,report,*,recheck=False):
         result['finished_at']=utc_now();result['requests']=http.report()
         atomic_write(report,encoded(result).encode())
         with db.connection(write=True) as conn:
+            prior=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+            try:
+                saved=json.loads(prior['result_json'] or '{}') if prior else {}
+            except json.JSONDecodeError:
+                saved={}
+            result['aggregation_results']={**(saved.get('aggregation_results') or {}),
+                                           **result.get('aggregation_results',{})}
             conn.execute('UPDATE sw_update_runs SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
                          (result['status'],result['finished_at'],encoded(result),result.get('error'),run_id))
     return result

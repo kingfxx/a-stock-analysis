@@ -240,8 +240,16 @@ def publish_reference(db,*,rehearsal=False):
                 summary=dict(**item,**stats,batch_id=batch,source_id=sid,price_method='suspended_pre_close',price_dates=price_dates)
                 result['periods'].append(summary)
                 c.execute("UPDATE collection_batches SET status='complete',coverage_status='partial',finished_at=?,result_json=? WHERE id=?",(utc_now(),encoded(summary),batch))
-            result.update(status='complete',finished_at=utc_now())
-            c.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",(result['finished_at'],encoded(result),rid))
+            result.update(status='aggregating')
+            c.execute("UPDATE sw_update_runs SET result_json=? WHERE id=?",(encoded(result),rid))
+        from .industry_cap_summary import aggregate_quarter
+        for item,_,_,_ in sources:
+            aggregation=aggregate_quarter(db,item['quarter'],rid,f'sw_update_runs:{rid}')
+            result.setdefault('aggregation_results',{})[item['quarter']]=aggregation
+        result.update(status='complete',finished_at=utc_now())
+        with db.connection(write=True) as c:
+            c.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
+                      (result['finished_at'],encoded(result),rid))
         if protected_fingerprints(db)!=before or original_series_hash(db)!=original_hash:raise ValueError('原有业务或原合成系列保护核对失败')
         result['protected_tables']=len(before);result['original_series_unchanged']=True
         with db.connection() as c:

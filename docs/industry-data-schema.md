@@ -30,7 +30,7 @@ v30读取同表独立 `historical-composite-v1` 系列；市值／价格逐字�
 | `sw_industries` / `sw_memberships` / `sw_membership_history` | 申万层级、沪深成员版本及分类变更 | 申万官方分类文件、沪深交易所名单 |
 | `sw_imports` / `sw_membership_checks` / `sw_listing_sources` | 名单/市值导入审计、名单检查及上市日期证据 | 本地任务与对应来源 |
 | `sw_cap_facts` / `sw_cap_provenance` | 公司总市值及共享证据 | 历史记录主要为东财 `RPT_VALUEANALYSIS_DET`，也含百度/腾讯及计算值；新快照采集停写旧表 |
-| `sw_cap_quarter_rosters` / `sw_cap_quarter_members` / `sw_industry_cap_quarters` | 冻结季度成员及三级行业市值汇总 | 本地冻结名单及市值聚合 |
+| `sw_cap_quarter_rosters` / `sw_cap_quarter_members` / `sw_industry_cap_quarters` | 冻结季度成员及快照生成的三级行业市值审计汇总 | 本地冻结名单、公司快照聚合及版本追溯 |
 | `sw_update_runs` | 财务、市值、历史补采任务状态 | 本地任务程序 |
 | `sw_financial_facts` / `sw_financial_provenance` | 旧版轻量财务历史及共享证据 | 旧采集/回填工具；日常按钮已停写 |
 
@@ -355,7 +355,7 @@ v30读取同表独立 `historical-composite-v1` 系列；市值／价格逐字�
 
 ### `sw_imports`
 
-名单及市值导入审计版本。`content_hash` 对应导入内容摘要；`member_import_id` 允许多个导入复用同一个名单。新四表财务批次不会自动成为 sw_imports 版本。
+名单、旧市值及行业快照汇总审计版本。`content_hash` 对应导入内容摘要；`member_import_id` 指向当前名单版本，汇总版本保持该指针不变。快照汇总通过 `source_manifest_json.scope=market_snapshot_industry_cap_aggregation` 标识，季度当前版本映射记录在 `sw_update_runs.result_json.aggregation_results`。新四表财务批次不会自动成为 sw_imports 版本。
 
 | 字段 | 类型 | 含义/来源 | 可空/键 |
 | --- | --- | --- | --- |
@@ -516,11 +516,11 @@ v30读取同表独立 `historical-composite-v1` 系列；市值／价格逐字�
 
 ### `sw_industry_cap_quarters`
 
-只持久化三级行业市值，一级/二级读取时汇总。known_count≤expected_count；total_cap 非空要求 known_count=expected_count。已知市值部分和不冒充完整行业总市值。
+只持久化三级行业市值，一级/二级从当前审计版本的三级行向上汇总。快照发布后按冻结季度成员计算并写入；同一季度同一输入签名复用原版本，变更则追加版本。known_count≤expected_count；total_cap 非空要求 known_count=expected_count。已知市值部分和不冒充完整行业总市值。
 
 | 字段 | 类型 | 含义/来源 | 可空/键 |
 | --- | --- | --- | --- |
-| `import_id` | INTEGER | 引用 sw_imports.id 的导入版本；成员表中是名单所属版本 | 主键序号 1 |
+| `import_id` | INTEGER | 行业汇总审计版本，引用 sw_imports.id；不是名单版本 ID | 主键序号 1 |
 | `industry_code` | TEXT | 申万行业代码；通常三级；按表约束可为空 | 主键序号 2 |
 | `quarter` | TEXT | 季度键，格式 YYYYQn，例如 2026Q2；不是日期文本 | 主键序号 3 |
 | `trade_date` | TEXT | 市值实际观察交易日 | 非空 |
@@ -605,7 +605,8 @@ v30读取同表独立 `historical-composite-v1` 系列；市值／价格逐字�
 | 公司毛利率 | (operating_revenue − operating_cost) / operating_revenue × 100% | 缺营业收入时，仅非金融公司允许用同口径营业总收入回退；金融不直接套用 |
 | 公司 ROE | View.weighted_roe → WEIGHTAVG_ROE | 来源累计加权值，不按单季/TTM差分，也不采用净利润/期末净资产估算 |
 | 行业收入、利润、毛利率及同比 | Python 在统一成员、可比公司及覆盖率规则下计算 | 不是所有公司比例简单平均；原始表不另存 TTM、同比副本 |
-| 公司总市值及行业市值 | market_cap_latest（新快照优先、旧同日回退）与冻结季度成员 | 与财务报告期、分类版本分别追踪；不能从 sw_financial_facts 取市值 |
+| 公司总市值 | market_trade_snapshot（同日定义优先级）及冻结季度成员 | PE/PB与公司行读取公司事实；不能从 sw_financial_facts 取市值 |
+| 行业总市值及覆盖率 | sw_industry_cap_quarters | 有新来源审计版本时优先读取；其他历史期沿用原有效汇总，不在页面读取时重算 |
 | 上市日期 | sw_memberships.listing_date → sw_listing_sources | 不是业绩指标接口公告日 |
 
 累计转单季需同年上一季度累计值（第一季度直接取累计）；非年末 TTM 通常为本期累计 + 上年全年 − 上年同期累计。同比须有相同计算口径的上年同期。缺依赖期则留空，不以零或旧期值补齐。资产负债表余额不做流量差分或 TTM 累加，每股指标、加权 ROE 也不能直接套用金额加减。
@@ -675,9 +676,9 @@ WHERE m.import_id = (
 
 结构 21 的全市场季度末未复权价格独立存储于 `market_quarterly_prices`，共享来源为 `market_price_sources`，批次为 `market_price_batches`；不绑定用户关注列表。字段、时间及采集流程见[专项来源说明](data-sources/market-quarterly-prices.md)。
 
-行业内公司表新增可排序的 PE（TTM）、PB，不展示估值同比。PE 固定为所选财报季度对应的总市值（元）÷ TTM 归母净利润（元），利润来自 `market_financial_industry.parent_profit`，按本期累计＋上年全年－上年同期累计计算，年末直接使用全年值；不随页面累计／单季度切换改变。市值按原季度名单的精确交易日，从 `market_cap_latest` 读取：优先 `market_trade_snapshot.total_market_cap`，缺少有效新值时回退旧 `sw_cap_facts` 同日最新有效版本。API的 `cap_source` 区分新快照和旧来源。利润非正、市值非正或任一必要输入缺失时显示 `—`。
+行业内公司表新增可排序的 PE（TTM）、PB，不展示估值同比。PE 固定为所选财报季度对应的总市值（元）÷ TTM 归母净利润（元），利润来自 `market_financial_industry.parent_profit`，按本期累计＋上年全年－上年同期累计计算，年末直接使用全年值；不随页面累计／单季度切换改变。公司市值按原季度名单的精确交易日，从 `market_trade_snapshot.total_market_cap` 读取。行业总市值由每季度冻结名单和已发布快照生成，保存至 `sw_industry_cap_quarters`，部分覆盖仅报告已知金额而完整总额留空。利润非正、市值非正或任一必要输入缺失时显示 `—`。
 
-PB = 同日 `market_trade_snapshot.close_price` 优先、缺失时使用 `market_quarterly_prices.close` 的季末未复权收盘价（元/股）÷ 同报告期最新 `market_financial_performance.bps`（元/股），结果为倍。BPS 统一通过结构 22 的 `market_financial_industry.bps` 读取，不按季度差分、不相加、不随页面周期模式改变；最新财务修订使缓存失效。价格按股票和自然季度末精确匹配，若已有市值季末交易日还须一致。价格缺失、BPS 缺失或非正时显示 `—`，不回退其他报告期、腾讯／百度现成 PB 或含少数股东权益的总权益；无市值但具备有效季末股价及同报告期 BPS 时仍可计算 PB。查看行业表不会自动联网补采。API 返回 `bps` 和 `pb_trade_date` 便于复核，表格提示显示日期与 BPS。两项均为历史估值参考，使用该报告期最新财务修订，不能作为当时已披露口径的无偏回测。
+PB = 同日 `market_trade_snapshot.close_price` 的季末未复权收盘价（元/股）÷ 同报告期最新 `market_financial_performance.bps`（元/股），结果为倍。BPS 统一通过结构 22 的 `market_financial_industry.bps` 读取，不按季度差分、不相加、不随页面周期模式改变；最新财务修订使缓存失效。价格按股票和自然季度末精确匹配，若已有市值季末交易日还须一致。价格缺失、BPS 缺失或非正时显示 `—`，不回退其他报告期、腾讯／百度现成 PB 或含少数股东权益的总权益；无市值但具备有效季末股价及同报告期 BPS 时仍可计算 PB。查看行业表不会自动联网补采。API 返回 `bps` 和 `pb_trade_date` 便于复核，表格提示显示日期与 BPS。两项均为历史估值参考，使用该报告期最新财务修订，不能作为当时已披露口径的无偏回测。
 
 公司表金额单位统一在表下注明亿元，金额最多两位小数；同比、毛利率及 ROE 显示一位小数，PE/PB 显示两位小数（倍）。显示精度不改变计算及排序精度。桌面采用紧凑固定列布局，小屏保留横向滚动。
 
@@ -756,7 +757,7 @@ PB = 同日 `market_trade_snapshot.close_price` 优先、缺失时使用 `market
 
 2026-10-14执行2015Q1—2026Q3的47期核验。2018Q1—2026Q3的35期写入158,632条；2015—2017的12期全部明确返回空，覆盖partial，无法从此接口提供2016同比所需2015基期。首个可用交易日为2018-03-30，末日为2026-09-30；这是本次目标日采样结果，不等于源接口所有日频的最早日期。全47期原文双哈希、22字段回放及外键/完整性检查通过。
 
-`market_cap_latest` 不存储副本，列为stock_code/trade_date/total_cap/source：新快照取最新em-valueanalysis-v1的沪深有效总市值，旧表只在缺少新有效市值时取同日最新非拒绝导入。行业按冻结季度真实交易日匹配，API给出cap_source；未来日频加入不改变季度日期选择。价格优先新close_price，缺失则回退旧BigQuant季度价格；不复制到旧价格/市值表，不修改个股日线/复权版本。新日常任务不再另调BigQuant补价。旧混合industry_bulk.collect入口停用，旧解析/离线导入保留。
+`market_cap_latest` 不存储副本，列为stock_code/trade_date/total_cap/source：新快照取最新em-valueanalysis-v1的沪深有效总市值，旧表只在缺少新有效市值时取同日最新非拒绝导入。行业公司行按冻结季度真实交易日匹配，API给出公司 cap_source；行业总额由冻结名单生成后存于 `sw_industry_cap_quarters`，页面不执行汇总写入。未来日频加入不改变季度日期选择。价格使用新close_price，缺失保持空值；不复制到旧价格/市值表，不修改个股日线/复权版本。新日常任务不再另调BigQuant补价。旧混合industry_bulk.collect入口停用，旧解析/离线导入保留。
 
 新表维护分类为行业数据，真实时间用obtained_at/updated_at；空表/缺时间显示未记录。View未存时间，维护页显示未记录，时间须查底层来源。公共来源表分类为运行与配置，反映跨数据域使用。旧财务/价格控制层尚未统一迁移，不能声称所有旧请求已获得公共调度保护。
 

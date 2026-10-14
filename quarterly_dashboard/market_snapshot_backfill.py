@@ -241,7 +241,12 @@ def protected_fingerprints(db):
         tables=[r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
         for table in sorted(tables):
             if table in {'collection_batches','collection_sources','collection_provider_state','sw_update_runs','schema_migrations'}:continue
-            where=" WHERE definition_version='em-valueanalysis-v1'" if table=='market_trade_snapshot' else ''
+            if table=='sw_imports':
+                where=" WHERE coalesce(json_extract(source_manifest_json,'$.scope'),'')!='market_snapshot_industry_cap_aggregation'"
+            elif table=='sw_industry_cap_quarters':
+                where=" WHERE import_id NOT IN (SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.scope')='market_snapshot_industry_cap_aggregation')"
+            else:
+                where=" WHERE definition_version='em-valueanalysis-v1'" if table=='market_trade_snapshot' else ''
             h=hashlib.sha256();count=0
             for row in c.execute(f'SELECT * FROM "{table}"'+where+' ORDER BY rowid'):
                 h.update(encoded([{'bytes_hex':v.hex()} if isinstance(v,bytes) else v for v in row]).encode());h.update(b'\n');count+=1
@@ -284,8 +289,16 @@ def publish_cache(db,folder=RUN,*,rehearsal=False):
                 summary=dict(**item,**stats,batch_id=batch,source_id=sid)
                 result['periods'].append(summary)
                 c.execute("UPDATE collection_batches SET status='complete',coverage_status='partial',finished_at=?,result_json=? WHERE id=?",(utc_now(),encoded(summary),batch))
-            result.update(status='complete',finished_at=utc_now())
-            c.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",(result['finished_at'],encoded(result),rid))
+            result.update(status='aggregating')
+            c.execute("UPDATE sw_update_runs SET result_json=? WHERE id=?",(encoded(result),rid))
+        from .industry_cap_summary import aggregate_quarter
+        for item,_,_,_ in sources:
+            aggregation=aggregate_quarter(db,item['quarter'],rid,operation)
+            result.setdefault('aggregation_results',{})[item['quarter']]=aggregation
+        result.update(status='complete',finished_at=utc_now())
+        with db.connection(write=True) as c:
+            c.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
+                      (result['finished_at'],encoded(result),rid))
         after=protected_fingerprints(db)
         if before!=after:raise ValueError('非目标业务表保护校验失败')
         result['protected_table_count']=len(before);result['protected_fingerprints']=after
@@ -306,7 +319,15 @@ def publish_cache(db,folder=RUN,*,rehearsal=False):
         for _,_,batch,_ in sources:
             with db.connection() as c:state=c.execute('SELECT status FROM collection_batches WHERE id=?',(batch,)).fetchone()[0]
             if state=='running':finish_batch(db,batch,'failed',error=exc)
-        with db.connection(write=True) as c:c.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE id=?",(utc_now(),str(exc),rid))
+        with db.connection(write=True) as c:
+            saved=c.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(rid,)).fetchone()
+            try:
+                prior=json.loads(saved['result_json'] or '{}') if saved else {}
+            except json.JSONDecodeError:
+                prior={}
+            result['aggregation_results']={**(prior.get('aggregation_results') or {}),**result.get('aggregation_results',{})}
+            c.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,result_json=?,error=? WHERE id=?",
+                      (utc_now(),encoded(result),str(exc),rid))
         save(REPORT/('rehearsal.json' if rehearsal else 'publication.json'),result)
         raise
 

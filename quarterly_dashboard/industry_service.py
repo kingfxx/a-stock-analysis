@@ -487,12 +487,19 @@ class IndustryService:
 
     def _load_cached(self):
         with self.db.connection() as conn:
-            latest = conn.execute('SELECT * FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()
+            pointer = conn.execute('SELECT member_import_id FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()
+            latest = conn.execute('SELECT * FROM sw_imports WHERE id=?',
+                                  (pointer['member_import_id'],)).fetchone() if pointer else None
             if latest is None:
                 return None
             publication = conn.execute("SELECT max(id),count(*),max(finished_at) FROM market_financial_batches WHERE status='complete'").fetchone()
             snapshots=conn.execute("SELECT max(id),count(*),max(finished_at) FROM collection_batches WHERE dataset='market.trade_snapshot' AND status='complete'").fetchone()
-            key = (latest['id'],*publication,*snapshots)
+            summary_rows=conn.execute('SELECT max(import_id),count(*) FROM sw_industry_cap_quarters').fetchone()
+            from .industry_cap_summary import current_aggregation_versions
+            aggregation_versions=current_aggregation_versions(conn)
+            aggregation_key=tuple(sorted((quarter,item['import_id'],item['input_signature'])
+                                         for quarter,item in aggregation_versions.items()))
+            key = (latest['id'],*publication,*snapshots,*summary_rows,aggregation_key)
             with self._lock:
                 cached = self._cache
             if cached and cached[0] == key:
@@ -512,23 +519,28 @@ class IndustryService:
                 "ON m.stock_code=f.security_code AND m.import_id=? "
                 "WHERE f.is_latest=1 AND f.exchange IN ('sh','sz') ORDER BY f.report_date",
                 (latest['member_import_id'],))]
-            # Aggregate quarter rosters from the canonical market snapshot table.
-            caps = [dict(r) for r in conn.execute(
-                "WITH ranked AS (SELECT security_code,trade_date,total_market_cap,"
-                "ROW_NUMBER() OVER (PARTITION BY security_code,trade_date ORDER BY "
-                "CASE definition_version WHEN 'em-valueanalysis-v1' THEN 3 "
-                "WHEN 'historical-suspended-preclose-v1' THEN 2 ELSE 1 END DESC) AS rn "
-                "FROM market_trade_snapshot WHERE is_latest=1 AND exchange IN ('sh','sz') "
-                "AND definition_version IN ('em-valueanalysis-v1','historical-composite-v1','historical-suspended-preclose-v1') "
-                "AND total_market_cap IS NOT NULL) "
-                "SELECT r.member_import_id AS import_id,m.industry_code,r.quarter,"
-                "r.target_date AS trade_date,r.target_date,r.composition,count(*) AS expected_count,"
-                "count(c.total_market_cap) AS known_count,sum(c.total_market_cap) AS known_cap "
-                "FROM sw_cap_quarter_members m JOIN sw_cap_quarter_rosters r ON r.quarter=m.quarter "
-                "LEFT JOIN ranked c ON c.security_code=m.stock_code AND c.trade_date=r.target_date AND c.rn=1 "
-                "GROUP BY r.quarter,m.industry_code ORDER BY r.quarter,m.industry_code")]
+            caps=[]
+            for quarter,item in aggregation_versions.items():
+                caps.extend(dict(row) for row in conn.execute(
+                    'SELECT * FROM sw_industry_cap_quarters WHERE import_id=? AND quarter=?',
+                    (item['import_id'],quarter)))
+            legacy_quarters=tuple(q for q in aggregation_versions)
+            legacy_query=(
+                "SELECT c.* FROM sw_industry_cap_quarters c JOIN sw_imports i ON i.id=c.import_id "
+                "WHERE coalesce(json_extract(i.source_manifest_json,'$.scope'),'')!='market_snapshot_industry_cap_aggregation' "
+                "AND coalesce(json_extract(i.source_manifest_json,'$.cap_status'),'')!='rejected' "
+                "AND i.status='complete' AND c.import_id=(SELECT max(c2.import_id) "
+                "FROM sw_industry_cap_quarters c2 JOIN sw_imports i2 ON i2.id=c2.import_id "
+                "WHERE c2.quarter=c.quarter AND i2.status='complete' "
+                "AND coalesce(json_extract(i2.source_manifest_json,'$.scope'),'')!='market_snapshot_industry_cap_aggregation' "
+                "AND coalesce(json_extract(i2.source_manifest_json,'$.cap_status'),'')!='rejected')")
+            if legacy_quarters:
+                legacy_query += f" AND c.quarter NOT IN ({','.join('?' for _ in legacy_quarters)})"
+            legacy_query += ' ORDER BY c.quarter,c.industry_code'
+            caps.extend(dict(row) for row in conn.execute(legacy_query,legacy_quarters))
             data = {'import':dict(latest),'catalog':catalog,'members':members,'periods':periods,
-                    'caps':caps,'token':key,'nonfinancial':nonfinancial_stocks,
+                    'caps':caps,'aggregation_versions':aggregation_versions,
+                    'token':key,'nonfinancial':nonfinancial_stocks,
                     'financial_times':{r[0]:r[1] for r in conn.execute(
                         "SELECT report_date,max(finished_at) FROM market_financial_batches WHERE status='complete' GROUP BY report_date")},
                     'membership_obtained_at':conn.execute('SELECT obtained_at FROM sw_imports WHERE id=?',
@@ -537,7 +549,7 @@ class IndustryService:
             self._cache = (key,data)
         return data
 
-    def market_history(self, industry, catalog):
+    def market_history(self, industry, catalog, summaries=None):
         belongs = {}
         for leaf in catalog:
             node = leaf
@@ -566,6 +578,16 @@ class IndustryService:
                     leaves)
                 for r in rows:
                     values[r['quarter']][r['stock_code']] = r['total_cap']
+        summaries=summaries or []
+        summary_by_quarter={}
+        for row in summaries:
+            if row['industry_code'] not in leaves:
+                continue
+            item=summary_by_quarter.setdefault(row['quarter'],{'known_cap':0,'known_count':0,'expected_count':0,
+                                                              'target_date':row['target_date'],'composition':row['composition']})
+            item['known_cap']+=row['known_cap'] or 0
+            item['known_count']+=row['known_count']
+            item['expected_count']+=row['expected_count']
         result = []
         for quarter, current in values.items():
             prior = f"{int(quarter[:4])-1}Q{quarter[-1]}"
@@ -573,8 +595,14 @@ class IndustryService:
             matched = current.keys() & baseline.keys()
             before = sum(baseline[s] for s in matched) if matched else None
             after = sum(current[s] for s in matched) if matched else None
+            summary=summary_by_quarter.get(quarter,{})
+            known_count=summary.get('known_count',0)
+            expected_count=summary.get('expected_count')
+            known_cap=summary.get('known_cap') if summary else None
             result.append({'quarter':quarter,'trade_date':dates[quarter],
-                'known_cap':sum(current.values()) if current else None,'known_count':len(current),
+                'known_cap':known_cap,'known_count':known_count,'expected_count':expected_count,
+                'coverage':known_count/expected_count if expected_count else None,
+                'total_cap':known_cap if expected_count and known_count==expected_count else None,
                 'prior_quarter':prior,'prior_trade_date':dates.get(prior), 'matched_count':len(matched),
                 'matched_current':after,'matched_baseline':before,
                 'yoy':(after/before-1)*100 if before is not None and before>0 else None})
@@ -618,7 +646,7 @@ class IndustryService:
                             'cap_trade_date':dates.get(quarter),'cap_source':sources[quarter].get(stock)}
         return result
 
-    def ranking_market_values(self, period, catalog):
+    def ranking_market_values(self, period, catalog, summaries=None):
         quarter = f"{period[:4]}Q{(int(period[5:7])-1)//3+1}"
         prior = f"{int(period[:4])-1}Q{quarter[-1]}"
         values = {q:{code:{} for code in catalog} for q in (quarter,prior)}
@@ -640,13 +668,27 @@ class IndustryService:
                 while node:
                     values[row['quarter']][node['code']][row['stock_code']] = row['total_cap']
                     node = catalog.get(node['parent_code'])
+        summary_parts={}
+        for row in summaries or []:
+            if row['quarter'] not in (quarter,prior):
+                continue
+            node=catalog.get(row['industry_code'])
+            while node:
+                key=(row['quarter'],node['code'])
+                part=summary_parts.setdefault(key,{'known_cap':0,'known_count':0,'expected_count':0})
+                part['known_cap']+=row['known_cap'] or 0
+                part['known_count']+=row['known_count']
+                part['expected_count']+=row['expected_count']
+                node=catalog.get(node['parent_code'])
+        summary_totals={key:part['known_cap'] for key,part in summary_parts.items()
+                        if part['expected_count'] and part['known_count']==part['expected_count']}
         result = {}
         for code in catalog:
             current, baseline = values[quarter][code], values[prior][code]
             matched = current.keys() & baseline.keys()
             before = sum(baseline[s] for s in matched) if matched else None
             after = sum(current[s] for s in matched) if matched else None
-            result[code] = {'total_cap':sum(current.values()) if current else None,
+            result[code] = {'total_cap':summary_totals.get((quarter,code)),
                             'cap_yoy':(after/before-1)*100 if before is not None and before>0 else None}
         return result
 
@@ -685,7 +727,7 @@ class IndustryService:
         facts = financial_window(period) if period else {}
         ranking = []
         if period:
-            ranking_caps = self.ranking_market_values(period,bycode)
+            ranking_caps = self.ranking_market_values(period,bycode,data['caps'])
             for r in data['catalog']:
                 if r['level'] == level and (not parent or r['parent_code'] == parent):
                     ranking.append({**r,**aggregate(groups[r['code']],facts,period,mode),**ranking_caps[r['code']]})
@@ -732,7 +774,7 @@ class IndustryService:
             r['provisional'] = r['quarter'] == f"{today[:4]}Q{(int(today[5:7])-1)//3+1}"
             market_series[r['quarter']]=r
         current_stock = next((m for m in data['members'] if m['stock_code']==code),None)
-        market_history = self.market_history(selected,bycode) if selected else []
+        market_history = self.market_history(selected,bycode,data['caps']) if selected else []
         selected_quarter = f"{period[:4]}Q{(int(period[5:7])-1)//3+1}" if period else None
         company_caps = self.company_market_values(groups.get(selected,[]),period)
         valuation_facts = reader.window(data['token'],data['import']['member_import_id'],
