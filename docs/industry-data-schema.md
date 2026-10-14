@@ -36,7 +36,7 @@ v30读取同表独立 `historical-composite-v1` 系列；市值／价格逐字�
 
 四表采集包括全 A 股（沪、深、北），当前行业展示按沪深申万名单筛选。`columns=ALL` 指摘要接口的全部返回列，不代表正式财报全部明细。不同接口可以缺少不同公司，不保证四表公司逐一齐全。
 
-关系：财务行 → `source_id` → 分页来源 → `batch_id` → 采集批次；行业 View → `sw_memberships` 按选定成员版本连接；市值独立通过季度冻结成员及来源引用读取。公司身份使用 `(security_code, exchange)`，没有外键关联个股 `instruments`。
+关系：迁移前财务行 → `source_id` → 旧分页来源 → `batch_id` → 旧采集批次；公共财务行 → `collection_source_id` + `collection_batch_id` → 公共来源及批次；行业 View 保留两套独立引用列并按选定 `sw_memberships` 版本连接。公司身份使用 `(security_code, exchange)`，没有外键关联个股 `instruments`。
 
 ## 2. 四张财务表的共同规则
 
@@ -53,14 +53,16 @@ v30读取同表独立 `historical-composite-v1` 系列；市值／价格逐字�
 | `report_date` | TEXT | 从 REPORT_DATE/REPORTDATE 提取 YYYY-MM-DD | 非空 |
 | `version` | INTEGER | 同证券、交易所、报告期内的财务修订编号，从 1 开始 | 非空；>0 |
 | `is_latest` | INTEGER | 1 为当前最新修订，0 为旧修订；不代表最新报告期 | 非空；0/1 |
-| `batch_id` | INTEGER | 引用 market_financial_batches.id，本行最后发布批次 | 非空；外键 |
-| `source_id` | INTEGER | 引用 market_financial_sources.id，追溯本行当前来源分页 | 非空；外键 |
+| `batch_id` | INTEGER | 历史事实引用 market_financial_batches.id | 与 `source_id` 同时非空或同时为空；外键 |
+| `source_id` | INTEGER | 历史事实引用 market_financial_sources.id | 与 `batch_id` 同时非空或同时为空；外键 |
+| `collection_batch_id` | INTEGER | 公共来源事实引用 collection_batches.id | 与 `collection_source_id` 同时非空或同时为空；与来源组合外键 |
+| `collection_source_id` | INTEGER | 公共事实引用 collection_sources.id | 与 `collection_batch_id` 组合外键确保来源隶属该批次 |
 | `content_hash` | TEXT | 规范化源字段 JSON 的 SHA256；不是原始文件哈希 | 非空 |
 | `definition_version` | TEXT | 本地解析/定义版本：三表 eastmoney-summary-v1；业绩 eastmoney-performance-all-v1 | 非空 |
 | `obtained_at` | TEXT | 插入该修订时来源页的采集时间；原地补全/核对不更新此列，当前页采集时间应看 source_id 对应来源 | 非空 |
 | `updated_at` | TEXT | 本地插入、补全或核对时间，UTC ISO 8601 | 非空 |
 
-每张财务表均有唯一约束 `(security_code, exchange, report_date, version)`；部分唯一索引限制 `is_latest=1` 时每公司每期仅一条，另有 `(report_date, is_latest)` 查询索引。源字段在 DDL 中均可空，证券身份与报告期由采集校验保证有效。
+每张财务表均有唯一约束 `(security_code, exchange, report_date, version)`；部分唯一索引限制 `is_latest=1` 时每公司每期仅一条，另有 `(report_date, is_latest)` 查询索引。源字段在 DDL 中均可空，证券身份与报告期由采集校验保证有效。Schema v32 通过表重建保留全部旧列及历史引用；新旧引用不得跨 ID 命名空间解析。
 
 ### 2.2 更新与历史版本
 

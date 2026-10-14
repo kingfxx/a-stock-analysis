@@ -1,18 +1,12 @@
 """Explicit single-period SSE/SZSE industry tasks, independent of stock refreshes."""
 from __future__ import annotations
 
-import hashlib
 import json
 import re
-import time
 from calendar import monthrange
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 from .industry_cap_history import parse_history
-from .industry_sources import EM, FINANCIAL_COLUMNS, attach_financial_source, financial_rows, parse_quotes
-from .network import create_data_session
-from .sources import TENCENT_URL, parse_daily_prices
-from .valuation import BAIDU_URL
 
 
 def quarter_end(quarter):
@@ -46,58 +40,8 @@ def validate_request(action, target, recheck=False, *, today=None):
         raise ValueError(f'仅允许最近{years}年范围内的报告期或季度')
 
 
-def _response(session, directory, url, params=None, *, binary=False):
-    response = session.get(url, params=params, timeout=20)
-    response.raise_for_status()
-    payload = response.content if binary else json.dumps(response.json(),ensure_ascii=False,sort_keys=True).encode('utf-8')
-    digest = hashlib.sha256(payload).hexdigest()
-    folder = directory/'responses'
-    folder.mkdir(parents=True,exist_ok=True)
-    path = folder/(digest+('.txt' if binary else '.json'))
-    if not path.exists():
-        path.write_bytes(payload)
-    provenance = {'url':url,'params':params,'file':str(path.resolve()),'sha256':digest}
-    return (payload if binary else json.loads(payload)),provenance
-
-
 def fetch_financial_period(directory, stocks, period):
-    if not stocks:
-        return []
-    stock_filter = ','.join('"'+s+'"' for s in stocks)
-    params = {'reportName':'RPT_DMSK_FN_INCOME',
-        'columns':FINANCIAL_COLUMNS,
-        'filter':f'(REPORT_DATE=\'{period}\')(SECURITY_CODE in ({stock_filter}))',
-        'sortColumns':'SECURITY_CODE','sortTypes':'1','pageSize':100,'pageNumber':1}
-    with create_data_session() as session:
-        payload,source = _response(session,directory,EM,params)
-    if not payload.get('success'):
-        raise ValueError('指定报告期财务接口失败')
-    result = payload.get('result') or {}
-    raw = result.get('data') or []
-    if result.get('pages',0)>1 or result.get('count',0)!=len(raw):
-        raise ValueError('指定报告期财务数据不完整')
-    rows = financial_rows(raw,date.today().isoformat())
-    if any(r['period']!=period or r['stock_code'] not in stocks for r in rows):
-        raise ValueError('来源返回了请求范围以外的财务')
-    if len({r['stock_code'] for r in rows})!=len(rows):
-        raise ValueError('指定报告期财务重复')
-    for row in rows:
-        attach_financial_source(row,source)
-    from .industry_performance import REPORT, COLUMNS, attach_performance
-    params={**params,'reportName':REPORT,'columns':COLUMNS,
-        'filter':f'(REPORTDATE=\'{period}\')(SECURITY_CODE in ({stock_filter}))'}
-    with create_data_session() as session:
-        payload,source=_response(session,directory,EM,params)
-    if not payload.get('success') and payload.get('code')!=9201:
-        raise ValueError('指定报告期业绩指标接口失败')
-    result=payload.get('result') or {}
-    raw=result.get('data') or []
-    if result.get('pages',0)>1 or result.get('count',0)!=len(raw):
-        raise ValueError('指定报告期业绩指标数据不完整')
-    if any(r['SECURITY_CODE'] not in stocks for r in raw):
-        raise ValueError('业绩指标股票超出请求范围')
-    attach_performance(rows,raw,[source],period,date.today().isoformat())
-    return rows
+    raise ValueError('旧指定报告期财务联网入口已停用；请使用 market_financial.collect_public 与历史回填入口。')
 
 
 def target_trade_date(db, quarter, directory):
@@ -109,15 +53,7 @@ def target_trade_date(db, quarter, directory):
         # An observed calendar quarter-end is unambiguous, and reuses only stored facts.
         if conn.execute('SELECT 1 FROM raw_daily_prices WHERE trade_date=? LIMIT 1',(end.isoformat(),)).fetchone():
             return end.isoformat()
-    # Independently fetch a small index calendar, without refreshing any tracked stock.
-    start = (end-timedelta(days=20)).isoformat()
-    with create_data_session() as session:
-        payload,_ = _response(session,directory,TENCENT_URL,
-                             {'param':f'sh000001,day,,{end.isoformat()},30,'})
-    days = [r['date'] for r in parse_daily_prices(payload,'sh000001','') if start<=r['date']<=end.isoformat()]
-    if not days or (end-date.fromisoformat(max(days))).days>14:
-        raise ValueError('无法确认季末最后交易日，未采集市值')
-    return max(days)
+    raise ValueError('旧交易日历联网入口已停用；请使用公共 market_trade_snapshot 工作流确认季末交易日。')
 
 
 def cap_roster(db, foundation, quarter, target_date):
@@ -170,61 +106,64 @@ def fetch_cap_quarter(db, directory, stocks, target_date, progress, *, reuse_loc
     failures=[]
     if not missing:
         return facts,failures
-    with create_data_session() as session:
-        symbols=','.join(('sh' if s[0]=='6' else 'sz')+s for s in missing)
-        raw,quote_source=_response(session,directory,'https://qt.gtimg.cn/q='+symbols,binary=True)
-        references={r['stock_code']:r for r in parse_quotes(raw.decode('gbk'))}
-        for index,stock in enumerate(missing,1):
-            progress(f'季度市值 {index}/{len(missing)} · {stock}')
-            try:
-                reference=references.get(stock)
-                if reference is None:
-                    raise ValueError('缺少有效总市值参考报价')
-                if reference['trade_date']==target_date:
-                    provenance={**reference['provenance'],**quote_source}
-                    provenance.pop('raw',None)
-                    facts.append({**reference,'provenance':provenance})
-                    continue
-                params={'openapi':'1','dspName':'iphone','tn':'tangram','client':'app','query':'总市值',
-                    'code':stock,'word':'','resource_id':'51171','market':'ab','tag':'总市值',
-                    'chart_select':'近一年','industry_select':'','skip_industry':'1','finClientType':'pc'}
-                payload,source=_response(session,directory,BAIDU_URL,params)
-                time.sleep(.5)
-                values=parse_history(payload)
-                common=values.get(reference['trade_date'])
-                value=values.get(target_date)
-                if common is None or abs(common-reference['total_cap']/1e8)>.020001:
-                    raise ValueError('同日总市值来源核对不通过')
-                if value is None:
-                    raise ValueError('来源缺少精确目标交易日，未使用其他日期替代')
-                facts.append({'stock_code':stock,'trade_date':target_date,'total_cap':value*1e8,
-                    'provenance':{**source,'source':'baidu:opendata','field':'总市值','source_unit':'亿元',
-                        'method':'精确季末总市值 × 1e8','source_date':target_date,
-                        'validation_date':reference['trade_date'],'validation_tencent_field':'45',
-                        'validation_difference_yi':abs(common-reference['total_cap']/1e8)}})
-            except Exception as exc:
-                failures.append({'stock_code':stock,'error':str(exc)})
+    raise ValueError('旧季度市值联网入口已停用；请使用公共 market_trade_snapshot。')
     return facts,failures
 
 
-def perform(service, action, target, recheck, progress):
+def perform(service, action, target, recheck, progress, *, run_id=None):
     validate_request(action,target,recheck)
-    from .market_financial import begin_batch, fail_batch
-    batch_id=begin_batch(service.db,target) if action=='financial_period' else None
+    from .market_financial import now,encoded
+    batch_id=None
+    owns_run=False
+    if run_id is None:
+        with service.db.connection(write=True) as conn:
+            if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+                raise ValueError('已有行业任务运行，未启动财务采集')
+            run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) "
+                "VALUES(?,?,? ,?,'running')",(action,target,int(recheck),now())).lastrowid
+            owns_run=True
     try:
-        return _perform(service,action,target,recheck,progress,batch_id)
+        result=_perform(service,action,target,recheck,progress,batch_id,run_id=run_id)
+        if owns_run:
+            with service.db.connection(write=True) as conn:
+                conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
+                    (now(),merge_run_result(conn,run_id,result),run_id))
+        return result
     except Exception as exc:
         if batch_id is not None:
+            from .market_financial import fail_batch
             fail_batch(service.db,batch_id,exc)
+        if action=='financial_period' and run_id is not None:
+            from .collection import finish_batch
+            with service.db.connection() as conn:
+                batch_ids=[r[0] for r in conn.execute("SELECT id FROM collection_batches WHERE operation_id=? AND status='running'",
+                    ('sw_update_runs:'+str(run_id),))]
+            for public_batch in batch_ids:
+                finish_batch(service.db,public_batch,'failed',error=str(exc))
+        if owns_run:
+            with service.db.connection(write=True) as conn:
+                conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE id=?",
+                    (now(),str(exc),run_id))
         raise
 
 
-def _perform(service, action, target, recheck, progress, batch_id):
-    from .industry_bulk import RequestPacer
+def merge_run_result(conn, run_id, result):
+    row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+    try:
+        saved=json.loads(row['result_json'] or '{}') if row else {}
+    except json.JSONDecodeError:
+        saved={}
+    merged={**saved,**result}
+    merged['aggregation_results']={**(saved.get('aggregation_results') or {}),
+                                  **(result.get('aggregation_results') or {})}
+    return json.dumps(merged,ensure_ascii=False,separators=(',',':'))
+
+
+def _perform(service, action, target, recheck, progress, batch_id, *, run_id=None):
     from .industry_memberships import ensure_daily_memberships
     from . import market_financial
     validate_request(action,target,recheck)
-    membership_check=ensure_daily_memberships(service,progress)
+    membership_check=ensure_daily_memberships(service,progress,run_id=run_id)
     foundation=service.foundation()
     if action=='cap_quarter':
         from .market_trade_snapshot import refresh_quarter
@@ -235,18 +174,15 @@ def _perform(service, action, target, recheck, progress, batch_id):
     name=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     directory=service.directory/'updates'/name
     directory.mkdir(parents=True,exist_ok=True)
-    pacer=RequestPacer(progress)
     progress(f'全市场财务 {target} · 全 A 股三表及业绩指标 · 行业展示 {len(stocks)} 家沪深公司')
-    with service.db.connection() as conn:
-        previous=conn.execute('SELECT status FROM market_financial_batches WHERE report_date=? AND id<? '
-                             'ORDER BY id DESC LIMIT 1',(target,batch_id)).fetchone()
-    datasets=market_financial.collect(service.db.path.parent/'market_financial_sources',target,pacer,progress,
-                                     resume=bool(previous and previous['status']=='failed'))
+    from .collection import RequestCollector
+    collector=RequestCollector(service.db,progress=progress)
+    operation_id='sw_update_runs:'+str(run_id) if run_id is not None else 'financial:'+str(target)
+    datasets=market_financial.collect_public(service.db,operation_id,target,collector,progress,recheck=recheck)
     sources=[source for data in datasets for source in data['sources']]
     progress('来源已完成，正在保存新增／修订指标并汇总所选一期')
     with service.db.connection(write=True) as conn:
-        statement_summary=market_financial.publish(conn,batch_id,target,datasets)
-    market_financial.clear_checkpoints(datasets)
+        statement_summary=market_financial.publish(conn,None,target,datasets)
     data=service._load()
     import_id=data['import']['id']
     effective=service._financial_reader.window(data['token'],data['import']['member_import_id'],
@@ -257,7 +193,8 @@ def _perform(service, action, target, recheck, progress, batch_id):
     result={'import_id':import_id,'action':action,'target':target,'scope_count':len(stocks),'membership_check':membership_check,
             'requested_count':len(stocks),'returned_count':sum(r['SECURITY_CODE'] in universe for r in
                 next(d for d in datasets if d['dataset']=='income')['rows']),
-            'network_requests':pacer.requests,'files':sources,'failures':failures,
-            'market_financial_batch_id':batch_id,'statements':statement_summary,'legacy_updated':False}
+            'network_requests':collector.requests,'files':sources,'failures':failures,
+            'collection_batch_ids':[d['collection_batch_id'] for d in datasets],
+            'statements':statement_summary,'legacy_updated':False}
     (directory/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
     return result

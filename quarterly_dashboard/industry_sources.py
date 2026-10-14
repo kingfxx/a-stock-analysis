@@ -5,20 +5,15 @@ price is used to estimate capitalization. TLS verification remains enabled.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 import re
 import ssl
-import time
-from datetime import date, datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import requests
 import xlrd
 from requests.adapters import HTTPAdapter
-
-from .network import create_data_session
 
 SW_BASE = 'https://www.swsresearch.com/swindex/pdf/SwClass2021/'
 SINA = 'https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/'
@@ -166,124 +161,8 @@ PILOT_INDUSTRIES = ('630701', '340702')  # 锂电池、乳品：45 家左右，�
 
 
 def download(directory, *, progress=lambda message: None, foundation=None, foundation_only=False):
-    """Network only; can resume a failed download in its same directory."""
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-    session = create_data_session()
-    session.mount('https://www.swsresearch.com/', SWAdapter())
-    asof = datetime.now().astimezone().date().isoformat()
-    files = []
-
-    def get(name, url, params=None, binary=False, delay=.12):
-        path = directory / name
-        if foundation and (name in {'taxonomy.xls','members.xls','universe_count.json'} or name.startswith('universe_')):
-            existing = Path(foundation) / name
-            if existing.exists() and not path.exists():
-                path.write_bytes(existing.read_bytes())
-        if not path.exists():
-            for attempt in range(3):
-                try:
-                    response = session.get(url, params=params, timeout=30)
-                    response.raise_for_status()
-                    payload = None if binary else response.json()
-                    if isinstance(payload, dict) and payload.get('success') is False:
-                        raise ValueError('数据接口拒绝请求：'+str(payload.get('message','未知原因')))
-                    value = response.content if binary else json.dumps(payload, ensure_ascii=False).encode('utf-8')
-                    temporary = path.with_suffix(path.suffix+'.tmp')
-                    temporary.write_bytes(value)
-                    temporary.replace(path)
-                    break
-                except (requests.RequestException, ValueError):
-                    if attempt == 2:
-                        raise
-                    time.sleep(2*(attempt+1))
-            time.sleep(delay)
-        files.append({'file': name, 'url': url, 'params': params,
-                      'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
-        return path.read_bytes() if binary else json.loads(path.read_text(encoding='utf-8'))
-
-    progress('读取申万官方三级分类')
-    taxonomy = parse_taxonomy(get('taxonomy.xls', SW_BASE+'SwClassCode_2021.xls', binary=True))
-    member_raw = get('members.xls', SW_BASE+'StockClassifyUse_stock.xls', binary=True)
-    universe = {}
-    count = int(str(get('universe_count.json', SINA+'Market_Center.getHQNodeStockCount', {'node':'hs_a'})).strip('"'))
-    pages = (count+99)//100
-    for page in range(1, pages+1):
-        progress(f'读取沪深 A 股名单 {page}/{pages}')
-        data = get(f'universe_{page}.json', SINA+'Market_Center.getHQNodeData',
-                   {'page':page,'num':100,'sort':'symbol','asc':1,'node':'hs_a','symbol':'','_s_r_a':'page'})
-        if not isinstance(data, list) or not data:
-            raise ValueError('全市场名单分页缺失')
-        for row in data:
-            if re.fullmatch(r'(?:sh6|sz[03])\d{5}', row['symbol']):
-                universe[row['code']] = row['name']
-    if len(universe) < 4000:
-        raise ValueError('沪深 A 股名单不完整')
-    members, history = parse_memberships(member_raw, taxonomy, universe, asof)
-    if foundation_only:
-        bundle={'asof':asof,'obtained_at':datetime.now(timezone.utc).isoformat(),'taxonomy':taxonomy,
-                'members':members,'membership_history':history,'financials':[],'caps':[],
-                'manifest':{'standard':'SW2021','scope':'classification','files':files,
-                            'pilot_industries':list(PILOT_INDUSTRIES),'membership_count':len(members)}}
-        (directory/'bundle.json').write_text(json.dumps(bundle,ensure_ascii=False),encoding='utf-8')
-        return bundle
-    # Pilot only: complete tertiary industries, never automatically widen to all-market history.
-    year = int(asof[:4])
-    start = f'{year-3}-01-01'
-    stocks = sorted(r['stock_code'] for r in members if r['industry_code'] in PILOT_INDUSTRIES)
-    if not stocks:
-        raise ValueError('试运行行业无成分')
-    stock_filter = ','.join('"'+s+'"' for s in stocks)
-    params = {'reportName':'RPT_DMSK_FN_INCOME',
-              'columns':'SECURITY_CODE,SECURITY_NAME_ABBR,REPORT_DATE,NOTICE_DATE,TOTAL_OPERATE_INCOME,PARENT_NETPROFIT',
-              'filter':f"(REPORT_DATE>='{start}')(REPORT_DATE<='{asof}')(SECURITY_CODE in ({stock_filter}))", 'sortColumns':'REPORT_DATE,SECURITY_CODE',
-              'sortTypes':'-1,1','pageSize':500,'pageNumber':1}
-    first = get('income_1.json', EM, params, delay=1.25)
-    if not first.get('success') or not first.get('result'):
-        raise ValueError('全市场利润表接口无有效数据')
-    total_pages = first['result']['pages']
-    total_count = first['result']['count']
-    rows = []
-    observed = 0
-    for page in range(1, total_pages+1):
-        progress(f'读取全市场营收历史 {page}/{total_pages}')
-        data = first if page == 1 else get(f'income_{page}.json', EM, {**params,'pageNumber':page}, delay=1.25)
-        if not data.get('success') or not data.get('result') or data['result']['count'] != total_count:
-            raise ValueError('利润表分页期间数据变化或接口失败，请重新刷新')
-        observed += len(data['result']['data'])
-        page_rows=financial_rows(data['result']['data'], asof)
-        source_path=directory/f'income_{page}.json'
-        evidence={'file':str(source_path.resolve()),'sha256':hashlib.sha256(source_path.read_bytes()).hexdigest(),
-                  'url':EM,'params':{**params,'pageNumber':page}}
-        for row in page_rows:
-            attach_financial_source(row,evidence)
-        rows.extend(page_rows)
-    if observed != total_count or len({(r['stock_code'],r['period']) for r in rows}) != len(rows):
-        raise ValueError('利润表分页不完整或重复')
-    quotes = []
-    for offset in range(0, len(stocks), 100):
-        progress(f'读取总市值 {offset+1}/{len(stocks)}')
-        symbols = ','.join(('sh' if code[0]=='6' else 'sz')+code for code in stocks[offset:offset+100])
-        content = get(f'quotes_{offset//100}.txt', 'https://qt.gtimg.cn/q='+symbols, binary=True)
-        quotes.extend(parse_quotes(content.decode('gbk')))
-    dates = [r['trade_date'] for r in quotes if r['trade_date'] <= asof]
-    if not dates:
-        raise ValueError('腾讯总市值无有效交易日')
-    trade_date = max(dates)
-    quotes = [r for r in quotes if r['trade_date'] == trade_date]
-    if len(quotes)/len(stocks) < .90:
-        raise ValueError('腾讯当日总市值覆盖不足 90%，保留旧版本')
-    bundle = {'asof':asof,'obtained_at':datetime.now(timezone.utc).isoformat(), 'taxonomy':taxonomy,
-              'members':members,'membership_history':history,'financials':rows,'caps':quotes,
-              'manifest':{'standard':'SW2021','universe':'沪深 A 股（不含北交所）','files':files,
-                          'financial_start':start,'market_date':trade_date,'financial_count':len(rows),
-                          'membership_count':len(members),'cap_count':len(quotes),
-                          'scope':'pilot','pilot_industries':list(PILOT_INDUSTRIES),'pilot_stock_count':len(stocks),
-                          'cap_parser':'tencent_total_cap_field45_v2'}}
-    output = directory / 'bundle.json'
-    output.write_text(json.dumps(bundle, ensure_ascii=False, allow_nan=False), encoding='utf-8')
-    session.close()
-    return bundle
+    """Retired legacy online bundle collector; parsers remain available offline."""
+    raise ValueError('旧行业来源联网入口已停用；分类名单请使用 python -m quarterly_dashboard.industry_memberships，由公共 RequestCollector 归档。离线解析函数仍可用于既有样本。')
 
 
 if __name__ == '__main__':
@@ -293,4 +172,8 @@ if __name__ == '__main__':
     parser.add_argument('--foundation', type=Path)
     parser.add_argument('--foundation-only',action='store_true',help='仅更新分类和成员，不采集财务或市值')
     args = parser.parse_args()
-    download(args.directory, foundation=args.foundation, foundation_only=args.foundation_only, progress=lambda msg: print(msg, flush=True))
+    try:
+        download(args.directory, foundation=args.foundation, foundation_only=args.foundation_only,
+                 progress=lambda msg: print(msg, flush=True))
+    except ValueError as exc:
+        parser.error(str(exc))

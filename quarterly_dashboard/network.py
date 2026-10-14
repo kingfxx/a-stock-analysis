@@ -12,6 +12,11 @@ def create_data_session() -> requests.Session:
     therefore be interpreted as an HTTPS proxy and fail during its TLS handshake.
     Keep TLS certificate verification enabled in either mode.
     """
+    # Import lazily to keep collection/network module initialization acyclic.
+    from .stock_collection import current_stock_session
+    routed = current_stock_session()
+    if routed is not None:
+        return routed
     session = requests.Session()
     session.trust_env = os.getenv("DASHBOARD_USE_SYSTEM_PROXY", "").strip().lower() in (
         "1", "true", "yes",

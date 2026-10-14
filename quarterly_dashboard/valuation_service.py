@@ -12,8 +12,9 @@ from pathlib import Path
 from .network import create_data_session
 from .sources import normalize_code
 from .storage import Database, SyncKey, SyncResult, utc_now
+from .stock_collection import begin_stock_batch, routed_stock_requests
 from .update_service import (audit_due, backup_before_update, data_lock, mark_failed,
-                             next_audit, recently_checked, sync_state)
+                             next_audit, recently_checked, recent_sync_failure, sync_state)
 from .valuation import (fetch_industry_snapshot_details, fetch_valuation_indicator,
                         monthly_valuation, valuation_observation_rows)
 
@@ -64,14 +65,22 @@ class ValuationService:
             return [], False
         key = SyncKey(identity, "industry", INDUSTRY_SOURCE)
         state = sync_state(self.db, key)
+        recent_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
+        if recent_failure:
+            return [f"行业估值最近自动更新失败，暂缓重试：{recent_failure['error']}"], False
         if state and not (refresh or full
                           or not recently_checked(state, seconds=86400)):
             return [], False
         run = self.db.start_sync(key, parser_version="eastmoney_peer_v1",
                                  methodology_version="current_peer_mean_v1",
                                  trigger_reason="refresh")
+        batch_id = begin_stock_batch(self.db, run, "eastmoney", "valuation.industry", code,
+                                     trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
+                                     scope={"source_interface": "RPT_PCF10_INDUSTRY_CVALUE"},
+                                     parser_version="eastmoney_peer_v1", definition_version="current_peer_mean_v1")
         try:
-            details = self.fetch_industry(code)
+            with routed_stock_requests(self.db, batch_id, "eastmoney", "valuation.industry"):
+                details = self.fetch_industry(code)
             raw = details["raw"]
             with self.db.connection() as conn:
                 latest = conn.execute("SELECT raw_json FROM industry_snapshots WHERE instrument_id=? AND source=? "
@@ -87,10 +96,11 @@ class ValuationService:
                         "snapshot_at": utc_now(), "industry_name": details["industry_name"],
                         "industry_code": details.get("industry_code"),
                         "classification_basis": "eastmoney_current_peer_group_v1", "raw_json": raw})
-            self.db.complete_sync(run, result, write)
+            self.db.complete_sync(run, result, write, collection_batch_id=batch_id,
+                                  batch_result={"changed": changed, "sync_run_id": run})
             return [], True
         except Exception as exc:
-            mark_failed(self.db, run, exc)
+            mark_failed(self.db, run, exc, collection_batch_id=batch_id)
             return [f"行业估值更新失败，保留已存快照：{exc}"], False
 
     def observations(self, code, metric):
@@ -224,6 +234,10 @@ class ValuationService:
             for metric in METRICS:
                 key = SyncKey(identity, f"valuation:{metric}", SOURCE)
                 state = sync_state(self.db, key)
+                recent_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
+                if recent_failure:
+                    warnings.append(f"{metric} 最近自动更新失败，暂缓重试：{recent_failure['error']}")
+                    continue
                 saved = self.db.valuation_observations(identity, SOURCE, metric)
                 if saved and not (refresh or full or audit_due(state, "valuation")
                                   or not recently_checked(state, seconds=86400)):
@@ -242,18 +256,25 @@ class ValuationService:
                 run = self.db.start_sync(key, parser_version="baidu_observations_v1",
                                          methodology_version=SAMPLING_VERSION,
                                          trigger_reason="full" if full_metric else "refresh")
+                batch_id = begin_stock_batch(self.db, run, "baidu", f"valuation.{metric}", code,
+                                             trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
+                                             scope={"source_interface": "opendata", "windows": list(windows),
+                                                    "mode": "full" if full_metric else "incremental"},
+                                             parser_version="baidu_observations_v1",
+                                             definition_version=SAMPLING_VERSION)
                 try:
-                    candidates = self._collect(code, metric, windows, self.fetch_indicator)
-                    if saved and not full_metric:
-                        saved_days = {row["observed_on"] for row in saved}
-                        candidate_days = {row["observed_on"] for row in candidates}
-                        for wider in ("近三年", "近五年", "近十年"):
-                            if saved_days & candidate_days or wider in windows:
-                                continue
-                            candidates = self._collect(code, metric, (wider,), self.fetch_indicator)
+                    with routed_stock_requests(self.db, batch_id, "baidu", f"valuation.{metric}"):
+                        candidates = self._collect(code, metric, windows, self.fetch_indicator)
+                        if saved and not full_metric:
+                            saved_days = {row["observed_on"] for row in saved}
                             candidate_days = {row["observed_on"] for row in candidates}
-                        if not saved_days & candidate_days:
-                            raise ValueError("估值窗口与已保存尾部没有共同观察日，未标记连续覆盖")
+                            for wider in ("近三年", "近五年", "近十年"):
+                                if saved_days & candidate_days or wider in windows:
+                                    continue
+                                candidates = self._collect(code, metric, (wider,), self.fetch_indicator)
+                                candidate_days = {row["observed_on"] for row in candidates}
+                            if not saved_days & candidate_days:
+                                raise ValueError("估值窗口与已保存尾部没有共同观察日，未标记连续覆盖")
                     if saved and not full_metric:
                         today = date.today()
                         month_index = today.year * 12 + today.month - 1 - 3
@@ -276,9 +297,11 @@ class ValuationService:
                             windows_seen = json.loads(previous["source_windows_json"])
                             row["source_windows"] = list(dict.fromkeys(windows_seen + row["source_windows"]))
                     self.db.complete_sync(run, result,
-                        lambda conn: self.db.upsert_valuation_observations(conn, key, run, candidates))
+                        lambda conn: self.db.upsert_valuation_observations(conn, key, run, candidates),
+                        collection_batch_id=batch_id,
+                        batch_result={"row_count": len(candidates), "sync_run_id": run})
                 except Exception as exc:
-                    mark_failed(self.db, run, exc)
+                    mark_failed(self.db, run, exc, collection_batch_id=batch_id)
                     warnings.append(f"{metric} 估值更新失败，保留已存事实：{exc}")
             industry_warnings, _ = self._update_industry(
                 code, identity, refresh=refresh, full=full)

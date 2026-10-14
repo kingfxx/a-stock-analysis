@@ -59,9 +59,9 @@
 
 结构版本 14 增加 `sw_memberships.listing_date` 与 `listing_source_id`。日期来源统一保存在 `sw_listing_sources`，包含来源 URL、参数、响应文件、SHA256、字段、定义、解析器版本及实际采集时间；行内只引用来源 ID。首次只 UPDATE 当前成员版本的这两个字段，不新建成员版本，不改变历史成员、原分类字段、财务、市值及既有季度引用。
 
-首次补齐工具：`python -m quarterly_dashboard.industry_memberships --directory data/industry_sources/listing_dates_20261004 --report data/verification/reports/listing-date-backfill-20261004.json`。工具在实例锁内迁移及备份，重新获取三份官方响应，再直接补齐当前名单，核对业务表记录数、季度名单引用与外键。重复执行日期不变时不重复写入。
+旧的 listing-date-backfill 命令已停用。分类名单／上市日期通过 `python -m quarterly_dashboard.industry_memberships --database <库路径> --directory <来源目录> --report <报告路径>` 执行；入口沿用公共 `RequestCollector` 归档沪深交易所名单和申万 XLS，全部解析与名单校验通过后再发布。该命令只在用户明确启动时运行，不由页面读取触发。离线 `parse_sse`、`parse_szse`、`parse_listing_files` 可继续处理已有样本。
 
-全市场财务／市值任务开始前调用同一每日检查入口，以上海日期为键写入 `sw_membership_checks`。当天成功、失败或中断都不重复网络检查，后台重启后仍有效；下一日允许再次检查。每次完整检查读取官方沪深 A 股名单（三份响应）及申万分类／变更（两份 XLS），串行请求并间隔一秒。沪深范围排除 B 股、北交所和 689 开头的 CDR，保持当前 A 股业务范围。公开响应保存在 `data/industry_sources/membership_checks/<上海日期>/`。
+全市场财务／市值任务开始前调用同一每日检查入口，以上海日期为键写入 `sw_membership_checks`。成功检查当日复用；失败检查可在用户显式重试时恢复，未完成状态会提示沿用本地名单。请求通过公共调度，按真实来源共享 `sse`、`szse`、`sws` 预算及拒绝冷却；所有响应先归档再解析。沪深范围排除 B 股、北交所和 689 开头的 CDR，保持当前 A 股业务范围。公共原文保存在数据库旁的 `collection_sources/`，目录中的 `result.json` 记录批次和来源引用。
 
 新增公司自动进入名单，分类暂缺标为未分类；来源暂缺的旧公司保留，旧公司分类暂缺则保留已知分类。名单数量骤减或来源失败时沿用已保存资料并提示，不启动重复重试。成员名称、分类或范围变化仍发布新成员版本；上市日期直接补齐当前版本。普通财务／市值导入及旧 bundle 均保留已有上市日期及来源，不因此复制成员版本。
 

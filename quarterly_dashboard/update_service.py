@@ -13,6 +13,7 @@ from .network import create_data_session
 from .financing_storage import effective_fields, NUMERIC_FIELDS
 from .sources import normalize_code
 from .storage import Database, SyncKey, SyncResult, utc_now
+from .stock_collection import begin_stock_batch, routed_stock_requests
 
 FINANCING_SOURCE = "eastmoney:RPTA_WEB_RZRQ_GGMX"
 HOLDER_SOURCES = ("RPT_F10_EH_HOLDERNUM", "RPT_HOLDERNUM_DET")
@@ -54,6 +55,19 @@ def recently_checked(state, seconds=600):
     return bool(checked and (datetime.now(timezone.utc) - datetime.fromisoformat(checked)).total_seconds() < seconds)
 
 
+def recent_sync_failure(db, key, seconds=600, *, now=None):
+    """Return a still-current failure inside the automatic retry quiet period."""
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    cutoff = (current - timedelta(seconds=seconds)).isoformat()
+    with db.connection() as conn:
+        row = conn.execute("SELECT id,error,finished_at,status FROM sync_runs WHERE instrument_id=? AND dataset=? "
+                           "AND source=? AND adjustment=? AND status IN ('failed','success','no_data','superseded') "
+                           "ORDER BY finished_at DESC,id DESC LIMIT 1", key.values()).fetchone()
+    return dict(row) if row and row['status'] == 'failed' and row['finished_at'] >= cutoff else None
+
+
 def checked_today(state):
     """Daily source checks follow the Shanghai calendar, not a rolling TTL."""
     checked = state.get("checked_at")
@@ -78,11 +92,11 @@ def next_audit(dataset="prices_adjusted"):
     return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat() if days else None
 
 
-def mark_failed(db, run, exc):
+def mark_failed(db, run, exc, *, collection_batch_id=None):
     with db.connection() as conn:
         row = conn.execute("SELECT status FROM sync_runs WHERE id=?", (run,)).fetchone()
     if row and row[0] == "running":
-        db.fail_sync(run, str(exc))
+        db.fail_sync(run, exc, collection_batch_id=collection_batch_id)
 
 
 def backup_before_update(db):
@@ -135,7 +149,8 @@ class ChipService:
             rows.append(dict(date=item["date"], raw=raw, values=values, retained=retained))
         return rows, list(dict.fromkeys(warnings))
 
-    def _save_financing(self, code, key, run, records, *, start=None, end=None, full=False, import_meta=None):
+    def _save_financing(self, code, key, run, records, *, start=None, end=None, full=False, import_meta=None,
+                        collection_batch_id=None):
         with self.db.connection() as conn:
             bounds = (start or "0001-01-01", end or "9999-12-31")
             old = {r["trade_date"]: dict(r) for r in conn.execute(
@@ -171,10 +186,11 @@ class ChipService:
                               digest(row["raw"]), utc_now(), run))
             if import_meta:
                 self._import_record(conn, key, run, len(rows), import_meta)
-        self.db.complete_sync(run, result, write)
+        self.db.complete_sync(run, result, write, collection_batch_id=collection_batch_id,
+                              batch_result={"row_count": len(rows), "sync_run_id": run} if collection_batch_id else None)
         return warnings
 
-    def _save_holders(self, code, key, run, records, import_meta=None, *, full=True):
+    def _save_holders(self, code, key, run, records, import_meta=None, *, full=True, collection_batch_id=None):
         parsed = chip_rows(records, "shareholders")
         with self.db.connection() as conn:
             known = {r[0] for r in conn.execute("SELECT stat_date FROM shareholder_observations "
@@ -199,7 +215,9 @@ class ChipService:
                 self._import_record(conn, key, run, len(parsed), import_meta)
         self.db.complete_sync(run, SyncResult(len(parsed), days[0] if days else None, days[-1] if days else None,
                                               days[-1] if days else None, no_data=not days, next_full_audit_at=None,
-                                              checked_at=import_meta.get("checked_at") if import_meta else None), write)
+                                              checked_at=import_meta.get("checked_at") if import_meta else None), write,
+                              collection_batch_id=collection_batch_id,
+                              batch_result={"row_count": len(parsed), "sync_run_id": run} if collection_batch_id else None)
 
     @staticmethod
     def _import_record(conn, key, run, count, meta):
@@ -268,6 +286,10 @@ class ChipService:
             for source in sources:
                 key = SyncKey(identity, section, source)
                 state = sync_state(self.db, key)
+                recent_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
+                if recent_failure:
+                    warnings.append(f"{source} 最近自动更新失败，暂缓重试：{recent_failure['error']}")
+                    continue
                 if not refresh and not full and checked_today(state):
                     continue
                 complete = full or (not state.get("data_watermark") if section == "financing"
@@ -284,22 +306,34 @@ class ChipService:
                 run = self.db.start_sync(key, parser_version="eastmoney-facts-v1", methodology_version="source-fields-v1",
                                          trigger_reason="full_audit" if complete else "incremental",
                                          requested_start=start, requested_end=end)
+                batch_id = begin_stock_batch(self.db, run, "eastmoney", section, code,
+                                             start=start, end=end,
+                                             trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
+                                             scope={"source_interface": source.split(":", 1)[1],
+                                                    "mode": "full" if complete else "incremental",
+                                                    "date_field": bounds.get("date_field")},
+                                             parser_version="eastmoney-facts-v1", definition_version="source-fields-v1")
                 try:
-                    records = self.fetcher(code, section, source.split(":", 1)[1], start_date=start, end_date=end, **bounds)
+                    with routed_stock_requests(self.db, batch_id, "eastmoney", section):
+                        records = self.fetcher(code, section, source.split(":", 1)[1], start_date=start, end_date=end, **bounds)
                     if section == "financing":
                         try:
-                            warnings += self._save_financing(code, key, run, records, start=start, end=end, full=complete)
+                            warnings += self._save_financing(code, key, run, records, start=start, end=end,
+                                                             full=complete, collection_batch_id=batch_id)
                         except FinancingHistoryGap:
                             if complete:
                                 raise
-                            records = self.fetcher(code, section, source.split(":", 1)[1], start_date=None, end_date=end)
+                            with routed_stock_requests(self.db, batch_id, "eastmoney", section):
+                                records = self.fetcher(code, section, source.split(":", 1)[1], start_date=None, end_date=end)
                             with self.db.connection(write=True) as conn:
                                 conn.execute("UPDATE sync_runs SET trigger_reason='historical_gap',requested_start=NULL WHERE id=?", (run,))
-                            warnings += self._save_financing(code, key, run, records, end=end, full=True)
+                            warnings += self._save_financing(code, key, run, records, end=end, full=True,
+                                                             collection_batch_id=batch_id)
                     else:
-                        self._save_holders(code, key, run, records, full=complete)
+                        self._save_holders(code, key, run, records, full=complete,
+                                           collection_batch_id=batch_id)
                 except Exception as exc:
-                    mark_failed(self.db, run, exc)
+                    mark_failed(self.db, run, exc, collection_batch_id=batch_id)
                     warnings.append(f"{source} 更新失败，保留已有记录：{exc}")
         result = self.cached(code, section, today=today)
         result["warnings"] = list(dict.fromkeys(warnings))

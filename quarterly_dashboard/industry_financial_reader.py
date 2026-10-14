@@ -59,7 +59,9 @@ class IndustryFinancialReader:
         for row in conn.execute(sql, args):
             stock = row['security_code']
             values = {k:row[k] for k in ('revenue','parent_profit','operating_revenue','operating_cost',
-                                        'weighted_roe','bps','income_source_id','performance_source_id')}
+                                        'weighted_roe','bps','income_source_id','performance_source_id',
+                                        'income_collection_source_id','income_collection_batch_id',
+                                        'performance_collection_source_id','performance_collection_batch_id')}
             values['gross_margin_applicable'] = stock in nonfinancial
             # INCOME.TOTAL_OPERATE_INCOME is consolidated cumulative yuan.
             values['gross_margin_total_revenue_equivalent'] = stock in nonfinancial
@@ -93,14 +95,32 @@ class IndustryFinancialReader:
             return self._remember(self._series,key,result,8)
 
     def provenance(self, facts, stock, period):
-        source_id = facts.get((stock,period),{}).get('income_source_id')
-        if source_id is None:
+        fact = facts.get((stock,period),{})
+        source_id = fact.get('income_source_id')
+        public_id = fact.get('income_collection_source_id')
+        if source_id is None and public_id is None:
             return {}
         with self.db.connection() as conn:
-            source = conn.execute('SELECT * FROM market_financial_sources WHERE id=?',(source_id,)).fetchone()
+            if public_id is not None:
+                source = conn.execute('SELECT * FROM collection_sources WHERE id=?',(public_id,)).fetchone()
+                batch = conn.execute('SELECT * FROM collection_batches WHERE id=?',(fact['income_collection_batch_id'],)).fetchone()
+            else:
+                source = conn.execute('SELECT * FROM market_financial_sources WHERE id=?',(source_id,)).fetchone()
+                batch = None
         if source is None:
             return {}
-        common = {'source':'eastmoney:RPT_DMSK_FN_INCOME','report_type':'利润表',
+        if public_id is not None:
+            request=json.loads(source['request_json'])
+            common={'source':f"{source['source_system']}:{source['dataset']}",'report_type':'利润表',
+                'unit':'元','basis':'本年累计','scope':'合并','method':'直接取数','period':period,
+                'source_id':None,'collection_source_id':public_id,
+                'collection_batch_id':fact['income_collection_batch_id'],
+                'obtained_at':source['obtained_at'],'url':request.get('url'),
+                'params':request.get('params',{}),'file_path':source['file_path'],
+                'content_hash':source['raw_sha256'],'status':source['request_status'],
+                'batch_status':batch['status'] if batch else None}
+        else:
+            common = {'source':'eastmoney:RPT_DMSK_FN_INCOME','report_type':'利润表',
                   'unit':'元','basis':'本年累计','scope':'合并','method':'直接取数',
                   'period':period,'source_id':source_id,'obtained_at':source['obtained_at'],
                   'url':source['url'],'params':json.loads(source['params_json']),

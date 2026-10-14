@@ -8,8 +8,10 @@ from datetime import date, datetime, timedelta, timezone
 from .network import create_data_session
 from .sources import fetch_price_history, normalize_code, price_equal
 from .storage import Database, SyncKey, SyncResult, StorageError, utc_now
+from .stock_collection import begin_stock_batch, routed_stock_requests
 from .update_service import (audit_due, data_lock, digest, encoded, instrument_id, mark_failed,
-                             next_audit, recently_checked, checked_today, sync_state, backup_before_update)
+                             next_audit, recently_checked, recent_sync_failure, checked_today, sync_state,
+                             backup_before_update)
 
 SOURCE = "tencent"
 
@@ -34,6 +36,11 @@ class PriceService:
     def _fetch(code, adjustment, start, end):
         with create_data_session() as session:
             return fetch_price_history(code, session, "" if adjustment == "raw" else adjustment, start, end)
+
+    def _scheduled_fetch(self, code, adjustment, start, end, batch_id):
+        dataset = "prices_raw" if adjustment == "raw" else "prices_adjusted"
+        with routed_stock_requests(self.db, batch_id, "tencent", dataset):
+            return self.fetcher(code, adjustment, start, end)
 
     def current_version(self, code):
         identity = instrument_id(self.db, code)
@@ -101,10 +108,7 @@ class PriceService:
             identity = self.db.ensure_instrument(code)
             key = SyncKey(identity, "prices_raw" if adjustment == "raw" else "prices_adjusted", SOURCE, adjustment)
             state = sync_state(self.db, key)
-            with self.db.connection() as conn:
-                prior_failure = conn.execute("SELECT error,finished_at FROM sync_runs WHERE instrument_id=? "
-                                             "AND dataset=? AND source=? AND adjustment=? AND status='failed' "
-                                             "AND finished_at>=? ORDER BY id DESC LIMIT 1", (*key.values(), requested_at)).fetchone()
+            prior_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
             if prior_failure:
                 message = f"价格更新失败，继续使用已有版本：{prior_failure['error']}"
                 if state.get("data_status") == "data":
@@ -129,8 +133,14 @@ class PriceService:
             run = self.db.start_sync(key, parser_version="tencent-ohlc-v2", methodology_version="current-adjustment-v1",
                                      trigger_reason="full_audit" if rebuild else "overlap_check",
                                      requested_start=start, requested_end=end)
+            dataset = "prices_raw" if adjustment == "raw" else "prices_adjusted"
+            batch_id = begin_stock_batch(self.db, run, "tencent", dataset, code, start=start, end=end,
+                                         trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
+                                         scope={"adjustment": adjustment, "mode": "full" if rebuild else "incremental",
+                                                "source_interface": "fqkline/get"},
+                                         parser_version="tencent-ohlc-v2", definition_version="current-adjustment-v1")
             try:
-                rows = self.fetcher(code, adjustment, start, end)
+                rows = self._scheduled_fetch(code, adjustment, start, end, batch_id)
                 self._validate(rows, start, end)
                 if not rebuild:
                     overlap = [r for r in rows if r["date"] in old_by_day]
@@ -138,7 +148,7 @@ class PriceService:
                     missing = expected - {r["date"] for r in rows}
                     if missing and adjustment == "raw":
                         rebuild = True
-                        rows = self.fetcher(code, adjustment, "1990-01-01", end)
+                        rows = self._scheduled_fetch(code, adjustment, "1990-01-01", end, batch_id)
                         self._validate(rows, "1990-01-01", end)
                         with self.db.connection(write=True) as conn:
                             conn.execute("UPDATE sync_runs SET trigger_reason='historical_gap',requested_start='1990-01-01' WHERE id=?", (run,))
@@ -149,11 +159,11 @@ class PriceService:
                         for anchor in anchors:
                             if rebuild:
                                 break
-                            sample = self.fetcher(code, adjustment, anchor["date"], anchor["date"])
+                            sample = self._scheduled_fetch(code, adjustment, anchor["date"], anchor["date"], batch_id)
                             self._validate(sample, anchor["date"], anchor["date"])
                             rebuild = len(sample) != 1 or not price_equal(anchor, sample[0])
                         if rebuild:
-                            rows = self.fetcher(code, adjustment, "1990-01-01", end)
+                            rows = self._scheduled_fetch(code, adjustment, "1990-01-01", end, batch_id)
                             self._validate(rows, "1990-01-01", end)
                             with self.db.connection(write=True) as conn:
                                 conn.execute("UPDATE sync_runs SET trigger_reason='historical_change',requested_start='1990-01-01' WHERE id=?", (run,))
@@ -176,12 +186,16 @@ class PriceService:
                                          "content_hash=excluded.content_hash,obtained_at=excluded.obtained_at,run_id=excluded.run_id",
                                          [(identity, SOURCE, r["date"], r["open"], r["close"], r["high"], r["low"], r["volume"],
                                            encoded(r["raw"]), digest(r["raw"]), utc_now(), run) for r in rows])
-                    self.db.complete_sync(run, SyncResult(len(rows), *coverage, next_full_audit_at=next_full), write)
+                    self.db.complete_sync(run, SyncResult(len(rows), *coverage, next_full_audit_at=next_full), write,
+                                          collection_batch_id=batch_id,
+                                          batch_result={"row_count": len(rows), "sync_run_id": run, "mode": "full" if rebuild else "incremental"})
                     version = None
                 elif not changed and old:
                     version = state["active_price_version_id"]
                     self.db.complete_sync(run, SyncResult(0, *coverage, active_price_version_id=version,
-                                                         next_full_audit_at=next_full), lambda conn: None)
+                                                         next_full_audit_at=next_full), lambda conn: None,
+                                          collection_batch_id=batch_id,
+                                          batch_result={"row_count": 0, "sync_run_id": run, "mode": "unchanged"})
                 else:
                     # Stage candidates; only the final validated state is published atomically.
                     with self.db.connection(write=True) as conn:
@@ -203,14 +217,16 @@ class PriceService:
                     def publish(conn):
                         conn.execute("UPDATE adjusted_price_versions SET status='complete',validated_at=? WHERE id=?", (utc_now(), version))
                     self.db.complete_sync(run, SyncResult(len(rows), *coverage, active_price_version_id=version,
-                                                         next_full_audit_at=next_full), publish)
+                                                         next_full_audit_at=next_full), publish,
+                                          collection_batch_id=batch_id,
+                                          batch_result={"row_count": len(rows), "sync_run_id": run, "mode": "full" if rebuild else "incremental"})
                     try:
                         self.prune(code)
                     except Exception as exc:
                         warnings.append(f"新价格版本已提交，旧版本清理失败：{exc}")
                 return dict(version=version, warnings=warnings, changed=changed)
             except Exception as exc:
-                mark_failed(self.db, run, exc)
+                mark_failed(self.db, run, exc, collection_batch_id=batch_id)
                 with self.db.connection(write=True) as conn:
                     conn.execute("DELETE FROM adjusted_price_versions WHERE run_id=? AND status='candidate'", (run,))
                 if old:

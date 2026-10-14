@@ -46,7 +46,7 @@ DESCRIPTIONS={
  'index_price_series':('指数数据','宽基、行业、策略共用的点位序列身份；提供方、频率及收益口径独立'),
  'index_price_observations':('指数数据','指数收盘点位和来源实际提供的开高低点；来源、真实取得时间及修订版本'),
  'collection_batches':('运行与配置','公共采集批次、操作范围、执行状态及独立覆盖判定；未迁移旧采集'),
- 'collection_sources':('运行与配置','公共指数及全市场逐次请求来源、原始响应双哈希、解析状态及真实取得时间'),
+ 'collection_sources':('运行与配置','公共逐次请求来源；指数、全市场与行业保存原文双哈希，个股按授权仅登记 metadata-only 请求结果'),
  'collection_provider_state':('运行与配置','公共来源共享请求预算、拒绝原因及跨任务冷却截止时间'),
  'market_trade_snapshot':('行业数据','全市场交易日快照：东财原值、历史合成及经停牌和股本校验的参考价估值；含价格、股本、市值及估值，当前仅季末'),
  'market_cap_latest':('行业数据','东财、经验证停牌参考价、普通历史合成及旧同日市值依次读取的逻辑视图'),
@@ -77,15 +77,15 @@ DESCRIPTIONS={
  'market_financial_cashflow':('行业数据','全 A 股东财摘要现金流量表全部返回字段、来源引用及真实修订版本'),
  'market_financial_performance':('行业数据','全 A 股东财业绩指标全部返回字段（含每股指标、加权 ROE）、来源及真实修订版本'),
  'market_financial_industry':('行业数据','行业页面最新东财财务及每股净资产逻辑视图；不存储副本，不含行业或周期计算'),
- 'market_financial_batches':('运行与配置','全市场三表及业绩指标采集批次、覆盖统计、状态与错误'),
- 'market_financial_sources':('行业数据','全市场财务分页请求、gzip 原始响应路径、内容哈希及采集时间'),
+ 'market_financial_batches':('运行与配置','旧全市场财务报告期批次；新采集批次使用 collection_batches'),
+ 'market_financial_sources':('行业数据','迁移前全市场财务分页来源；新来源登记在 collection_sources'),
  'sw_financial_provenance':('行业数据','共享财务来源说明；明细通过来源 ID 引用'),
  'sw_cap_facts':('行业数据','公司季末总市值明细，含来源与修订版本'),
  'sw_cap_provenance':('行业数据','共享市值来源说明；明细通过来源 ID 引用'),
  'sw_industry_cap_quarters':('行业数据','由全市场交易快照生成的三级行业季度市值汇总及覆盖家数，按输入版本审计'),
  'sw_industries':('行业数据','申万三级行业分类及父子关系'),
  'sw_imports':('行业数据','行业采集批次、来源清单、成员导入及快照汇总审计版本'),
- 'sw_memberships':('行业数据','行业成分公司名单、分类版本及 A 股上市日期'),
+ 'sw_memberships':('行业数据','行业成分公司名单、分类版本及上市日期；上市日期可引用旧或公共来源'),
  'sw_listing_sources':('行业数据','上市日期共享来源响应、字段定义及采集时间'),
  'sw_membership_checks':('运行与配置','全市场任务前每日名单检查、结果及失败记录'),
  'sw_membership_history':('行业数据','来源提供的历史分类变更'),
@@ -134,9 +134,10 @@ def quote(name):
 
 def table_time(conn, name, columns):
     if name=='sw_memberships':
-        values=conn.execute('SELECT max(i.obtained_at),max(s.obtained_at) FROM sw_memberships m '
-            'JOIN sw_imports i ON i.id=m.import_id LEFT JOIN sw_listing_sources s ON s.id=m.listing_source_id').fetchone()
-        return max((v for v in values if v),default=None),'名单批次及上市日期来源采集时间'
+        values=conn.execute('SELECT max(i.obtained_at),max(s.obtained_at),max(cs.obtained_at) FROM sw_memberships m '
+            'JOIN sw_imports i ON i.id=m.import_id LEFT JOIN sw_listing_sources s ON s.id=m.listing_source_id '
+            'LEFT JOIN collection_sources cs ON cs.id=m.collection_source_id').fetchone()
+        return max((v for v in values if v),default=None),'名单导入、旧上市日期来源或 collection_sources.obtained_at（公共来源）'
     fields=[c for c in TIME_COLUMNS if c in columns]
     if fields:
         # Take max over the separate non-null aggregates.

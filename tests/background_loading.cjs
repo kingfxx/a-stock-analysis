@@ -22,6 +22,7 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
     Plotly: {}, render: () => rendered.push('financial'),
     renderValuation: () => rendered.push('valuation'), renderChips: section => rendered.push(section), renderCachedStocks() {},
     renderWarnings() {}, renderCurrentStock() {},
+    renderFollowState() { elements.get('refresh').setAttribute('aria-disabled', 'false'); },
     document: {getElementById: id => {
       if (!elements.has(id)) elements.set(id, {textContent:id === 'refresh' ? '刷新数据' : '', attributes:{}, listeners:{},
         setAttribute(name, value) { this.attributes[name] = value; },

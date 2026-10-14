@@ -8,7 +8,6 @@ from pathlib import Path
 
 import hashlib
 
-from .industry_bulk import RequestPacer
 from .industry_updates import validate_request
 from . import market_financial as mf
 from .market_financial import atomic_write, encoded, now
@@ -46,6 +45,33 @@ def completed_batch(conn, period):
         "AND json_extract(s.params_json,'$.columns')='ALL')=4 ORDER BY b.id DESC LIMIT 1",(period,)).fetchone()
 
 
+def completed_public_batch(conn,period):
+    expected={f'market.financial.{name}' for name in mf.FIELDS}
+    operations=conn.execute("SELECT operation_id FROM collection_batches WHERE domain='market' "
+        "AND source_system='eastmoney' AND scope_start=? AND scope_end=? AND status='complete' "
+        "AND coverage_status!='empty' "
+        "AND parser_version='market-financial-v1' "
+        "AND universe_version='eastmoney-a-share-v1' GROUP BY operation_id HAVING count(*)=4 "
+        "AND count(DISTINCT dataset)=4",(period,period)).fetchall()
+    for operation in operations:
+        rows=conn.execute("SELECT dataset,definition_version,scope_json FROM collection_batches "
+            "WHERE operation_id=? AND domain='market' AND source_system='eastmoney' AND scope_start=? "
+            "AND scope_end=? AND status='complete' AND coverage_status!='empty' "
+            "AND parser_version='market-financial-v1' AND universe_version='eastmoney-a-share-v1'",
+            (operation['operation_id'],period,period)).fetchall()
+        if {r['dataset'] for r in rows}!=expected or len(rows)!=4:
+            continue
+        valid=True
+        for row in rows:
+            name=row['dataset'].removeprefix('market.financial.')
+            scope=json.loads(row['scope_json'])
+            valid &= (row['definition_version']==mf.FIELDS[name]['definition_version']
+                      and scope.get('period')==period and scope.get('columns')=='ALL'
+                      and scope.get('report_name')==mf.FIELDS[name]['report'])
+        if valid:return True
+    return False
+
+
 def run(db, start, end, report_path, *, recheck=False):
     selected = list(reversed(periods(start, end)))
     result = {'started_at': now(), 'start': start, 'end': end, 'total_periods':len(selected),
@@ -66,36 +92,38 @@ def run(db, start, end, report_path, *, recheck=False):
             conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?',
                          (encoded({'message': message,'start':start,'end':end,'report':str(report_path),
                                    'completed_periods':len(result['periods']),'total_periods':len(selected)}), run_id))
-    pacer=RequestPacer(progress)
-    source_root=db.path.parent/'market_financial_sources'
+    from .collection import RequestCollector,finish_batch
+    collector=RequestCollector(db,progress=progress)
     try:
         result['legacy_before_sha256']=legacy_fingerprint(db)
         result['backup'] = str(db.backup(db.path.parent/'backups'/
             ('before-market-financial-history-'+now().replace(':', '').replace('.', '')+'.sqlite3')))
         for period in selected:
             with db.connection() as conn:
-                complete = completed_batch(conn,period)
-            if complete and not recheck:
-                item = {'period': period, 'skipped': True, 'batch_id': complete['id']}
+                complete_public=completed_public_batch(conn,period)
+                complete_legacy=completed_batch(conn,period)
+            if (complete_public or complete_legacy) and not recheck:
+                item = {'period': period, 'skipped': True,
+                        'batch_id':complete_legacy['id'] if complete_legacy else None,
+                        'public_complete':complete_public}
             else:
                 progress(f'历史财务 {len(result["periods"])+1}/{len(selected)} · {period} · 四表全部字段')
-                with db.connection() as conn:
-                    previous=conn.execute('SELECT status FROM market_financial_batches WHERE report_date=? '
-                                          'ORDER BY id DESC LIMIT 1',(period,)).fetchone()
-                batch_id=mf.begin_batch(db,period)
                 try:
-                    data=mf.collect(source_root,period,pacer,progress,
-                                    resume=bool(previous and previous['status']=='failed'))
+                    data=mf.collect_public(db,'sw_update_runs:'+str(run_id),period,collector,progress,recheck=recheck)
                     progress(f'{period} 四表校验完成，正在发布新表')
                     with db.connection(write=True) as conn:
-                        summary=mf.publish(conn,batch_id,period,data)
-                    mf.clear_checkpoints(data)
-                    item={'period':period,'batch_id':batch_id,'statements':summary}
+                        summary=mf.publish(conn,None,period,data)
+                    item={'period':period,'collection_batch_ids':[entry['collection_batch_id'] for entry in data],
+                          'statements':summary}
                 except Exception as exc:
-                    mf.fail_batch(db,batch_id,exc)
+                    with db.connection() as conn:
+                        pending=[r[0] for r in conn.execute("SELECT id FROM collection_batches WHERE operation_id=? AND status='running'",
+                            ('sw_update_runs:'+str(run_id),))]
+                    for pending_id in pending:
+                        finish_batch(db,pending_id,'failed',error=str(exc))
                     raise
             result['periods'].append(item)
-            result['network_requests']=pacer.requests
+            result['network_requests']=collector.requests
             atomic_write(report_path, encoded(result).encode('utf-8'))
         result['legacy_after_sha256']=legacy_fingerprint(db)
         if result['legacy_after_sha256']!=result['legacy_before_sha256']:

@@ -1,16 +1,12 @@
 """Bounded pilot backfill: three exact quarter ends, never full-market history."""
 from __future__ import annotations
 
-import hashlib
 import json
-import time
 from calendar import monthrange
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .industry_sources import PILOT_INDUSTRIES, number
-from .network import create_data_session
-from .valuation import BAIDU_URL
 
 TARGETS = ('2025-12-31', '2026-03-31', '2026-06-30')
 
@@ -74,39 +70,22 @@ def build(db, source_bundle, directory, *, progress=lambda message:None):
                 'AND v.observed_on IN ('+','.join('?' for _ in dates)+')',dates):
             cached.setdefault(r['code'],{})[r['observed_on']]=(r['value'],r['content_hash'])
     added=[];checks=[];files=[];failures=[];network_count=0
-    with create_data_session() as session:
-        for index,code in enumerate(stocks,1):
-            progress(f'历史市值小范围验证 {index}/{len(stocks)} · {code}')
-            reference=references.get(code)
-            if not reference:
-                failures.append({'code':code,'error':'没有同日腾讯总市值，未回填'});continue
-            try:
-                local=cached.get(code,{})
-                required=(*TARGETS,reference['trade_date'])
-                if all(d in local for d in required):
-                    values={d:v[0] for d,v in local.items()}
-                    provenance={'reuse':'local valuation_observations','row_hashes':{d:local[d][1] for d in required}}
-                else:
-                    params={'openapi':'1','dspName':'iphone','tn':'tangram','client':'app','query':'总市值',
-                            'code':code,'word':'','resource_id':'51171','market':'ab','tag':'总市值',
-                            'chart_select':'近一年','industry_select':'','skip_industry':'1','finClientType':'pc'}
-                    path=directory/(code+'.json')
-                    if not path.exists():
-                        response=session.get(BAIDU_URL,params=params,timeout=20);response.raise_for_status()
-                        payload=response.json();parse_history(payload)
-                        path.write_text(json.dumps(payload,ensure_ascii=False),encoding='utf-8')
-                        network_count+=1;time.sleep(.5)
-                    values=parse_history(json.loads(path.read_text(encoding='utf-8')))
-                    provenance={'url':BAIDU_URL,'params':params,'file':str(path.resolve()),
-                                'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
-                    files.append(provenance)
-                facts=quarter_facts(code,values,TARGETS,reference,provenance)
-                added.extend(facts)
-                checks.append({'code':code,'reference_date':reference['trade_date'],
-                               'difference_yi':abs(values[reference['trade_date']]-reference['total_cap']/1e8),
-                               'quarter_count':len(facts),'reused_local':all(d in local for d in required)})
-            except Exception as exc:
-                failures.append({'code':code,'error':str(exc)})
+    for index,code in enumerate(stocks,1):
+        progress(f'历史市值小范围验证 {index}/{len(stocks)} · {code}')
+        reference=references.get(code)
+        if not reference:
+            failures.append({'code':code,'error':'没有同日腾讯总市值，未回填'});continue
+        local=cached.get(code,{})
+        required=(*TARGETS,reference['trade_date'])
+        if not all(d in local for d in required):
+            raise ValueError('旧百度历史市值联网入口已停用；新季度快照使用 python -m quarterly_dashboard.market_trade_snapshot。历史补点需先接入公共 RequestCollector；本次不会发送网络请求。')
+        values={d:v[0] for d,v in local.items()}
+        provenance={'reuse':'local valuation_observations','row_hashes':{d:local[d][1] for d in required}}
+        facts=quarter_facts(code,values,TARGETS,reference,provenance)
+        added.extend(facts)
+        checks.append({'code':code,'reference_date':reference['trade_date'],
+                       'difference_yi':abs(values[reference['trade_date']]-reference['total_cap']/1e8),
+                       'quarter_count':len(facts),'reused_local':True})
     report={'targets':list(TARGETS),'stock_count':len(stocks),'network_count':network_count,
             'quarter_records':len(added),'checks':checks,'failures':failures}
     (directory/'validation.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
@@ -131,4 +110,7 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('bundle',type=Path);parser.add_argument('directory',type=Path)
     parser.add_argument('--database',type=Path,default=DEFAULT_DATABASE)
     args=parser.parse_args()
-    build(Database(args.database),args.bundle,args.directory,progress=lambda msg:print(msg,flush=True))
+    try:
+        build(Database(args.database),args.bundle,args.directory,progress=lambda msg:print(msg,flush=True))
+    except ValueError as exc:
+        parser.error(str(exc))

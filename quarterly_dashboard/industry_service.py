@@ -217,15 +217,21 @@ class IndustryService:
     def recover_interrupted_runs(self):
         """Called under the backend instance lock; recovery starts no source work."""
         with self.db.connection(write=True) as conn:
+            stamp=datetime.now(timezone.utc).isoformat()
             conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error=? "
                          "WHERE dataset='market.trade_snapshot' AND status='running'",
-                         (datetime.now(timezone.utc).isoformat(),'后台中断，交易日分段未发布；公共来源保留，可按原范围恢复'))
+                         (stamp,'后台中断，交易日分段未发布；公共来源保留，可按原范围恢复'))
+            conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error=? "
+                         "WHERE status='running' AND (dataset LIKE 'market.financial.%' "
+                         "OR dataset LIKE 'industry.classification.%' OR dataset LIKE 'market.listings.%') "
+                         "AND operation_id IN (SELECT 'sw_update_runs:'||id FROM sw_update_runs WHERE status='running')",
+                         (stamp,'后台中断，行业／财务公共采集段未完成；已归档来源保留，可按原范围重试'))
             conn.execute("UPDATE market_financial_batches SET status='failed',finished_at=?,error=? WHERE status='running'",
-                (datetime.now(timezone.utc).isoformat(),'后台中断，三表批次未发布，请重试'))
+                (stamp,'后台中断，三表批次未发布，请重试'))
             conn.execute("UPDATE sw_membership_checks SET status='failed',finished_at=?,error=? WHERE status='running'",
-                (datetime.now(timezone.utc).isoformat(),'后台中断，今日名单检查未完成，沿用已保存名单'))
+                (stamp,'后台中断，今日名单检查未完成，沿用已保存名单'))
             return conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE status='running'",
-                (datetime.now(timezone.utc).isoformat(),'后台中断，已有行业快照保留；请在行业页面重试补缺')).rowcount
+                (stamp,'后台中断，已有行业快照保留；请在行业页面重试补缺')).rowcount
 
     def start_refresh(self, action, target, recheck=False):
         from .industry_updates import validate_request
@@ -241,7 +247,7 @@ class IndustryService:
         return self.status()
 
     def _refresh(self, action, target, recheck):
-        from .industry_updates import perform
+        from .industry_updates import merge_run_result, perform
         run_id=None
         def progress(message):
             with self._lock:
@@ -252,10 +258,10 @@ class IndustryService:
                     raise ValueError('已有行业任务运行，未启动重复更新')
                 run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES(?,?,?,?,'running')",
                     (action,target,int(recheck),datetime.now(timezone.utc).isoformat())).lastrowid
-            result=perform(self,action,target,recheck,progress)
+            result=perform(self,action,target,recheck,progress,run_id=run_id)
             with self.db.connection(write=True) as conn:
                 conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
-                             (datetime.now(timezone.utc).isoformat(),dumps(result),run_id))
+                             (datetime.now(timezone.utc).isoformat(),merge_run_result(conn,run_id,result),run_id))
             with self._lock:
                 warning=result.get('membership_check',{}).get('warning')
                 statements=result.get('statements',{})
@@ -285,7 +291,8 @@ class IndustryService:
                 "WHERE action='classification' AND status='complete' AND json_extract(result_json,'$.member_import_id')=?",(member_id,)).fetchone()[0]
             return {'member_import_id':member_id,'member_obtained_at':max(obtained,checked or obtained),
                 'taxonomy':[dict(r) for r in conn.execute('SELECT * FROM sw_industries ORDER BY level,code')],
-                'members':[{k:r[k] for k in ('stock_code','name','industry_code','effective_date','source_update','listing_date','listing_source_id')}
+                'members':[{k:r[k] for k in ('stock_code','name','industry_code','effective_date','source_update','listing_date',
+                    'listing_source_id','collection_batch_id','collection_source_id')}
                     for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=? ORDER BY stock_code',(member_id,))],
                 'membership_history':[{k:r[k] for k in ('stock_code','industry_code','effective_date','source_update')}
                     for r in conn.execute('SELECT * FROM sw_membership_history WHERE import_id=?',(member_id,))]}
@@ -356,13 +363,17 @@ class IndustryService:
         member_id=None
         if latest:
             member_id=conn.execute('SELECT member_import_id FROM sw_imports WHERE id=?',(latest,)).fetchone()[0]
-            old_members=[{k:r[k] for k in ('stock_code','name','industry_code','effective_date','source_update')}
+            old_members=[{k:r[k] for k in ('stock_code','name','industry_code','effective_date','source_update',
+                'listing_date','listing_source_id')}
                 for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=? ORDER BY stock_code',(member_id,))]
             old_count=len(old_members)
             if len(bundle['members']) < old_count*.95:
                 raise ValueError('全市场成分数量骤减，未发布新版本')
-            member_fields=('stock_code','name','industry_code','effective_date','source_update')
-            if old_members!=sorted([{k:r[k] for k in member_fields} for r in bundle['members']],key=lambda r:r['stock_code']):
+            member_fields=('stock_code','name','industry_code','effective_date','source_update','listing_date','listing_source_id')
+            previous_by_code={r['stock_code']:r for r in old_members}
+            incoming_members=[{k:(r.get(k) if r.get(k) is not None else previous_by_code.get(r['stock_code'],{}).get(k))
+                               for k in member_fields} for r in bundle['members']]
+            if old_members!=sorted(incoming_members,key=lambda r:r['stock_code']):
                 member_id=None
             else:
                 old_history=[{k:r[k] for k in ('stock_code','effective_date','industry_code','source_update')}
@@ -419,7 +430,10 @@ class IndustryService:
         if latest and member_id and not catalog_changed and not values and not cap_values and (not roster or conn.execute(
                 'SELECT 1 FROM sw_cap_quarter_rosters WHERE quarter=?',(roster['quarter'],)).fetchone()):
             self._classification_check(conn,bundle,member_id)
-            return latest
+            # A public membership check is an auditable import operation even when
+            # classification facts are unchanged; reuse the member version below.
+            if not bundle.get('manifest',{}).get('collection_operation_id'):
+                return latest
         import_id = conn.execute("INSERT INTO sw_imports(obtained_at,content_hash,source_manifest_json,status,member_import_id) VALUES(?,?,?,'complete',?)",
                                  (bundle['obtained_at'],content_hash,dumps(bundle['manifest']),member_id)).lastrowid
         if member_id is None:
@@ -427,12 +441,25 @@ class IndustryService:
             conn.execute('UPDATE sw_imports SET member_import_id=? WHERE id=?',(member_id,import_id))
             existing={r['stock_code']:dict(r) for r in conn.execute('SELECT * FROM sw_memberships WHERE import_id=?',
                 (conn.execute('SELECT member_import_id FROM sw_imports WHERE id=?',(latest,)).fetchone()[0],))} if latest else {}
+            operation_id=bundle.get('manifest',{}).get('collection_operation_id')
+            retained=bundle.setdefault('manifest',{}).setdefault('retained_prior_listing_sources',[])
+            for row in bundle['members']:
+                batch_id=row.get('collection_batch_id');source_id=row.get('collection_source_id')
+                if batch_id is None and source_id is None:continue
+                batch=conn.execute('SELECT operation_id FROM collection_batches WHERE id=?',(batch_id,)).fetchone()
+                if batch is None or source_id is None or batch['operation_id']!=operation_id:
+                    retained.append({'stock_code':row['stock_code'],'retained':True,
+                        'collection_batch_id':batch_id,'collection_source_id':source_id})
+                    row.pop('collection_batch_id',None);row.pop('collection_source_id',None)
+            conn.execute('UPDATE sw_imports SET source_manifest_json=? WHERE id=?',(dumps(bundle['manifest']),import_id))
             conn.executemany('INSERT INTO sw_memberships '
-                '(import_id,stock_code,name,industry_code,effective_date,source_update,listing_date,listing_source_id) '
-                'VALUES(?,?,?,?,?,?,?,?)',
+                '(import_id,stock_code,name,industry_code,effective_date,source_update,listing_date,listing_source_id,collection_batch_id,collection_source_id) '
+                'VALUES(?,?,?,?,?,?,?,?,?,?)',
                 [(import_id,r['stock_code'],r['name'],r['industry_code'],r['effective_date'],r['source_update'],
                   r.get('listing_date') or existing.get(r['stock_code'],{}).get('listing_date'),
-                  r.get('listing_source_id') or existing.get(r['stock_code'],{}).get('listing_source_id')) for r in bundle['members']])
+                  r.get('listing_source_id') if r.get('collection_source_id') is not None else
+                    (r.get('listing_source_id') or existing.get(r['stock_code'],{}).get('listing_source_id')),
+                  r.get('collection_batch_id'),r.get('collection_source_id')) for r in bundle['members']])
             conn.executemany('INSERT INTO sw_membership_history VALUES(?,?,?,?,?)',
                 [(import_id,r['stock_code'],r['effective_date'],r['industry_code'],r['source_update']) for r in bundle.get('membership_history',[])])
         self._classification_check(conn,bundle,member_id)
@@ -493,13 +520,15 @@ class IndustryService:
             if latest is None:
                 return None
             publication = conn.execute("SELECT max(id),count(*),max(finished_at) FROM market_financial_batches WHERE status='complete'").fetchone()
+            public_publication = conn.execute("SELECT max(id),count(*),max(finished_at) FROM collection_batches "
+                "WHERE domain='market' AND dataset LIKE 'market.financial.%' AND status='complete'").fetchone()
             snapshots=conn.execute("SELECT max(id),count(*),max(finished_at) FROM collection_batches WHERE dataset='market.trade_snapshot' AND status='complete'").fetchone()
             summary_rows=conn.execute('SELECT max(import_id),count(*) FROM sw_industry_cap_quarters').fetchone()
             from .industry_cap_summary import current_aggregation_versions
             aggregation_versions=current_aggregation_versions(conn)
             aggregation_key=tuple(sorted((quarter,item['import_id'],item['input_signature'])
                                          for quarter,item in aggregation_versions.items()))
-            key = (latest['id'],*publication,*snapshots,*summary_rows,aggregation_key)
+            key = (latest['id'],*publication,*public_publication,*snapshots,*summary_rows,aggregation_key)
             with self._lock:
                 cached = self._cache
             if cached and cached[0] == key:
@@ -541,8 +570,11 @@ class IndustryService:
             data = {'import':dict(latest),'catalog':catalog,'members':members,'periods':periods,
                     'caps':caps,'aggregation_versions':aggregation_versions,
                     'token':key,'nonfinancial':nonfinancial_stocks,
-                    'financial_times':{r[0]:r[1] for r in conn.execute(
+                    'financial_times':{**{r[0]:r[1] for r in conn.execute(
                         "SELECT report_date,max(finished_at) FROM market_financial_batches WHERE status='complete' GROUP BY report_date")},
+                        **{r[0]:r[1] for r in conn.execute("SELECT scope_start,max(finished_at) FROM collection_batches "
+                            "WHERE domain='market' AND dataset LIKE 'market.financial.%' AND status='complete' "
+                            "AND scope_start IS NOT NULL GROUP BY scope_start")}},
                     'membership_obtained_at':conn.execute('SELECT obtained_at FROM sw_imports WHERE id=?',
                         (latest['member_import_id'],)).fetchone()[0]}
         with self._lock:

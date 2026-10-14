@@ -102,7 +102,7 @@ def test_pacing_shared_across_endpoints_instances_and_rest(db):
     assert times[20]-times[19]>=72
 
 
-@pytest.mark.parametrize('reply',[response(status=403),response(status=429,headers={'Retry-After':'7200'}),
+@pytest.mark.parametrize('reply',[response(status=401),response(status=403),response(status=429,headers={'Retry-After':'7200'}),
     response(body='验证码'.encode(),headers={'Content-Type':'text/html'}),response(body=b'<html>blocked</html>')])
 def test_block_stops_source_persists_cooldown_and_one_probe(db,reply):
     clock=Clock()
@@ -138,6 +138,30 @@ def test_healthy_probe_clears_cooldown_cancel_and_retry_date(db):
     healthy.cancelled=lambda:True
     with pytest.raises(Cancelled):healthy.wait(100)
     assert retry_after('Wed, 21 Oct 2026 07:28:00 GMT',0)==datetime(2026,10,21,7,28,tzinfo=timezone.utc).timestamp()
+
+
+def test_valid_json_is_not_blocked_by_html_content_type(db):
+    batch=begin_batch(db,'o','index.test','csindex')
+    payload={'code':0,'msg':'ok','data':{'value':1}}
+    reply=response(payload,headers={'Content-Type':'text/html; charset=UTF-8'})
+    client,session,_=http(db,[reply])
+
+    returned,_=client.get(batch,'csindex','index.test','https://example.test',expect='json')
+
+    assert returned is reply
+    assert len(session.calls)==1
+    assert client.state('csindex')['cooldown_until'] is None
+
+
+def test_html_block_page_with_json_content_type_is_still_blocked(db):
+    batch=begin_batch(db,'o','index.test','csindex')
+    reply=response(body=b'<html>blocked</html>',headers={'Content-Type':'application/json'})
+    client,session,_=http(db,[reply])
+
+    with pytest.raises(ProviderBlocked):
+        client.get(batch,'csindex','index.test','https://example.test',expect='json')
+
+    assert len(session.calls)==1
 
 
 def test_versions_unchanged_corrections_withdrawal_and_source_mismatch(db):

@@ -1387,6 +1387,7 @@
     finally {
       dashboardUpdating = false;
       window.dispatchEvent(new CustomEvent('dashboard-data-state', {detail:{code:state.code, updating:false}}));
+      fullRefresh.disabled = false;
       refresh.textContent = '刷新数据';
       renderFollowState();
     }

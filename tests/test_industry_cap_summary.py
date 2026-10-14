@@ -5,6 +5,7 @@ import pytest
 from quarterly_dashboard.collection import archive_source, begin_batch
 from quarterly_dashboard.industry_cap_summary import aggregate_quarter, current_aggregation_versions
 from quarterly_dashboard.industry_service import IndustryService
+from quarterly_dashboard.industry_updates import perform
 from quarterly_dashboard.market_trade_snapshot import FIELDS, normalized, publish
 from quarterly_dashboard.storage import Database
 
@@ -130,3 +131,86 @@ def test_page_keeps_legacy_history_until_a_new_snapshot_summary_is_published(db)
     with db.connection() as c:
         assert c.execute('SELECT total_cap FROM sw_industry_cap_quarters WHERE import_id=? AND industry_code=?',
                          (legacy,'110101')).fetchone()[0]==777
+
+
+@pytest.mark.parametrize('entrypoint',['perform','page_refresh'])
+def test_task_entrypoint_keeps_published_cap_aggregation_current_and_visible(db,monkeypatch,entrypoint):
+    add_snapshot(db,'000001','sz',100)
+    add_snapshot(db,'000002','sz',200)
+    service=IndustryService(db)
+
+    from quarterly_dashboard import industry_memberships, market_trade_snapshot
+    monkeypatch.setattr(industry_memberships,'ensure_daily_memberships',
+                        lambda *args,**kwargs:{'warning':None})
+
+    def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress):
+        with db.connection(write=True) as conn:
+            run_id=conn.execute("SELECT id FROM sw_update_runs WHERE status='running'").fetchone()[0]
+            conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?',
+                         (json.dumps({'message':'已有进度','audit_marker':'preserved',
+                                      'aggregation_results':{'2025Q3':{'import_id':9}}}),run_id))
+        aggregation=aggregate_quarter(db,quarter,run_id,f'sw_update_runs:{run_id}')
+        return {'aggregation':aggregation,'requested_count':2,'failures':[],
+                'membership_check':membership_check}
+
+    monkeypatch.setattr(market_trade_snapshot,'refresh_quarter',refresh_quarter)
+    progress=lambda _message:None
+    if entrypoint=='perform':
+        result=perform(service,'cap_quarter','2025Q4',False,progress)
+        with db.connection() as conn:
+            run=conn.execute('SELECT status,result_json FROM sw_update_runs ORDER BY id DESC LIMIT 1').fetchone()
+    else:
+        service._refresh('cap_quarter','2025Q4',False)
+        with db.connection() as conn:
+            run=conn.execute('SELECT status,result_json FROM sw_update_runs ORDER BY id DESC LIMIT 1').fetchone()
+        result=json.loads(run['result_json'])
+
+    saved=json.loads(run['result_json'])
+    published=saved['aggregation_results']['2025Q4']
+    assert run['status']=='complete'
+    assert saved['message']=='已有进度' and saved['audit_marker']=='preserved'
+    assert saved['aggregation_results']['2025Q3']['import_id']==9
+    assert published['import_id']==result['aggregation']['import_id']
+    with db.connection() as conn:
+        current=current_aggregation_versions(conn)['2025Q4']
+        summary=conn.execute('SELECT total_cap FROM sw_industry_cap_quarters '
+                             'WHERE import_id=? AND industry_code=\'110101\'',
+                             (published['import_id'],)).fetchone()[0]
+    page=service.read(industry='110101')
+    visible=next(row for row in page['market_series'] if row['trade_date']=='2025-12-31')
+    assert current['import_id']==published['import_id']
+    assert summary==300
+    assert visible['import_id']==published['import_id']
+    assert visible['total_cap']==summary
+
+
+@pytest.mark.parametrize('entrypoint',['perform','page_refresh'])
+def test_failed_task_entrypoint_preserves_already_published_aggregation(db,monkeypatch,entrypoint):
+    add_snapshot(db,'000001','sz',100)
+    add_snapshot(db,'000002','sz',200)
+    service=IndustryService(db)
+
+    from quarterly_dashboard import industry_memberships, market_trade_snapshot
+    monkeypatch.setattr(industry_memberships,'ensure_daily_memberships',
+                        lambda *args,**kwargs:{'warning':None})
+
+    def refresh_then_fail(service,quarter,recheck,foundation,membership_check,progress):
+        with db.connection() as conn:
+            run_id=conn.execute("SELECT id FROM sw_update_runs WHERE status='running'").fetchone()[0]
+        aggregate_quarter(db,quarter,run_id,f'sw_update_runs:{run_id}')
+        raise RuntimeError('后续审计阶段失败')
+
+    monkeypatch.setattr(market_trade_snapshot,'refresh_quarter',refresh_then_fail)
+    if entrypoint=='perform':
+        with pytest.raises(RuntimeError,match='后续审计阶段失败'):
+            perform(service,'cap_quarter','2025Q4',False,lambda _message:None)
+    else:
+        service._refresh('cap_quarter','2025Q4',False)
+
+    with db.connection() as conn:
+        run=conn.execute('SELECT status,result_json FROM sw_update_runs ORDER BY id DESC LIMIT 1').fetchone()
+        saved=json.loads(run['result_json'])
+        current=current_aggregation_versions(conn)['2025Q4']
+    assert run['status']=='failed'
+    assert saved['aggregation_results']['2025Q4']['import_id']==current['import_id']
+    assert current['import_id'] is not None

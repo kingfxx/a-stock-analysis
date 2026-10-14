@@ -2,6 +2,7 @@ import copy
 import pytest
 
 from quarterly_dashboard.industry_financial_reader import required_periods
+from quarterly_dashboard.collection import archive_source,begin_batch,finish_batch
 from quarterly_dashboard.industry_service import IndustryService
 from quarterly_dashboard.maintenance import MaintenanceService
 from quarterly_dashboard.storage import Database
@@ -100,6 +101,24 @@ def test_view_is_logical_registered_and_reports_actual_time(setup):
     assert view['total_bytes']==0 and view['updated_at'] and view['time_basis']=='updated_at'
     assert view['category']=='行业数据' and '尚未登记' not in view['description']
     assert not any(t['name']==view['name'] for t in data['tables'])
+
+
+def test_public_financial_reference_resolves_without_legacy_id_namespace(setup):
+    db,service,bundle=setup
+    data=service._load()
+    batch=begin_batch(db,'sw_update_runs:public','market.financial.income','eastmoney',
+        start='2025-06-30',end='2025-06-30',scope={'period':'2025-06-30'},parser_version='financial-v1')
+    source=archive_source(db,batch,'eastmoney','market.financial.income',
+        {'transport':'http','method':'GET','url':'https://example.test','params':{'columns':'ALL'}},
+        1,raw=b'{"data":[]}',obtained_at='2026-10-14T00:00:00+00:00')
+    finish_batch(db,batch,'complete','complete')
+    with db.connection(write=True) as conn:
+        conn.execute("UPDATE market_financial_income SET batch_id=NULL,source_id=NULL,collection_batch_id=?,collection_source_id=? WHERE security_code='300750' AND report_date='2025-06-30' AND is_latest=1",(batch,source))
+    facts=service._financial_reader.facts(data['import']['member_import_id'],data['nonfinancial'],periods=['2025-06-30'])
+    provenance=service._financial_reader.provenance(facts,'300750','2025-06-30')['revenue']
+    assert provenance['source']=='eastmoney:market.financial.income'
+    assert provenance['source_id'] is None and provenance['collection_source_id']==source
+    assert provenance['collection_batch_id']==batch and provenance['params']['columns']=='ALL'
 
 
 def test_financial_industry_exclusion_reloads_on_classification_update(setup):

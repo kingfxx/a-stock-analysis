@@ -10,8 +10,9 @@ from pathlib import Path
 from .network import create_data_session
 from .sources import normalize_code
 from .storage import Database, SyncKey, SyncResult
+from .stock_collection import begin_stock_batch, routed_stock_requests
 from .update_service import (backup_before_update, data_lock, mark_failed,
-                             recently_checked, sync_state)
+                             recently_checked, recent_sync_failure, sync_state)
 from .valuation import fetch_dividend_event_page
 
 
@@ -163,6 +164,10 @@ class DividendService:
             key = SyncKey(identity, "dividends", SOURCE)
             state = sync_state(self.db, key)
             old = self.db.dividend_events(identity, SOURCE)
+            recent_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
+            if recent_failure:
+                return {"events": self.read(code), "warnings": [
+                    f"分红最近自动更新失败，暂缓重试：{recent_failure['error']}"]}
             known = bool(old) or state.get("data_status") == "no_data"
             if known and not (refresh or full
                             or not recently_checked(state, seconds=86400)):
@@ -175,22 +180,28 @@ class DividendService:
                                      methodology_version="implemented_cash_v1",
                                      trigger_reason="full" if full_fetch else "refresh",
                                      requested_start=None if full_fetch else since)
+            batch_id = begin_stock_batch(self.db, run, "eastmoney", "dividends", code,
+                                         start=None if full_fetch else since, end=date.today().isoformat(),
+                                         trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
+                                         scope={"source_interface": "RPT_SHAREBONUS_DET", "mode": "full" if full_fetch else "incremental"},
+                                         parser_version="eastmoney_dividend_v1", definition_version="implemented_cash_v1")
             warnings = []
             try:
-                batches = [self._all_pages(code)] if full_fetch else [
-                    self._all_pages(code, date_field="NOTICE_DATE", since=since),
-                    self._all_pages(code, date_field="EX_DIVIDEND_DATE", since=since)]
-                if not full_fetch:
-                    for period in sorted({row["report_period"] for row in old if row["status"] == "pending"}):
-                        try:
-                            pending = self._all_pages(code, report_period=period)
-                            if not pending:
-                                raise ValueError("empty pending-event lookup")
-                            batches.append(pending)
-                        except ValueError:
-                            batches.append(self._all_pages(code))
-                            warnings.append("未完成事件精确查询不可用，已执行有记录原因的全量补偿")
-                            break
+                with routed_stock_requests(self.db, batch_id, "eastmoney", "dividends"):
+                    batches = [self._all_pages(code)] if full_fetch else [
+                        self._all_pages(code, date_field="NOTICE_DATE", since=since),
+                        self._all_pages(code, date_field="EX_DIVIDEND_DATE", since=since)]
+                    if not full_fetch:
+                        for period in sorted({row["report_period"] for row in old if row["status"] == "pending"}):
+                            try:
+                                pending = self._all_pages(code, report_period=period)
+                                if not pending:
+                                    raise ValueError("empty pending-event lookup")
+                                batches.append(pending)
+                            except ValueError:
+                                batches.append(self._all_pages(code))
+                                warnings.append("未完成事件精确查询不可用，已执行有记录原因的全量补偿")
+                                break
                 candidates = {}
                 for batch in batches:
                     for raw in batch:
@@ -229,8 +240,9 @@ class DividendService:
                         conn.execute("UPDATE dividend_events SET event_key=? WHERE instrument_id=? "
                                      "AND source=? AND event_key=?", (new_key, identity, SOURCE, old_key))
                     self.db.upsert_dividend_events(conn, key, run, list(candidates.values()))
-                self.db.complete_sync(run, result, write)
+                self.db.complete_sync(run, result, write, collection_batch_id=batch_id,
+                                      batch_result={"candidate_count": len(candidates), "sync_run_id": run})
             except Exception as exc:
-                mark_failed(self.db, run, exc)
+                mark_failed(self.db, run, exc, collection_batch_id=batch_id)
                 warnings.append(f"分红更新失败，保留已存事实：{exc}")
             return {"events": self.read(code), "warnings": warnings}

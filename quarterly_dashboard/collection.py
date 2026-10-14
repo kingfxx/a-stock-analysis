@@ -58,6 +58,9 @@ class ProviderBlocked(RuntimeError):
     pass
 
 
+RECOVERY_PENDING = object()
+
+
 @dataclass(frozen=True)
 class PacingPolicy:
     interval: float = 10
@@ -143,6 +146,29 @@ def read_source(db, source_id):
     if digest(raw)!=item['raw_sha256']:
         raise ValueError('来源原文哈希不符')
     return raw,item
+
+
+def reusable_source(db, batch_id, source_id):
+    """Register a same-day verified archive in a new batch without copying its file."""
+    fields=('source_system','dataset','request_key','request_json','http_status','file_path','content_type',
+            'compression','raw_sha256','stored_sha256','hash_basis','raw_bytes','stored_bytes','fields_json','obtained_at')
+    with db.connection() as conn:
+        original=conn.execute('SELECT * FROM collection_sources WHERE id=?',(source_id,)).fetchone()
+        target=conn.execute('SELECT source_system,dataset FROM collection_batches WHERE id=?',(batch_id,)).fetchone()
+    if not original or original['request_status'] not in ('success','reused') or original['parse_status']!='complete':
+        raise ValueError('来源未通过请求及解析校验，不能复用')
+    if not target or (target['source_system'],target['dataset'])!=(original['source_system'],original['dataset']):
+        raise ValueError('复用来源与目标批次提供方或数据集不一致')
+    if not original['obtained_at'] or not original['file_path']:
+        raise ValueError('来源缺少原始取得时间或归档文件')
+    values={field:original[field] for field in fields}
+    values.update(batch_id=batch_id,request_status='reused',parse_status='complete',reused_source_id=source_id)
+    with db.connection(write=True) as conn:
+        values['attempt_no']=conn.execute('SELECT coalesce(max(attempt_no),0)+1 FROM collection_sources '
+            'WHERE batch_id=? AND dataset=? AND request_key=?',
+            (batch_id,original['dataset'],original['request_key'])).fetchone()[0]
+        return conn.execute('INSERT INTO collection_sources('+','.join(values)+') VALUES('+','.join('?' for _ in values)+')',
+                             tuple(values.values())).lastrowid
 
 
 def retry_after(value, now):
@@ -241,6 +267,29 @@ class RequestCollector:
         self.halted[provider]=dict(reason=reason,cooldown_until=state['cooldown_until'])
         raise ProviderBlocked(f'{provider} {reason}；停止本轮同源请求，冷却至 {state["cooldown_until"]}')
 
+    def confirm_recovery(self, provider, recovery_token):
+        """Release a deferred provider probe after its multi-request check passes."""
+        with self.provider_lock(provider):
+            state=self.state(provider)
+            if state.get('reason') != f'recovery_pending:{recovery_token}' or not state.get('cooldown_until'):
+                raise ProviderBlocked(f'{provider} 恢复验证状态已变化')
+            if datetime.fromisoformat(state['cooldown_until']).timestamp()>self.clock():
+                raise ProviderBlocked(f'{provider} 仍在冷却')
+            state.update(cooldown_until=None,reason=None,denials=0)
+            self.save_state(state)
+
+    def abort_recovery(self, provider, recovery_token, reason):
+        """Keep a failed deferred probe blocked and extend its cooldown."""
+        with self.provider_lock(provider):
+            state=self.state(provider)
+            if state.get('reason') != f'recovery_pending:{recovery_token}':
+                return
+            deadline=self.clock()+self.policy.cooldown*(2**min(state.get('denials',0),4))
+            state.update(cooldown_until=datetime.fromtimestamp(deadline,timezone.utc).isoformat(),
+                         reason=f'恢复验证失败：{reason}',denials=state.get('denials',0)+1)
+            self.save_state(state)
+            self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
+
     def report(self):
         return dict(policy=asdict(self.policy),network_requests=self.requests,retries=self.retries,halted=self.halted)
 
@@ -259,6 +308,14 @@ class RequestCollector:
                 self.wait(60*(attempt-1)+self.uniform(0,5))
             with self.provider_lock(provider):
                 state=self.state(provider)
+                pending=state.get('reason')
+                if pending and pending.startswith('recovery_pending:'):
+                    updated=datetime.fromisoformat(state.get('updated_at') or utc_now())
+                    if (datetime.now(timezone.utc)-updated).total_seconds()<300:
+                        self.halted[provider]=dict(reason='恢复验证进行中',cooldown_until=state['cooldown_until'])
+                        raise ProviderBlocked(f'{provider} 另一请求正在进行恢复验证')
+                    state.update(reason='恢复验证超时')
+                    self.save_state(state)
                 if state['cooldown_until'] and datetime.fromisoformat(state['cooldown_until']).timestamp()>self.clock():
                     self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
                     raise ProviderBlocked(f'{provider} 仍在冷却至 {state["cooldown_until"]}')
@@ -322,7 +379,10 @@ class RequestCollector:
                 return value,sid
         raise RuntimeError('SDK transport attempts exhausted')
 
-    def get(self, batch_id, provider, dataset, url, params=None, *, headers=None, expect='json', healthy_response=None):
+    def get(self, batch_id, provider, dataset, url, params=None, *, headers=None, expect='json', healthy_response=None,
+            evidence_mode='archive', recovery_token=None, stock_fast=False):
+        if evidence_mode not in ('archive', 'metadata_only'):
+            raise ValueError('不支持的来源证据策略')
         # Authentication is sent, but never persisted in request identity or logs.
         request=dict(transport='http',method='GET',url=url,
                      params={k:v for k,v in (params or {}).items() if k.lower() not in ('token','apikey','api_key')})
@@ -336,17 +396,26 @@ class RequestCollector:
             with self.provider_lock(provider):
                 state=self.state(provider)
                 probe=state['cooldown_until'] is not None
+                pending=state.get('reason')
+                if pending and pending.startswith('recovery_pending:') and pending != f'recovery_pending:{recovery_token}':
+                    updated=datetime.fromisoformat(state.get('updated_at') or utc_now())
+                    if (datetime.now(timezone.utc)-updated).total_seconds()<300:
+                        self.halted[provider]=dict(reason='恢复验证进行中',cooldown_until=state['cooldown_until'])
+                        raise ProviderBlocked(f'{provider} 另一请求正在进行恢复验证')
+                    state.update(reason='恢复验证超时')
+                    self.save_state(state)
                 if probe and datetime.fromisoformat(state['cooldown_until']).timestamp()>self.clock():
                     self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
                     raise ProviderBlocked(f'{provider} 仍在冷却至 {state["cooldown_until"]}')
                 budget=json.loads(state['budget_json'])
                 starts=[t for t in budget.get('starts',[]) if t>self.clock()-self.policy.window]
-                ready=budget.get('ready_at',0)
-                if len(starts)>=self.policy.window_requests:
-                    ready=max(ready,starts[-self.policy.window_requests]+self.policy.window+.001)
-                if ready>self.clock():
-                    self.progress(f'{provider} 限速等待 {round(ready-self.clock())} 秒')
-                    self.wait(ready-self.clock())
+                if not stock_fast:
+                    ready=budget.get('ready_at',0)
+                    if len(starts)>=self.policy.window_requests:
+                        ready=max(ready,starts[-self.policy.window_requests]+self.policy.window+.001)
+                    if ready>self.clock():
+                        self.progress(f'{provider} 限速等待 {round(ready-self.clock())} 秒')
+                        self.wait(ready-self.clock())
                 stamp=datetime.fromtimestamp(self.clock(),timezone.utc).isoformat()
                 starts=[t for t in starts if t>self.clock()-self.policy.window]+[self.clock()]
                 with self.db.connection() as conn:
@@ -370,8 +439,14 @@ class RequestCollector:
                     state['budget_json']=encoded(dict(starts=starts,ready_at=ready,count=count))
                     self.save_state(state)
                 source_id=archive_source(self.db,batch_id,provider,dataset,request,attempt_no,
-                    raw=response.content if response is not None else None,response=response,obtained_at=stamp,
+                    raw=response.content if response is not None and evidence_mode == 'archive' else None,
+                    response=response,obtained_at=stamp,
                     request_status='failed' if network_error or response.status_code>=400 else 'success',error=network_error)
+                if evidence_mode == 'metadata_only' and response is not None:
+                    # Keep the parser outcome pending for the domain adapter to finalize;
+                    # the response body exists only in memory and is never hashed or written.
+                    with self.db.connection(write=True) as conn:
+                        conn.execute("UPDATE collection_sources SET parse_status='pending' WHERE id=?",(source_id,))
                 if network_error:
                     if probe:
                         self.halted[provider]=dict(reason='恢复验证网络失败',cooldown_until=state['cooldown_until'])
@@ -381,9 +456,20 @@ class RequestCollector:
                     continue
                 text=response.text[:100000].lower()
                 anti_bot=any(marker in text for marker in ('captcha','验证码','访问过于频繁','访问频率','too many requests','access denied'))
-                html=text.lstrip().startswith(('<!doctype html','<html')) or 'text/html' in response.headers.get('Content-Type','')
-                if response.status_code in (403,429) or anti_bot or (expect=='json' and response.status_code==200 and html):
-                    reason=f'HTTP {response.status_code}' if response.status_code in (403,429) else '验证码／反爬响应'
+                html_body=text.lstrip().startswith(('<!doctype html','<html'))
+                html_content_type='text/html' in response.headers.get('Content-Type','').lower()
+                json_valid=False
+                if expect=='json':
+                    try:
+                        response.json()
+                        json_valid=True
+                    except ValueError:
+                        pass
+                # Some upstreams label a JSON API response as text/html. Treat it as
+                # an HTML block page only when the body is HTML or is not valid JSON.
+                html=html_body or (html_content_type and not json_valid)
+                if response.status_code in (401,403,429) or anti_bot or (expect=='json' and response.status_code==200 and html):
+                    reason=f'HTTP {response.status_code}' if response.status_code in (401,403,429) else '验证码／反爬响应'
                     parsed_source(self.db,source_id,error=reason)
                     self.block(provider,state,reason,response)
                 if response.status_code in (500,502,503,504):
@@ -403,6 +489,10 @@ class RequestCollector:
                             and str(payload.get('code','200')) in ('0','200') and payload.get('success') is not False) if expect=='json' else ('_csrf' in text if expect=='html' else len(response.content)>0)
                     except ValueError:
                         pass
+                    if healthy is RECOVERY_PENDING and recovery_token:
+                        state.update(reason=f'recovery_pending:{recovery_token}')
+                        self.save_state(state)
+                        return response,source_id
                     if not healthy:
                         self.block(provider,state,'恢复验证响应无效',response)
                     state.update(cooldown_until=None,reason=None,denials=0)

@@ -12,8 +12,9 @@ from .sources import (PROFIT_KEYS, fetch_financial_report_page, normalize_code,
                       normalize_report_dates, parse_cash_flow_reports,
                       parse_financial_reports)
 from .storage import Database, SyncKey, SyncResult, utc_now
+from .stock_collection import begin_stock_batch, routed_stock_requests
 from .update_service import (audit_due, backup_before_update, data_lock, mark_failed,
-                             next_audit, recently_checked, sync_state)
+                             next_audit, recently_checked, recent_sync_failure, sync_state)
 
 
 SOURCE = "sina:CompanyFinanceService.getFinanceReport2022"
@@ -220,6 +221,10 @@ class FundamentalService:
             for kind in REPORT_TYPES:
                 key = SyncKey(identity, f"financial:{kind}", SOURCE)
                 state = sync_state(self.db, key)
+                recent_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
+                if recent_failure:
+                    warnings.append(f"{kind} 最近自动更新失败，暂缓重试：{recent_failure['error']}")
+                    continue
                 saved = self.db.financial_reports(identity, SOURCE, kind)
                 if saved and not (refresh or full or audit_due(state, "financial")
                                   or not recently_checked(state, seconds=86400)):
@@ -228,8 +233,14 @@ class FundamentalService:
                 run = self.db.start_sync(key, parser_version="sina_reports_v1",
                                          methodology_version="raw_facts_v1",
                                          trigger_reason="full" if full_kind else "refresh")
+                batch = begin_stock_batch(self.db, run, "sina", f"financial.{kind}", code,
+                                          trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
+                                          scope={"source_interface": f"getFinanceReport2022:{kind}",
+                                                 "mode": "full" if full_kind else "incremental"},
+                                          parser_version="sina_reports_v1", definition_version="raw_facts_v1")
                 try:
-                    candidates = self._collect(code, kind, full=full_kind, saved=saved)
+                    with routed_stock_requests(self.db, batch, "sina", f"financial.{kind}"):
+                        candidates = self._collect(code, kind, full=full_kind, saved=saved)
                     all_periods = sorted({row["period"] for row in saved} |
                                          {row["period"] for row in candidates})
                     if not all_periods:
@@ -238,7 +249,9 @@ class FundamentalService:
                                         all_periods[-1],
                                         next_full_audit_at=next_audit("financial") if full_kind else state.get("next_full_audit_at"))
                     self.db.complete_sync(run, result,
-                        lambda conn: self.db.upsert_financial_reports(conn, key, run, candidates))
+                        lambda conn: self.db.upsert_financial_reports(conn, key, run, candidates),
+                        collection_batch_id=batch,
+                        batch_result={"row_count": len(candidates), "sync_run_id": run})
                     if kind == "lrb" and full_kind:
                         sparse = [row["period"] for row in candidates
                                   if not all(_income_fields(row["raw_json"]))]
@@ -246,7 +259,7 @@ class FundamentalService:
                             warnings.append("旧期利润表来源缺少营收或归母利润，原始报告已保存，缺失指标留空："
                                             + "、".join(sparse))
                 except Exception as exc:
-                    mark_failed(self.db, run, exc)
+                    mark_failed(self.db, run, exc, collection_batch_id=batch)
                     warnings.append(f"{kind} 财报更新失败，保留已存事实：{exc}")
             data = self.read(code)
             data["warnings"] = warnings

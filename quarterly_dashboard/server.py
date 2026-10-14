@@ -37,6 +37,8 @@ from .dividend_service import DividendService
 from .valuation_service import ValuationService
 from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update
 from .storage import SyncKey
+from .stock_collection import (begin_stock_batch, complete_stock_batch, fail_stock_batch,
+                               recent_failed_stock_batch, routed_stock_requests)
 from .stock_library import StockLibrary
 from .stock_cleanup import StockCleanupService
 from .analysis_service import AnalysisService
@@ -240,13 +242,32 @@ def _add_missing_name(data: dict, path: Path, session: requests.Session) -> dict
 def _add_sqlite_missing_name(db: Database, data: dict) -> dict:
     if (data.get("name") or "").strip():
         return data
+    if recent_failed_stock_batch(db, "instrument_name", data["code"]):
+        return {**data, "warnings": [*data.get("warnings", []), "股票名称最近自动获取失败，暂缓重试"]}
+    identity = instrument_id(db, data["code"])
+    with db.connection() as conn:
+        row = conn.execute("SELECT id FROM sync_runs WHERE instrument_id=? ORDER BY id DESC LIMIT 1",
+                           (identity,)).fetchone() if identity else None
+    if not row:
+        return {**data, "warnings": [*data.get("warnings", []), "股票名称暂缺，未建立无关联的外部请求"]}
+    run_id = row["id"]
+    batch_id = begin_stock_batch(db, run_id, "tencent", "instrument_name", data["code"],
+                                 trigger="automatic", scope={"source_interface": "qt.gtimg.cn",
+                                                              "related_to_dataset": "financial"},
+                                 parser_version="tencent_quote_v1", definition_version="instrument_name_v1")
     try:
-        with create_data_session() as session:
-            name = fetch_stock_name(data["code"], session)
+        with routed_stock_requests(db, batch_id, "tencent", "instrument_name"):
+            with create_data_session() as session:
+                name = fetch_stock_name(data["code"], session)
         if not isinstance(name, str) or not name.strip():
             raise ValueError("名称响应为空")
     except (requests.RequestException, ValueError, KeyError) as exc:
+        fail_stock_batch(db, batch_id, exc)
         return {**data, "warnings": [*data.get("warnings", []), f"股票名称获取失败，暂可按代码查找：{exc}"]}
+    except RuntimeError as exc:
+        fail_stock_batch(db, batch_id, exc)
+        return {**data, "warnings": [*data.get("warnings", []), f"股票名称获取失败，暂可按代码查找：{exc}"]}
+    complete_stock_batch(db, batch_id, result={"sync_run_id": run_id, "name_fetched": True})
     backup_before_update(db)
     db.ensure_instrument(data["code"], name.strip())
     return {**data, "name": name.strip()}

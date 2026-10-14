@@ -16,6 +16,8 @@ v30未新增表，交易快照用途扩展为东财原始值及独立历史合�
 
 结构 v23/v24 的公共采集、指数目录／映射／定义／估值表和任务／冷却状态已登记为「指数数据」或「运行与配置」。时间依据只用真实采集／写入／批次时间，未知时间不以观察日补充；旧采集未迁移。详见[指数估值采集](index-valuation-collection.md)。
 
+个股接入公共调度后继续复用三张公共采集表，不新增数据库表。个股 `collection_batches` 以 `domain=stock` 区分，`collection_sources` 记录逐次请求元数据；个股证据策略为 `metadata_only`，请求取得时间仍使用 `obtained_at`，原文路径、双哈希和字节数为空。批次与请求状态在维护统计中按真实更新时间字段识别，不能由报告期或交易日推算。共享 provider 预算／冷却在 `collection_provider_state`；详见[个股采集说明](stock-collection.md)。
+
 结构 21 新增 `market_quarterly_prices`、`market_price_sources`（行业数据）和 `market_price_batches`（运行与配置），均已登记用途。价格／来源的更新时间使用 `obtained_at`，批次使用 `finished_at`；空表显示暂无数据，空时间不推断。详见[全市场季度末未复权价格](data-sources/market-quarterly-prices.md)。
 
 - 表名、用途、分类、记录数、列数、索引数；支持名称／用途搜索、分类筛选及表头排序。
@@ -37,6 +39,8 @@ v30未新增表，交易快照用途扩展为东财原始值及独立历史合�
 Schema v19 新增 `market_financial_performance`，保存全 A 股业绩指标接口 ALL 的 37 个字段，与三表使用统一来源、批次和版本规则；更新时间为 `obtained_at`/`updated_at`。历史采集只更新四张新业务表，不改旧 `sw_financial_facts`。采集进度沿用行业任务状态，页面读取不受影响。
 
 Schema v18 新增 `market_financial_income`、`market_financial_balance`、`market_financial_cashflow`、`market_financial_sources` 和 `market_financial_batches`。三表为全 A 股东财摘要接口全部字段，保留真实修订；来源表保存 gzip 响应引用，批次表记录执行结果。业务表更新时间读取 `obtained_at`/`updated_at`，来源表读取 `obtained_at`，批次读取 `obtained_at`/`finished_at`；空表不推算时间。原始响应位于数据库目录下的 `market_financial_sources/`，单独占磁盘，不包含在 SQLite 表大小和单独数据库备份中。采集与字段说明见 [全市场三表采集](data-sources/market-financial-statements.md)。
+
+Schema v32 重建四张财务事实表，以可空旧引用列加公共引用列兼容历史和新采集；逐列保留历史事实及旧来源 ID。新公共来源文件仍位于数据库旁 `collection_sources/`，SQLite 维护大小不含文件内容。财务事实表的实际采集时间继续读取行内 `obtained_at`，公共请求时间可由公共来源 `obtained_at` 对照；`sw_memberships` 时间依据包括关联的 `sw_imports.obtained_at`、旧 listing source 或新 `collection_sources.obtained_at`。版本迁移本身不会采集数据或重标来源。
 
 - [ ] 在 `quarterly_dashboard/maintenance.py` 的 `DESCRIPTIONS` 登记用途和分类；表改名或用途变更时同步更新。
 - [ ] 核对 `TIME_COLUMNS`、`PARENT_TIMES` 或 `table_time` 中的更新时间依据，明确实际字段或关联批次；无适用记录时说明原因并显示「未记录」，不使用报告期或交易日替代。

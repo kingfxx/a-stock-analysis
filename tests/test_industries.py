@@ -345,24 +345,37 @@ def test_stock_financial_refresh_does_not_collect_or_change_industry_snapshot(se
 
 
 def test_financial_task_one_period_reuses_local_and_never_fetches_caps(service,monkeypatch,tmp_path):
-    from quarterly_dashboard import industry_updates as updates
+    from quarterly_dashboard import industry_updates as updates,market_financial
+    from test_market_financial import prepared_public_datasets, row as financial_row, datasets
+    from quarterly_dashboard.market_financial import FIELDS
     service.directory=tmp_path/'sources'
+    bundle=fixture_bundle()
+    for i in range(3997):
+        bundle['members'].append({**bundle['members'][0],'stock_code':f'600{i:03d}'})
     save_local_financial(service.db,0,10)
-    service.import_bundle(fixture_bundle())
+    service.import_bundle(bundle)
     before=service.read(industry='630701',mode='ytd')['market_series']
     requested=[]
-    def fetch(directory,stocks,period):
-        requested.append((stocks,period))
-        return [{'stock_code':'000001','period':period,'notice_date':None,'revenue':50,'parent_profit':5,
-                 'provenance':{'source':'test'}}]
-    monkeypatch.setattr(updates,'fetch_financial_period',fetch)
+    def collect(database,operation_id,period,collector,progress,*,recheck=False):
+        requested.append((operation_id,period,recheck))
+        payload=datasets()
+        for item in payload:
+            rows=[]
+            for code in ('300750','000001','000002'):
+                record=financial_row(item['dataset'],code=code,exchange='SZ')
+                for field,definition in FIELDS[item['dataset']]['fields'].items():
+                    if definition['type']=='REAL':record[field]=0
+                rows.append(record)
+            item['rows']=rows
+        return prepared_public_datasets(database,operation_id,period,payload)
+    monkeypatch.setattr(market_financial,'collect_public',collect)
     monkeypatch.setattr(updates,'fetch_cap_quarter',lambda *a,**k:pytest.fail('finance requested caps'))
-    result=updates.perform(service,'financial_period','2025-06-30',False,lambda _:None)
-    assert requested==[(['000001'],'2025-06-30')]
-    assert not result['failures']
+    result=updates.perform(service,'financial_period','2025-06-30',True,lambda _:None)
+    assert len(requested)==1 and requested[0][1:] == ('2025-06-30',True)
+    assert result['legacy_updated'] is False
     assert service.read(industry='630701',mode='ytd')['market_series']==before
     with service.db.connection() as conn:
-        assert conn.execute('SELECT count(*) FROM sw_memberships').fetchone()[0]==3
+        assert conn.execute('SELECT count(*) FROM sw_memberships').fetchone()[0]==4000
         assert conn.execute('SELECT count(*) FROM sw_cap_facts').fetchone()[0]==3
 
 
@@ -373,10 +386,13 @@ def test_financial_repeat_ignores_response_file_changes_and_preserves_valid_valu
     assert service.import_bundle(repeated)==1
     changed=copy.deepcopy(b);changed['financials'][0]['revenue']=None
     changed['financials'][0]['parent_profit']=0
-    service.import_bundle(changed)
+    with pytest.raises(ValueError,match='来源值变空'):
+        service.import_bundle(changed)
     with service.db.connection() as conn:
-        row=conn.execute("SELECT * FROM sw_financial_facts WHERE stock_code='300750' AND period='2024-06-30' ORDER BY import_id DESC LIMIT 1").fetchone()
-    assert row['revenue']==10 and row['parent_profit']==0
+        row=conn.execute("SELECT total_operate_income,parent_netprofit FROM market_financial_income "
+                          "WHERE security_code='300750' AND report_date='2024-06-30' AND is_latest=1").fetchone()
+    original=next(item for item in b['financials'] if item['stock_code']=='300750' and item['period']=='2024-06-30')
+    assert row['total_operate_income']==original['revenue'] and row['parent_netprofit']==original['parent_profit']
 
 
 def test_quarter_cap_default_skip_and_revision_only_changed_company(service,monkeypatch,tmp_path):
@@ -384,7 +400,6 @@ def test_quarter_cap_default_skip_and_revision_only_changed_company(service,monk
     from test_market_trade_snapshot import row, http
     service.import_bundle(fixture_bundle())
     with service.db.connection(write=True) as conn:
-        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('cap_quarter','2026Q3',0,'2026-10-13','running')")
         member=conn.execute('SELECT member_import_id FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()[0]
         conn.execute("INSERT INTO sw_cap_quarter_rosters VALUES('2026Q3','2026-09-30','current_constituents_backfill',?)",(member,))
         conn.execute("INSERT INTO sw_cap_quarter_members SELECT '2026Q3',stock_code,industry_code FROM sw_memberships WHERE import_id=? AND industry_code='630701'",(member,))
@@ -410,7 +425,6 @@ def test_partial_cap_retry_keeps_old_values_and_frozen_members(service,monkeypat
     from test_market_trade_snapshot import row, http
     bundle=fixture_bundle();bundle['caps']=bundle['caps'][:1];service.import_bundle(bundle)
     with service.db.connection(write=True) as conn:
-        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('cap_quarter','2026Q3',0,'2026-10-13','running')")
         member=conn.execute('SELECT member_import_id FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()[0]
         conn.execute("INSERT INTO sw_cap_quarter_rosters VALUES('2026Q3','2026-09-30','current_constituents_backfill',?)",(member,))
         conn.execute("INSERT INTO sw_cap_quarter_members SELECT '2026Q3',stock_code,industry_code FROM sw_memberships WHERE import_id=? AND industry_code='630701'",(member,))
@@ -432,12 +446,9 @@ def test_ended_quarter_validation_calendar_weekend_and_exact_target(service,monk
     from quarterly_dashboard import industry_updates as updates
     for action,target in [('refresh_pilot','2026Q3'),('financial_period','2026-07-01'),('cap_quarter','2026Q4')]:
         with pytest.raises(ValueError):updates.validate_request(action,target,today=date(2026,10,3))
-    # 2023Q4 ended on Sunday: confirm Friday from the index calendar, without updating a stock.
-    def index_calendar(session, directory, url, params):
-        assert params['param'] == 'sh000001,day,,2023-12-31,30,'
-        return {'code':0,'data':{'sh000001':{'day':[['2023-12-29','1','1']]}}},{}
-    monkeypatch.setattr(updates,'_response',index_calendar)
-    assert updates.target_trade_date(service.db,'2023Q4',tmp_path)=='2023-12-29'
+    # Legacy helper may reuse known local dates, but must not fetch a calendar itself.
+    with pytest.raises(ValueError,match='market_trade_snapshot'):
+        updates.target_trade_date(service.db,'2023Q4',tmp_path)
     b=fixture_bundle();one=service.import_bundle(b)
     bad={**service.foundation(),'financials':[],'caps':[dict(b['caps'][0],trade_date='2026-10-01')],
          'obtained_at':b['obtained_at'],'manifest':{},'cap_roster':{'quarter':'2026Q3','target_date':'2026-09-30',
@@ -448,24 +459,8 @@ def test_ended_quarter_validation_calendar_weekend_and_exact_target(service,monk
 
 def test_target_period_source_filter_and_content_addressed_samples(monkeypatch,tmp_path):
     from quarterly_dashboard import industry_updates as updates
-    payload={'success':True,'result':{'pages':1,'count':1,'data':[{'SECURITY_CODE':'300750',
-        'REPORT_DATE':'2025-06-30','REPORTDATE':'2025-06-30','NOTICE_DATE':'2025-08-01','TOTAL_OPERATE_INCOME':1,'PARENT_NETPROFIT':0,'WEIGHTAVG_ROE':0}]}}
-    params=[]
-    class Response:
-        def raise_for_status(self):pass
-        def json(self):return payload
-    class Session:
-        def __enter__(self):return self
-        def __exit__(self,*args):pass
-        def get(self,url,**options):params.append(options['params']);return Response()
-    monkeypatch.setattr(updates,'create_data_session',Session)
-    one=updates.fetch_financial_period(tmp_path,['300750'],'2025-06-30')
-    updates.fetch_financial_period(tmp_path,['300750'],'2025-06-30')
-    assert params[0]['filter']=='(REPORT_DATE=\'2025-06-30\')(SECURITY_CODE in ("300750"))'
-    assert one[0]['parent_profit']==0 and 'raw' not in one[0]['provenance']
-    assert one[0]['weighted_roe']==0
-    assert params[1]['reportName']=='RPT_LICO_FN_CPD'
-    assert len(list((tmp_path/'responses').iterdir()))==1
+    with pytest.raises(ValueError,match='collect_public'):
+        updates.fetch_financial_period(tmp_path,['300750'],'2025-06-30')
 
 
 def test_industry_api_requires_explicit_task_stock_routes_stay_separate(service,monkeypatch):
@@ -503,10 +498,10 @@ def test_industry_api_requires_explicit_task_stock_routes_stay_separate(service,
 def test_industry_job_audits_success_and_failure(service,monkeypatch,tmp_path):
     from quarterly_dashboard import industry_updates as updates
     service.import_bundle(fixture_bundle());service.directory=tmp_path/'sources'
-    monkeypatch.setattr(updates,'perform',lambda *a:{'requested_count':0,'failures':[]})
+    monkeypatch.setattr(updates,'perform',lambda *a,**k:{'requested_count':0,'failures':[]})
     service._refresh('cap_quarter','2026Q3',False)
     assert service.status()['error'] is None
-    monkeypatch.setattr(updates,'perform',lambda *a:(_ for _ in ()).throw(ValueError('source failed')))
+    monkeypatch.setattr(updates,'perform',lambda *a,**k:(_ for _ in ()).throw(ValueError('source failed')))
     service._refresh('financial_period','2026-06-30',False)
     assert 'source failed' in service.status()['error'] and not service.status()['running']
     with service.db.connection() as conn:

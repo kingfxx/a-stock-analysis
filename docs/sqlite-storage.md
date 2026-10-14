@@ -118,19 +118,21 @@ v29新增业务表 `market_trade_snapshot`：全市场未复权股价、涨跌�
 
 行业专用数据包括财务四表、交易日快照、旧价格与市值历史表、成员及任务表，并复用跨领域公共采集三表。表数量以维护页实时发现为准。`sw_` 前缀不代表全部停用；旧财务表已退出行业日常采集和读取，旧市值/价格表保留供历史追溯和旧工具使用，行业页面已改为直接读取交易日快照。
 
+Schema v32 为四张财务表增加可空的 `collection_batch_id` / `collection_source_id`。每行必须且只能使用一组完整来源引用：历史行继续使用旧 `batch_id` / `source_id`，新公共来源行使用公共列，组合外键确保来源与批次相配。迁移重建财务表并逐列复制旧行，不更改旧 ID 或内容。`market_financial_industry` 暴露旧引用和公共引用两组独立列；读取方不得跨命名空间解释整数 ID。`sw_memberships` 的公共上市日期来源列使用 `collection_sources` 记录，其采集时间由维护页沿关联来源读取。
+
 | 分类 | 表 / View | 保存内容与来源 | 当前用途 |
 | --- | --- | --- | --- |
 | 财务 | `market_financial_income` | 利润表摘要全字段，东财 `RPT_DMSK_FN_INCOME` | 当前全市场财务采集；行业营收、利润和毛利率计算来源 |
 | 财务 | `market_financial_balance` | 资产负债表摘要全字段，东财 `RPT_DMSK_FN_BALANCE` | 当前全市场财务采集与历史保存 |
 | 财务 | `market_financial_cashflow` | 现金流量表摘要全字段，东财 `RPT_DMSK_FN_CASHFLOW` | 当前全市场财务采集与历史保存 |
 | 财务 | `market_financial_performance` | 业绩指标全字段，东财 `RPT_LICO_FN_CPD` | 当前全市场财务采集；行业内公司对比的加权 ROE 来源 |
-| 财务采集 | `market_financial_batches` | 每报告期四表采集/发布状态、时间、计数及错误 | 当前财务批次审计与更新时间依据 |
-| 财务来源 | `market_financial_sources` | 分页请求参数、原始 gzip 响应路径、哈希、大小及字段列表 | 当前财务行通过 `source_id` 追溯来源 |
+| 财务采集 | `market_financial_batches` | 迁移前每报告期四表批次与来源元数据 | 历史财务行通过旧 `batch_id` 追溯 |
+| 财务来源 | `market_financial_sources` | 迁移前分页参数、gzip 响应路径、哈希、大小及字段列表 | 历史财务行通过旧 `source_id` 追溯 |
 | 读取 View | `market_financial_industry` | 最新利润表左连接同公司同报告期最新业绩指标 | 行业页面统一取数入口；不存储副本，计算在 Python 完成 |
 | 交易日快照 | `market_trade_snapshot` | 东财 `RPT_VALUEANALYSIS_DET` 全部22个已登记源字段；当前只采季末 | 当前季末未复权股价、股本、市值及估值来源；身份按实际交易日兼容日频 |
 | 市值读取 View | `market_cap_latest` | 新快照有效市值优先、旧表同日最新有效市值回退 | 兼容旧工具读取；行业页面直接查询 `market_trade_snapshot` |
 | 旧季度价格 | `market_quarterly_prices` / `market_price_sources` / `market_price_batches` | BigQuant 季末未复权收盘价及历史来源/批次；不是总市值 | 行业页面已不读取或回退，日常快照按钮停写且不调BigQuant；保留历史、合成输入追溯、采集日期映射核对及旧工具用途，见[来源说明](data-sources/market-quarterly-prices.md) |
-| 公共采集 | `collection_batches` / `collection_sources` / `collection_provider_state` | 分段与覆盖、逐次响应、同源共享预算/冷却 | 指数与交易快照共用；不为新接口新建控制表 |
+| 公共采集 | `collection_batches` / `collection_sources` / `collection_provider_state` | 分段与覆盖、逐次请求结果及同源共享预算/冷却；指数、交易快照及市场财务/行业保存完整归档来源，个股按已授权例外仅保存 metadata-only 请求元数据 | 覆盖指数、交易快照、市场财务/行业及个股；个股来源无原文文件、哈希或重放能力，见[个股采集说明](stock-collection.md) |
 | 导入版本 | `sw_imports` | 名单/旧市值及快照汇总审计清单、哈希、真实时间及成员版本指针 | 当前分类及市值审计；独立于财务批次 |
 | 行业分类 | `sw_industries` | 申万 SW2021 一至三级分类代码、名称及父子关系 | 当前行业层级与分类查询 |
 | 行业成员 | `sw_memberships` | 各版本沪深公司名单、申万归属、上市日期及来源引用 | 当前行业成员筛选与公司名称/上市日期展示 |
@@ -396,6 +398,8 @@ python -m quarterly_dashboard.storage check --database $restorePath
 日常启动不自动执行 `VACUUM`，维护 CLI 也没有单独的 `vacuum` 子命令。若需实际收缩文件，应先备份，停止同库后台，并在持有实例锁的维护流程中执行，再核验和恢复服务。空间整理不能删除业务历史来替代。
 
 2026-10-12在点位索引重建后，已正式备份、停止8765并持有实例锁执行VACUUM。日常库文件由1314324480字节降至1304301568字节，实际释放10022912字节（约9.56 MiB），空闲页由2413降至0。67张表的行数和逐行内容指纹、全部表／索引／触发器定义前后一致，完整性与外键检查通过；8765已恢复，页面、目录和维护接口均返回200。验收及维护统计分别见 `data/verification/reports/2026-10-12-sqlite-vacuum.json` 和 `2026-10-12-sqlite-vacuum-maintenance-api.json`，后台日志位于 `data/verification/logs/daily-8765-vacuum-20261012.*.log`。
+
+2026-10-14按用户要求再次整理日常库。先创建并检查正式备份 `data/backups/pre-vacuum-20261014T1430.sqlite3`（1,589,465,088 字节），核对并停止原 8765 进程后持数据库实例锁执行 VACUUM。数据库从 1,589,465,088 字节降至 1,440,706,560 字节，释放 148,758,528 字节（约 141.9 MiB），page_count 从 388,053 降至 351,735，freelist 从 34,501 降为 0。68 张表共 3,198,020 行的逐表指纹与备份一致，schema 定义一致，完整性检查为 `ok`、外键错误 0；`Database.check()` 前后均通过。8765 已恢复为 PID 12704，首页、维护统计、行业状态/数据、财报 API 均 HTTP 200。详见 `data/verification/reports/20261014_sqlite_vacuum.json` 和 `data/verification/logs/daily-8765-vacuum-20261014.*.log`。
 
 ## 7. 代码依据与历史记录
 

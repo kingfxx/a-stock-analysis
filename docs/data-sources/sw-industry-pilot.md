@@ -36,7 +36,7 @@
 
 结构版本 11 在 `sw_financial_facts` 新增四个可空本年累计金额列：`operating_revenue`（`OPERATE_INCOME`）、`operating_cost`（`OPERATE_COST`）、`deduct_parent_profit`（`DEDUCT_PARENT_NETPROFIT`）、`operating_profit`（`OPERATE_PROFIT`）。保留原版本，旧行新列为 NULL；后续普通财务更新同时请求四字段。按用户确认的行业采集例外，四字段统一取东财，字段码、单位、合并／归母、期间口径、分页文件和 SHA256 逐项记录，缺项不覆盖已有有效值。毛利率不新增存储列，也不无条件用营业总收入替代缺失营业收入。
 
-专用补采工具为 `python -m quarterly_dashboard.industry_financial_extensions data/industry_sources/financial_extensions_20261004 --report-directory data/verification/reports/financial_extensions_pilot_20261004 --publish`，默认只处理最近已有财报期。最近一期核对后加 `--all-history` 推进已存约十年报告期，报告另存 `data/verification/reports/financial_extensions_history_20261004/`。每次发布先备份；每期保留原有营收、归母利润、披露日及其来源，仅新增四字段版本，并核对原字段 SHA256。精确分页缓存用于中断续跑；源字段为空记录为空而非重复无限补采。串行随机间隔、阶段休息和失败冷却与历史批量采集一致，行业独立任务锁阻止同时点击其他行业更新。
+旧 `industry_financial_extensions` 在线补采命令已停用，避免其独立 Session 和进程内限速绕过公共来源预算。四张新财务表的新增／显式复核统一使用 `python -m quarterly_dashboard.market_financial_backfill --start <报告期> --end <报告期> --recheck`；离线旧财务解析和来源读取仍保留，旧行业财务事实不自动迁移。
 
 2026-06-30 最近一期实际来源返回 5,579 条记录，当前沪深名单匹配 5,222 家。四字段分别覆盖 47、5,119、5,222、5,222 家。`OPERATE_INCOME` 仅少数公司有值，不能将该列的缺失理解为公司没有收入：原有 `TOTAL_OPERATE_INCOME` 保持不变，非金融企业来源通常由它表达收入。金融企业营业成本缺失时不套用工业企业毛利率公式。报告中的覆盖数均为公司家数，历史期不以当前 5,223 家作为漏采分母。最近一期和历史补采报告保存在上述目录，原业务表内容校验资料为 `data/verification/reports/financial_extensions_pilot_20261004/original_tables_audit.json`。
 
@@ -114,11 +114,11 @@
 
 离线整理工具为 `python -m quarterly_dashboard.industry_cap_compact --report-directory data/verification/reports/<本次报告目录>`，必须停止后台并持有数据库实例锁。迁移自动备份，工具复用迁移前备份；已完成迁移时额外生成整理前备份。仅清理同一公司及交易日的连续版本中金额、完整来源、拒绝状态完全相同的后续行；若有外键直接引用市值明细则不清理。保留修订、来源变化和错误版本审计。整理前后核对最新有效市值、真实变更序列及完整来源，并逐表校验行业汇总和其他业务数据的 SHA256；事务通过后 VACUUM 回收空间，再检查完整性和外键。重复运行不重复整理。
 
-分类及名单需要单独更新：`python -m quarterly_dashboard.industry_sources data/industry_sources/<新目录> --foundation-only`，然后通过 `python -m quarterly_dashboard.industry_service <目录>/bundle.json --database <指定数据库>` 导入；该模式不下载财务或市值，不捕获本地财务。新季度要求分类资料的采集日期不早于目标季末，过旧则提示先更新分类。已经固定的季度不随后来分类变化而改写。
+旧 `industry_sources --foundation-only` 联网下载及旧 bundle 导入命令已停止用于新采集。分类及名单由 `python -m quarterly_dashboard.industry_memberships --database <库路径> --directory <来源目录> --report <报告路径>` 通过公共 `RequestCollector` 归档、解析并发布；历史 bundle 与离线解析仅用于已保存样本核对。新季度要求分类资料的采集日期不早于目标季末，过旧则提示先更新分类。已经固定的季度不随后来分类变化而改写。
 
 首次初始化仍使用不带 `--foundation-only` 的来源工具，明确导入分类及必要历史。生产库迁移及导入应先核对并停止后台，完成后重启 8765。原已有历史来源文件及审计版本保留。
 
-三季度点的有限回补工具为 `python -m quarterly_dashboard.industry_cap_history <当前来源目录>/bundle.json <新历史来源目录>`，优先只读复用本地估值来源，输出 bundle 和验证报告后才单独导入。固定两个试运行行业，上限 60 家，三个季末全部验证成功才生成可导入版本；普通页面刷新不扩大历史范围，也不会丢失已保存的季度点。
+旧 `industry_cap_history` 工具不再发百度联网请求；只有所需日期均有本地估值证据时才可离线组装，否则明确停止。新季度快照使用 `python -m quarterly_dashboard.market_trade_snapshot` 的公共入口。历史百度来源补点需另行接入公共 `RequestCollector` 后再启用，不由本计划自动重抓。
 
 本次验证记录见 `data/verification/reports/sw_pilot_validation.json`、`sw_source_cross_checks.json`、`sw_production_acceptance.json`。45 家总市值与新浪公开报价核对，差异小于腾讯 0.01 亿元报价舍入精度；28 组同报告期营收在新浪和东方财富来源中一致。全套回归 544 项通过，行业针对性测试 10 项通过（含其后补充的旧错误版本排除测试）；桌面及手机浏览器验收通过，零模型调用，原业务表条数不变。8765 日常后台保持运行。
 
