@@ -183,6 +183,12 @@ class IndustryService:
                 warning=result.get('membership_check',{}).get('warning')
                 status.update(running=False,action=run['action'],target=run['target'],error=run['error'],result=result,
                               message=message+price_status(result)+(' · '+warning if warning else ''))
+            elif run and run['action']=='trade_snapshot_history':
+                result=json.loads(run['result_json'] or '{}')
+                total=result.get('total_quarters',len(result.get('periods',[])))
+                label='交易快照历史采集执行完成' if run['status']=='complete' else '交易快照历史采集未完成，已提交季度保留'
+                status.update(running=False,action=run['action'],target=run['target'],error=run['error'],result=result,
+                              message=f"{label} · {len(result.get('periods',[]))}/{total} 期；来源空期 {len(result.get('empty_quarters',[]))}")
             elif run and run['action']=='financial_history':
                 result=json.loads(run['result_json'] or '{}')
                 total=result.get('total_periods',len(result.get('periods',[])))
@@ -211,6 +217,9 @@ class IndustryService:
     def recover_interrupted_runs(self):
         """Called under the backend instance lock; recovery starts no source work."""
         with self.db.connection(write=True) as conn:
+            conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error=? "
+                         "WHERE dataset='market.trade_snapshot' AND status='running'",
+                         (datetime.now(timezone.utc).isoformat(),'后台中断，交易日分段未发布；公共来源保留，可按原范围恢复'))
             conn.execute("UPDATE market_financial_batches SET status='failed',finished_at=?,error=? WHERE status='running'",
                 (datetime.now(timezone.utc).isoformat(),'后台中断，三表批次未发布，请重试'))
             conn.execute("UPDATE sw_membership_checks SET status='failed',finished_at=?,error=? WHERE status='running'",
@@ -482,7 +491,8 @@ class IndustryService:
             if latest is None:
                 return None
             publication = conn.execute("SELECT max(id),count(*),max(finished_at) FROM market_financial_batches WHERE status='complete'").fetchone()
-            key = (latest['id'],*publication)
+            snapshots=conn.execute("SELECT max(id),count(*),max(finished_at) FROM collection_batches WHERE dataset='market.trade_snapshot' AND status='complete'").fetchone()
+            key = (latest['id'],*publication,*snapshots)
             with self._lock:
                 cached = self._cache
             if cached and cached[0] == key:
@@ -502,10 +512,21 @@ class IndustryService:
                 "ON m.stock_code=f.security_code AND m.import_id=? "
                 "WHERE f.is_latest=1 AND f.exchange IN ('sh','sz') ORDER BY f.report_date",
                 (latest['member_import_id'],))]
-            # Compute capitalization using each import's own constituent roster.
-            caps = [dict(r) for r in conn.execute('SELECT * '
-                    "FROM sw_industry_cap_quarters WHERE import_id NOT IN "
-                    "(SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected')")]
+            # Aggregate quarter rosters from the canonical market snapshot table.
+            caps = [dict(r) for r in conn.execute(
+                "WITH ranked AS (SELECT security_code,trade_date,total_market_cap,"
+                "ROW_NUMBER() OVER (PARTITION BY security_code,trade_date ORDER BY "
+                "CASE definition_version WHEN 'em-valueanalysis-v1' THEN 3 "
+                "WHEN 'historical-suspended-preclose-v1' THEN 2 ELSE 1 END DESC) AS rn "
+                "FROM market_trade_snapshot WHERE is_latest=1 AND exchange IN ('sh','sz') "
+                "AND definition_version IN ('em-valueanalysis-v1','historical-composite-v1','historical-suspended-preclose-v1') "
+                "AND total_market_cap IS NOT NULL) "
+                "SELECT r.member_import_id AS import_id,m.industry_code,r.quarter,"
+                "r.target_date AS trade_date,r.target_date,r.composition,count(*) AS expected_count,"
+                "count(c.total_market_cap) AS known_count,sum(c.total_market_cap) AS known_cap "
+                "FROM sw_cap_quarter_members m JOIN sw_cap_quarter_rosters r ON r.quarter=m.quarter "
+                "LEFT JOIN ranked c ON c.security_code=m.stock_code AND c.trade_date=r.target_date AND c.rn=1 "
+                "GROUP BY r.quarter,m.industry_code ORDER BY r.quarter,m.industry_code")]
             data = {'import':dict(latest),'catalog':catalog,'members':members,'periods':periods,
                     'caps':caps,'token':key,'nonfinancial':nonfinancial_stocks,
                     'financial_times':{r[0]:r[1] for r in conn.execute(
@@ -530,13 +551,18 @@ class IndustryService:
                 'SELECT quarter,target_date FROM sw_cap_quarter_rosters ORDER BY quarter')}
             values = {q:{} for q in dates}
             if leaves:
-                rows = conn.execute('SELECT m.quarter,c.stock_code,c.total_cap FROM sw_cap_quarter_members m '
+                rows = conn.execute('SELECT m.quarter,c.security_code AS stock_code,c.total_market_cap AS total_cap FROM sw_cap_quarter_members m '
                     'JOIN sw_cap_quarter_rosters r ON r.quarter=m.quarter '
-                    'JOIN sw_cap_facts c ON c.stock_code=m.stock_code AND c.trade_date=r.target_date '
+                    'JOIN market_trade_snapshot c ON c.security_code=m.stock_code AND c.trade_date=r.target_date '
                     f"WHERE m.industry_code IN ({','.join('?' for _ in leaves)}) "
-                    'AND c.total_cap IS NOT NULL AND c.import_id=(SELECT max(c2.import_id) FROM sw_cap_facts c2 '
-                    'WHERE c2.stock_code=c.stock_code AND c2.trade_date=c.trade_date AND c2.import_id NOT IN '
-                    "(SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected'))",
+                    "AND c.is_latest=1 AND c.exchange IN ('sh','sz') "
+                    "AND c.definition_version IN ('em-valueanalysis-v1','historical-composite-v1','historical-suspended-preclose-v1') "
+                    'AND c.total_market_cap IS NOT NULL AND NOT EXISTS (SELECT 1 FROM market_trade_snapshot x '
+                    'WHERE x.security_code=c.security_code AND x.exchange=c.exchange AND x.trade_date=c.trade_date '
+                    'AND x.is_latest=1 AND x.total_market_cap IS NOT NULL '
+                    "AND x.definition_version IN ('em-valueanalysis-v1','historical-composite-v1','historical-suspended-preclose-v1') "
+                    "AND CASE x.definition_version WHEN 'em-valueanalysis-v1' THEN 3 WHEN 'historical-suspended-preclose-v1' THEN 2 ELSE 1 END > "
+                    "CASE c.definition_version WHEN 'em-valueanalysis-v1' THEN 3 WHEN 'historical-suspended-preclose-v1' THEN 2 ELSE 1 END)",
                     leaves)
                 for r in rows:
                     values[r['quarter']][r['stock_code']] = r['total_cap']
@@ -564,23 +590,32 @@ class IndustryService:
         quarter = f"{period[:4]}Q{(int(period[5:7])-1)//3+1}"
         prior = f"{int(period[:4])-1}Q{quarter[-1]}"
         values, dates = {quarter:{},prior:{}}, {}
+        sources = {quarter:{},prior:{}}
         with self.db.connection() as conn:
             dates = {r['quarter']:r['target_date'] for r in conn.execute(
                 'SELECT quarter,target_date FROM sw_cap_quarter_rosters WHERE quarter IN (?,?)', (quarter,prior))}
             for q, date in dates.items():
-                rows = conn.execute('SELECT c.stock_code,c.total_cap FROM sw_cap_facts c '
-                    f"WHERE c.stock_code IN ({','.join('?' for _ in stocks)}) AND c.trade_date=? "
-                    'AND c.total_cap IS NOT NULL AND c.import_id=(SELECT max(c2.import_id) FROM sw_cap_facts c2 '
-                    'WHERE c2.stock_code=c.stock_code AND c2.trade_date=c.trade_date AND c2.import_id NOT IN '
-                    "(SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected'))",
-                    [*stocks,date])
+                rows = list(conn.execute("SELECT c.security_code AS stock_code,c.total_market_cap AS total_cap,"
+                    "CASE c.definition_version WHEN 'em-valueanalysis-v1' THEN 'eastmoney:market_trade_snapshot' "
+                    "ELSE 'composite:'||c.definition_version END AS source FROM market_trade_snapshot c "
+                    f"WHERE c.security_code IN ({','.join('?' for _ in stocks)}) AND c.trade_date=? "
+                    "AND c.is_latest=1 AND c.exchange IN ('sh','sz') "
+                    "AND c.definition_version IN ('em-valueanalysis-v1','historical-composite-v1','historical-suspended-preclose-v1') "
+                    'AND c.total_market_cap IS NOT NULL AND NOT EXISTS (SELECT 1 FROM market_trade_snapshot x '
+                    'WHERE x.security_code=c.security_code AND x.exchange=c.exchange AND x.trade_date=c.trade_date '
+                    'AND x.is_latest=1 AND x.total_market_cap IS NOT NULL '
+                    "AND x.definition_version IN ('em-valueanalysis-v1','historical-composite-v1','historical-suspended-preclose-v1') "
+                    "AND CASE x.definition_version WHEN 'em-valueanalysis-v1' THEN 3 WHEN 'historical-suspended-preclose-v1' THEN 2 ELSE 1 END > "
+                    "CASE c.definition_version WHEN 'em-valueanalysis-v1' THEN 3 WHEN 'historical-suspended-preclose-v1' THEN 2 ELSE 1 END)",
+                    [*stocks,date]))
                 values[q] = {r['stock_code']:r['total_cap'] for r in rows}
+                sources[q] = {r['stock_code']:r['source'] for r in rows}
         result = {}
         for stock in stocks:
             current, baseline = values[quarter].get(stock), values[prior].get(stock)
             result[stock] = {'total_cap':current,'cap_yoy':(current/baseline-1)*100
                             if current is not None and baseline is not None and baseline>0 else None,
-                            'cap_trade_date':dates.get(quarter)}
+                            'cap_trade_date':dates.get(quarter),'cap_source':sources[quarter].get(stock)}
         return result
 
     def ranking_market_values(self, period, catalog):
@@ -588,13 +623,17 @@ class IndustryService:
         prior = f"{int(period[:4])-1}Q{quarter[-1]}"
         values = {q:{code:{} for code in catalog} for q in (quarter,prior)}
         with self.db.connection() as conn:
-            rows = conn.execute('SELECT m.quarter,m.industry_code,c.stock_code,c.total_cap '
+            rows = conn.execute('SELECT m.quarter,m.industry_code,c.security_code AS stock_code,c.total_market_cap AS total_cap '
                 'FROM sw_cap_quarter_members m JOIN sw_cap_quarter_rosters r ON r.quarter=m.quarter '
-                'JOIN sw_cap_facts c ON c.stock_code=m.stock_code AND c.trade_date=r.target_date '
-                'WHERE m.quarter IN (?,?) AND c.total_cap IS NOT NULL '
-                'AND c.import_id=(SELECT max(c2.import_id) FROM sw_cap_facts c2 '
-                'WHERE c2.stock_code=c.stock_code AND c2.trade_date=c.trade_date AND c2.import_id NOT IN '
-                "(SELECT id FROM sw_imports WHERE json_extract(source_manifest_json,'$.cap_status')='rejected'))",
+                'JOIN market_trade_snapshot c ON c.security_code=m.stock_code AND c.trade_date=r.target_date '
+                "WHERE m.quarter IN (?,?) AND c.is_latest=1 AND c.exchange IN ('sh','sz') "
+                "AND c.definition_version IN ('em-valueanalysis-v1','historical-composite-v1','historical-suspended-preclose-v1') "
+                'AND c.total_market_cap IS NOT NULL AND NOT EXISTS (SELECT 1 FROM market_trade_snapshot x '
+                'WHERE x.security_code=c.security_code AND x.exchange=c.exchange AND x.trade_date=c.trade_date '
+                'AND x.is_latest=1 AND x.total_market_cap IS NOT NULL '
+                "AND x.definition_version IN ('em-valueanalysis-v1','historical-composite-v1','historical-suspended-preclose-v1') "
+                "AND CASE x.definition_version WHEN 'em-valueanalysis-v1' THEN 3 WHEN 'historical-suspended-preclose-v1' THEN 2 ELSE 1 END > "
+                "CASE c.definition_version WHEN 'em-valueanalysis-v1' THEN 3 WHEN 'historical-suspended-preclose-v1' THEN 2 ELSE 1 END)",
                 (quarter,prior))
             for row in rows:
                 node = catalog.get(row['industry_code'])
@@ -702,13 +741,16 @@ class IndustryService:
         if period and groups.get(selected):
             stocks = groups[selected]
             with self.db.connection() as conn:
-                rows = conn.execute('SELECT security_code,trade_date,close FROM market_quarterly_prices '
-                    'WHERE quarter_end=? AND adjustment=\'raw\' AND security_code IN ('+
-                    ','.join('?' for _ in stocks)+')', [period,*stocks])
-                for row in rows:
-                    cap_date=company_caps.get(row['security_code'],{}).get('cap_trade_date')
-                    if cap_date is None or cap_date==row['trade_date']:
-                        company_prices[row['security_code']]={'close':row['close'],'pb_trade_date':row['trade_date']}
+                day=next((v.get('cap_trade_date') for v in company_caps.values() if v.get('cap_trade_date')),None)
+                if day:
+                    for row in conn.execute("SELECT s.security_code,s.trade_date,s.close_price,s.definition_version,"
+                            "CASE WHEN s.definition_version='historical-suspended-preclose-v1' THEN json_extract(b.result_json,'$.price_dates.'||s.security_code) ELSE s.trade_date END AS price_date "
+                            'FROM market_trade_snapshot s JOIN collection_batches b ON b.id=s.batch_id '
+                            "WHERE s.trade_date=? AND s.is_latest=1 AND s.definition_version IN ('em-valueanalysis-v1','historical-composite-v1','historical-suspended-preclose-v1') "
+                            "AND s.close_price IS NOT NULL AND s.exchange IN ('sh','sz') AND s.security_code IN ("+
+                            ','.join('?' for _ in stocks)+") ORDER BY CASE s.definition_version WHEN 'historical-composite-v1' THEN 0 WHEN 'historical-suspended-preclose-v1' THEN 1 ELSE 2 END",[day,*stocks]):
+                        company_prices[row['security_code']]={'close':row['close_price'],'pb_trade_date':row['trade_date'],
+                            'pb_price_date':row['price_date'],'pb_price_source':'composite:'+row['definition_version'] if row['definition_version']!='em-valueanalysis-v1' else 'eastmoney:market_trade_snapshot'}
         companies = [{ 'code':m['stock_code'],'name':m['name'],'listing_date':m.get('listing_date'),
                        'weighted_roe':facts.get((m['stock_code'],period),{}).get('weighted_roe'),
                        **company_valuation(company_caps.get(m['stock_code'],{}).get('total_cap'),
@@ -717,6 +759,8 @@ class IndustryService:
                            valuation_facts.get((m['stock_code'],period),{}).get('bps')),
                        'bps':valuation_facts.get((m['stock_code'],period),{}).get('bps'),
                        'pb_trade_date':company_prices.get(m['stock_code'],{}).get('pb_trade_date'),
+                       'pb_price_source':company_prices.get(m['stock_code'],{}).get('pb_price_source'),
+                       'pb_price_date':company_prices.get(m['stock_code'],{}).get('pb_price_date'),
                        'metrics':aggregate([m['stock_code']],facts,period,mode) if period else None,
                        **company_caps.get(m['stock_code'],{})}
                      for m in data['members'] if selected in paths.get(m['stock_code'],[])]

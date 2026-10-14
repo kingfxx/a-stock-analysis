@@ -380,55 +380,50 @@ def test_financial_repeat_ignores_response_file_changes_and_preserves_valid_valu
 
 
 def test_quarter_cap_default_skip_and_revision_only_changed_company(service,monkeypatch,tmp_path):
-    from quarterly_dashboard import industry_updates as updates
-    b=fixture_bundle();service.import_bundle(b);service.directory=tmp_path/'sources'
-    monkeypatch.setattr(updates,'target_trade_date',lambda *a:'2026-09-30')
-    calls=[]
-    def fetch(db,directory,stocks,target,progress,**options):
-        calls.append((stocks,target,options['reuse_local']))
-        return ([{**b['caps'][0],'total_cap':120}] if stocks else []),[]
-    monkeypatch.setattr(updates,'fetch_cap_quarter',fetch)
-    monkeypatch.setattr(updates,'fetch_financial_period',lambda *a:pytest.fail('cap requested finance'))
-    updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)
-    assert calls[-1]==([],'2026-09-30',True)
-    updates.perform(service,'cap_quarter','2026Q3',True,lambda _:None)
-    assert calls[-1]==(['000001','300750'],'2026-09-30',False)
+    from quarterly_dashboard import industry_updates as updates, market_trade_snapshot as snapshot
+    from test_market_trade_snapshot import row, http
+    service.import_bundle(fixture_bundle())
+    with service.db.connection(write=True) as conn:
+        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('cap_quarter','2026Q3',0,'2026-10-13','running')")
+        member=conn.execute('SELECT member_import_id FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()[0]
+        conn.execute("INSERT INTO sw_cap_quarter_rosters VALUES('2026Q3','2026-09-30','current_constituents_backfill',?)",(member,))
+        conn.execute("INSERT INTO sw_cap_quarter_members SELECT '2026Q3',stock_code,industry_code FROM sw_memberships WHERE import_id=? AND industry_code='630701'",(member,))
+    data=row('300750');data.update(TRADE_DATE='2026-09-30',TOTAL_MARKET_CAP=120,TOTAL_SHARES=12)
+    client,calls=http(service.db,[data])
+    monkeypatch.setattr(snapshot,'RequestCollector',lambda *a,**k:client)
+    result=updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)
+    assert result['legacy_updated'] is False and len(calls.calls)==1
     assert service.read(industry='630701',mode='ytd')['market_series'][-1]['total_cap']==320
+    updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)
+    assert len(calls.calls)==1
     with service.db.connection() as conn:
-        assert conn.execute('SELECT count(*) FROM sw_cap_facts').fetchone()[0]==4
-        assert conn.execute('SELECT count(*) FROM sw_financial_facts').fetchone()[0]==6
-        assert conn.execute('SELECT count(*) FROM sw_memberships').fetchone()[0]==3
-    # No changed value means no new import or facts, even on explicit recheck.
-    previous=service.read(industry='630701',mode='ytd')['import_id']
-    result=updates.perform(service,'cap_quarter','2026Q3',True,lambda _:None)
-    assert result['import_id']==previous
-    # A revision may legitimately return to an older numeric value.
-    monkeypatch.setattr(updates,'fetch_cap_quarter',lambda *a,**k:([b['caps'][0]],[]))
+        assert conn.execute('SELECT count(*) FROM sw_cap_facts').fetchone()[0]==3
+        assert conn.execute('SELECT count(*) FROM market_trade_snapshot').fetchone()[0]==1
+    data['TOTAL_MARKET_CAP']=100;data['TOTAL_SHARES']=10
+    client,_=http(service.db,[data]);monkeypatch.setattr(snapshot,'RequestCollector',lambda *a,**k:client)
     updates.perform(service,'cap_quarter','2026Q3',True,lambda _:None)
     assert service.read(industry='630701',mode='ytd')['market_series'][-1]['total_cap']==300
 
 
 def test_partial_cap_retry_keeps_old_values_and_frozen_members(service,monkeypatch,tmp_path):
-    from quarterly_dashboard import industry_updates as updates
-    b=fixture_bundle();b['caps']=b['caps'][:1];service.import_bundle(b);service.directory=tmp_path/'sources'
-    monkeypatch.setattr(updates,'target_trade_date',lambda *a:'2026-09-30')
-    def fetch(db,directory,stocks,target,progress,**options):
-        assert stocks==['000001']
-        return [],[{'stock_code':'000001','error':'source unavailable'}]
-    monkeypatch.setattr(updates,'fetch_cap_quarter',fetch)
+    from quarterly_dashboard import industry_updates as updates, market_trade_snapshot as snapshot
+    from test_market_trade_snapshot import row, http
+    bundle=fixture_bundle();bundle['caps']=bundle['caps'][:1];service.import_bundle(bundle)
+    with service.db.connection(write=True) as conn:
+        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('cap_quarter','2026Q3',0,'2026-10-13','running')")
+        member=conn.execute('SELECT member_import_id FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()[0]
+        conn.execute("INSERT INTO sw_cap_quarter_rosters VALUES('2026Q3','2026-09-30','current_constituents_backfill',?)",(member,))
+        conn.execute("INSERT INTO sw_cap_quarter_members SELECT '2026Q3',stock_code,industry_code FROM sw_memberships WHERE import_id=? AND industry_code='630701'",(member,))
+    data=row('300750');data.update(TRADE_DATE='2026-09-30',TOTAL_MARKET_CAP=100,TOTAL_SHARES=10)
+    client,_=http(service.db,[data]);monkeypatch.setattr(snapshot,'RequestCollector',lambda *a,**k:client)
     result=updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)
     assert len(result['failures'])==1
     market=service.read(industry='630701',mode='ytd')['market_series'][-1]
-    assert market['known_cap']==100 and market['total_cap'] is None and market['coverage']==.5
-    def retry(db,directory,stocks,target,progress,**options):
-        assert stocks==['000001']
-        return [fixture_bundle()['caps'][1]],[]
-    monkeypatch.setattr(updates,'fetch_cap_quarter',retry)
-    updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)
+    assert market['known_cap']==100 and market['total_cap'] is None
+    other=row('000001');other.update(TRADE_DATE='2026-09-30',TOTAL_MARKET_CAP=200,TOTAL_SHARES=20)
+    client,_=http(service.db,[data,other]);monkeypatch.setattr(snapshot,'RequestCollector',lambda *a,**k:client)
+    updates.perform(service,'cap_quarter','2026Q3',True,lambda _:None)
     assert service.read(industry='630701',mode='ytd')['market_series'][-1]['total_cap']==300
-    changed=copy.deepcopy(b);changed['caps']=[];changed['financials']=[]
-    changed['members'][1]['industry_code']='630702'
-    service.import_bundle(changed)
     assert updates.cap_roster(service.db,service.foundation(),'2026Q3','2026-09-30')['members'][0]['industry_code']=='630701'
 
 

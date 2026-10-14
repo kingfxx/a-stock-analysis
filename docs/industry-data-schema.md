@@ -1,14 +1,18 @@
 # 全行业数据表结构与字段字典
 
+v31新增独立停牌参考价定义身份，仍复用33列交易快照表，不新增表或列；`close_price` 在此系列表示经验证的 `pre_close` 估值参考价，原始空close和实际价格日保留于集中计算证据。读取优先级及字段限制见[停牌参考价补齐](data-sources/market-suspended-price.md)。
+
+v30读取同表独立 `historical-composite-v1` 系列；市值／价格逐字段优先东财、合成、适用旧同日回退，不直接查询所有latest系列造成重复。合成字段、来源、缓存和补值修订规则见[历史合成快照](data-sources/market-trade-snapshot-composite.md)。
+
 指数估值是独立数据域：统一 `index_valuation_observations`，目录类别／体系／层级分别保存，行业指数身份不复用公司 `sw_industries`。来源、版本、有效期及采集说明见[指数估值采集说明](index-valuation-collection.md)。旧行业财务、价格及成员采集结构不迁移。
 
-导航：[财务共同规则](#2-四张财务表的共同规则) · [四表字段](#3-四张财务表的全部源字段) · [批次与来源](#4-批次分页来源与逻辑-view) · [行业及市值字段](#5-行业分类成员市值及旧表完整字段) · [追溯与备份](#7-原始响应追溯时间与备份) · [查询示例](#8-常用只读查询)
+导航：[财务共同规则](#2-四张财务表的共同规则) · [四表字段](#3-四张财务表的全部源字段) · [批次与来源](#4-批次分页来源与逻辑-view) · [行业及市值字段](#5-行业分类成员市值及旧表完整字段) · [追溯与备份](#7-原始响应追溯时间与备份) · [查询示例](#8-常用只读查询) · [交易日快照](#10-全市场交易日快照v29)
 
-更新日期：2026-10-10。依据本项目迁移 009—022、字段映射及当前读取/采集代码整理。本文描述已落库字段和程序实际使用方式；来源辅助字段尚未确认的单位、公式和枚举明确标为待核对，不把字段名推测当作已验证定义。
+更新日期：2026-10-14。依据本项目迁移 009—029、字段映射及当前读取/采集代码整理。本文描述已落库字段和程序实际使用方式；来源辅助字段尚未确认的单位、公式和枚举明确标为待核对，不把字段名推测当作已验证定义。
 
 ## 1. 范围与数据流
 
-当前财务来源层为四张 `market_financial_*` 表，行业分类、成员和市值仍使用 `sw_*` 表。旧 `sw_financial_facts` 及其来源表仅保留历史和维护工具用途，行业页面及日常采集已与其解耦。
+当前财务来源层为四张 `market_financial_*` 表，行业分类、成员继续使用 `sw_*` 表；交易快照使用 `market_trade_snapshot`，旧市值/价格保留同日兼容读取及历史追溯。旧 `sw_financial_facts` 及其来源表仅保留历史和维护工具用途，行业页面及日常采集已与其解耦。
 
 | 对象 | 用途 | 来源/写入入口 |
 | --- | --- | --- |
@@ -19,10 +23,13 @@
 | `market_financial_batches` | 每个报告期的四表发布批次 | 本地采集程序 |
 | `market_financial_sources` | 每个接口分页的请求及原始响应引用 | 本地采集程序 |
 | `market_financial_industry` | 行业页面轻量读取 View，无独立存储 | 最新利润表左连接最新业绩指标 |
-| `market_quarterly_prices` / `market_price_sources` / `market_price_batches` | 当前沪深名单回溯的季末未复权收盘价、共享来源及批次 | BigQuant `cn_stock_real_bar1d.close`、腾讯指数交易日历；独立一次性工具 |
+| `market_trade_snapshot` | 全市场交易日快照：季末未复权股价、股本、市值、估值等全部字段；未来可扩日频 | 东方财富 `RPT_VALUEANALYSIS_DET`，公共采集入口 `market_trade_snapshot.py` |
+| `market_cap_latest` | 新快照优先、旧同日市值回退的逻辑View | 行业公司、市值趋势及排名只读入口 |
+| `collection_batches` / `collection_sources` / `collection_provider_state` | 跨领域共用分段、逐次原文追溯、预算/冷却 | 指数与交易快照共用；没有新增快照控制表 |
+| `market_quarterly_prices` / `market_price_sources` / `market_price_batches` | 保留的沪深名单回溯季末未复权收盘价、共享来源及批次；新快照同日价格缺失时回退 | 历史BigQuant `cn_stock_real_bar1d.close`、腾讯指数交易日历；独立工具保留，新日常任务不再额外补价 |
 | `sw_industries` / `sw_memberships` / `sw_membership_history` | 申万层级、沪深成员版本及分类变更 | 申万官方分类文件、沪深交易所名单 |
 | `sw_imports` / `sw_membership_checks` / `sw_listing_sources` | 名单/市值导入审计、名单检查及上市日期证据 | 本地任务与对应来源 |
-| `sw_cap_facts` / `sw_cap_provenance` | 公司总市值及共享证据 | 当前批量接口主要为东财 `RPT_VALUEANALYSIS_DET`，旧记录可含百度/腾讯 |
+| `sw_cap_facts` / `sw_cap_provenance` | 公司总市值及共享证据 | 历史记录主要为东财 `RPT_VALUEANALYSIS_DET`，也含百度/腾讯及计算值；新快照采集停写旧表 |
 | `sw_cap_quarter_rosters` / `sw_cap_quarter_members` / `sw_industry_cap_quarters` | 冻结季度成员及三级行业市值汇总 | 本地冻结名单及市值聚合 |
 | `sw_update_runs` | 财务、市值、历史补采任务状态 | 本地任务程序 |
 | `sw_financial_facts` / `sw_financial_provenance` | 旧版轻量财务历史及共享证据 | 旧采集/回填工具；日常按钮已停写 |
@@ -447,7 +454,7 @@
 
 ### `sw_cap_facts`
 
-公司市值，来源主要为东财 RPT_VALUEANALYSIS_DET.TOTAL_MARKET_CAP（元）；旧记录也可来自百度总市值（亿元换算元）及腾讯行情。准确来源、日期、单位换算以 provenance_id 对应证据为准，不使用复权价估算。
+旧公司市值，历史来源主要为东财 RPT_VALUEANALYSIS_DET.TOTAL_MARKET_CAP（元）；旧记录也可来自百度总市值（亿元换算元）及腾讯行情。准确来源、日期、单位换算以 provenance_id 对应证据为准，不使用复权价估算。
 
 2016—2018 一次性补缺工具沿用本表与来源表，可发布历史未复权收盘价 × 对应交易日历史总股本的计算市值，不将其标成数据源直接返回值。仅补适用缺口，保留有效原值和原冻结名单；实际覆盖、核对、备份及批次关系见[专项来源说明](data-sources/historical-market-cap-backfill.md)及本机验收报告。
 
@@ -598,22 +605,24 @@
 | 公司毛利率 | (operating_revenue − operating_cost) / operating_revenue × 100% | 缺营业收入时，仅非金融公司允许用同口径营业总收入回退；金融不直接套用 |
 | 公司 ROE | View.weighted_roe → WEIGHTAVG_ROE | 来源累计加权值，不按单季/TTM差分，也不采用净利润/期末净资产估算 |
 | 行业收入、利润、毛利率及同比 | Python 在统一成员、可比公司及覆盖率规则下计算 | 不是所有公司比例简单平均；原始表不另存 TTM、同比副本 |
-| 公司总市值及行业市值 | sw_cap_facts 与冻结季度汇总 | 与财务报告期、分类版本分别追踪；不能从 sw_financial_facts 取市值 |
+| 公司总市值及行业市值 | market_cap_latest（新快照优先、旧同日回退）与冻结季度成员 | 与财务报告期、分类版本分别追踪；不能从 sw_financial_facts 取市值 |
 | 上市日期 | sw_memberships.listing_date → sw_listing_sources | 不是业绩指标接口公告日 |
 
 累计转单季需同年上一季度累计值（第一季度直接取累计）；非年末 TTM 通常为本期累计 + 上年全年 − 上年同期累计。同比须有相同计算口径的上年同期。缺依赖期则留空，不以零或旧期值补齐。资产负债表余额不做流量差分或 TTM 累加，每股指标、加权 ROE 也不能直接套用金额加减。
 
-页面使用有界缓存：最多两组全市场财务依赖期窗口、八组所选行业汇总趋势；新成功财务批次或名单版本变化会失效。时间范围筛选只裁剪展示，不删除库内历史，也不截断计算依赖期。
+页面使用有界缓存：最多两组全市场财务依赖期窗口、八组所选行业汇总趋势；新成功财务批次、交易快照批次或名单版本变化会失效。时间范围筛选只裁剪展示，不删除库内历史，也不截断计算依赖期。
 
 ## 7. 原始响应、追溯、时间与备份
 
-原始文件相对数据库目录保存为 `market_financial_sources/<report_date>/<dataset>/responses/<SHA256>.json.gz`；来源表 file_path 相对该根目录。文件名按响应内容 SHA256 去重，解压后为原始 HTTP 响应，不是逐公司重构 JSON。不另外生成 baseline 合并 JSON。
+财务原始文件相对数据库目录保存为 `market_financial_sources/<report_date>/<dataset>/responses/<SHA256>.json.gz`；来源表 file_path 相对该根目录。文件名按响应内容 SHA256 去重，解压后为原始 HTTP 响应，不是逐公司重构 JSON。不另外生成 baseline 合并 JSON。
 
 `market_financial_sources.obtained_at` 是该来源页实际采集时间；财务行 `updated_at` 是本地核对时间；财务行 `obtained_at` 保留该修订最初插入时的来源时间。页面财务更新时间来自所选报告期成功批次的 finished_at；分类和市值时间由各自来源/导入批次追溯。没有采集时间的老来源不能用报告期、上市日或交易日代替，应显示未记录。
 
 失败任务可能留下原始响应/检查点，但不代表已发布事实行；必须区分文件存在、批次 complete 和事实行 latest。历史补采与日常按钮共用任务互斥，按报告期事务发布。单独 SQLite 备份不包含原始响应 gzip 文件，完整迁移需同时复制来源目录；原始文件大小不计入 SQLite 表空间。
 
-截至本次整理，已完成的四表报告期范围为 2014-09-30 至 2026-06-30（48 期）。这是当前采集覆盖，不是每家公司每期都有报告；后续覆盖以数据库查询为准。财务采集菜单支持最近十二年，市值仍为十年。
+截至本次整理，已完成的四表报告期范围为 2014-09-30 至 2026-06-30（48 期）。这是当前采集覆盖，不是每家公司每期都有报告；后续覆盖以数据库查询为准。财务采集菜单支持最近十二年；交易快照本次明确授权2015Q1起，当前只采已结束季度末，不能把整个区间都描述为有数据。
+
+交易快照原文使用公共 `collection_sources/` 根目录和双哈希，而不是财务私有来源目录；真实时间、来源/批次组合外键及备份迁移要求见第10节。两套来源目录均需随资料迁移，单独SQLite备份不包含文件。
 
 ## 8. 常用只读查询
 
@@ -666,9 +675,9 @@ WHERE m.import_id = (
 
 结构 21 的全市场季度末未复权价格独立存储于 `market_quarterly_prices`，共享来源为 `market_price_sources`，批次为 `market_price_batches`；不绑定用户关注列表。字段、时间及采集流程见[专项来源说明](data-sources/market-quarterly-prices.md)。
 
-行业内公司表新增可排序的 PE（TTM）、PB，不展示估值同比。PE 固定为所选财报季度对应的总市值（元）÷ TTM 归母净利润（元），利润来自 `market_financial_industry.parent_profit`，按本期累计＋上年全年－上年同期累计计算，年末直接使用全年值；不随页面累计／单季度切换改变。市值来自原季度名单和 `sw_cap_facts` 最新有效版本。利润非正、市值非正或任一必要输入缺失时显示 `—`。
+行业内公司表新增可排序的 PE（TTM）、PB，不展示估值同比。PE 固定为所选财报季度对应的总市值（元）÷ TTM 归母净利润（元），利润来自 `market_financial_industry.parent_profit`，按本期累计＋上年全年－上年同期累计计算，年末直接使用全年值；不随页面累计／单季度切换改变。市值按原季度名单的精确交易日，从 `market_cap_latest` 读取：优先 `market_trade_snapshot.total_market_cap`，缺少有效新值时回退旧 `sw_cap_facts` 同日最新有效版本。API的 `cap_source` 区分新快照和旧来源。利润非正、市值非正或任一必要输入缺失时显示 `—`。
 
-PB = `market_quarterly_prices.close` 季末最后市场交易日未复权收盘价（元/股）÷ 同报告期最新 `market_financial_performance.bps`（元/股），结果为倍。BPS 统一通过结构 22 的 `market_financial_industry.bps` 读取，不按季度差分、不相加、不随页面周期模式改变；最新财务修订使缓存失效。价格按股票和自然季度末精确匹配，若已有市值季末交易日还须一致。价格缺失、BPS 缺失或非正时显示 `—`，不回退其他报告期、腾讯／百度现成 PB 或含少数股东权益的总权益；无市值但具备有效季末股价及同报告期 BPS 时仍可计算 PB。查看行业表不会自动联网补采。API 返回 `bps` 和 `pb_trade_date` 便于复核，表格提示显示日期与 BPS。两项均为历史估值参考，使用该报告期最新财务修订，不能作为当时已披露口径的无偏回测。
+PB = 同日 `market_trade_snapshot.close_price` 优先、缺失时使用 `market_quarterly_prices.close` 的季末未复权收盘价（元/股）÷ 同报告期最新 `market_financial_performance.bps`（元/股），结果为倍。BPS 统一通过结构 22 的 `market_financial_industry.bps` 读取，不按季度差分、不相加、不随页面周期模式改变；最新财务修订使缓存失效。价格按股票和自然季度末精确匹配，若已有市值季末交易日还须一致。价格缺失、BPS 缺失或非正时显示 `—`，不回退其他报告期、腾讯／百度现成 PB 或含少数股东权益的总权益；无市值但具备有效季末股价及同报告期 BPS 时仍可计算 PB。查看行业表不会自动联网补采。API 返回 `bps` 和 `pb_trade_date` 便于复核，表格提示显示日期与 BPS。两项均为历史估值参考，使用该报告期最新财务修订，不能作为当时已披露口径的无偏回测。
 
 公司表金额单位统一在表下注明亿元，金额最多两位小数；同比、毛利率及 ROE 显示一位小数，PE/PB 显示两位小数（倍）。显示精度不改变计算及排序精度。桌面采用紧凑固定列布局，小屏保留横向滚动。
 
@@ -682,3 +691,92 @@ PB = `market_quarterly_prices.close` 季末最后市场交易日未复权收盘�
 
 新增源字段需同时更新字段映射、迁移/存储列及本文；新增表或用途调整需同步维护页用途、分类和更新时间登记。来源新增未登记字段时当前采集会拒绝发布，保留原始响应供核对，不会静默丢弃字段。
 
+
+## 10. 全市场交易日快照（v29）
+
+只新增一张业务表 `market_trade_snapshot`。源接口为 `RPT_VALUEANALYSIS_DET`，请求 `columns=ALL`；目前按季度末实际交易日采样，不是完整日线。身份按交易日设计，未来日频复用同表，同日记录不因采样策略变化重复保存。接口实测不含开高低、成交量或成交额，不把它称为完整行情表。
+
+### 10.1 本地身份、版本与来源字段
+
+| 字段 | 类型/约束 | 实际含义 |
+| --- | --- | --- |
+| id | INTEGER PRIMARY KEY | 本地记录ID |
+| exchange | TEXT NOT NULL，sh/sz/bj | 从SECUCODE验证的交易所 |
+| trade_date | TEXT NOT NULL，长度10 | 实际交易日YYYY-MM-DD，不以季度自然末日替代 |
+| version / is_latest | INTEGER NOT NULL，版本>0、最新标志0/1 | 同公司/交易日/定义的真实修订及最新记录 |
+| definition_version | TEXT NOT NULL | 当前固定em-valueanalysis-v1；不同提供方不得作为同口径修订覆盖 |
+| batch_id / source_id | INTEGER NOT NULL | 公共批次和公共逐次来源 |
+| content_hash | TEXT NOT NULL | 数值源字段的规范化内容SHA256，用于幂等和修订判定 |
+| obtained_at / updated_at | TEXT NOT NULL | 实际来源时间/本地写入时间，不使用交易日推算 |
+
+历史唯一键为 `(security_code,exchange,trade_date,definition_version,version)`；`is_latest=1` 部分唯一索引保证一个最新版本，另有日期查询索引。组合外键 `(source_id,batch_id)` 引用 `collection_sources(id,batch_id)`，确保来源属于同一批次。security_code在SQL中为可空TEXT，实际解析器要求六位有效代码；完整表约束以迁移029为准。
+
+指标修订新增版本；未变化保持原batch/source，仍记录新请求。名称/板块描述变化只更新最新描述，历史描述保留在原文中。有值变空停止发布待核实。未知新增字段先归档再停止；已登记列缺失留NULL并统计，不能当作零或完整覆盖。
+
+### 10.2 全部22个源字段
+
+| 源字段 | SQLite列 | 类型 | 单位与含义 |
+| --- | --- | --- | --- |
+| `SECURITY_CODE` | `security_code` | TEXT | 六位证券代码 |
+| `SECUCODE` | `secucode` | TEXT | 带交易所后缀的证券代码 |
+| `SECURITY_NAME_ABBR` | `security_name_abbr` | TEXT | 来源证券简称 |
+| `ORG_CODE` | `org_code` | TEXT | 来源机构代码 |
+| `TRADE_MARKET` | `trade_market` | TEXT | 来源交易市场代码，枚举待核实 |
+| `BOARD_CODE` | `board_code` | TEXT | 来源板块代码，语义待核实 |
+| `BOARD_NAME` | `board_name` | TEXT | 来源板块名称 |
+| `ORIG_BOARD_CODE` | `orig_board_code` | TEXT | 来源原板块代码，语义待核实 |
+| `TRADE_DATE` | `source_trade_date` | TEXT | 保留源日期原始文本；标准化日期另存trade_date |
+| `TOTAL_SHARES` | `total_shares` | INTEGER | 股；来源总股本；股数和市值乘积已交叉验证 |
+| `FREE_SHARES_A` | `free_shares_a` | INTEGER | 股；来源A股流通股数，统计范围待核实 |
+| `TOTAL_MARKET_CAP` | `total_market_cap` | REAL | 元；来源总市值原值 |
+| `NOTLIMITED_MARKETCAP_A` | `notlimited_marketcap_a` | REAL | 元；来源A股流通市值，准确统计范围待核实 |
+| `CLOSE_PRICE` | `close_price` | REAL | 元/股；未复权收盘价，已与本地raw/qfq及市值乘积核对 |
+| `CHANGE_RATE` | `change_rate` | REAL | 来源涨跌幅原值，百分数口径待进一步核实 |
+| `PE_TTM` | `pe_ttm` | REAL | 倍；来源滚动市盈率原值，利润口径待核实 |
+| `PE_LAR` | `pe_lar` | REAL | 倍；来源年度市盈率原值，年度期间待核实 |
+| `PB_MRQ` | `pb_mrq` | REAL | 倍；来源市净率原值，净资产口径待核实 |
+| `PCF_OCF_LAR` | `pcf_ocf_lar` | REAL | 倍；来源年度经营现金流市现率，期间待核实 |
+| `PCF_OCF_TTM` | `pcf_ocf_ttm` | REAL | 倍；来源滚动经营现金流市现率，口径待核实 |
+| `PS_TTM` | `ps_ttm` | REAL | 倍；来源滚动市销率，收入口径待核实 |
+| `PEG_CAR` | `peg_car` | REAL | 来源PEG原值，增长期间及单位待核实 |
+
+所有数值可空，有效零/负值按来源保留，特别是不删除负PE/PCF；非法/非有限数值拒绝发布。股数严格INTEGER，不四舍五入非整数或溢出值。源估值字段用于原文保存，页面PE/PB继续按第9节计算，不直接替换为源PE/PB。
+
+### 10.3 公共采集、归档与恢复
+
+任务复用 `sw_update_runs`，操作ID为 `sw_update_runs:<id>`；一目标交易日一个公共batch，dataset=`market.trade_snapshot`、source_system=`eastmoney`、frequency=`daily`、scope.sampling=`quarter_end`。daily表示源事实交易日粒度，quarter_end表示当前日期选择策略。未来全部交易日使用不同采样范围，事实身份不变，季度完成不能当作完整日频覆盖。
+
+参数：reportName=RPT_VALUEANALYSIS_DET、columns=ALL、filter限定一个TRADE_DATE、SECURITY_CODE升序、pageSize=500、pageNumber逐页递增。返回所有来源证券后保存，行业读取再按沪深冻结名单筛选，不裁掉来源层北交所记录；历史市场/证券有效期未核实部分保持覆盖未知。
+
+复用 `collection.RequestCollector` 的跨进程同源并发1、完成后10—15秒、60秒最多5次、每20次额外60—120秒；拒绝停止本轮并持久冷却至少一小时。每次尝试登记 `collection_sources`，HTTP解码后原文gzip原子归档在数据库旁 `collection_sources/eastmoney/market.trade_snapshot/`，raw_sha256/stored_sha256分别校验原文与存储文件。复用来源保留原取得时间及reused_source_id。
+
+所有分页/日期/重复/字段及市值乘积校验通过后，事实和batch完成状态同一短事务提交。失败保留已提交季度及来源；恢复按相同范围、定义和ALL策略跳过成功分段，未发布分段仅复用同日完整参数匹配的已解析页。执行成功与覆盖分开登记，空响应记empty，各指标有效数/NULL数独立统计。旧5字段缓存不能视作ALL完成。
+
+### 10.4 实际覆盖、兼容与维护
+
+2026-10-14执行2015Q1—2026Q3的47期核验。2018Q1—2026Q3的35期写入158,632条；2015—2017的12期全部明确返回空，覆盖partial，无法从此接口提供2016同比所需2015基期。首个可用交易日为2018-03-30，末日为2026-09-30；这是本次目标日采样结果，不等于源接口所有日频的最早日期。全47期原文双哈希、22字段回放及外键/完整性检查通过。
+
+`market_cap_latest` 不存储副本，列为stock_code/trade_date/total_cap/source：新快照取最新em-valueanalysis-v1的沪深有效总市值，旧表只在缺少新有效市值时取同日最新非拒绝导入。行业按冻结季度真实交易日匹配，API给出cap_source；未来日频加入不改变季度日期选择。价格优先新close_price，缺失则回退旧BigQuant季度价格；不复制到旧价格/市值表，不修改个股日线/复权版本。新日常任务不再另调BigQuant补价。旧混合industry_bulk.collect入口停用，旧解析/离线导入保留。
+
+新表维护分类为行业数据，真实时间用obtained_at/updated_at；空表/缺时间显示未记录。View未存时间，维护页显示未记录，时间须查底层来源。公共来源表分类为运行与配置，反映跨数据域使用。旧财务/价格控制层尚未统一迁移，不能声称所有旧请求已获得公共调度保护。
+
+SQL示例：
+
+```sql
+SELECT security_code, exchange, trade_date, close_price, total_shares,
+       total_market_cap, pe_ttm, pb_mrq, source_id, batch_id
+FROM market_trade_snapshot
+WHERE security_code='600150' AND exchange='sh' AND trade_date='2025-12-31'
+  AND definition_version='em-valueanalysis-v1' AND is_latest=1;
+
+SELECT f.security_code, f.trade_date, f.version, s.request_json,
+       s.file_path, s.raw_sha256, s.stored_sha256, s.obtained_at,
+       b.status, b.coverage_status, b.scope_json
+FROM market_trade_snapshot f
+JOIN collection_sources s ON s.id=f.source_id AND s.batch_id=f.batch_id
+JOIN collection_batches b ON b.id=f.batch_id
+WHERE f.security_code='600150' AND f.trade_date='2025-12-31'
+ORDER BY f.version;
+```
+
+本次表含索引84.4MiB、归档19.6MiB（含中断复用副本），不作为永久容量或每期全覆盖承诺。SQLite备份不含原文，完整迁移须复制公共来源目录并验证双哈希。来源/运行入口见[专项说明](data-sources/market-trade-snapshot.md)，结构见[迁移029](../quarterly_dashboard/migrations/029_market_trade_snapshot.sql)，映射见[字段字典](../quarterly_dashboard/resources/market_trade_snapshot_fields.json)，结果见[47期验收报告](../data/verification/reports/market-trade-snapshot-history-20261013.json)。

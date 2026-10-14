@@ -1,0 +1,175 @@
+{
+  "report": "RPT_VALUEANALYSIS_DET",
+  "fields": {
+    "SECURITY_CODE": {
+      "column": "security_code",
+      "type": "TEXT",
+      "unit": null,
+      "definition_status": "verified_sample",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric"
+    },
+    "SECUCODE": {
+      "column": "secucode",
+      "type": "TEXT",
+      "unit": null,
+      "definition_status": "verified_sample",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric"
+    },
+    "SECURITY_NAME_ABBR": {
+      "column": "security_name_abbr",
+      "type": "TEXT",
+      "unit": null,
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "ORG_CODE": {
+      "column": "org_code",
+      "type": "TEXT",
+      "unit": null,
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "TRADE_MARKET": {
+      "column": "trade_market",
+      "type": "TEXT",
+      "unit": null,
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "BOARD_CODE": {
+      "column": "board_code",
+      "type": "TEXT",
+      "unit": null,
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "BOARD_NAME": {
+      "column": "board_name",
+      "type": "TEXT",
+      "unit": null,
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "ORIG_BOARD_CODE": {
+      "column": "orig_board_code",
+      "type": "TEXT",
+      "unit": null,
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "TRADE_DATE": {
+      "column": "source_trade_date",
+      "type": "TEXT",
+      "unit": null,
+      "definition_status": "verified_sample",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric"
+    },
+    "TOTAL_SHARES": {
+      "column": "total_shares",
+      "type": "INTEGER",
+      "unit": "股",
+      "definition_status": "verified_sample",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric"
+    },
+    "FREE_SHARES_A": {
+      "column": "free_shares_a",
+      "type": "INTEGER",
+      "unit": "股",
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "TOTAL_MARKET_CAP": {
+      "column": "total_market_cap",
+      "type": "REAL",
+      "unit": "元",
+      "definition_status": "verified_sample",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric"
+    },
+    "NOTLIMITED_MARKETCAP_A": {
+      "column": "notlimited_marketcap_a",
+      "type": "REAL",
+      "unit": "元",
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "CLOSE_PRICE": {
+      "column": "close_price",
+      "type": "REAL",
+      "unit": "元/股",
+      "definition_status": "verified_sample",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric"
+    },
+    "CHANGE_RATE": {
+      "column": "change_rate",
+      "type": "REAL",
+      "unit": null,
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "PE_TTM": {
+      "column": "pe_ttm",
+      "type": "REAL",
+      "unit": "倍",
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "PE_LAR": {
+      "column": "pe_lar",
+      "type": "REAL",
+      "unit": "倍",
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "PB_MRQ": {
+      "column": "pb_mrq",
+      "type": "REAL",
+      "unit": "倍",
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "PCF_OCF_LAR": {
+      "column": "pcf_ocf_lar",
+      "type": "REAL",
+      "unit": "倍",
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "PCF_OCF_TTM": {
+      "column": "pcf_ocf_ttm",
+      "type": "REAL",
+      "unit": "倍",
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "PS_TTM": {
+      "column": "ps_ttm",
+      "type": "REAL",
+      "unit": "倍",
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    },
+    "PEG_CAR": {
+      "column": "peg_car",
+      "type": "REAL",
+      "unit": null,
+      "definition_status": "source_only",
+      "missing_rule": "NULL; preserve source zero and negative values when numeric",
+      "note": "仅保存来源原值；详细统计口径尚待核实，不替代现有业务计算"
+    }
+  }
+}

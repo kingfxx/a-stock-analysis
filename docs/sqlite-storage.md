@@ -1,8 +1,14 @@
 # SQLite 存储、数据更新与备份
 
+v31继续只更新 `market_cap_latest`，新增可读取的同表独立停牌估值系列 `historical-suspended-preclose-v1`：东财有效值优先，其次经验证的停牌参考价系列、普通历史合成、旧同日市值。原空价记录保留；实际价格日集中登记于发布batch的 `result_json.price_dates`，快照交易日仍为季末，真实取得／更新时间规则不变。详见[停牌参考价补齐](data-sources/market-suspended-price.md)。
+
+v30仅更新 `market_cap_latest`，不新增表：按字段优先读取东财有效值、独立 `historical-composite-v1` 同日合成值、旧同日市值。来源使用公共批次／来源表，时间依据仍为真实 `obtained_at/updated_at`，逻辑View显示「未记录」。详见[历史合成快照](data-sources/market-trade-snapshot-composite.md)。
+
+v29新增业务表 `market_trade_snapshot`：全市场未复权股价、涨跌幅、股本、市值、估值等22个源字段，当前只采季度末，事实按实际交易日识别以兼容以后日频。复用公共 `collection_batches/sources/provider_state` 和现有 `sw_update_runs`，不新增采集控制表。`market_cap_latest` 为新快照优先、旧同日市值回退的逻辑View。新表为行业数据，时间依据为真实 `obtained_at/updated_at`；空表或缺时间显示未记录，交易日不代替更新时间。公共来源表分类为运行与配置。原文归档在公共 `collection_sources/`，SQLite备份不包含来源文件。详见[全市场交易日快照](data-sources/market-trade-snapshot.md)。
+
 指数采集新增 v23/v24：公共 `collection_batches/sources/provider_state`，稳定指数身份、历史目录、提供方映射、指标定义、统一估值事实及操作状态。未迁移旧财务或价格记录；用途与真实时间依据已登记维护页。表关系、来源目录完整备份及采集保护见[指数估值采集说明](index-valuation-collection.md)。
 
-本文依据当前代码整理；取消关注、恢复和个股清理部分更新于 2026-10-07，全行业结构索引更新于 2026-10-10，指数点位说明更新于 2026-10-11，当前数据库结构版本为 **27**，表数量以维护页实时统计为准。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
+本文依据当前代码整理；取消关注、恢复和个股清理部分更新于 2026-10-07，全行业结构索引更新于 2026-10-10，指数点位说明更新于 2026-10-11，交易日快照更新于 2026-10-14，当前数据库结构版本为 **29**，表数量以维护页实时统计为准。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
 
 ## 1. 文件位置与启动过程
 
@@ -12,6 +18,7 @@
 | `data/stock_analysis.sqlite3.lock` | 数据库实例锁文件 | 文件可长期保留，进程退出会释放操作系统锁 |
 | `data/backups/` | 正式日备份、升级前备份及手动备份 | 只有规定命名的日备份参与轮转 |
 | `data/fundamentals/`、`data/valuation/`、`data/chips/` | 旧 JSON 缓存及部分导入归档 | 保留原文件；正常运行以 SQLite 为准 |
+| `data/collection_sources/` | 公共指数及交易日快照逐次请求的 gzip 原文；双哈希登记在公共来源表，SQLite 备份不包含这些文件 | 正式来源证据保留；迁移须同时复制并验哈希 |
 | `data/verification/` | 来源样本、报告、核对资料、维护工具和后台日志 | 按项目记忆整理、清理过期测试产物 |
 
 `data/verification/` 的分类为 `samples/`、`reports/`、`audits/`、`tools/`、`logs/`。正式库与正式备份不属于测试清理范围；数据库、备份和本地验证资料不进入 Git。
@@ -109,7 +116,7 @@
 
 ### 2.5 全行业数据表清单
 
-全行业数据共 **20 张实体表和 1 个逻辑 View**。财务、市值和行业成员分别管理来源及版本；`sw_` 前缀不代表全部停用，只有下表末尾两张旧财务表已退出日常采集和页面读取。
+行业专用数据包括财务四表、交易日快照、旧价格与市值历史表、成员及任务表，并复用跨领域公共采集三表。表数量以维护页实时发现为准。`sw_` 前缀不代表全部停用；旧财务表已退出行业日常采集和读取，旧市值/价格表保留供历史追溯和旧工具使用，行业页面已改为直接读取交易日快照。
 
 | 分类 | 表 / View | 保存内容与来源 | 当前用途 |
 | --- | --- | --- | --- |
@@ -120,22 +127,36 @@
 | 财务采集 | `market_financial_batches` | 每报告期四表采集/发布状态、时间、计数及错误 | 当前财务批次审计与更新时间依据 |
 | 财务来源 | `market_financial_sources` | 分页请求参数、原始 gzip 响应路径、哈希、大小及字段列表 | 当前财务行通过 `source_id` 追溯来源 |
 | 读取 View | `market_financial_industry` | 最新利润表左连接同公司同报告期最新业绩指标 | 行业页面统一取数入口；不存储副本，计算在 Python 完成 |
+| 交易日快照 | `market_trade_snapshot` | 东财 `RPT_VALUEANALYSIS_DET` 全部22个已登记源字段；当前只采季末 | 当前季末未复权股价、股本、市值及估值来源；身份按实际交易日兼容日频 |
+| 市值读取 View | `market_cap_latest` | 新快照有效市值优先、旧表同日最新有效市值回退 | 兼容旧工具读取；行业页面直接查询 `market_trade_snapshot` |
+| 旧季度价格 | `market_quarterly_prices` / `market_price_sources` / `market_price_batches` | BigQuant 季末未复权收盘价及历史来源/批次；不是总市值 | 行业页面已不读取或回退，日常快照按钮停写且不调BigQuant；保留历史、合成输入追溯、采集日期映射核对及旧工具用途，见[来源说明](data-sources/market-quarterly-prices.md) |
+| 公共采集 | `collection_batches` / `collection_sources` / `collection_provider_state` | 分段与覆盖、逐次响应、同源共享预算/冷却 | 指数与交易快照共用；不为新接口新建控制表 |
 | 导入版本 | `sw_imports` | 名单/市值导入清单、哈希、时间及复用的成员版本 | 当前分类及市值导入审计；独立于财务批次 |
 | 行业分类 | `sw_industries` | 申万 SW2021 一至三级分类代码、名称及父子关系 | 当前行业层级与分类查询 |
 | 行业成员 | `sw_memberships` | 各版本沪深公司名单、申万归属、上市日期及来源引用 | 当前行业成员筛选与公司名称/上市日期展示 |
 | 行业成员 | `sw_membership_history` | 来源提供的行业归属生效及变更记录 | 保存分类变更依据；不等同于完整历史全市场名单 |
 | 上市日期来源 | `sw_listing_sources` | 沪深交易所名单中上市日期的共享证据及采集时间 | 当前上市日期来源追溯 |
 | 名单检查 | `sw_membership_checks` | 北京时间每日名单检查状态、时间与结果 | 当前日常采集前名单检查及去重 |
-| 公司市值 | `sw_cap_facts` | 公司交易日总市值；当前批量来源主要为东财 `RPT_VALUEANALYSIS_DET`，旧来源可含百度/腾讯；2016—2018 一次性缺口工具可写入历史未复权价格 × 历史总股本的计算值，详见[来源说明](data-sources/historical-market-cap-backfill.md) | 当前公司对比与行业市值计算 |
-| 市值来源 | `sw_cap_provenance` | 共享市值来源参数、字段、单位换算和文件证据 | 当前市值事实通过 `provenance_id` 解析来源 |
+| 公司市值 | `sw_cap_facts` | 旧公司交易日总市值；历史批量来源主要为东财 `RPT_VALUEANALYSIS_DET`，旧来源可含百度/腾讯；2016—2018 一次性缺口工具可写入历史未复权价格 × 历史总股本的计算值，详见[来源说明](data-sources/historical-market-cap-backfill.md) | 行业页面已不读取或回退；保留旧历史、合成输入追溯及 `market_cap_latest` 的旧工具兼容读取；新日常采集停写 |
+| 市值来源 | `sw_cap_provenance` | 共享市值来源参数、字段、单位换算和文件证据 | 行业页面不直接读取；旧市值事实通过 `provenance_id` 解析来源，保留历史核验及合成输入证据；新快照使用公共来源 |
 | 季度市值成员 | `sw_cap_quarter_rosters` | 每季度冻结名单的目标日期、构成口径及成员版本 | 当前季度市值成员口径控制 |
 | 季度市值成员 | `sw_cap_quarter_members` | 冻结季度内逐公司行业归属 | 当前季度市值逐公司成员查询 |
-| 行业市值 | `sw_industry_cap_quarters` | 三级行业季度市值、应有/已知公司数及成员口径 | 当前行业市值历史；一级/二级读取时汇总 |
+| 行业市值 | `sw_industry_cap_quarters` | 旧三级行业季度市值、应有/已知公司数及成员口径 | 行业页面已不读取或回退，日常快照按钮停写；保留历史汇总及旧导入工具用途；当前页面按新快照与冻结名单聚合 |
 | 任务管理 | `sw_update_runs` | 日常更新与历史补采的动作、目标、状态、时间及错误 | 当前四表采集、市值采集等任务进展与互斥 |
 | 旧财务 | `sw_financial_facts` | 旧版轻量财务字段、报告期、导入版本及来源引用 | 仅保留旧历史与维护工具；日常按钮停写，行业页面不读取 |
 | 旧财务来源 | `sw_financial_provenance` | 旧财务字段的共享来源与指标定义 | 仅供旧财务历史追溯及维护工具 |
 
 四张财务表按证券、交易所、报告期保存最新记录及真实修订版本；利润表、现金流量表为累计流量，资产负债表为期末余额。四表采集包括沪深北 A 股，行业页面仍按沪深申万成员筛选。详细字段、主外键、单位、计算口径和 SQL 示例见 [全行业数据表结构与字段字典](industry-data-schema.md)。
+
+#### 旧市值三表的页面与保留关系（2026-10-14核查）
+
+当前行业内公司对比、市值汇总、各级排行及趋势直接读取 `market_trade_snapshot`，按字段优先使用东财原始、已核验停牌参考价、普通历史合成的有效值；缺值继续留空。行业汇总使用 `sw_cap_quarter_rosters` 的精确目标交易日和 `sw_cap_quarter_members` 的冻结成员，读取时计算，不写入 `sw_industry_cap_quarters`。新成功快照批次使行业缓存失效。
+
+三张旧表仍在数据库维护页显示记录数、大小、用途及真实时间，但不再提供日常行业页面的展示金额。旧导入代码仍可写旧事实、来源及行业汇总，不能将日常按钮停写理解为所有历史工具已移除。
+
+`market_cap_latest` View仍保留 `sw_cap_facts` 的同日回退，供旧工具兼容读取；当前行业页面不依赖该View。2026-10-14核查时，View中实际命中 `legacy:sw_cap_facts` 的记录为0，此数是该次数据状态，不是永久保证。当前旧行业汇总18,359条，覆盖2016Q1—2026Q3，最近关联写入批次135的取得时间为2026-10-09 21:40:34（北京时间）；这些统计不是页面最新市值的水位。
+
+旧市值及 `sw_cap_provenance` 仍被历史合成证据引用，原事实、修订、批次、来源参数和文件证据共同用于复算及核验。页面不读取旧金额不等于可以删除旧表；本次仅登记用途，不清理数据。后续若计划归档或移除，须另行盘点旧工具、View及合成证据依赖，并保留可复核的来源关系。来源文件不包含在SQLite备份中。
 
 ### 2.6 指数估值整数序列（v25）
 
@@ -156,7 +177,7 @@
 
 常规“更新近期估值”先查本地各来源／序列水位，仅补尾部新增日期；已最新的序列跳过估值请求。申万一级／二级独立检查成功分段，不能只用全表最大日期判定。月频移动观察点按真实日期保存。单独“核对近期修订”重抓日频10交易日／乐咕4个月，另有历史月份轮换核对。无变化不新增事实版本，真实修订留档；跳过请求仍记录任务状态。
 
-日期已最新不代表历史完整或数值未修订，内部缺口与逐指标缺值需独立核验。公共结构目前用于指数，旧财务／价格历史尚未统一迁移。SQLite备份不包含原始响应，完整追溯恢复须同步复制来源目录并校验双哈希。
+日期已最新不代表历史完整或数值未修订，内部缺口与逐指标缺值需独立核验。公共结构目前用于指数和全市场交易日快照；旧财务／价格历史尚未统一迁移。SQLite备份不包含原始响应，完整追溯恢复须同步复制来源目录并校验双哈希。
 
 来源能力、口径、请求保护、更新／修订核对、取消恢复与接口限制的detail文档见[指数估值采集与查询说明](index-valuation-collection.md)。
 
@@ -179,6 +200,23 @@
 不同提供方、接口、日／月频、收益口径和定义版本分别保存，不拼接。有效点数须为有限正数，缺值留空，不由收盘点位补造开高低点；重复数据不新增修订，真实变化保留历史。点位查询为本地读取，目前未新增页面、HTTP 接口或缓存；采集成功不等于历史覆盖完整。
 
 字段与收益口径、来源能力、回放／增量写入、读取及验收的详细说明见 [指数点位存储与归档复用](index-price-storage.md)。
+
+### 2.10 全市场交易日快照（v29）
+
+只新增一张业务表 `market_trade_snapshot` 和一个逻辑 View `market_cap_latest`。任务复用 `sw_update_runs`，逐日分段、逐次请求和预算复用公共三表；没有新增快照专用批次、来源或控制表。源字段转小写，共22列，加11个本地身份/版本/追溯字段，共33列。
+
+- 身份和修订：`security_code + exchange + trade_date + definition_version + version`；最新部分唯一索引保证同公司/交易日/定义只有一个最新版本。季度属于采样策略，未来日频同日不会重复建档。
+- 价格/股本/市值：`close_price` 为未复权收盘价，`total_shares/free_shares_a` 为股数INTEGER，`total_market_cap/notlimited_marketcap_a` 为金额REAL；源PE/PB/PCF/PS/PEG按原值保存，待核实辅助定义不替换页面计算。
+- 来源：`source_id/batch_id` 组合外键引用 `collection_sources(id,batch_id)`；原文、请求参数及双哈希集中保存，行内不复制整行JSON或文件路径。
+- 真实时间：`obtained_at` 为来源取得时间，`updated_at` 为本地写入时间。维护分类为行业数据，空表/缺时间显示未记录。View不保存时间，维护页显示未记录，实际时间查底层来源。
+- 发布：按固定交易日全市场、500行分页，所有页完整校验后短事务提交。共用同源并发1、完成后10—15秒、60秒最多5次及每20次额外60—120秒休息；拒绝立即停止并持久冷却至少一小时。旧财务请求未全部接入，不能宣称所有东财旧流程已共用保护。
+- 行业页面读取：市值与未复权股价均直接来自 `market_trade_snapshot`；市值按东财原始、已核验停牌估值、历史合成的顺序取首个有效值，旧 `sw_cap_facts` 和 `market_quarterly_prices` 不再作为页面回退来源。PE仍按市值/TTM归母利润，PB仍按未复权价格/同报告期BPS。旧表/文件保留，新日常快照不再写旧市值或单独补BigQuant价格。
+
+2026-10-14完成2015Q1—2026Q3共47期核验。实际有数据为2018Q1—2026Q3的35期、158,632条；2015—2017的12期来源明确为空，覆盖为partial，尚无法从此接口取得2016同比所需2015基期。历史名单有效期未核实、个别指标空值另记，执行complete不代表覆盖完整。
+
+本次新表含索引88,465,408字节（约84.4MiB），公共响应归档20,555,653字节（约19.6MiB，包含中断复用副本）；这是本次实测，不是永久容量上限。47期原文双哈希/22字段回放、SQLite完整性及外键校验通过，旧市值/来源/价格逐行哈希与采集前备份一致。
+
+字段、恢复及运行说明见[全市场交易日快照](data-sources/market-trade-snapshot.md)；[完整验收](../data/verification/reports/market-trade-snapshot-history-20261013.json)、[旧表完整性复核](../data/verification/reports/market-trade-snapshot-legacy-integrity-20261014.json)。
 
 ## 3. 更新、缓存与价格一致性
 
@@ -357,6 +395,8 @@ python -m quarterly_dashboard.storage check --database $restorePath
 
 日常启动不自动执行 `VACUUM`，维护 CLI 也没有单独的 `vacuum` 子命令。若需实际收缩文件，应先备份，停止同库后台，并在持有实例锁的维护流程中执行，再核验和恢复服务。空间整理不能删除业务历史来替代。
 
+2026-10-12在点位索引重建后，已正式备份、停止8765并持有实例锁执行VACUUM。日常库文件由1314324480字节降至1304301568字节，实际释放10022912字节（约9.56 MiB），空闲页由2413降至0。67张表的行数和逐行内容指纹、全部表／索引／触发器定义前后一致，完整性与外键检查通过；8765已恢复，页面、目录和维护接口均返回200。验收及维护统计分别见 `data/verification/reports/2026-10-12-sqlite-vacuum.json` 和 `2026-10-12-sqlite-vacuum-maintenance-api.json`，后台日志位于 `data/verification/logs/daily-8765-vacuum-20261012.*.log`。
+
 ## 7. 代码依据与历史记录
 
 | 内容 | 代码依据 |
@@ -369,6 +409,8 @@ python -m quarterly_dashboard.storage check --database $restorePath
 | 共享价格、版本发布及租约清理 | [price_service.py](../quarterly_dashboard/price_service.py) |
 | 财报、分红与估值更新 | [fundamental_service.py](../quarterly_dashboard/fundamental_service.py)、[dividend_service.py](../quarterly_dashboard/dividend_service.py)、[valuation_service.py](../quarterly_dashboard/valuation_service.py) |
 | 图表范围、频率及刷新操作 | [web/index.html](../web/index.html) |
+| 全字段交易日快照、季度恢复与来源回放 | [market_trade_snapshot.py](../quarterly_dashboard/market_trade_snapshot.py)、[字段字典](../quarterly_dashboard/resources/market_trade_snapshot_fields.json) |
+| 公共来源归档、同源预算与冷却 | [collection.py](../quarterly_dashboard/collection.py) |
 
 历史实测参见 [P4/P5 验收](data-sources/p4-acceptance.md)、[融资存储精简验收](data-sources/financing-compaction-acceptance.md)。这些记录用于说明特定日期的测试结果，不应代替当前代码规则。
 

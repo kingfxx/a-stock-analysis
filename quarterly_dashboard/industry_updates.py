@@ -35,11 +35,13 @@ def validate_request(action, target, recheck=False, *, today=None):
             raise ValueError('仅支持季度报告期')
     elif action == 'cap_quarter':
         end = quarter_end(target)
+        if end<date(2015,3,31):
+            raise ValueError('交易快照从已授权的2015Q1开始')
     else:
         raise ValueError('仅支持独立的行业财务或季度市值任务')
     if end >= today:
         raise ValueError('仅更新已结束的报告期或季度')
-    years = 12 if action == 'financial_period' else 10
+    years = 12
     if end.year < today.year-years:
         raise ValueError(f'仅允许最近{years}年范围内的报告期或季度')
 
@@ -218,86 +220,44 @@ def perform(service, action, target, recheck, progress):
 
 
 def _perform(service, action, target, recheck, progress, batch_id):
-    # Import lazily: the bulk history collector also uses calendar/roster helpers here.
-    from .industry_bulk import RequestPacer, cap_rows, fetch_pages
-    validate_request(action,target,recheck)
+    from .industry_bulk import RequestPacer
     from .industry_memberships import ensure_daily_memberships
+    from . import market_financial
+    validate_request(action,target,recheck)
     membership_check=ensure_daily_memberships(service,progress)
     foundation=service.foundation()
+    if action=='cap_quarter':
+        from .market_trade_snapshot import refresh_quarter
+        return refresh_quarter(service,target,recheck,foundation,membership_check,progress)
     stocks=sorted(r['stock_code'] for r in foundation['members'])
     if not 4000<=len(stocks)<=10000:
         raise ValueError('全市场沪深分类名单规模异常，请先更新分类资料')
     name=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-    bundle={**foundation,'asof':date.today().isoformat(),'obtained_at':datetime.now(timezone.utc).isoformat(),
-            'financials':[],'caps':[],
-            'manifest':{'standard':'SW2021','scope':'all_market_update','pilot_industries':[],
-                        'action':action,'target':target,'recheck':recheck,'membership_count':len(stocks),
-                        'historical_universe':'current_SSE_SZSE_constituents_backfill',
-                        'pacing':'串行；2.5—3.5 秒随机间隔；每 20 次休息 30 秒；失败冷却 60/120 秒'}}
     directory=service.directory/'updates'/name
     directory.mkdir(parents=True,exist_ok=True)
     pacer=RequestPacer(progress)
-    sources=[]
-    def fetch(report, columns, filter_):
-        with create_data_session() as session:
-            session.headers.update({'User-Agent':'Mozilla/5.0','Referer':'https://data.eastmoney.com/'})
-            return fetch_pages(session,directory,report,columns,filter_,progress,pacer)
-    if action=='financial_period':
-        from . import market_financial
-        required=stocks
-        universe=set(stocks)
-        progress(f'全市场财务 {target} · 全 A 股三表及业绩指标 · 行业展示 {len(stocks)} 家沪深公司')
-        with service.db.connection() as conn:
-            previous=conn.execute('SELECT status FROM market_financial_batches WHERE report_date=? AND id<? '
-                                  'ORDER BY id DESC LIMIT 1',(target,batch_id)).fetchone()
-        datasets=market_financial.collect(service.db.path.parent/'market_financial_sources',target,pacer,progress,
-                                         resume=bool(previous and previous['status']=='failed'))
-        sources=[source for data in datasets for source in data['sources']]
-        failures=[]
-    else:
-        target_date=target_trade_date(service.db,target,directory)
-        roster=cap_roster(service.db,foundation,target,target_date)
-        stocks=sorted(r['stock_code'] for r in roster['members'])
-        known=service.cap_known(target_date)
-        required=stocks if recheck else [s for s in stocks if s not in known]
-        progress(f'全市场市值 {target} · 已有 {len(stocks)-len(required)} 家，待核对 {len(required)} 家')
-        caps=[]
-        if required:
-            raw,sources=fetch('RPT_VALUEANALYSIS_DET',
-                'SECURITY_CODE,TRADE_DATE,TOTAL_MARKET_CAP,TOTAL_SHARES,CLOSE_PRICE',
-                f"(TRADE_DATE='{target_date}')")
-            source_by_code={r['SECURITY_CODE']:sources[i//500] for i,r in enumerate(raw)}
-            caps=cap_rows(raw,target_date,set(required),source_by_code)
-        returned={r['stock_code'] for r in caps}
-        failures=[{'stock_code':s,'error':'来源缺少指定季末有效总市值，保留原值或待补'} for s in required if s not in returned]
-        bundle.update(caps=caps,cap_roster=roster)
-        bundle['manifest'].update(cap_quarter=target,market_date=target_date,
-                                  composition=roster['composition'])
+    progress(f'全市场财务 {target} · 全 A 股三表及业绩指标 · 行业展示 {len(stocks)} 家沪深公司')
+    with service.db.connection() as conn:
+        previous=conn.execute('SELECT status FROM market_financial_batches WHERE report_date=? AND id<? '
+                             'ORDER BY id DESC LIMIT 1',(target,batch_id)).fetchone()
+    datasets=market_financial.collect(service.db.path.parent/'market_financial_sources',target,pacer,progress,
+                                     resume=bool(previous and previous['status']=='failed'))
+    sources=[source for data in datasets for source in data['sources']]
     progress('来源已完成，正在保存新增／修订指标并汇总所选一期')
-    statement_summary={}
-    if action=='financial_period':
-        with service.db.connection(write=True) as conn:
-            statement_summary=market_financial.publish(conn,batch_id,target,datasets)
-        market_financial.clear_checkpoints(datasets)
-    else:
-        bundle['manifest'].update(files=sources,network_requests=pacer.requests)
-        import_id=service.import_bundle(bundle,capture_local=False)
-    if action=='financial_period':
-        data=service._load()
-        import_id=data['import']['id']
-        effective=service._financial_reader.window(data['token'],data['import']['member_import_id'],
-                                                   data['nonfinancial'],target,'ytd')
-        failures=[{'stock_code':s,'error':'指定报告期营收或归母净利润待补'} for s in stocks
-                  if any(effective.get((s,target),{}).get(m) is None for m in ('revenue','parent_profit'))]
+    with service.db.connection(write=True) as conn:
+        statement_summary=market_financial.publish(conn,batch_id,target,datasets)
+    market_financial.clear_checkpoints(datasets)
+    data=service._load()
+    import_id=data['import']['id']
+    effective=service._financial_reader.window(data['token'],data['import']['member_import_id'],
+                                               data['nonfinancial'],target,'ytd')
+    failures=[{'stock_code':s,'error':'指定报告期营收或归母净利润待补'} for s in stocks
+              if any(effective.get((s,target),{}).get(m) is None for m in ('revenue','parent_profit'))]
+    universe=set(stocks)
     result={'import_id':import_id,'action':action,'target':target,'scope_count':len(stocks),'membership_check':membership_check,
-            'requested_count':len(required),'returned_count':sum(r['SECURITY_CODE'] in universe for r in next(d for d in datasets if d['dataset']=='income')['rows'])
-                if action=='financial_period' else len(bundle['caps']),
-            'network_requests':pacer.requests,'files':sources,'failures':failures}
-    if batch_id is not None:
-        result.update(market_financial_batch_id=batch_id,statements=statement_summary,legacy_updated=False)
-    if action=='cap_quarter':
-        from .industry_prices import sync_quarter
-        result['quarter_prices']=sync_quarter(service,foundation,quarter_end(target).isoformat(),
-                                              target_date,stocks,recheck,progress)
+            'requested_count':len(stocks),'returned_count':sum(r['SECURITY_CODE'] in universe for r in
+                next(d for d in datasets if d['dataset']=='income')['rows']),
+            'network_requests':pacer.requests,'files':sources,'failures':failures,
+            'market_financial_batch_id':batch_id,'statements':statement_summary,'legacy_updated':False}
     (directory/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
     return result

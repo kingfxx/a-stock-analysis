@@ -1,6 +1,6 @@
 """Public request provenance and conservative, cross-process provider pacing.
 
-Only the new index collectors use this module. Network waits never hold a SQLite
+Index and market trading-day snapshot collectors use this module. Network waits never hold a SQLite
 transaction. The provider file lock covers all hosts, endpoints and retries.
 """
 from __future__ import annotations
@@ -79,12 +79,14 @@ class PacingPolicy:
 
 
 def begin_batch(db, operation_id, dataset, provider, start=None, end=None, *, scope=None,
-                frequency=None, trigger='manual', idempotency_key=None):
+                frequency=None, trigger='manual', idempotency_key=None, domain='market',
+                parser_version='index-v2', definition_version='v1', universe_version=None):
     with db.connection(write=True) as conn:
         return conn.execute('INSERT INTO collection_batches(operation_id,domain,dataset,source_system,scope_start,scope_end,'
-            'scope_json,frequency,trigger_type,status,started_at,parser_version,definition_version,idempotency_key) '
-            "VALUES(?,'market',?,?,?,?,?,?,?,'running',?,'index-v2','v1',?)",
-            (operation_id,dataset,provider,start,end,encoded(scope or {}),frequency,trigger,utc_now(),idempotency_key)).lastrowid
+            'scope_json,frequency,trigger_type,status,started_at,parser_version,definition_version,idempotency_key,universe_version) '
+            "VALUES(?,?,?,?,?,?,?,?,?,'running',?,?,?,?,?)",
+            (operation_id,domain,dataset,provider,start,end,encoded(scope or {}),frequency,trigger,utc_now(),
+             parser_version,definition_version,idempotency_key,universe_version)).lastrowid
 
 
 def finish_batch(db, batch_id, status, coverage='unknown', *, result=None, error=None):
@@ -242,7 +244,85 @@ class RequestCollector:
     def report(self):
         return dict(policy=asdict(self.policy),network_requests=self.requests,retries=self.retries,halted=self.halted)
 
-    def get(self, batch_id, provider, dataset, url, params=None, *, headers=None, expect='json'):
+    def invoke(self, batch_id, provider, dataset, request, callback, *, serialize,
+               hash_basis='sdk_materialized_json / gzip_file', response_of=lambda value: None):
+        """Schedule one actual SDK transport exchange; consume streams inside callback.
+
+        Request metadata must be sanitized by the adapter. Exceptions are recorded
+        by class only because SDK diagnostics may contain authentication material.
+        """
+        for attempt in range(1,self.policy.max_attempts+1):
+            if provider in self.halted:
+                raise ProviderBlocked(f'{provider} 本轮已停止')
+            if attempt>1:
+                self.retries+=1
+                self.wait(60*(attempt-1)+self.uniform(0,5))
+            with self.provider_lock(provider):
+                state=self.state(provider)
+                if state['cooldown_until'] and datetime.fromisoformat(state['cooldown_until']).timestamp()>self.clock():
+                    self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
+                    raise ProviderBlocked(f'{provider} 仍在冷却至 {state["cooldown_until"]}')
+                budget=json.loads(state['budget_json'])
+                starts=[t for t in budget.get('starts',[]) if t>self.clock()-self.policy.window]
+                ready=budget.get('ready_at',0)
+                if len(starts)>=self.policy.window_requests:
+                    ready=max(ready,starts[-self.policy.window_requests]+self.policy.window+.001)
+                self.wait(max(0,ready-self.clock()))
+                starts=[t for t in starts if t>self.clock()-self.policy.window]+[self.clock()]
+                count=budget.get('count',0)+1
+                state['budget_json']=encoded(dict(starts=starts,ready_at=self.clock()+120,count=count))
+                self.save_state(state)
+                obtained=datetime.fromtimestamp(self.clock(),timezone.utc).isoformat()
+                self.requests+=1
+                value=response=raw=None
+                error=None
+                try:
+                    value=callback()
+                    response=response_of(value)
+                    raw=serialize(value)
+                except BaseException as exc:
+                    error=exc
+                finally:
+                    ready=self.clock()+self.policy.interval+self.uniform(0,self.policy.jitter)
+                    if count%self.policy.rest_every==0:
+                        ready+=self.uniform(self.policy.rest_min,self.policy.rest_max)
+                    state['budget_json']=encoded(dict(starts=starts,ready_at=ready,count=count))
+                    self.save_state(state)
+                key=digest(encoded(request).encode())
+                with self.db.connection() as conn:
+                    attempt_no=conn.execute('SELECT coalesce(max(attempt_no),0)+1 FROM collection_sources '
+                        'WHERE batch_id=? AND dataset=? AND request_key=?',(batch_id,dataset,key)).fetchone()[0]
+                status=getattr(response,'status_code',None)
+                sid=archive_source(self.db,batch_id,provider,dataset,request,attempt_no,raw=raw,response=response,
+                    obtained_at=obtained,request_status='failed' if error or status and status>=400 else 'success',
+                    error=type(error).__name__ if error else None)
+                with self.db.connection(write=True) as conn:
+                    conn.execute('UPDATE collection_sources SET hash_basis=? WHERE id=?',(hash_basis,sid))
+                diagnostic=str(error).lower() if error else ''
+                if isinstance(error,(Cancelled,KeyboardInterrupt)):
+                    parsed_source(self.db,sid,error=type(error).__name__)
+                    raise error
+                text=getattr(response,'text','')[:100000].lower()
+                denied=status in (401,403,429) or any(s in diagnostic+' '+text for s in
+                    ('permission denied','unauthorized','forbidden','access denied','captcha','验证码','too many requests','rate limit','访问频率'))
+                if denied:
+                    parsed_source(self.db,sid,error='SDK transport access refused')
+                    self.block(provider,state,'SDK transport access refused',response)
+                temporary=status in (500,502,503,504) or error and any(s in type(error).__name__.lower() for s in
+                    ('timeout','connecterror','unavailable','connectionerror'))
+                if error or status and status>=400:
+                    parsed_source(self.db,sid,error=type(error).__name__ if error else f'HTTP {status}')
+                    if temporary and attempt<self.policy.max_attempts and not state['cooldown_until']:
+                        continue
+                    raise RuntimeError(f'{provider} SDK transport failed: {type(error).__name__ if error else status}') from None
+                parsed_source(self.db,sid)
+                if state['cooldown_until']:
+                    state.update(cooldown_until=None,reason=None,denials=0)
+                    self.save_state(state)
+                return value,sid
+        raise RuntimeError('SDK transport attempts exhausted')
+
+    def get(self, batch_id, provider, dataset, url, params=None, *, headers=None, expect='json', healthy_response=None):
         # Authentication is sent, but never persisted in request identity or logs.
         request=dict(transport='http',method='GET',url=url,
                      params={k:v for k,v in (params or {}).items() if k.lower() not in ('token','apikey','api_key')})
@@ -319,7 +399,7 @@ class RequestCollector:
                     healthy=False
                     try:
                         payload=response.json() if expect=='json' else None
-                        healthy=(isinstance(payload,dict) and isinstance(payload.get('data'),(list,dict))
+                        healthy=healthy_response(response) if healthy_response else (isinstance(payload,dict) and isinstance(payload.get('data'),(list,dict))
                             and str(payload.get('code','200')) in ('0','200') and payload.get('success') is not False) if expect=='json' else ('_csrf' in text if expect=='html' else len(response.content)>0)
                     except ValueError:
                         pass

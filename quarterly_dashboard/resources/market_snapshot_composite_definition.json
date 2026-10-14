@@ -1,0 +1,21 @@
+{
+  "definition_version": "historical-composite-v1",
+  "formula_version": "industry-quarter-ttm-and-bps-v1",
+  "scope": "2015Q1:2017Q4; exact quarter-end SH/SZ trading dates",
+  "pending_fields": ["pe_lar", "pcf_ocf_lar", "pcf_ocf_ttm", "ps_ttm", "peg_car"],
+  "formulas": {
+    "total_market_cap": "validated same-day legacy value first; otherwise raw close * same-day total shares",
+    "notlimited_marketcap_a": "raw close * validated same-day A float shares",
+    "change_rate": "cn_stock_real_bar1d.change_ratio * 100",
+    "pe_ttm": "market cap / TTM parent net profit; positive inputs only",
+    "pb_mrq": "raw close / same-report-period BPS; positive inputs only",
+    "ttm_parent_profit": "annual: current full year; other quarters: current YTD + prior full year - prior same-quarter YTD"
+  },
+  "share_mapping": {
+    "total_shares": "cn_stock_shares.total_shares; validated cn_stock_capital event only for missing daily values",
+    "free_shares_a": "cn_stock_shares.a_float_shares; overlap conflicts quarantined"
+  },
+  "descriptor_inheritance": "earliest available latest Eastmoney record; explicit later_record_backfill; conflicting org_code left NULL",
+  "revisions": "same-definition metric supplement merges into full new version; unchanged metrics keep original provenance",
+  "missing": "NULL with reasons; no interpolation or stale-price substitution; source zero change_ratio retained"
+}

@@ -100,6 +100,34 @@
     .chart-scroll-hint { display:none; }
     .note { margin:0; padding:0 27px 23px; color:var(--muted); font-size:13px; line-height:1.6; }
     .note[role="status"]:empty { display:none; }
+    .trend-history-heading { display:flex; justify-content:space-between; align-items:baseline; gap:15px; flex-wrap:wrap; margin:18px 27px 10px; }
+    .trend-history-heading h3 { margin:0; font-size:15px; }
+    .trend-history-heading span,.trend-history-footer { color:var(--muted); font-size:12px; line-height:1.8; }
+    .trend-history-scroll { position:relative; isolation:isolate; max-width:calc(100% - 54px); margin:0 27px; overflow:auto; border:1px solid var(--line); border-radius:10px; scrollbar-color:#526c78 #182227; }
+    .trend-history-scroll:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
+    .trend-history-table { border-collapse:separate; border-spacing:0; width:max-content; min-width:100%; table-layout:fixed; font-variant-numeric:tabular-nums; }
+    .trend-history-table th,.trend-history-table td { min-width:125px; padding:12px 14px; text-align:right; border-right:1px solid #29373e; border-bottom:1px solid #2b3a42; white-space:nowrap; }
+    .trend-history-table thead th { background:#202e35; color:#b9cbd4; font-size:12px; font-weight:500; }
+    .trend-history-table th:first-child { position:sticky; left:0; z-index:3; width:180px; min-width:180px; max-width:180px; text-align:left; background:#202c33; box-shadow:4px 0 8px #10161920; }
+    .trend-history-table thead th:first-child { z-index:4; }
+    .trend-history-table tbody th { font-size:13px; font-weight:500; }
+    .trend-history-table tbody th span { display:block; margin-top:6px; color:var(--muted); font-size:11px; font-weight:400; }
+    .trend-history-table td strong { display:block; font-size:16px; font-weight:500; letter-spacing:-.02em; }
+    .trend-history-change { margin-top:5px; font-size:12px; color:var(--muted); }
+    .trend-history-change small { margin-right:6px; color:var(--muted); }
+    .trend-history-change.positive { color:#f09a75; }
+    .trend-history-change.negative { color:#72c9b3; }
+    .trend-history-table .trend-history-latest { background:#223740; }
+    .trend-history-table thead .trend-history-latest { color:#81d8eb; }
+    .trend-history-table thead small { display:block; margin-top:5px; color:var(--cyan); font-size:10px; }
+    .trend-history-table tbody tr:last-child>* { border-bottom:0; }
+    .trend-history-table tr>*:last-child { border-right:0; }
+    .trend-history-footer { margin:10px 27px 16px; }
+    .chart-explanation { margin:0 27px 18px; border-top:1px solid var(--line); }
+    .chart-explanation summary { width:max-content; padding:12px 0; color:var(--cyan); font-size:13px; cursor:pointer; }
+    .chart-explanation .note { padding:0 0 13px; }
+    .chart-explanation .below { margin:0 0 15px; }
+    .chart-explanation .mini { background:#172026; }
     .below { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
     .mini { padding:20px 23px; background:#172026; border:1px solid var(--line); border-radius:10px; }
     .mini h3 { margin:0 0 9px; font-size:14px; color:#d8e6e9; }
@@ -159,7 +187,7 @@
     .error { background:#442729; color:#ffe2df; }
     .warning { background:#4a3c22; color:#ffe5a1; }
     .hide { display:none; }
-    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .panel-head > div:first-child{width:100%} .controls{width:100%;min-width:0} .metric-choice{flex:1 1 100%;min-width:0} .metric-choice select{min-width:0} .controls .period{width:100%;min-width:0} .controls .period button{flex:1;min-width:0;padding:10px 6px} select{flex:1} #chart{height:520px;min-height:420px} .chart-scroll.wide-chart #chart{min-width:850px} .chart-scroll-hint:not([hidden]){display:block;margin:10px 15px 0;color:var(--muted);font-size:12px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} .valuation-overview{grid-template-columns:1fr;padding:18px 15px 0;gap:13px} .valuation-current{max-width:230px} .valuation-levels{padding:14px 15px 0;gap:8px 17px} #valuation-chart{height:360px} }
+    @media(max-width:800px) { .shell{padding:18px 12px 32px} header{align-items:start;flex-direction:column} .lookup,.search{width:100%} .search input{flex:1;min-width:0} .cached-picker{width:100%} .cached-menu{left:0;right:auto;width:100%} .panel-head{padding:20px 15px} .panel-head > div:first-child{width:100%} .controls{width:100%;min-width:0} .metric-choice{flex:1 1 100%;min-width:0} .metric-choice select{min-width:0} .controls .period{width:100%;min-width:0} .controls .period button{flex:1;min-width:0;padding:10px 6px} select{flex:1} #chart{height:520px;min-height:420px} .chart-scroll.wide-chart #chart{min-width:850px} .chart-scroll-hint:not([hidden]){display:block;margin:10px 15px 0;color:var(--muted);font-size:12px} .note{padding:0 15px 18px} .below{grid-template-columns:1fr} .valuation-overview{grid-template-columns:1fr;padding:18px 15px 0;gap:13px} .valuation-current{max-width:230px} .valuation-levels{padding:14px 15px 0;gap:8px 17px} #valuation-chart{height:360px} .trend-history-heading{margin:16px 15px 9px}.trend-history-scroll{max-width:calc(100% - 30px);margin:0 15px}.trend-history-footer{margin:9px 15px 13px}.chart-explanation{margin:0 15px 15px} }
     .shell { max-width:1580px; display:grid; grid-template-columns:180px minmax(0,1fr); gap:24px; align-items:start; }
     .workspace-content { min-width:0; }
     .stock-sidebar { position:sticky; top:20px; z-index:30; padding:18px 14px; background:var(--panel); border:1px solid var(--line); border-top:3px solid var(--cyan); border-radius:10px; }
@@ -350,8 +378,8 @@
         <div class="comparison-range-control">
           <label for="comparison-range">时间范围</label>
           <select id="comparison-range" aria-label="财务图时间范围">
-            <option value="all" selected>全部时间</option>
-            <option value="10">最近 10 年</option>
+            <option value="all">全部时间</option>
+            <option value="10" selected>最近 10 年</option>
             <option value="5">最近 5 年</option>
           </select>
         </div>
@@ -361,12 +389,20 @@
     <p id="financial-status" class="note" role="status" aria-live="polite"></p>
     <p id="dividends-status" class="note" role="status" aria-live="polite"></p>
     <div id="chart-scroll" class="chart-scroll"><div id="chart" role="img" aria-label="季度财务与市场价格对照图"></div></div>
-    <p id="chart-note" class="note"></p>
+    <div class="trend-history-heading"><h3>历史数据</h3><span id="trend-history-caption">金额按所选指标单位 · 时间由新到旧</span></div>
+    <div id="trend-history-scroll" class="trend-history-scroll" tabindex="0" role="region" aria-label="财务与市场指标历史数据，可横向滚动">
+      <table class="trend-history-table"><thead id="trend-history-head"></thead><tbody id="trend-history-body"></tbody></table>
+    </div>
+    <p id="trend-history-footer" class="trend-history-footer"></p>
+    <details class="chart-explanation">
+      <summary>说明</summary>
+      <p id="chart-note" class="note"></p>
+      <div class="below">
+        <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。新浪部分历史披露日期错位，按上一年同报告期记录校正；无法可靠推断则留空。股价取校正披露日或此前最近交易日的收盘价。相隔超过 15 天的价格不算披露日价格；若处于有前后交易记录的长间隔内，以空心圆点标出最近收盘参考值，与相邻价格点之间用虚线连接。悬停可查看实际交易日。</p></section>
+        <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的不复权及前复权价格来自腾讯日 K。日线统一存储、供各图表复用，财务图按披露日期匹配价格快照及长间隔参考点。季末市值按季末当日或此前最近交易日的不复权收盘价×该报告期末总股本计算，实际价格日期见悬浮提示；相隔超过 15 天则留空。披露日估算市值按披露日价格×报告期末股本计算；缺少价格或股本时留空。</p></section>
+      </div>
+    </details>
   </section>
-  <div class="below">
-    <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。新浪部分历史披露日期错位，按上一年同报告期记录校正；无法可靠推断则留空。股价取校正披露日或此前最近交易日的收盘价。相隔超过 15 天的价格不算披露日价格；若处于有前后交易记录的长间隔内，以空心圆点标出最近收盘参考值，与相邻价格点之间用虚线连接。悬停可查看实际交易日。</p></section>
-    <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的不复权及前复权价格来自腾讯日 K。日线统一存储、供各图表复用，财务图按披露日期匹配价格快照及长间隔参考点。季末市值按季末当日或此前最近交易日的不复权收盘价×该报告期末总股本计算，实际价格日期见悬浮提示；相隔超过 15 天则留空。披露日估算市值按披露日价格×报告期末股本计算；缺少价格或股本时留空。</p></section>
-  </div>
   <section class="panel valuation-panel" aria-label="估值与历史分位">
     <div class="panel-head">
       <div>
@@ -575,7 +611,7 @@
   };
   let selectedPeriod = ['quarter','year','ttm'].includes(savedSelections.period) ? savedSelections.period : 'quarter';
   const comparisonRange = document.getElementById('comparison-range');
-  if (['all','10','5'].includes(savedSelections.comparisonRange)) comparisonRange.value = savedSelections.comparisonRange;
+  comparisonRange.value = ['all','10','5'].includes(savedSelections.comparisonRange) ? savedSelections.comparisonRange : '10';
   const seriesControls = [
     {id:'bar-metric', defaultKind:'bar', label:'A', color:'#38c4dc'},
     {id:'bar-metric-2', defaultKind:null, legacyKind:'bar', label:'B', color:'#b9a0f5'},
@@ -612,12 +648,17 @@
     cutoff.setHours(0, 0, 0, 0);
     if (comparisonRange.value !== 'all') cutoff.setFullYear(cutoff.getFullYear() - Number(comparisonRange.value));
     const allRows = state.views?.[selectedPeriod] || [];
-    const rows = allRows.filter(row =>
+    const rangedRows = allRows.filter(row =>
       comparisonRange.value === 'all' || new Date(row.period + 'T00:00:00') >= cutoff);
+    const activeControls = seriesControls.filter(series => modeOf(series)).map(series => ({
+      ...series, kind:modeOf(series), key:series.control.value, metric:metrics[series.control.value]
+    }));
+    const rows = activeControls.length ? rangedRows.filter(row => activeControls.some(series =>
+      row[series.key] != null || (series.metric.referenceKey && row[series.metric.referenceKey] != null))) : rangedRows;
     const labels = rows.map(label);
     const xs = positions(rows);
-    const active = seriesControls.filter(series => modeOf(series)).map(series => ({
-      ...series, kind:modeOf(series), key:series.control.value, metric:metrics[series.control.value],
+    const active = activeControls.map(series => ({
+      ...series,
       values:rows.map(row => row[series.control.value] == null ? null : row[series.control.value] / metrics[series.control.value].scale)
     }));
     const axisGroups = [];
@@ -808,6 +849,31 @@
       (hasBalance ? ' 有息负债（简化）＝短期借款＋应付短期债券＋一年内到期的非流动负债＋长期借款＋应付债券＋租赁负债；净现金＝报告期末货币资金－有息负债，正值为净现金，负值为净负债。均为期末时点值，不随单季／年度／TTM 切换而加总；货币资金可能含受限资金，债务科目亦可能含非有息部分。' : '') +
       (referenceCount ? ' 空心圆点为距披露日 16–180 天的最近交易价参考点；与相邻价格点用虚线连接，正常价格点之间仍用实线。' : '') +
       missingNote;
+    const historyHead = document.getElementById('trend-history-head');
+    const historyBody = document.getElementById('trend-history-body');
+    const historyFooter = document.getElementById('trend-history-footer');
+    const historyRows = [...rows].reverse();
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    historyHead.innerHTML = `<tr><th scope="col">指标 / 单位</th>${historyRows.map((row,index) => `<th scope="col" class="${index===0?'trend-history-latest':''}">${escapeHtml(label(row))}${index===0?'<small>最新一期</small>':''}</th>`).join('')}</tr>`;
+    historyBody.innerHTML = active.length ? active.map(series => `<tr><th scope="row">${escapeHtml(series.metric.name)}<span>${escapeHtml(series.metric.unit)}${series.key==='period_end_market_cap'?' · 季末快照':''}</span></th>${historyRows.map((row,index) => {
+      const value=row[series.key], scaled=value==null?null:value/series.metric.scale;
+      const formatted=scaled==null?'—':scaled.toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
+      const changes=[];
+      if (hasMarketComparisons(series.key)) {
+        changes.push(comparisonText(row,series.key,periodOffsets.yoy,'同比'));
+        changes.push(comparisonText(row,series.key,periodOffsets.qoq,'环比'));
+      } else if (row.yoy?.[series.key]) changes.push(row.yoy[series.key]);
+      const changeHtml=changes.map(change=>{
+        const match=change.match(/(?:同比|环比)\s+([+-]?\d+(?:\.\d+)?%)/);
+        const tone=match?(Number(match[1].replace('%',''))>0?'positive':Number(match[1].replace('%',''))<0?'negative':''):'';
+        return `<div class="trend-history-change ${tone}">${escapeHtml(change)}</div>`;
+      }).join('');
+      return `<td class="${index===0?'trend-history-latest':''}" title="${escapeHtml(series.metric.name+' · '+row.period+(series.metric.dateKey&&row[series.metric.dateKey]?' · 交易日 '+row[series.metric.dateKey]:''))}"><strong>${formatted}</strong>${changeHtml}</td>`;
+    }).join('')}</tr>`).join('') : `<tr><th scope="row">历史数据</th><td colspan="${Math.max(1,historyRows.length)}" style="text-align:left;color:var(--muted)">请选择柱形或折线以显示指标。</td></tr>`;
+    const historyUnit=active.length?active.map(series=>series.metric.unit).filter((unit,index,units)=>units.indexOf(unit)===index).join('、'):'所选指标单位';
+    const historyPeriodLabel={quarter:'单季度',year:'年度',ttm:'TTM'}[selectedPeriod] || selectedPeriod;
+    document.getElementById('trend-history-caption').textContent=`口径：${historyPeriodLabel} · ${historyUnit} · 同比见指标下方；市值及股价另显示环比 · 时间由新到旧`;
+    historyFooter.textContent=active.length?'按当前财务周期与时间范围展示；市场指标的同比和环比按相同周期点位比较，缺少比较值时显示缺失原因。':'';
   }
   seriesControls.forEach(series => {
     series.control.addEventListener('change', () => { saveSelections(); render(); });

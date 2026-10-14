@@ -48,6 +48,8 @@ python -m quarterly_dashboard.index_price_replay --start 2016-10-11 --end 2026-1
 
 ## 维护与验证
 
+2026-10-12已在正式备份后持有数据库实例锁，事务内重建点位事实的两个现有唯一索引，未改变表或索引定义。索引物理页占用由25366528字节降至15482880字节，释放9883648字节（约9.43 MiB）供库内复用；未执行VACUUM，数据库文件大小不因此缩小。352335条点位及347619条估值的全行SHA256前后一致，完整性／外键检查和8765页面／接口核验通过。报告为 `data/verification/reports/2026-10-12-index-price-reindex.json`，维护统计为同目录 `2026-10-12-index-price-reindex-maintenance-api.json`。
+
 三个新表归入「指数数据」。定义表按 `updated_at`，序列表按 `created_at`，事实表按 `updated_at, obtained_at`；空表显示暂无数据，缺时间不使用交易日替代。迁移只新增表，不自动导入或改写原估值、财务和个股价格。
 
 隔离库验证迁移、修订、空值撤回、类别兼容、分页原子性、月频快照、零网络回放、幂等和维护统计。正式迁移前由已有机制备份SQLite；资料迁移须同时复制数据库旁 `collection_sources/` 并校验哈希。验收资料在 `data/verification/reports/`，临时测试副本完成后清理，正式备份和来源保留。

@@ -89,6 +89,8 @@ def price_status(result):
     price = result.get('quarter_prices')
     if not price:
         return ''
+    if price.get('source')=='market.trade_snapshot':
+        return ' · 未复权股价随全字段交易快照保存'
     if price['status']=='failed':
         return ' · 未复权股价同步失败：'+price['error']+'；已保存市值保留'
     return f" · 未复权股价新增 {price['inserted']} 家，已有 {price['skipped']} 家，待补 {price['missing']} 家"

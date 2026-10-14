@@ -1,5 +1,9 @@
 # 后台维护页
 
+v31未新增表，交易快照及市值View用途说明增加经停牌、股本和除权核验的参考价估值。快照按 `obtained_at/updated_at` 显示真实时间，View仍无独立写入时间；实际价格日不代替更新时间。详见[停牌参考价补齐](data-sources/market-suspended-price.md)。
+
+v30未新增表，交易快照用途扩展为东财原始值及独立历史合成口径，市值View优先级为东财、合成、旧同日值；维护页两项描述已同步。快照仍以真实 `obtained_at/updated_at` 识别时间，逻辑View显示「未记录」，不以交易日代替。详见[历史合成快照](data-sources/market-trade-snapshot-composite.md)。
+
 结构 v27 新增 `index_price_definitions / index_price_series / index_price_observations`，均归入「指数数据」。更新时间分别依据 `updated_at`、`created_at`、`updated_at, obtained_at`，不使用观察日；空表显示暂无数据。用途、大小和索引由维护统计自动发现。方案见[指数点位存储](index-price-storage.md)。
 
 经营判断复用 AI 任务和输入快照表；用途说明包含随结果保存的联网来源，更新时间继续使用任务/快照的实际写入时间。没有新增表。详见 [经营判断](business-judgment.md)。

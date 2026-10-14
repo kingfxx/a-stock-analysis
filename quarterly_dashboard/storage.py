@@ -38,7 +38,10 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (25, "025_index_valuation_series.sql"),
               (26, "026_index_read_revisions.sql"),
               (27, "027_index_prices.sql"),
-              (28, "028_index_price_read_revisions.sql"))
+              (28, "028_index_price_read_revisions.sql"),
+              (29, "029_market_trade_snapshot.sql"),
+              (30, "030_composite_market_cap.sql"),
+              (31, "031_suspended_market_cap.sql"))
 
 
 class StorageError(RuntimeError):
