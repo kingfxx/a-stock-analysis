@@ -12,16 +12,18 @@ for (const period of ['quarter', 'year', 'ttm']) {
   for (const kind of ['bar', 'line']) {
     for (const key of ['profit', 'cash_dividend', 'qfq_price', 'market_cap', 'profit_growth', 'gross_margin', 'roic']) {
       const elements = new Map();
+      const makeElement = () => ({textContent:'',className:'',hidden:false,children:[],append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;}});
       const context = {
         state: {views: {[period]: [{period:'2025-12-31', publish_date:'2026-04-30',
+          publish_date_source:'cninfo_original',publish_date_status:'matched_original',latest_revision_on:'2026-05-08',publish_date_reason:'唯一明确原始正式报告',
           profit:100e8, cash_dividend:10e8, dividend_payout_ratio:10, qfq_price:20, market_cap:500e8,
           profit_growth:20, gross_margin:30, roic:17.28, cash_dividend_details:'2025-12-31 → 2026-06-05',
           yoy: {profit:'同比 +20.00%', cash_dividend:'同比 +10.00%（仅已实施口径）'}}]}},
         selectedPeriod: period, comparisonRange: {value:'all'},
         seriesControls: [{label:'A', color:'#38c4dc', kind, control:{value:key}}],
         modeOf: series => series.kind, note: {},
-        document: {getElementById: id => {
-          if (!elements.has(id)) elements.set(id, {classList:{toggle() {}}, textContent:''});
+        document: {createElement:makeElement,getElementById: id => {
+          if (!elements.has(id)) elements.set(id, {...makeElement(),classList:{toggle() {}}});
           return elements.get(id);
         }},
         Plotly: {react: (id, traces) => { context.traces = traces; }}
@@ -36,6 +38,12 @@ for (const period of ['quarter', 'year', 'ttm']) {
         assert.match(hover, /亿元；同比 \+10\.00%（仅已实施口径）/);
         assert.match(hover, /2025-12-31 → 2026-06-05/);
       } else assert.doesNotMatch(hover, /；同比/);
+      assert.doesNotMatch(hover, /日期来源：|核验状态：|唯一明确原始正式报告/);
+      const audit = elements.get('disclosure-audit-rows');
+      const auditText = (node) => (node.textContent || '') + (node.children || []).map(auditText).join('');
+      assert.match(auditText(audit), /日期来源：巨潮原始正式报告；核验状态：已匹配原始报告/);
+      assert.match(auditText(audit), /最近已知修订：2026-05-08/);
+      assert.match(auditText(audit), /说明：唯一明确原始正式报告/);
       if (key === 'cash_dividend' && period === 'year') {
         assert.match(hover, /分红率：10\.00%（仅已实施口径）/);
         assert.match(context.note.textContent, /全年归母净利润/);
@@ -52,6 +60,10 @@ for (const period of ['quarter', 'year', 'ttm']) {
           context.state.views.year[0].yoy = {};
           vm.runInContext('render();', context);
           const payoutTrace = context.traces[0];
+          if (!payoutTrace.customdata.length) {
+            assert.equal(payoutTrace.y.length,0,'a missing dividend observation has no chart point or tooltip');
+            continue;
+          }
           const detail = payoutTrace.hovertemplate.replace(/%\{customdata\[(\d+)\]\}/g,
             (_, index) => payoutTrace.customdata[0][index]);
           assert.ok(detail.includes(expected), detail);
@@ -82,6 +94,8 @@ for (const period of ['quarter', 'year', 'ttm']) {
   }
 }
 {
+  const elements = new Map();
+  const makeElement = () => ({textContent:'',className:'',hidden:false,children:[],append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;}});
   const rows = [
     {period:'2024-12-31', publish_date:'2025-04-30', profit:80e8, revenue:900e8, qfq_price:10, market_cap:100e8,
       yoy:{profit:'同比 +8.00%', revenue:'同比 +9.00%'}},
@@ -93,7 +107,10 @@ for (const period of ['quarter', 'year', 'ttm']) {
     seriesControls:['profit','revenue','qfq_price','market_cap'].map((key, i) => ({
       label:'ABCD'[i], color:'#38c4dc', kind:'line', control:{value:key}
     })), modeOf:series => series.kind, note:{},
-    document:{getElementById:() => ({classList:{toggle() {}}, textContent:''})},
+    document:{createElement:makeElement,getElementById:id => {
+      if(!elements.has(id))elements.set(id,{...makeElement(),classList:{toggle() {}}});
+      return elements.get(id);
+    }},
     Plotly:{react:(id, traces) => { context.traces = traces; }}
   };
   vm.createContext(context);

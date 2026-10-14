@@ -72,12 +72,20 @@ class PacingPolicy:
     rest_max: float = 120
     cooldown: float = 3600
     max_attempts: int = 3
+    provider: str | None = None
 
     def __post_init__(self):
-        # Public configuration can tighten these defaults, never silently bypass them.
-        if (self.interval < 10 or self.jitter < 0 or self.window < 60 or not 1 <= self.window_requests <= 5
-                or not 1 <= self.rest_every <= 20 or self.rest_min < 60 or self.rest_max < self.rest_min
-                or self.cooldown < 3600 or not 1 <= self.max_attempts <= 3):
+        # The sole faster policy is an explicit, fixed cninfo authorization.
+        if self.provider == 'cninfo':
+            if ((self.interval, self.jitter, self.window, self.window_requests, self.rest_every,
+                    self.rest_min, self.rest_max, self.cooldown) != (2, 0, 60, 30, 20, 0, 0, 3600)
+                    or not 1 <= self.max_attempts <= 3):
+                raise ValueError('cninfo限速配置必须符合已授权策略')
+            return
+        if (self.provider is not None or self.interval < 10 or self.jitter < 0 or self.window < 60
+                or not 1 <= self.window_requests <= 5 or not 1 <= self.rest_every <= 20
+                or self.rest_min < 60 or self.rest_max < self.rest_min or self.cooldown < 3600
+                or not 1 <= self.max_attempts <= 3):
             raise ValueError('指数采集限速配置不能低于保守默认要求')
 
 
@@ -190,6 +198,8 @@ class RequestCollector:
         self.db=db
         self.session=session or create_data_session()
         self.policy=policy or PacingPolicy()
+        if self.policy.provider is not None:
+            raise ValueError('提供方专属策略由RequestCollector按来源选择，不能作为全局policy')
         self.cancelled=cancelled
         self.clock=clock
         self.sleep=sleep
@@ -198,6 +208,13 @@ class RequestCollector:
         self.halted={}
         self.requests=0
         self.retries=0
+
+    def policy_for(self, provider):
+        if provider == 'cninfo':
+            return PacingPolicy(interval=2,jitter=0,window=60,window_requests=30,
+                rest_every=20,rest_min=0,rest_max=0,cooldown=3600,max_attempts=self.policy.max_attempts,
+                provider='cninfo')
+        return self.policy
 
     def check_cancelled(self):
         if self.cancelled():
@@ -259,7 +276,8 @@ class RequestCollector:
 
     def block(self, provider, state, reason, response=None):
         now=self.clock()
-        deadline=max(now+self.policy.cooldown*(2**min(state['denials'],4)),
+        policy=self.policy_for(provider)
+        deadline=max(now+policy.cooldown*(2**min(state['denials'],4)),
                      retry_after(response.headers.get('Retry-After'),now) if response is not None else now)
         state.update(cooldown_until=datetime.fromtimestamp(deadline,timezone.utc).isoformat(),reason=reason,
                      denials=state['denials']+1)
@@ -284,14 +302,15 @@ class RequestCollector:
             state=self.state(provider)
             if state.get('reason') != f'recovery_pending:{recovery_token}':
                 return
-            deadline=self.clock()+self.policy.cooldown*(2**min(state.get('denials',0),4))
+            deadline=self.clock()+self.policy_for(provider).cooldown*(2**min(state.get('denials',0),4))
             state.update(cooldown_until=datetime.fromtimestamp(deadline,timezone.utc).isoformat(),
                          reason=f'恢复验证失败：{reason}',denials=state.get('denials',0)+1)
             self.save_state(state)
             self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
 
     def report(self):
-        return dict(policy=asdict(self.policy),network_requests=self.requests,retries=self.retries,halted=self.halted)
+        return dict(policy=asdict(self.policy),provider_policies={'cninfo':asdict(self.policy_for('cninfo'))},
+                    network_requests=self.requests,retries=self.retries,halted=self.halted)
 
     def invoke(self, batch_id, provider, dataset, request, callback, *, serialize,
                hash_basis='sdk_materialized_json / gzip_file', response_of=lambda value: None):
@@ -300,7 +319,8 @@ class RequestCollector:
         Request metadata must be sanitized by the adapter. Exceptions are recorded
         by class only because SDK diagnostics may contain authentication material.
         """
-        for attempt in range(1,self.policy.max_attempts+1):
+        policy=self.policy_for(provider)
+        for attempt in range(1,policy.max_attempts+1):
             if provider in self.halted:
                 raise ProviderBlocked(f'{provider} 本轮已停止')
             if attempt>1:
@@ -320,12 +340,12 @@ class RequestCollector:
                     self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
                     raise ProviderBlocked(f'{provider} 仍在冷却至 {state["cooldown_until"]}')
                 budget=json.loads(state['budget_json'])
-                starts=[t for t in budget.get('starts',[]) if t>self.clock()-self.policy.window]
+                starts=[t for t in budget.get('starts',[]) if t>self.clock()-policy.window]
                 ready=budget.get('ready_at',0)
-                if len(starts)>=self.policy.window_requests:
-                    ready=max(ready,starts[-self.policy.window_requests]+self.policy.window+.001)
+                if len(starts)>=policy.window_requests:
+                    ready=max(ready,starts[-policy.window_requests]+policy.window+.001)
                 self.wait(max(0,ready-self.clock()))
-                starts=[t for t in starts if t>self.clock()-self.policy.window]+[self.clock()]
+                starts=[t for t in starts if t>self.clock()-policy.window]+[self.clock()]
                 count=budget.get('count',0)+1
                 state['budget_json']=encoded(dict(starts=starts,ready_at=self.clock()+120,count=count))
                 self.save_state(state)
@@ -340,9 +360,9 @@ class RequestCollector:
                 except BaseException as exc:
                     error=exc
                 finally:
-                    ready=self.clock()+self.policy.interval+self.uniform(0,self.policy.jitter)
-                    if count%self.policy.rest_every==0:
-                        ready+=self.uniform(self.policy.rest_min,self.policy.rest_max)
+                    ready=self.clock()+policy.interval+self.uniform(0,policy.jitter)
+                    if count%policy.rest_every==0:
+                        ready+=self.uniform(policy.rest_min,policy.rest_max)
                     state['budget_json']=encoded(dict(starts=starts,ready_at=ready,count=count))
                     self.save_state(state)
                 key=digest(encoded(request).encode())
@@ -369,7 +389,7 @@ class RequestCollector:
                     ('timeout','connecterror','unavailable','connectionerror'))
                 if error or status and status>=400:
                     parsed_source(self.db,sid,error=type(error).__name__ if error else f'HTTP {status}')
-                    if temporary and attempt<self.policy.max_attempts and not state['cooldown_until']:
+                    if temporary and attempt<policy.max_attempts and not state['cooldown_until']:
                         continue
                     raise RuntimeError(f'{provider} SDK transport failed: {type(error).__name__ if error else status}') from None
                 parsed_source(self.db,sid)
@@ -381,13 +401,30 @@ class RequestCollector:
 
     def get(self, batch_id, provider, dataset, url, params=None, *, headers=None, expect='json', healthy_response=None,
             evidence_mode='archive', recovery_token=None, stock_fast=False):
+        return self.request(batch_id, provider, dataset, 'GET', url, params=params, headers=headers, expect=expect,
+                            healthy_response=healthy_response, evidence_mode=evidence_mode,
+                            recovery_token=recovery_token, stock_fast=stock_fast)
+
+    def post(self, batch_id, provider, dataset, url, data=None, *, params=None, headers=None, expect='json',
+             healthy_response=None, evidence_mode='archive', recovery_token=None, stock_fast=False):
+        return self.request(batch_id, provider, dataset, 'POST', url, params=params, data=data, headers=headers,
+                            expect=expect, healthy_response=healthy_response, evidence_mode=evidence_mode,
+                            recovery_token=recovery_token, stock_fast=stock_fast)
+
+    def request(self, batch_id, provider, dataset, method, url, params=None, *, data=None, headers=None, expect='json',
+                healthy_response=None, evidence_mode='archive', recovery_token=None, stock_fast=False):
+        method=method.upper()
+        if method not in ('GET','POST'):
+            raise ValueError('仅支持 GET/POST')
         if evidence_mode not in ('archive', 'metadata_only'):
             raise ValueError('不支持的来源证据策略')
+        policy=self.policy_for(provider)
         # Authentication is sent, but never persisted in request identity or logs.
-        request=dict(transport='http',method='GET',url=url,
-                     params={k:v for k,v in (params or {}).items() if k.lower() not in ('token','apikey','api_key')})
+        scrub=lambda values:{k:v for k,v in (values or {}).items() if k.lower() not in ('token','apikey','api_key')}
+        request=dict(transport='http',method=method,url=url,params=scrub(params))
+        if method=='POST': request['data']=scrub(data)
         key=digest(encoded(request).encode())
-        for attempt in range(1,self.policy.max_attempts+1):
+        for attempt in range(1,policy.max_attempts+1):
             if provider in self.halted:
                 raise ProviderBlocked(f'{provider} 本轮已停止')
             if attempt>1:
@@ -408,34 +445,37 @@ class RequestCollector:
                     self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
                     raise ProviderBlocked(f'{provider} 仍在冷却至 {state["cooldown_until"]}')
                 budget=json.loads(state['budget_json'])
-                starts=[t for t in budget.get('starts',[]) if t>self.clock()-self.policy.window]
-                if not stock_fast:
+                starts=[t for t in budget.get('starts',[]) if t>self.clock()-policy.window]
+                if not stock_fast or provider == 'cninfo':
                     ready=budget.get('ready_at',0)
-                    if len(starts)>=self.policy.window_requests:
-                        ready=max(ready,starts[-self.policy.window_requests]+self.policy.window+.001)
+                    if len(starts)>=policy.window_requests:
+                        ready=max(ready,starts[-policy.window_requests]+policy.window+.001)
                     if ready>self.clock():
                         self.progress(f'{provider} 限速等待 {round(ready-self.clock())} 秒')
                         self.wait(ready-self.clock())
                 stamp=datetime.fromtimestamp(self.clock(),timezone.utc).isoformat()
-                starts=[t for t in starts if t>self.clock()-self.policy.window]+[self.clock()]
+                starts=[t for t in starts if t>self.clock()-policy.window]+[self.clock()]
                 with self.db.connection() as conn:
                     attempt_no=conn.execute('SELECT coalesce(max(attempt_no),0)+1 FROM collection_sources WHERE batch_id=? '
                                            'AND dataset=? AND request_key=?',(batch_id,dataset,key)).fetchone()[0]
                 # Reserve the budget before sending, so a crash cannot reset pacing.
-                state['budget_json']=encoded(dict(starts=starts,ready_at=self.clock()+90+self.policy.interval,count=budget.get('count',0)))
+                state['budget_json']=encoded(dict(starts=starts,ready_at=self.clock()+90+policy.interval,count=budget.get('count',0)))
                 self.save_state(state)
                 self.requests+=1
                 response=None
                 network_error=None
                 try:
-                    response=self.session.get(url,params=params,headers=headers,timeout=(15,60))
+                    if method=='POST':
+                        response=self.session.post(url,params=params,data=data,headers=headers,timeout=(15,60))
+                    else:
+                        response=self.session.get(url,params=params,headers=headers,timeout=(15,60))
                 except requests.RequestException as exc:
                     network_error=type(exc).__name__  # exception URLs may contain credentials
                 finally:
                     count=budget.get('count',0)+1
-                    ready=self.clock()+self.policy.interval+self.uniform(0,self.policy.jitter)
-                    if count%self.policy.rest_every==0:
-                        ready+=self.uniform(self.policy.rest_min,self.policy.rest_max)
+                    ready=self.clock()+policy.interval+self.uniform(0,policy.jitter)
+                    if count%policy.rest_every==0:
+                        ready+=self.uniform(policy.rest_min,policy.rest_max)
                     state['budget_json']=encoded(dict(starts=starts,ready_at=ready,count=count))
                     self.save_state(state)
                 source_id=archive_source(self.db,batch_id,provider,dataset,request,attempt_no,
@@ -451,7 +491,7 @@ class RequestCollector:
                     if probe:
                         self.halted[provider]=dict(reason='恢复验证网络失败',cooldown_until=state['cooldown_until'])
                         raise ProviderBlocked(f'{provider} 恢复验证失败，停止本轮')
-                    if attempt==self.policy.max_attempts:
+                    if attempt==policy.max_attempts:
                         raise RuntimeError(f'{provider} 网络请求失败：{network_error}')
                     continue
                 text=response.text[:100000].lower()
@@ -474,7 +514,7 @@ class RequestCollector:
                     self.block(provider,state,reason,response)
                 if response.status_code in (500,502,503,504):
                     parsed_source(self.db,source_id,error=f'HTTP {response.status_code}')
-                    if probe or attempt==self.policy.max_attempts:
+                    if probe or attempt==policy.max_attempts:
                         raise RuntimeError(f'{provider} HTTP {response.status_code}')
                     continue
                 if response.status_code>=400:

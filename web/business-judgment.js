@@ -7,7 +7,7 @@ window.initBusinessJudgment = function(state, actions, openSettings) {
   dialog.addEventListener('click',event=>{if(event.target!==dialog)return;const rect=dialog.getBoundingClientRect();if(event.clientX<rect.left || event.clientX>rect.right || event.clientY<rect.top || event.clientY>rect.bottom)dialog.close();});
   const error=e=>{dialog.querySelector('.business-error')?.remove();dialog.append(el('p',e?.message || '操作失败，请重试','ai-message business-error'));};
   const button=(text,fn)=>{const n=el('button',text,'ai-button');n.type='button';n.addEventListener('click',()=>Promise.resolve().then(fn).catch(error));return n;};
-  const entry=button('经营判断',async()=>{openedCode=state.code;dialog.showModal();await refresh();});actions.insertBefore(entry,actions.children[1] || null);
+  const entry=button('经营判断',async()=>{openedCode=state.code;dialog.showModal();await refresh();});actions.insertBefore(entry,actions.children[2] || null);
   async function api(path,body) {
     if(body && !token)token=(await api('/api/ai/status')).session_token;
     const response=await fetch(path,body ? {method:'POST',headers:{'Content-Type':'application/json','X-Local-Session':token},body:JSON.stringify(body)} : undefined);

@@ -3,8 +3,11 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from quarterly_dashboard.fundamental_service import FundamentalService
-from quarterly_dashboard.storage import Database
+from quarterly_dashboard.fundamental_service import FundamentalService, SOURCE
+from quarterly_dashboard.price_projection import financial_prices
+from quarterly_dashboard.core import build_period_rows
+from quarterly_dashboard.sources import normalize_report_dates
+from quarterly_dashboard.storage import Database, SyncKey, SyncResult
 
 
 def test_cache_timestamp_tracks_successful_financial_commits(tmp_path, monkeypatch):
@@ -48,6 +51,75 @@ def _record(period, revenue, published):
     return {"publish_date": published.replace("-", ""), "update_time": 1,
             "data": [{"item_title": "营业收入", "item_value": str(revenue)},
                      {"item_title": "归属于母公司所有者的净利润", "item_value": "10"}]}
+
+
+def test_publish_date_override_survives_cached_projection_and_normalization(tmp_path):
+    db = Database(tmp_path / "facts.sqlite3")
+    db.initialize()
+    identity = db.ensure_instrument("002463", "沪电股份")
+    rows = {
+        "2022-06-30": ("2023-08-25", 100),
+        "2023-06-30": ("2024-08-25", 110),
+        "2023-09-30": ("2024-10-30", 115),
+        "2024-12-31": ("2026-03-26", 120),
+    }
+    for kind in ("lrb", "fzb", "llb"):
+        key = SyncKey(identity, f"financial:{kind}", SOURCE)
+        run = db.start_sync(key, parser_version="test", methodology_version="test")
+        records = [{"period": period, "publish_date": published,
+                    "raw_json": _record(period.replace("-", ""), revenue, published)}
+                   for period, (published, revenue) in rows.items()]
+        db.complete_sync(run, SyncResult(len(records), min(rows), max(rows), max(rows)),
+                         lambda conn, records=records, key=key, run=run:
+                         db.upsert_financial_reports(conn, key, run, records))
+    with db.connection(write=True) as conn:
+        conn.execute("INSERT INTO report_overrides(instrument_id,period,field_name,value_json,origin,updated_at) "
+                     "VALUES (?,?, 'publish_date', ?, 'manual', 'test')",
+                     (identity, "2024-12-31", json.dumps("2025-03-26")))
+        conn.execute("INSERT INTO report_overrides(instrument_id,period,field_name,value_json,origin,updated_at) "
+                     "VALUES (?,?, 'publish_date', 'null', 'manual', 'test')",
+                     (identity, "2023-09-30"))
+
+    reports = FundamentalService(db, tmp_path / "legacy").read("002463")["reports"]
+    target = next(row for row in reports if row["period"] == "2024-12-31")
+    ordinary = next(row for row in reports if row["period"] == "2023-06-30")
+    null_override = next(row for row in reports if row["period"] == "2023-09-30")
+    assert target["publish_date"] == "2025-03-26"
+    assert target["publish_date_source"] == "manual"
+    assert target["publish_date_status"] == "manual_override"
+    assert target["source_publish_date"] == "2026-03-26"
+    assert ordinary["publish_date"] == "2023-08-25"
+    assert ordinary["source_publish_date"] == "2024-08-25"
+    assert null_override["publish_date"] is None
+    assert null_override["publish_date_source"] == "manual"
+    assert null_override["publish_date_status"] == "manual_override"
+    assert null_override["source_publish_date"] == "2024-10-30"
+
+    normalized = normalize_report_dates(reports)
+    assert normalize_report_dates(normalized) == normalized
+    assert next(row for row in normalized if row["period"] == "2024-12-31")["publish_date"] == "2025-03-26"
+    prices = financial_prices({"code": "002463", "reports": normalized,
+                               "price_basis": "disclosure"}, [],
+                              [{"date": "2025-03-25", "close": 20}])
+    rows = build_period_rows(prices["reports"], prices["prices"].get("raw", []),
+                             prices["prices"]["qfq"])
+    projected = next(row for row in rows if row["period"] == "2024-12-31")
+    assert projected["publish_date"] == "2025-03-26"
+    assert projected["qfq_price_date"] == "2025-03-25"
+
+
+def test_null_publish_date_override_and_regular_sina_correction_are_stable():
+    reports = normalize_report_dates([
+        {"period": "2022-06-30", "publish_date": "2023-08-25"},
+        {"period": "2023-06-30", "publish_date": "2024-08-25"},
+        {"period": "2024-06-30", "publish_date": None,
+         "source_publish_date": "2025-08-25",
+         "_publish_date_override_applied": True},
+    ])
+    assert reports[1]["publish_date"] == "2023-08-25"
+    assert reports[2]["publish_date"] is None
+    assert reports[2]["source_publish_date"] == "2025-08-25"
+    assert normalize_report_dates(reports) == reports
 
 
 def test_refresh_uses_two_period_window_and_keeps_old_report(tmp_path):

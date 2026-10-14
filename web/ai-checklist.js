@@ -207,10 +207,86 @@ window.initAIChecklist = function(state) {
   const selectedHistory = new Set();
   let historyDeleteButton = null, historyCount = null, deletingHistory = false;
   const actions = el('span', undefined, 'ai-context-actions');
+  const announcementWrap = el('span', undefined, 'announcement-entry');
+  const announcementList = el('div', undefined, 'announcement-list'); announcementList.hidden = true;
+  const announcementTypes = [['annual','年报'],['interim','半年报'],['q1','一季报'],['q3','三季报'],
+    ['forecast','业绩预告/快报'],['dividend','权益分派/分红']];
+  let announcementData = [];
+  const announcementFilters = el('div', undefined, 'announcement-filters');
+  const timeFilter = el('label', '时间范围 ', 'announcement-time-filter');
+  const timeSelect = el('select');
+  for (const [value, label] of [['all','全部'],['5','最近5年'],['3','最近3年']]) {
+    const option = el('option', label); option.value = value; if (value === '3') option.selected = true; timeSelect.append(option);
+  }
+  timeFilter.append(timeSelect);
+  const typeFieldset = el('fieldset', undefined, 'announcement-type-filter');
+  const typeLegend = el('legend', '公告类型（可多选）');
+  const selectAllTypes = el('button', '全选', 'announcement-filter-action'); selectAllTypes.type = 'button';
+  const clearTypes = el('button', '清空', 'announcement-filter-action'); clearTypes.type = 'button';
+  typeLegend.append(selectAllTypes, clearTypes); typeFieldset.append(typeLegend);
+  const typeInputs = new Map();
+  for (const [value, label] of announcementTypes) {
+    const item = el('label', undefined, 'announcement-type-option'), input = el('input');
+    input.type = 'checkbox'; input.value = value; input.checked = true; typeInputs.set(value, input);
+    item.append(input, el('span', label)); typeFieldset.append(item);
+  }
+  announcementFilters.append(timeFilter, typeFieldset);
+  const announcementResults = el('div', undefined, 'announcement-results');
+  announcementList.append(announcementFilters, announcementResults);
+  const renderAnnouncements = () => {
+    const years = timeSelect.value === 'all' ? 0 : Number(timeSelect.value);
+    let cutoff = '';
+    if (years) {
+      const now = new Date(), start = new Date(now); start.setFullYear(start.getFullYear() - years);
+      cutoff = [start.getFullYear(), String(start.getMonth()+1).padStart(2,'0'), String(start.getDate()).padStart(2,'0')].join('-');
+    }
+    const selectedTypes = new Set([...typeInputs].filter(([,input]) => input.checked).map(([value]) => value));
+    const filtered = announcementData.filter(item => (!cutoff || !item.published_on || item.published_on >= cutoff) && selectedTypes.has(item.category));
+    announcementResults.replaceChildren();
+    if (!filtered.length) announcementResults.append(el('span', '没有符合筛选条件的公告', 'announcement-empty'));
+    for (const item of filtered) {
+      const row = el('div', undefined, 'announcement-row');
+      if (item.url) { const link = el('a', item.title || '未命名公告'); link.href = item.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; row.append(link); }
+      else row.append(el('span', item.title || '未命名公告'));
+      row.append(el('span', item.published_on || '日期未记录', 'announcement-date')); announcementResults.append(row);
+    }
+  };
+  timeSelect.addEventListener('change', renderAnnouncements);
+  for (const input of typeInputs.values()) input.addEventListener('change', renderAnnouncements);
+  selectAllTypes.addEventListener('click', () => { for (const input of typeInputs.values()) input.checked = true; renderAnnouncements(); });
+  clearTypes.addEventListener('click', () => { for (const input of typeInputs.values()) input.checked = false; renderAnnouncements(); });
+  const fitAnnouncementList = () => {
+    if (announcementList.hidden) return;
+    announcementList.style.maxWidth = Math.max(200, window.innerWidth - 32) + 'px';
+    announcementList.style.left = '0px';
+    const anchor = announcementWrap.getBoundingClientRect(), panel = announcementList.getBoundingClientRect();
+    let offset = Math.min(0, window.innerWidth - 12 - panel.right);
+    if (anchor.left + offset < 12) offset = 12 - anchor.left;
+    announcementList.style.left = offset + 'px';
+  };
+  const announcementEntry = button('公告', async () => {
+    const expanded = announcementEntry.getAttribute('aria-expanded') === 'true';
+    if (expanded) { announcementEntry.setAttribute('aria-expanded', 'false'); announcementList.hidden = true; return; }
+    announcementEntry.disabled = true;
+    try {
+      const response = await fetch('/api/stock-announcements?code=' + encodeURIComponent(state.code), {cache:'no-store'});
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || '公告读取失败');
+      announcementData = data.announcements || []; renderAnnouncements();
+      announcementEntry.setAttribute('aria-expanded', 'true'); announcementList.hidden = false; fitAnnouncementList();
+    } finally { announcementEntry.disabled = false; }
+  });
+  announcementEntry.setAttribute('aria-expanded', 'false'); announcementEntry.setAttribute('aria-controls', 'stock-announcement-list');
+  announcementList.id = 'stock-announcement-list'; announcementWrap.append(announcementEntry, announcementList);
+  document.addEventListener('click', event => {
+    if (announcementEntry.getAttribute('aria-expanded') === 'true' && !announcementWrap.contains(event.target)) {
+      announcementEntry.setAttribute('aria-expanded', 'false'); announcementList.hidden = true;
+    }
+  });
+  window.addEventListener('resize', fitAnnouncementList);
   const entry = button('Checklist', openReport);
   const researchEntry = button('AI 研报', openResearch);
   const settingsEntry = button('AI 设置', openSettings);
-  actions.append(entry, researchEntry, settingsEntry); document.querySelector('.context').append(actions);
+  actions.append(announcementWrap, entry, researchEntry, settingsEntry); document.querySelector('.context').append(actions);
   window.initBusinessJudgment?.(state, actions, openSettings);
   const dialog = el('dialog', undefined, 'ai-dialog checklist-dialog'); dialog.setAttribute('aria-label','投资 checklist');
   const settings = el('dialog', undefined, 'ai-dialog'); settings.setAttribute('aria-label','AI 设置');

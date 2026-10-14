@@ -13,6 +13,7 @@ from .sources import (PROFIT_KEYS, fetch_financial_report_page, normalize_code,
                       parse_financial_reports)
 from .storage import Database, SyncKey, SyncResult, utc_now
 from .stock_collection import begin_stock_batch, routed_stock_requests
+from .disclosure_dates import apply_disclosure_dates
 from .update_service import (audit_due, backup_before_update, data_lock, mark_failed,
                              next_audit, recently_checked, recent_sync_failure, sync_state)
 
@@ -134,15 +135,27 @@ class FundamentalService:
         with self.db.connection() as conn:
             overrides = conn.execute("SELECT period,field_name,value_json FROM report_overrides "
                                      "WHERE instrument_id=?", (instrument["id"],)).fetchall()
+            disclosure_rows = conn.execute("SELECT * FROM report_disclosure_dates WHERE instrument_id=? AND is_current=1",
+                                           (instrument["id"],)).fetchall()
             updated_at = conn.execute(
                 "SELECT MAX(succeeded_at) FROM sync_state WHERE instrument_id=? AND data_status='data' "
                 "AND ((source=? AND dataset IN ('financial:lrb','financial:fzb','financial:llb')) "
                 "OR (source='legacy' AND dataset='financial:merged'))",
                 (instrument["id"], SOURCE)).fetchone()[0]
+        disclosure = {'dates': {row['period']: dict(id=row['id'], first_published_on=row['first_published_on'],
+            latest_revision_on=row['latest_revision_on'], status=row['status'], reason=row['reason'],
+            rule_version=row['rule_version']) for row in disclosure_rows}}
+        reports = apply_disclosure_dates(reports, disclosure)
         by_period = {report["period"]: report for report in reports}
         for override in overrides:
             if override["period"] in by_period:
                 by_period[override["period"]][override["field_name"]] = json.loads(override["value_json"])
+                if override["field_name"] == "publish_date":
+                    by_period[override["period"]]["_publish_date_override_applied"] = True
+                    by_period[override["period"]]["publish_date_source"] = "manual"
+                    by_period[override["period"]]["publish_date_status"] = "manual_override"
+                    by_period[override["period"]]["publish_date_reason"] = "人工覆盖优先"
+                    by_period[override["period"]]["_publish_date_finalized"] = True
         return {"code": code, "name": instrument["name"], "reports": reports,
                 "updated_at": updated_at if reports else None,
                 "prices": {}, "price_basis": "disclosure", "report_date_basis": "sina_same_period_shift_v1",

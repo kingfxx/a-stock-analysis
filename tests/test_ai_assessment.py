@@ -538,7 +538,7 @@ def test_snapshot_debt_matches_dashboard_with_empty_reported_components(database
             del report['bonds_payable']
         conn.execute('UPDATE financial_reports SET raw_json=? WHERE period=?',(encoded(report),stored['period']))
     data=snapshot(database)['input']
-    assert data['calculation_version']=='stock_assessment_calc_v4'
+    assert data['calculation_version']=='stock_assessment_calc_v5'
     latest=[e for e in data['evidence'] if e['metric']=='financial_period' and e['observed_on']==period]
     assert {e['period_type'] for e in latest}==({'quarter','ttm','year'} if period.endswith('12-31') else {'quarter','ttm'})
     for evidence in latest:

@@ -49,6 +49,9 @@ v29新增业务表 `market_trade_snapshot`：全市场未复权股价、涨跌�
 | --- | --- | --- |
 | `instruments` | 股票交易所、六位代码、名称和创建时间 | `id` 为主键；`(exchange, code)` 唯一。代码是文本，保留前导零 |
 | `financial_reports` | 财报原始 JSON、报告类型、报告期、披露日期、来源更新时间、内容哈希与取得时间 | `(instrument_id, source, report_type, period)`；新浪类型为 `lrb` 利润表、`fzb` 资产负债表、`llb` 现金流量表、`gjzb` 关键指标，旧合并记录以 `legacy/merged` 保留 |
+| `stock_announcement_identities` | 巨潮提供方组织标识、身份状态、来源/批次及实际查询和更新时间 | 股票 `instrument_id` 唯一；身份来源通过公共 `collection_sources` 与同一批次外键追溯 |
+| `stock_announcement_metadata` | 公告编号及标题、公告时间、附件路径、报告期候选、类型/修订标记、字段指纹和版本来源 | 股票×公告编号×版本唯一；`periods_json` 保留一条多年度说明涉及的多个期间；仅结构化元数据 |
+| `report_disclosure_dates` | 报告期首次披露日、最新已知修订日、规则/结果版本、候选依据及状态 | 股票×报告期单一当前结果，旧结果保留版本链；人工覆盖仍由 `report_overrides` 最后应用 |
 | `dividend_events` | 分红事件标识、报告期、预案/公告/登记/除权日期、状态、每十股现金分红和原始 JSON | `id` 为主键；`(instrument_id, source, event_key)` 唯一。业务读取仅让已经实施且除权日不晚于今天的现金事件参与计算 |
 | `valuation_observations` | 指标、实际观察日期、数值、来源窗口、采样口径版本和原始 JSON | `(instrument_id, source, metric, observed_on)`；当前直接存储 `pe`、`pb`、`market_cap`，保留同一日期曾来自哪些来源窗口 |
 | `industry_snapshots` | 行业名称/代码、分类口径、快照时间和行业估值原始 JSON | `id` 为主键；`(instrument_id, source, snapshot_at)` 唯一。来源内容变化才增加快照，页面读取最新一份 |
@@ -119,6 +122,8 @@ v29新增业务表 `market_trade_snapshot`：全市场未复权股价、涨跌�
 行业专用数据包括财务四表、交易日快照、旧价格与市值历史表、成员及任务表，并复用跨领域公共采集三表。表数量以维护页实时发现为准。`sw_` 前缀不代表全部停用；旧财务表已退出行业日常采集和读取，旧市值/价格表保留供历史追溯和旧工具使用，行业页面已改为直接读取交易日快照。
 
 Schema v32 为四张财务表增加可空的 `collection_batch_id` / `collection_source_id`。每行必须且只能使用一组完整来源引用：历史行继续使用旧 `batch_id` / `source_id`，新公共来源行使用公共列，组合外键确保来源与批次相配。迁移重建财务表并逐列复制旧行，不更改旧 ID 或内容。`market_financial_industry` 暴露旧引用和公共引用两组独立列；读取方不得跨命名空间解释整数 ID。`sw_memberships` 的公共上市日期来源列使用 `collection_sources` 记录，其采集时间由维护页沿关联来源读取。
+
+Schema v33 新增三张巨潮公告日期元数据表。`metadata_only` 请求不写入原文文件/哈希或响应 BLOB；来源字段保留公共批次/来源 ID，触发器校验提供方、批次、数据集及股票 run 身份。实际请求完成范围不是巨潮历史完整性声明。
 
 | 分类 | 表 / View | 保存内容与来源 | 当前用途 |
 | --- | --- | --- | --- |
@@ -421,3 +426,5 @@ python -m quarterly_dashboard.storage check --database $restorePath
 ### 新浪关键指标原始数据
 
 财务抓取同时独立同步 `gjzb`，沿用 `financial_reports` 表和 `financial:gjzb` 同步水位，无需结构迁移。旧库首次运行时补齐关键指标完整历史，后续与三表采用相同的 24 小时检查、近期 2 期增量及定期全量机制；手动刷新会检查四类来源。抓取失败或丢失已有有效科目时保留已存记录并返回警告，不阻断其他类型成功提交。原始 JSON 保留所有来源科目、分组、重复项、单位/显示格式及来源元信息，暂不映射至图表和 AI 指标；加权 ROE 和来源 ROIC 不替换既有估算口径。
+
+版本 33 新增 `stock_announcement_identities`（巨潮股票组织身份）、`stock_announcement_metadata`（公告筛选元数据版本）和 `report_disclosure_dates`（报告期日期判断版本）。三表保存身份/公告/判断关联及真实取得、验证时间；公告来源通过公共 `collection_sources`/`collection_batches` 追溯，sync run 记录成功检查范围。个股策略为 `metadata_only`：不保留响应正文、响应哈希、PDF 或正文片段。日期判断按规则版本和当前标记保留历史修订，人工 `report_overrides` 仍在读取末尾优先。时间展示采用各表 `obtained_at`、`updated_at`、`created_at`、`validated_at`，结果表通过 `run_id` 关联任务完成时间；没有成功检查时显示未记录。默认类别覆盖年报、半年报、一季报、三季报、业绩预告及权益分派；类别 profile 写入 sync run/batch 范围，扩展类别会重新覆盖目标范围。请求范围下限不早于上海当前日期前十个日历年，已验证覆盖水位不代表公告网站全部历史。

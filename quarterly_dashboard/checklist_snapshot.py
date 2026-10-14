@@ -12,8 +12,8 @@ from .fundamental_service import FundamentalService
 from .core import build_period_rows, view_rows
 from .checklist_validation import ITEMS
 from .company_report_service import PARSER_VERSION, EXTRACTION_VERSION
-INPUT_VERSION="stock_checklist_input_v1"
-CALCULATION_VERSION="stock_checklist_calc_v4"
+INPUT_VERSION="stock_checklist_input_v2"
+CALCULATION_VERSION="stock_checklist_calc_v5"
 PROFILE={"style":"qualitative_checklist","chips_window":"one_year_weekly","holders_periods":3,"valuation_years":10}
 FIELDS={'revenue':'BIZTOTINCO','profit':'PARENETP','profit_cut':'NPCUT','cash_flow':'MANANETR','roe':'ROEWEIGHTED','debt_ratio':'ASSLIABRT','cash':'CURFDS'}
 FALLBACK={'revenue':'revenue_ytd','profit':'profit_ytd','cash_flow':'operating_cash_flow_ytd','cash':'monetary_funds'}
@@ -34,10 +34,12 @@ def capture(db, code, *, as_of=None):
         if not instrument:raise SnapshotError('没有本地股票数据，请先刷新股票')
         identity=instrument['id']
         def rows(table,order):return [dict(r) for r in conn.execute(f'SELECT * FROM {table} WHERE instrument_id=? ORDER BY {order}',(identity,))]
-        reports=[r for r in rows('financial_reports','period,source,report_type') if r['period']<=today and (not r['publish_date'] or r['publish_date']<=today)]
-        periods=sorted({r['period'] for r in reports})
         local=FundamentalService(reader,Path('.')).read(code)['reports']
         local_by_period={r['period']:r for r in local}
+        reports=[r for r in rows('financial_reports','period,source,report_type')
+                 if r['period']<=today and (not local_by_period.get(r['period'],{}).get('publish_date')
+                                            or local_by_period[r['period']]['publish_date']<=today)]
+        periods=sorted({r['period'] for r in reports})
         selected=[]
         if periods:
             latest=periods[-1];prior=str(int(latest[:4])-1)+latest[4:]
@@ -59,7 +61,15 @@ def capture(db, code, *, as_of=None):
             for override in overrides:
                 for name,field in FALLBACK.items():
                     if override['field_name']==field and number(json.loads(override['value_json'])) is not None:values[name]=number(json.loads(override['value_json']));basis[name]={'field':field,'source':'manual','unit':'元'}
-            add('financial.'+period,'financial_period',values,period,'sina/normalized/manual',basis=basis,methodology='累计财务金额、加权ROE；半年值仅与同期间比较，不将加权ROE相加为TTM')
+            date_info=local_by_period.get(period,{})
+            add('financial.'+period,'financial_period',values,period,'sina/normalized/manual',basis=basis,
+                published_on=date_info.get('publish_date'),
+                published_on_source=date_info.get('publish_date_source'),
+                published_on_status=date_info.get('publish_date_status'),
+                latest_known_revision_on=date_info.get('latest_revision_on'),
+                disclosure_result_id=date_info.get('disclosure_result_id'),
+                disclosure_rule_version=date_info.get('disclosure_rule_version'),
+                methodology='累计财务金额、加权ROE；半年值仅与同期间比较，不将加权ROE相加为TTM')
         published_local=[r for r in local if r['period']<=today and (not r.get('publish_date') or r['publish_date']<=today)]
         ttm=view_rows(build_period_rows(published_local,[],[]),'ttm')
         if ttm:
@@ -137,7 +147,13 @@ def capture(db, code, *, as_of=None):
             for page_no,record in sorted(doc_pages.items()):
                 add('company.page.'+str(d['id'])+'.'+str(page_no),'report_excerpt',[record['page']],d['report_period'],d['source_url'],topics=record['topics'],label='财报 PDF 第 '+str(page_no)+' 页',file_hash=d['content_hash'],published_on=d['published_on'],relative_path=d['relative_path'],document_id=d['id'],parser_version=PARSER_VERSION,extraction_version=EXTRACTION_VERSION)
         updating=bool(conn.execute("SELECT 1 FROM sync_runs WHERE instrument_id=? AND status='running'",(identity,)).fetchone())
-        manifest={'company_documents':selected_docs,'financial_records':[{k:r[k] for k in ('source','report_type','period','content_hash')} for r in reports if r['period'] in selected],'qfq_version':version[0] if version else None}
+        manifest={'company_documents':selected_docs,
+            'financial_records':[{k:r[k] for k in ('source','report_type','period','content_hash')} for r in reports if r['period'] in selected],
+            'disclosure_dates':[{k:local_by_period.get(period,{}).get(k) for k in
+                ('period','source_publish_date','sina_publish_date','publish_date','publish_date_source',
+                 'publish_date_status','latest_revision_on','publish_date_reason','disclosure_result_id',
+                 'disclosure_rule_version')} for period in selected],
+            'qfq_version':version[0] if version else None}
     add('company.identity','company',{'code':code,'name':instrument['name']},None,'local_instrument')
     ids={e['id'] for e in evidence};missing=[]
     topics={topic for e in evidence for topic in e.get('topics',[])}

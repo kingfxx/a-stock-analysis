@@ -128,6 +128,11 @@
     .chart-explanation .note { padding:0 0 13px; }
     .chart-explanation .below { margin:0 0 15px; }
     .chart-explanation .mini { background:#172026; }
+    .chart-explanation .disclosure-audit { grid-column:1 / -1; }
+    .disclosure-audit-row { padding:9px 0; border-top:1px solid var(--line); }
+    .disclosure-audit-row:first-child { border-top:0; }
+    .disclosure-audit-row strong { display:block; margin-bottom:3px; color:var(--ink); font-size:13px; }
+    .disclosure-audit-row p { margin:2px 0; color:var(--muted); font-size:12px; line-height:1.65; }
     .below { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
     .mini { padding:20px 23px; background:#172026; border:1px solid var(--line); border-radius:10px; }
     .mini h3 { margin:0 0 9px; font-size:14px; color:#d8e6e9; }
@@ -387,6 +392,7 @@
     </div>
     <p id="chart-scroll-hint" class="chart-scroll-hint" hidden>向右滑动可查看其他纵轴与完整图表</p>
     <p id="financial-status" class="note" role="status" aria-live="polite"></p>
+    <p id="announcement-status" class="note" role="status" aria-live="polite"></p>
     <p id="dividends-status" class="note" role="status" aria-live="polite"></p>
     <div id="chart-scroll" class="chart-scroll"><div id="chart" role="img" aria-label="季度财务与市场价格对照图"></div></div>
     <div class="trend-history-heading"><h3>历史数据</h3><span id="trend-history-caption">金额按所选指标单位 · 时间由新到旧</span></div>
@@ -398,8 +404,9 @@
       <summary>说明</summary>
       <p id="chart-note" class="note"></p>
       <div class="below">
-        <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。新浪部分历史披露日期错位，按上一年同报告期记录校正；无法可靠推断则留空。股价取校正披露日或此前最近交易日的收盘价。相隔超过 15 天的价格不算披露日价格；若处于有前后交易记录的长间隔内，以空心圆点标出最近收盘参考值，与相邻价格点之间用虚线连接。悬停可查看实际交易日。</p></section>
+        <section class="mini"><h3>时间口径</h3><p>横轴是财报所属季度。披露日优先采用已核验的巨潮原始正式报告日期，人工覆盖优先；未核验时显示新浪校正候选并标明来源状态。修订公告日单独提示为最近已知修订日期。公告元数据不包含 PDF 正文，不能证明财务数值属于首次披露版本。股价取最终采用披露日或此前最近交易日的收盘价。相隔超过 15 天的价格不算披露日价格；若处于有前后交易记录的长间隔内，以空心圆点标出最近收盘参考值，与相邻价格点之间用虚线连接。悬停可查看实际交易日。</p></section>
         <section class="mini"><h3>来源与缺口</h3><p>季度财务和报告期末股本来自新浪财报三表；披露日前的不复权及前复权价格来自腾讯日 K。日线统一存储、供各图表复用，财务图按披露日期匹配价格快照及长间隔参考点。季末市值按季末当日或此前最近交易日的不复权收盘价×该报告期末总股本计算，实际价格日期见悬浮提示；相隔超过 15 天则留空。披露日估算市值按披露日价格×报告期末股本计算；缺少价格或股本时留空。</p></section>
+        <section class="mini disclosure-audit" id="disclosure-audit" hidden><h3>披露日期来源与核验</h3><div id="disclosure-audit-rows"></div></section>
       </div>
     </details>
   </section>
@@ -511,9 +518,9 @@
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script src="/plotly.min.js"></script>
 <script src="/stock-picker.js"></script>
-<link rel="stylesheet" href="/ai-checklist.css?v=20261012-checklist-light">
+<link rel="stylesheet" href="/ai-checklist.css?v=20261014-announcement-date-fit">
 <script src="/business-judgment.js"></script>
-<script src="/ai-checklist.js?v=20261012-light-theme"></script>
+<script src="/ai-checklist.js?v=20261014-announcement-date-fit"></script>
 <link rel="stylesheet" href="/financial-statements.css?v=20261004-sidebar-tabs">
 <script src="/financial-statements.js?v=20261004-sidebar-tabs"></script>
 <link rel="stylesheet" href="/industry.css?v=20261010-period-nav">
@@ -609,6 +616,10 @@
     market_cap: {name:'披露日估算市值', unit:'亿元', scale:1e8, dateKey:'price_date', referenceKey:'market_cap_reference'},
     qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date', referenceKey:'qfq_price_reference'}
   };
+  const disclosureSourceLabel = value => ({manual:'人工覆盖',cninfo_original:'巨潮原始正式报告',
+    cninfo:'巨潮冲突候选',sina_unverified:'新浪校正日期（未核验）',none:'无可用日期'})[value] || '未记录';
+  const disclosureStatusLabel = value => ({matched_original:'已匹配原始报告',conflict_retained:'候选冲突，保留原日期',
+    pending:'待核验',failed:'同步失败',sina_unverified:'新浪日期未核验',manual_override:'人工确认'})[value] || '未记录';
   let selectedPeriod = ['quarter','year','ttm'].includes(savedSelections.period) ? savedSelections.period : 'quarter';
   const comparisonRange = document.getElementById('comparison-range');
   comparisonRange.value = ['all','10','5'].includes(savedSelections.comparisonRange) ? savedSelections.comparisonRange : '10';
@@ -849,6 +860,22 @@
       (hasBalance ? ' 有息负债（简化）＝短期借款＋应付短期债券＋一年内到期的非流动负债＋长期借款＋应付债券＋租赁负债；净现金＝报告期末货币资金－有息负债，正值为净现金，负值为净负债。均为期末时点值，不随单季／年度／TTM 切换而加总；货币资金可能含受限资金，债务科目亦可能含非有息部分。' : '') +
       (referenceCount ? ' 空心圆点为距披露日 16–180 天的最近交易价参考点；与相邻价格点用虚线连接，正常价格点之间仍用实线。' : '') +
       missingNote;
+    const disclosureAudit = document.getElementById('disclosure-audit');
+    const disclosureAuditRows = document.getElementById('disclosure-audit-rows');
+    const auditedRows = rangedRows.filter(row => row.publish_date_source || row.publish_date_status ||
+      row.publish_date_reason || row.latest_revision_on);
+    disclosureAuditRows.replaceChildren();
+    disclosureAudit.hidden = !auditedRows.length;
+    for (const row of [...auditedRows].reverse()) {
+      const item = document.createElement('div'); item.className = 'disclosure-audit-row';
+      const heading = document.createElement('strong'); heading.textContent = row.period + ' · 披露日 ' + (row.publish_date || '未记录'); item.append(heading);
+      const sourceStatus = document.createElement('p');
+      sourceStatus.textContent = '日期来源：' + disclosureSourceLabel(row.publish_date_source) + '；核验状态：' + disclosureStatusLabel(row.publish_date_status);
+      item.append(sourceStatus);
+      if (row.latest_revision_on) { const revision = document.createElement('p'); revision.textContent = '最近已知修订：' + row.latest_revision_on; item.append(revision); }
+      if (row.publish_date_reason) { const reason = document.createElement('p'); reason.textContent = '说明：' + row.publish_date_reason; item.append(reason); }
+      disclosureAuditRows.append(item);
+    }
     const historyHead = document.getElementById('trend-history-head');
     const historyBody = document.getElementById('trend-history-body');
     const historyFooter = document.getElementById('trend-history-footer');
@@ -1248,9 +1275,16 @@
         }
       }
     }
-    for (const key of ['name','updated_at','views','warnings','cached_stocks']) {
+    for (const key of ['name','updated_at','views','warnings','cached_stocks','announcement_sync']) {
       if (Object.hasOwn(data, key)) state[key] = data[key];
     }
+    const announcement = state.announcement_sync || {};
+    const announcementText = !announcement.has_data
+      ? '公告日期：尚未建档；需手动刷新财务以初始化。'
+      : announcement.error ? '公告日期：同步失败，保留已有判断。' + announcement.error
+      : announcement.checked_at ? '公告日期：' + (announcement.status || '已检查') + '；检查时间 ' + announcement.checked_at
+      : '公告日期：已保存判断，检查时间未记录。';
+    document.getElementById('announcement-status').textContent = announcementText;
     renderCurrentStock();
     document.getElementById('updated').textContent = state.updated_at ? new Date(state.updated_at).toLocaleString('zh-CN') : '—';
     document.getElementById('latest-period').textContent = state.views?.quarter?.at(-1)?.period || '—';

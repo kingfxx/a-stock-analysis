@@ -17,8 +17,8 @@ from .valuation import valuation_summary_observations, merge_dividend_yields, mo
 from .sources import normalize_code
 from .storage import utc_now
 
-INPUT_VERSION = "stock_assessment_input_v1"
-CALCULATION_VERSION = "stock_assessment_calc_v4"
+INPUT_VERSION = "stock_assessment_input_v2"
+CALCULATION_VERSION = "stock_assessment_calc_v5"
 PROFILE = {"style": "value", "horizon": "1_to_3_years",
            "chips_horizon": "6_to_12_months", "chips_framework": "user_hypotheses_v1"}
 
@@ -46,6 +46,11 @@ def capture(db, code, *, as_of=None):
         identity = instrument["id"]
         # Existing repositories now share this read transaction, including overrides.
         financial = FundamentalService(reader, Path(".")).read(code)
+        disclosure_dates = [{key: report.get(key) for key in
+                             ("period", "source_publish_date", "sina_publish_date", "publish_date",
+                              "publish_date_source", "publish_date_status", "latest_revision_on",
+                              "publish_date_reason", "disclosure_result_id", "disclosure_rule_version")}
+                            for report in financial["reports"]]
         dividends = DividendService(reader, Path(".")).read(code)
         valuation = ValuationService(reader, Path(".")).read(code, financial["reports"])
         price_service = PriceService(reader)
@@ -73,6 +78,7 @@ def capture(db, code, *, as_of=None):
             (identity,))]
         industry_rows = rows("industry_snapshots", "snapshot_at,id")[-1:]
         manifest = {"price_version": version, "financial": rows("financial_reports", "period,source,report_type"),
+                    "disclosure_dates": disclosure_dates,
                     "overrides": rows("report_overrides", "period,field_name"),
                     "dividends": rows("dividend_events", "id"),
                     "valuation": rows("valuation_observations", "observed_on,source,metric"),
@@ -97,6 +103,11 @@ def capture(db, code, *, as_of=None):
             add(f"financial.{period}.{row['period']}", "financial_period", values, "金额:元;比率:%",
                 row["period"], "sina/legacy/manual", period_type=period,
                 published_on=row.get("publish_date"),
+                published_on_source=row.get("publish_date_source"),
+                published_on_status=row.get("publish_date_status"),
+                latest_known_revision_on=row.get("latest_revision_on"),
+                disclosure_result_id=row.get("disclosure_result_id"),
+                disclosure_rule_version=row.get("disclosure_rule_version"),
                 methodology="单季拆分/TTM/ROE/ROIC复用现有计算；自由现金流和债务为简化口径，时点值不加总；债务科目齐全且列示空值时按零处理，缺科目不计算；净现金可为负（净负债）；已实施分红率仅年度提供")
     observation_rows = valuation.get("observation_rows") or valuation.get("rows", [])
     yield_rows = merge_dividend_yields([], monthly_dividend_yields(raw, dividends))

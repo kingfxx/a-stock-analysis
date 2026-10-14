@@ -1,4 +1,23 @@
 .ai-context-actions { margin-left:auto; display:flex; gap:14px; align-items:center; }
+.announcement-entry { position:relative; display:inline-flex; }
+.announcement-list { box-sizing:border-box; position:absolute; z-index:30; top:calc(100% + 8px); left:0; width:min(620px,calc(100vw - 32px)); max-width:calc(100vw - 32px); max-height:min(72vh,620px); overflow:auto; padding:14px 16px; border:1px solid #d9dee5; border-radius:8px; background:#eef6e9; color:#202124; box-shadow:0 10px 28px #0004; color-scheme:light; }
+.announcement-filters { display:grid; gap:10px; padding-bottom:10px; border-bottom:1px solid #d9e4d4; }
+.announcement-time-filter { display:flex; align-items:center; gap:8px; color:#202124; }
+.announcement-time-filter select { padding:5px 8px; border:1px solid #cdd5df; border-radius:5px; background:#f8fbf5; color:#202124; font:inherit; }
+.announcement-type-filter { display:flex; flex-wrap:wrap; gap:6px 14px; margin:0; padding:6px 9px 9px; border:1px solid #d9e4d4; border-radius:6px; }
+.announcement-type-filter legend { padding:0 4px; color:#626b77; font-size:12px; }
+.announcement-filter-action { margin-left:8px; padding:2px 7px; border:1px solid #cdd5df; border-radius:4px; background:#f8fbf5; color:#245bb4; font:inherit; font-size:11px; cursor:pointer; }
+.announcement-filter-action:hover { background:#e4efdf; }
+.announcement-filter-action:focus-visible { outline:2px solid #38c4dc; outline-offset:2px; }
+.announcement-type-option { display:inline-flex; align-items:center; gap:5px; font-size:12px; white-space:nowrap; }
+.announcement-type-option input { accent-color:#4f8a54; }
+.announcement-results { padding-top:6px; }
+.announcement-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; min-width:0; padding:8px 2px; border-bottom:1px solid #dfe8da; }
+.announcement-row:last-child { border-bottom:0; }
+.announcement-row a,.announcement-row > span:first-child { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; color:#245bb4; text-decoration:none; }
+.announcement-row a:hover { text-decoration:underline; }
+.announcement-date { flex:0 0 auto; color:#626b77; white-space:nowrap; }
+.announcement-empty { color:#626b77; }
 .ai-button { border:1px solid #304049; color:#38c4dc; background:transparent; padding:7px 12px; border-radius:5px; cursor:pointer; font:inherit; }
 .ai-button:disabled { opacity:.5; cursor:wait; }
 .ai-button:focus-visible,.ai-dialog a:focus-visible { outline:2px solid #38c4dc; outline-offset:3px; }

@@ -20,10 +20,12 @@ CATEGORIES = {
 }
 # Never discover deletion scope by a generic instrument_id column or table prefix.
 FACT_TABLES = ('financial_reports', 'report_overrides', 'raw_daily_prices',
+               'stock_announcement_identities', 'stock_announcement_metadata', 'report_disclosure_dates',
                'adjusted_daily_prices', 'adjusted_price_versions', 'valuation_observations',
                'dividend_events', 'financing_daily', 'shareholder_observations',
                'legacy_valuation_snapshots', 'industry_snapshots')
-DELETE_ORDER = ('ai_analysis_runs', 'ai_analysis_snapshots', 'company_report_facts',
+DELETE_ORDER = ('ai_analysis_runs', 'ai_analysis_snapshots', 'report_disclosure_dates',
+                'stock_announcement_metadata', 'stock_announcement_identities', 'company_report_facts',
                 'company_report_parses', 'company_report_documents', 'sync_state', 'legacy_imports',
                 'price_version_leases', 'adjusted_price_versions', 'adjusted_daily_prices', 'financial_reports',
                 'report_overrides', 'raw_daily_prices', 'valuation_observations', 'dividend_events',

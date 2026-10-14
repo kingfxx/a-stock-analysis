@@ -98,7 +98,8 @@ def normalize_report_dates(reports: list[dict]) -> list[dict]:
         previous = by_period.get(f"{int(period[:4]) - 1}{period[4:]}")
         candidate = source_date(previous)
         raw = source_date(report)
-        published = candidate if plausible(period, candidate) else raw if plausible(period, raw) else None
+        published = (report.get("publish_date") if report.get("_publish_date_override_applied") or report.get("_publish_date_finalized")
+                     else candidate if plausible(period, candidate) else raw if plausible(period, raw) else None)
         corrected.append({**report, "source_publish_date": raw, "publish_date": published})
     return corrected
 

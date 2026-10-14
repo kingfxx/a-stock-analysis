@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock, Thread
-from urllib.parse import parse_qs, urlparse, unquote
+from urllib.parse import parse_qs, urlparse, unquote, urlencode
 
 import requests
 from plotly.offline import get_plotlyjs
@@ -25,13 +25,15 @@ from .storage import DEFAULT_DATABASE, Database, StorageError, instance_lock
 from .price_service import PriceService, PriceVersionUnavailable, month_closes
 from .price_projection import chip_prices, financial_prices, valuation_prices
 from .fundamental_service import FundamentalService
+from .announcement_service import AnnouncementService
+from .disclosure_dates import is_earnings_notice
 from .statements import read_statements
 from .industry_service import IndustryService
 from .maintenance import MaintenanceService
 from .index_collection import start_operation, run_operation, cancel_operation, recover_operations
 from .index_repository import read_indices
 from .index_read_service import IndexReadService
-from .collection import read_source
+from .collection import ProviderBlocked, read_source
 from .database_restore import RestoreManager, RequestGate, MAX_UPLOAD
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
@@ -503,7 +505,15 @@ def _financial_payload(data: dict) -> dict:
                              period_end_prices=prices.get("raw_period_end"))
     return {"code": data["code"], "name": data.get("name"), "updated_at": data.get("updated_at"),
             "views": {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")},
-            "warnings": data.get("warnings", []), "needs_dividends": _needs_dividends(data)}
+            "warnings": data.get("warnings", []), "needs_dividends": _needs_dividends(data),
+            "announcement_sync": data.get("announcement_sync", {})}
+
+
+def _financial_with_announcement_state(data, db):
+    if data and data.get("code"):
+        sync = AnnouncementService(db).read(data["code"]).get("sync", {})
+        data = {**data, "announcement_sync": sync}
+    return data
 
 
 def _valuation_payload(data: dict) -> dict:
@@ -689,7 +699,7 @@ def price_bundle(code, *, refresh=False, full=False, version=None):
                 warnings.append(str(exc))
     version, raw, qfq = shared_projection(code, version, lease=True)
     fundamentals, dividends, valuations = p4_services()
-    financial = fundamentals.read(code)
+    financial = _financial_with_announcement_state(fundamentals.read(code), fundamentals.db)
     events = dividends.read(code)
     financial["dividend_events"] = events
     financial["dividend_basis"] = DIVIDEND_BASIS if events else None
@@ -720,6 +730,28 @@ def load_chart_data(code: str, section: str, refresh: bool = False, *, price_ver
             fundamentals, dividends, valuations = p4_services()
             if section == "financial":
                 data = fundamentals.update(code, refresh=refresh, full=full)
+                financial_warnings = list(data.get("warnings", []))
+                if data.get("reports"):
+                    try:
+                        announcement = AnnouncementService(fundamentals.db).update(
+                            code, data["reports"], refresh=refresh, full=full,
+                            allow_initial=bool(refresh or full))
+                    except (ProviderBlocked, ValueError, KeyError, TypeError, OSError,
+                            requests.RequestException, StorageError, sqlite3.DatabaseError) as exc:
+                        try:
+                            old_sync = AnnouncementService(fundamentals.db).read(code).get("sync", {})
+                        except (ValueError, OSError, StorageError, sqlite3.DatabaseError):
+                            old_sync = {}
+                        announcement = {"sync": {**old_sync, "error": str(exc)},
+                                         "warnings": [f"公告日期独立同步失败，已保留新浪财务事实：{exc}"]}
+                    if announcement.get("sync", {}).get("status") == "failed":
+                        announcement.setdefault("warnings", []).append("公告日期同步失败，已保留已有判断。")
+                    data = fundamentals.read(code)
+                    data["warnings"] = list(dict.fromkeys(financial_warnings + data.get("warnings", []) +
+                                                           announcement.get("warnings", [])))
+                    data["announcement_sync"] = announcement.get("sync", {})
+                else:
+                    data = _financial_with_announcement_state(data, fundamentals.db)
                 data = _add_sqlite_missing_name(fundamentals.db, data)
                 data["dividend_events"] = dividends.read(code)
                 data["dividend_basis"] = DIVIDEND_BASIS if data["dividend_events"] else None
@@ -792,7 +824,7 @@ def render_page(code: str, refresh: bool) -> str:
         code = normalize_code(code)
         if Path(DATABASE_PATH).exists():
             fundamentals, dividends, valuations = p4_services()
-            data = fundamentals.read(code)
+            data = _financial_with_announcement_state(fundamentals.read(code), fundamentals.db)
             data["dividend_events"] = dividends.read(code)
             data["dividend_basis"] = DIVIDEND_BASIS if data["dividend_events"] else None
             valuation = valuations.read(code, data.get("reports", []))
@@ -822,8 +854,10 @@ def render_page(code: str, refresh: bool) -> str:
                 payload["price_needs_update"] = any(not checked_today(state := sync_state(sql_chips.db,
                     SyncKey(identity, dataset, "tencent", adjustment))) or audit_due(state, dataset) for dataset, adjustment in
                     (("prices_raw", "raw"), ("prices_adjusted", "qfq")))
-            normalized = {**data, "reports": normalize_report_dates(data.get("reports", [])),
-                          "report_date_basis": REPORT_DATE_BASIS} if data else {}
+            normalized = ({**data, "reports": (data.get("reports", [])
+                              if data.get("report_date_basis") == REPORT_DATE_BASIS
+                              else normalize_report_dates(data.get("reports", []))),
+                          "report_date_basis": REPORT_DATE_BASIS} if data else {})
             if version or raw:
                 payload.update(_financial_payload(financial_prices(normalized, raw, qfq)))
                 payload["valuation"] = _p4_valuation_payload(valuation, raw=raw, qfq=qfq,
@@ -1143,6 +1177,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == '/api/stock-announcements':
+            query = parse_qs(parsed.query)
+            try:
+                code = normalize_code(query.get('code', [''])[0])
+                db = services()[0].db
+                with db.connection() as conn:
+                    instrument = conn.execute('SELECT id FROM instruments WHERE code=?', (code,)).fetchone()
+                    rows = conn.execute("""SELECT m.title,m.published_on,m.announcement_id,m.org_id,m.title_category,m.report_type
+                        FROM stock_announcement_metadata m
+                        WHERE m.instrument_id=? AND m.id IN (
+                          SELECT max(id) FROM stock_announcement_metadata WHERE instrument_id=? GROUP BY announcement_id)
+                        ORDER BY m.published_on DESC,m.announcement_time DESC,m.id DESC""",
+                        (instrument['id'], instrument['id'])).fetchall() if instrument else []
+                announcements = []
+                for row in rows:
+                    category = 'forecast' if is_earnings_notice(row['title']) else row['report_type'] if row['report_type'] in ('annual','interim','q1','q3') else (
+                        row['title_category'] if row['title_category'] in ('forecast','dividend') else None)
+                    announcements.append({'title': row['title'], 'published_on': row['published_on'],
+                        'url': 'https://www.cninfo.com.cn/new/disclosure/detail?' + urlencode({
+                            'stockCode': code, 'announcementId': row['announcement_id'], 'orgId': row['org_id']}),
+                        'category': category})
+                self._ai_reply({'announcements': announcements})
+            except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
+                self._ai_reply({'error': str(exc)}, 400)
+            return
         if parsed.path in {'/api/indices/catalog','/api/indices/status','/api/indices/chart','/api/indices/price'}:
             try:
                 with _SERVICE_LOCK:
