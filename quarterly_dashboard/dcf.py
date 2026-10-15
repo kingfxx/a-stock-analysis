@@ -18,6 +18,7 @@ from .statements import metric
 
 
 DEFAULTS = dict(base_window='3', growth_pct=3, discount_pct=9, terminal_growth_pct=2)
+GROWTH_DEFAULTS = dict(stage1_pct=15, stage2_pct=8, stage3_pct=4)
 FCFF_GAPS = [
     '缺少已核实的利息现金支出归类及实际税盾，不能由简化FCF自动转为FCFF。',
     '经营必需现金、受限现金与超额现金尚未区分，不能把全部货币资金加回。',
@@ -37,18 +38,49 @@ def _finite(value):
     return number if math.isfinite(number) else None
 
 
-def calculate_dcf(base_fcf, growth_pct, discount_pct, terminal_growth_pct, *, shares=None, price=None):
-    """Ten year-end cash flows and year eleven perpetuity; reject invalid input."""
-    values = [_finite(v) for v in (base_fcf, growth_pct, discount_pct, terminal_growth_pct)]
-    if any(v is None for v in values):
-        raise ValueError('DCF参数必须是有效有限数值')
-    base, growth, rate, terminal = values
-    growth, rate, terminal = (v / 100 for v in (growth, rate, terminal))
-    if growth <= -1 or rate <= 0 or terminal <= -1 or rate <= terminal:
-        raise ValueError('增长率必须大于-100%，折现率必须为正且大于永续增长率')
+def forecast_standard(base_fcf, growth_pct):
+    """Keep the original standard forecast's power calculation unchanged."""
+    base, growth = _finite(base_fcf), _finite(growth_pct)
+    if base is None or growth is None or growth <= -100:
+        raise ValueError('FCF和增长率必须为有限数值，增长率必须大于-100%')
     try:
-        rows = [dict(year=t, fcf=base * (1 + growth)**t,
-                     present_value=base * (1 + growth)**t / (1 + rate)**t) for t in range(1, 11)]
+        flows = [base * (1 + growth / 100)**t for t in range(1, 11)]
+    except OverflowError:
+        raise ValueError('DCF计算溢出，请缩小参数范围') from None
+    if not all(math.isfinite(v) for v in flows):
+        raise ValueError('DCF计算溢出，请缩小参数范围')
+    return flows
+
+
+def forecast_three_stage(base_fcf, stage1_pct, stage2_pct, stage3_pct):
+    """Compound from the preceding year; fixed boundaries are 3/4 and 7/8."""
+    values = [_finite(v) for v in (base_fcf, stage1_pct, stage2_pct, stage3_pct)]
+    if any(v is None for v in values) or any(v <= -100 for v in values[1:]):
+        raise ValueError('FCF和阶段增长率必须为有限数值，增长率必须大于-100%')
+    current, first, second, third = values
+    flows = []
+    for growth in [first] * 3 + [second] * 4 + [third] * 3:
+        current *= 1 + growth / 100
+        if not math.isfinite(current):
+            raise ValueError('DCF计算溢出，请缩小参数范围')
+        flows.append(current)
+    return flows
+
+
+def discount_cash_flows(fcfs, discount_pct, terminal_growth_pct, *, shares=None, price=None):
+    """Discount ten yuan cash flows at year end, allowing effective negative rates."""
+    if not isinstance(fcfs, (list, tuple)) or len(fcfs) != 10:
+        raise ValueError('DCF需要完整10年现金流序列')
+    flows = [_finite(v) for v in fcfs]
+    rate, terminal = _finite(discount_pct), _finite(terminal_growth_pct)
+    if any(v is None for v in flows) or rate is None or terminal is None:
+        raise ValueError('DCF参数必须是有效有限数值')
+    rate, terminal = rate / 100, terminal / 100
+    if rate <= -1 or terminal <= -1 or rate <= terminal:
+        raise ValueError('折现率和永续增长率必须大于-100%，且折现率必须大于永续增长率')
+    try:
+        rows = [dict(year=t, fcf=flow, present_value=flow / (1 + rate)**t)
+                for t, flow in enumerate(flows, 1)]
         explicit = sum(r['present_value'] for r in rows)
         terminal_value = rows[-1]['fcf'] * (1 + terminal) / (rate - terminal)
         terminal_pv = terminal_value / (1 + rate)**10
@@ -67,7 +99,42 @@ def calculate_dcf(base_fcf, growth_pct, discount_pct, terminal_growth_pct, *, sh
                 terminal_present_value=terminal_pv, total_value=total,
                 terminal_share_pct=terminal_pv / total * 100 if total else None,
                 per_share=per_share, reference_difference_pct=difference,
-                mode='simplified', warnings=['基准FCF非正，不适合持续增长DCF。'] if base <= 0 else [])
+                mode='simplified', warnings=['基准FCF非正，不适合持续增长DCF。'] if flows[0] <= 0 else [])
+
+
+def calculate_dcf(base_fcf, growth_pct, discount_pct, terminal_growth_pct, *, shares=None, price=None):
+    """Original standard DCF contract, including its positive discount restriction."""
+    values = [_finite(v) for v in (base_fcf, growth_pct, discount_pct, terminal_growth_pct)]
+    if any(v is None for v in values):
+        raise ValueError('DCF参数必须是有效有限数值')
+    base, growth, rate, terminal = values
+    growth, rate, terminal = (v / 100 for v in (growth, rate, terminal))
+    if growth <= -1 or rate <= 0 or terminal <= -1 or rate <= terminal:
+        raise ValueError('增长率必须大于-100%，折现率必须为正且大于永续增长率')
+    result = discount_cash_flows(forecast_standard(base, values[1]), values[2], values[3],
+                                 shares=shares, price=price)
+    result['warnings'] = ['基准FCF非正，不适合持续增长DCF。'] if base <= 0 else []
+    return result
+
+
+def calculate_growth_dcf(base_fcf, stage1_pct, stage2_pct, stage3_pct, discount_pct,
+                         terminal_growth_pct, *, shares=None, price=None):
+    """Three-stage assumptions change the forecast, never the simplified FCF scope."""
+    flows = forecast_three_stage(base_fcf, stage1_pct, stage2_pct, stage3_pct)
+    result = discount_cash_flows(flows, discount_pct, terminal_growth_pct, shares=shares, price=price)
+    result['warnings'] = ['基准FCF非正，不适合持续增长DCF。'] if float(base_fcf) <= 0 else []
+    stages = [float(v) for v in (stage1_pct, stage2_pct, stage3_pct)]
+    if any(v > 30 for v in stages):
+        result['warnings'].append('阶段增长率超过30%，高增长假设可能难以持续。')
+    if stages[1] > stages[0] or stages[2] > stages[1]:
+        result['warnings'].append('后续阶段增长率上升，请核对成长路径假设。')
+    if float(terminal_growth_pct) > stages[2]:
+        result['warnings'].append('永续增长率高于最后阶段增长率，请核对长期假设。')
+    if float(discount_pct) < 0:
+        result['warnings'].append('使用负折现率，属于非常规假设，未来现金流现值会被放大。')
+    if result['terminal_share_pct'] is not None and result['terminal_share_pct'] > 75:
+        result['warnings'].append('永续价值占比超过75%，估值高度依赖终值假设。')
+    return result
 
 
 def estimate_wacc(risk_free_pct, beta, equity_risk_premium_pct, debt_cost_pct, tax_rate_pct, debt_weight_pct):
@@ -211,7 +278,7 @@ def read_dcf(db, code, legacy_root):
         warnings.append('周期行业需核对跨周期现金流，历史增长可能不可持续。')
     if any(r['free_cash_flow'] is not None and r['free_cash_flow'] <= 0 for r in history):
         warnings.append('历史存在非正FCF年份，请检查投资周期和异常值；不适合直接外推永续增长。')
-    return dict(code=code, name=financial.get('name'), mode='simplified', model_label='简化DCF（非FCFF/FCFE）', defaults=dict(DEFAULTS),
+    return dict(code=code, name=financial.get('name'), mode='simplified', model_label='简化DCF（非FCFF/FCFE）', defaults=dict(DEFAULTS), growth_defaults=dict(GROWTH_DEFAULTS),
                 bases=bases, history=history, market=market, updated_at=financial.get('updated_at'), warnings=warnings,
                 recommendations=dict(growth=_growth_recommendation(history),
                     discount=dict(value_pct=9, status='assumption', basis='9%为可配置折现率假设；本地缺少已核实的10年国债收益率、Beta、ERP和资本成本数据，非自动WACC。'),

@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard.dcf import calculate_dcf, estimate_wacc, read_dcf, _growth_recommendation
+from quarterly_dashboard.dcf import (calculate_dcf, calculate_growth_dcf, discount_cash_flows,
+                                     forecast_standard, forecast_three_stage, estimate_wacc,
+                                     read_dcf, _growth_recommendation)
 from quarterly_dashboard.fundamental_service import SOURCE
 from quarterly_dashboard.storage import Database, SyncKey, SyncResult
 
@@ -33,6 +35,100 @@ def test_negative_zero_cash_flows_and_missing_shares():
     zero = calculate_dcf(0,3,9,2,shares=0)
     assert zero['total_value'] == 0 and zero['terminal_share_pct'] is None
     assert zero['per_share'] is None
+
+
+def test_three_stage_compounds_at_boundaries_and_terminal_year_eleven():
+    flows = forecast_three_stage(1e8, 15, 8, 4)
+    assert flows[0] == 1e8 * 1.15
+    assert flows[2] == pytest.approx(1e8 * 1.15**3)
+    assert flows[3] == flows[2] * 1.08
+    assert flows[6] == pytest.approx(1e8 * 1.15**3 * 1.08**4)
+    assert flows[7] == flows[6] * 1.04
+    assert flows[9] == pytest.approx(1e8 * 1.15**3 * 1.08**4 * 1.04**3)
+    result = calculate_growth_dcf(1e8, 15, 8, 4, 9, 2, shares=1e8, price=10)
+    assert [r['fcf'] for r in result['rows']] == flows
+    assert result['explicit_value'] == sum(flow / 1.09**t for t, flow in enumerate(flows, 1))
+    assert result['terminal_value'] == pytest.approx(flows[-1] * 1.02 / .07)
+    assert result['terminal_present_value'] == pytest.approx(result['terminal_value'] / 1.09**10)
+    assert result['per_share'] == result['total_value'] / 1e8
+    assert result['reference_difference_pct'] == (1 - 10 / result['per_share']) * 100
+    assert result['mode'] == 'simplified'
+
+
+def test_standard_golden_result_is_unchanged():
+    result = calculate_dcf(123456789, 3.25, 9.75, 1.85, shares=98765432, price=12.34)
+    assert result['rows'][0] == dict(year=1, fcf=127469134.6425, present_value=116144997.39635536)
+    assert result['rows'][-1] == dict(year=10, fcf=169986949.54722834, present_value=67045601.485568404)
+    assert result['explicit_value'] == 896070017.0561643
+    assert result['terminal_value'] == 2191540609.036102
+    assert result['terminal_present_value'] == 864379052.063942
+    assert result['total_value'] == 1760449069.1201062
+    assert result['per_share'] == 17.824546842665622
+    assert result['reference_difference_pct'] == 30.769628485239064
+    assert result['terminal_share_pct'] == 49.09991815304087
+    assert result['warnings'] == []
+
+
+def test_growth_and_standard_use_same_engine_for_equal_growth():
+    standard = calculate_dcf(100, 3, 9, 2, shares=10, price=50)
+    growth = calculate_growth_dcf(100, 3, 3, 3, 9, 2, shares=10, price=50)
+    for key in ('explicit_value', 'terminal_value', 'terminal_present_value', 'total_value',
+                'per_share', 'reference_difference_pct', 'terminal_share_pct'):
+        assert growth[key] == pytest.approx(standard[key])
+    assert forecast_standard(100, 3) == [100 * 1.03**t for t in range(1, 11)]
+
+
+def test_growth_accepts_negative_fractional_rates_and_zero_discount():
+    result = calculate_growth_dcf(100, -1.25, -2.5, -3.75, -.5, -4)
+    assert result['rows'][0]['fcf'] == 98.75
+    assert result['rows'][0]['present_value'] == pytest.approx(98.75 / .995)
+    assert any('负折现率' in w for w in result['warnings'])
+    assert calculate_growth_dcf(100, 1, 0, -1, 0, -2)['total_value'] > 0
+    with pytest.raises(ValueError):
+        calculate_dcf(100, 1, 0, -2)  # Original standard validation remains in effect.
+    with pytest.raises(ValueError):
+        calculate_dcf(100, 1, -.5, -2)
+
+
+@pytest.mark.parametrize('args', [
+    (None, 15, 8, 4, 9, 2), (True, 15, 8, 4, 9, 2), (100, math.nan, 8, 4, 9, 2),
+    (100, 15, -100, 4, 9, 2), (100, 15, 8, math.inf, 9, 2),
+    (100, 15, 8, 4, 2, 2), (100, 15, 8, 4, -100, -101),
+    (100, 15, 8, 4, 9, -100), (100, 15, 8, 4, None, 2),
+    (1e308, 100, 8, 4, 9, 2), (100, 15, 8, 4, 1e308, 2),
+])
+def test_growth_invalid_inputs_and_overflow(args):
+    with pytest.raises(ValueError):
+        calculate_growth_dcf(*args)
+
+
+@pytest.mark.parametrize('flows', [None, [], [100] * 9, [100] * 11,
+                                    [100] * 9 + [None], [100] * 9 + [math.nan],
+                                    [100] * 9 + [True], [1e308] * 10])
+def test_shared_discount_engine_rejects_invalid_sequences(flows):
+    with pytest.raises(ValueError):
+        discount_cash_flows(flows, 9, 2)
+
+
+@pytest.mark.parametrize('base', [0, -100])
+def test_growth_nonpositive_base_remains_visible_with_warning(base):
+    result = calculate_growth_dcf(base, 15, 8, 4, 9, 2, shares=10, price=50)
+    assert result['total_value'] <= 0
+    assert any('基准FCF非正' in w for w in result['warnings'])
+    assert result['reference_difference_pct'] is None
+    if base == 0:
+        assert result['terminal_share_pct'] is None
+
+
+def test_growth_risk_warnings_do_not_clip_assumptions():
+    result = calculate_growth_dcf(100, 31, 32, -1, 2.01, 2)
+    assert result['rows'][0]['fcf'] == 131
+    assert result['rows'][3]['fcf'] == result['rows'][2]['fcf'] * 1.32
+    assert any('超过30%' in w for w in result['warnings'])
+    assert any('阶段增长率上升' in w for w in result['warnings'])
+    assert any('永续增长率高于' in w for w in result['warnings'])
+    assert any('占比超过75%' in w for w in result['warnings'])
+    assert not any('超过30%' in w for w in calculate_growth_dcf(100, 30, 8, 4, 9, 2)['warnings'])
 
 
 def test_wacc_matches_weighted_cost_and_missing_is_not_zero():

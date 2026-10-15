@@ -30,7 +30,10 @@ def test_dcf_route_reads_isolated_store_without_updates(tmp_path, monkeypatch):
     monkeypatch.setattr(PriceService, 'ensure', forbidden)
     status, headers, body = request('/api/dcf?code=600887&refresh=1')
     assert status == 200
-    assert json.loads(body)['code'] == '600887'
+    payload = json.loads(body)
+    assert payload['code'] == '600887'
+    assert payload['growth_defaults'] == dict(stage1_pct=15, stage2_pct=8, stage3_pct=4)
+    assert payload['defaults'] == dict(base_window='3', growth_pct=3, discount_pct=9, terminal_growth_pct=2)
     assert headers['Cache-Control'] == 'no-store'
     assert headers['Content-Type'].startswith('application/json')
 
