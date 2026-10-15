@@ -422,6 +422,7 @@
           <button type="button" data-valuation-metric="pb">市净率 PB</button>
           <button type="button" data-valuation-metric="ps">市销率 PS</button>
           <button type="button" data-valuation-metric="dividend_yield">股息率</button>
+          <button type="button" id="dcf-toggle" aria-expanded="false" aria-controls="dcf-panel">DCF 估值</button>
         </div>
         <label for="valuation-range">时间范围</label>
         <select id="valuation-range" aria-label="估值时间范围">
@@ -518,6 +519,8 @@
 <script id="payload" type="application/json">__PAYLOAD__</script>
 <script src="/plotly.min.js"></script>
 <script src="/stock-picker.js"></script>
+<link rel="stylesheet" href="/dcf.css?v=20261014">
+<script src="/dcf.js?v=20261014"></script>
 <link rel="stylesheet" href="/ai-checklist.css?v=20261014-announcement-date-fit">
 <script src="/business-judgment.js"></script>
 <script src="/ai-checklist.js?v=20261014-announcement-date-fit"></script>

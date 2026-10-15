@@ -28,6 +28,7 @@ from .fundamental_service import FundamentalService
 from .announcement_service import AnnouncementService
 from .disclosure_dates import is_earnings_notice
 from .statements import read_statements
+from .dcf import read_dcf
 from .industry_service import IndustryService
 from .maintenance import MaintenanceService
 from .index_collection import start_operation, run_operation, cancel_operation, recover_operations
@@ -1298,7 +1299,7 @@ class Handler(BaseHTTPRequestHandler):
             content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
                              "/financial-statements.js", "/financial-statements.css", "/industry.js", "/industry.css",
-                             "/maintenance.js", "/maintenance.css", "/stock-cleanup.js"}:
+                             "/maintenance.js", "/maintenance.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
@@ -1346,6 +1347,16 @@ class Handler(BaseHTTPRequestHandler):
                 status,data=503,{'error':str(exc)}
             body=json.dumps(data,ensure_ascii=False,allow_nan=False).encode('utf-8')
             content_type='application/json; charset=utf-8'
+        elif parsed.path == "/api/dcf":
+            query = parse_qs(parsed.query)
+            try:
+                data = read_dcf(Database(DATABASE_PATH), query.get('code', ['601919'])[0], CACHE)
+            except (ValueError, TypeError) as exc:
+                status, data = 400, {'error': str(exc)}
+            except (OSError, StorageError, sqlite3.DatabaseError) as exc:
+                status, data = 503, {'error': str(exc)}
+            body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode('utf-8')
+            content_type = 'application/json; charset=utf-8'
         elif parsed.path == "/api/statements":
             query = parse_qs(parsed.query)
             try:
