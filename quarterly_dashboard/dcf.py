@@ -324,7 +324,30 @@ def parse_sina_gov_bond_yields(rows, as_of):
 
 def _call_akshare_gov_bond_history():
     import akshare as ak
-    return ak.bond_gb_zh_sina(symbol='中国10年期国债')
+    # AkShare's Sina adapter calls requests.get directly and therefore bypasses
+    # create_data_session(), including its opt-in-only system proxy policy.
+    # Replace only the requests module reference used by that adapter while it
+    # runs, so the request is direct by default without changing other callers.
+    import importlib
+    from .network import create_data_session
+
+    endpoint = importlib.import_module(ak.bond_gb_zh_sina.__module__)
+    original_requests = endpoint.requests
+    session = create_data_session()
+
+    class _DirectRequests:
+        def __getattr__(self, name):
+            return getattr(original_requests, name)
+
+        def get(self, *args, **kwargs):
+            return session.get(*args, **kwargs)
+
+    try:
+        endpoint.requests = _DirectRequests()
+        return ak.bond_gb_zh_sina(symbol='中国10年期国债')
+    finally:
+        endpoint.requests = original_requests
+        session.close()
 
 
 def fetch_risk_free_rate(as_of):
