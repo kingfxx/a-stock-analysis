@@ -59,9 +59,9 @@ assert.ok(discountCashFlows(Array(10),9,2).error,'sparse arrays are missing cash
 
 class Element {
   constructor(){this.listeners={};this.attrs={};this.value='';this.dataset={};this.nodes={};this.hidden=false;const classes=new Set();this.classList={contains:name=>classes.has(name),toggle(name,on){if(on)classes.add(name);else classes.delete(name);}};}
-  addEventListener(name,fn){this.listeners[name]=fn;}
+  addEventListener(name,fn){(this.listeners[name]||(this.listeners[name]=[])).push(fn);}
   setAttribute(name,value){this.attrs[name]=value;}
-  fire(name){return this.listeners[name]?.();}
+  fire(name){return this.listeners[name]?.map(fn=>fn()).at(-1);}
   set innerHTML(html){
     this.html=html;
     for(const match of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"[^>]*>/g)){
@@ -70,13 +70,13 @@ class Element {
       child.hidden=/\shidden(?:\s|>)/.test(match[0]);
       this.nodes[match[2]]=child;
     }
-    this.recommend=[...html.matchAll(/<button[^>]*data-dcf-recommend="([^"]+)"[^>]*data-value="([^"]*)"[^>]*>/g)].map(match=>{const node=new Element();node.dataset={dcfRecommend:match[1],value:match[2]};return node;});
+    this.recommend=[...html.matchAll(/<button[^>]*data-dcf-recommend="([^"]+)"[^>]*data-value="([^"]*)"[^>]*>/g)].map(match=>{const node=new Element();node.dataset={dcfRecommend:match[1],value:match[2]};const id=match[0].match(/\bid="([^"]+)"/);if(id)this.nodes[id[1]]=node;return node;});
   }
   get innerHTML(){return this.html||'';}
-  querySelector(selector){return this.nodes[selector.slice(1)];}
+  querySelector(selector){return this.nodes[selector.slice(1)]||Object.values(this.nodes).map(node=>node.querySelector(selector)).find(Boolean);}
   querySelectorAll(){return [...(this.recommend||[]),...Object.values(this.nodes).flatMap(node=>node.querySelectorAll())];}
 }
-const fixture={code:'600519',name:'测试 <script>',model_label:'简化DCF（非FCFF/FCFE）',bases:{'3':{value:1e8,available:true,periods:['2023','2024','2025'],source:'saved'},'5':{value:null,available:false,reason:'缺年'}},history:[],market:{total_shares:1e8,price:10},recommendations:{growth:{value_pct:4,basis:'历史中位数',status:'available'}},professional:{available:false,gaps:['利息分类待核对']},applicability:{blocked:false},warnings:[]};
+const fixture={code:'600519',name:'测试 <script>',model_label:'简化DCF（非FCFF/FCFE）',bases:{'1':{value:1.1e8,available:true,periods:['2025'],source:'saved'},'3':{value:1e8,available:true,periods:['2023','2024','2025'],source:'saved'},'5':{value:null,available:false,periods:['2021','2022','2023','2024','2025'],reason:'缺年'}},history:[{period:'2020-12-31',free_cash_flow:50},{period:'2021-12-31',free_cash_flow:75},{period:'2022-12-31',free_cash_flow:100},{period:'2023-12-31',free_cash_flow:150},{period:'2024-12-31',free_cash_flow:120},{period:'2025-12-31',free_cash_flow:180}],market:{total_shares:1e8,price:10},recommendations:{growth:{value_pct:4,basis:'历史中位数',status:'available'}},professional:{available:false,gaps:['利息分类待核对']},applicability:{blocked:false},warnings:[]};
 async function domTest(data,failFirst=false,autoData=null){
   const metrics=Array.from({length:4},()=>new Element());metrics[0].classList.toggle('active',true);
   const button=new Element(),head={after(node){panel=node;}},host={querySelector(){return head;},querySelectorAll(){return metrics;}};
@@ -97,7 +97,13 @@ async function domTest(data,failFirst=false,autoData=null){
 (async()=>{
   const {panel,button,window,metrics,getRequests}=await domTest(fixture);
   const get=id=>panel.querySelector('#dcf-'+id);
-  assert.equal(get('base').value,1);assert.equal(get('base').disabled,true);
+  assert.equal(get('base').value,'1');assert.equal(get('base').disabled,true);
+  assert.equal(panel.querySelector('#dcf-growth-reference').textContent,'增长率参考：26.67%');
+  assert.match(panel.querySelector('#dcf-growth-reference-basis').textContent,/样本3组/);
+  const growthMethod=panel.querySelector('#dcf-growth-method');growthMethod.value='endpoint_cagr';growthMethod.fire('change');
+  assert.equal(panel.querySelector('#dcf-growth-reference').textContent,'增长率参考：21.64%');
+  growthMethod.value='annual_average';growthMethod.fire('change');
+  panel.querySelector('#dcf-recommendations').querySelectorAll()[0].fire('click');assert.equal(get('growth').value,'26.667');get('growth').value='3';get('growth').fire('input');
   assert.equal(get('growth').value,'3');assert.equal(get('discount').value,'9');assert.equal(get('terminal').value,'2');
   assert.equal(button.classList.contains('active'),true);
   assert.ok(metrics.every(item=>!item.classList.contains('active')));
@@ -148,12 +154,15 @@ async function domTest(data,failFirst=false,autoData=null){
   get('discount').value='9';get('window').value='5';get('window').fire('change');assert.equal(get('base').value,'');assert.equal(get('results').innerHTML,'');
   get('window').value='manual';get('window').fire('change');assert.equal(get('base').disabled,false);get('base').value='-1';get('base').fire('input');assert.match(get('status').textContent,/负/);
   get('mode').value='three_stage';get('mode').fire('change');assert.ok(get('forecast-chart').plot.data[0].y.every(value=>value<0));get('mode').value='standard';get('mode').fire('change');
-  panel.querySelector('#dcf-recommendations').querySelectorAll()[0].fire('click');assert.equal(get('growth').value,'4');
+  get('window').value='5';get('window').fire('change');assert.match(panel.querySelector('#dcf-growth-reference-basis').textContent,/样本5组/);assert.equal(panel.querySelector('#dcf-growth-reference').textContent,'增长率参考：32.67%');
+  growthMethod.value='endpoint_cagr';growthMethod.fire('change');assert.equal(panel.querySelector('#dcf-growth-reference').textContent,'增长率参考：29.20%');
+  get('window').value='1';get('window').fire('change');assert.equal(panel.querySelector('#dcf-growth-reference').textContent,'增长率参考：50.00%');assert.match(panel.querySelector('#dcf-growth-reference-basis').textContent,/首尾复合增长率/);
+  get('window').value='3';get('window').fire('change');
   get('apply-wacc').fire('click');assert.match(get('wacc-result').textContent,/完整填写/);
   for(const [key,value] of Object.entries({rf:2,beta:1,erp:5,cost:4,tax:25,weight:20}))get(key).value=String(value);
   get('apply-wacc').fire('click');assert.equal(get('discount').value,'6.2','applying WACC must not require manual source notes or a date');
   button.fire('click');button.fire('click');assert.equal(getRequests(),1,'cached reopening must not request facts again');
-  window.listeners['financial-facts-updated']({detail:{code:'600519'}});
+  window.listeners['financial-facts-updated'][0]({detail:{code:'600519'}});
   assert.match(get('status').textContent,/财务依据已刷新/);
   get('growth').fire('input');assert.equal(getRequests(),1);assert.match(get('status').textContent,/财务依据已刷新/);
   button.fire('click');button.fire('click');await new Promise(resolve=>setImmediate(resolve));assert.equal(getRequests(),2);
@@ -162,7 +171,7 @@ async function domTest(data,failFirst=false,autoData=null){
   assert.equal(financial.panel.querySelector('#dcf-forecast-chart').plot,undefined);assert.equal(financial.panel.querySelector('#dcf-forecast-chart').hidden,true);
   assert.equal(financial.panel.querySelector('#dcf-results').innerHTML,'');assert.match(financial.panel.querySelector('#dcf-status').textContent,/金融企业/);
   const configured=await domTest({...fixture,growth_defaults:{stage1_pct:12.5,stage2_pct:6,stage3_pct:2.5},defaults:{base_window:'1',growth_pct:1,discount_pct:8,terminal_growth_pct:0}});
-  assert.equal(configured.panel.querySelector('#dcf-window').value,'1');assert.equal(configured.panel.querySelector('#dcf-growth').value,1);assert.equal(configured.panel.querySelector('#dcf-terminal').value,0);
+  assert.equal(configured.panel.querySelector('#dcf-window').value,'1');assert.equal(configured.panel.querySelector('#dcf-growth').value,'1');assert.equal(configured.panel.querySelector('#dcf-terminal').value,'0');
   assert.equal(configured.panel.querySelector('#dcf-stage1').value,12.5);assert.equal(configured.panel.querySelector('#dcf-stage3').value,2.5);
   const autoData={as_of_date:'2026-10-15',parameters:{rf:{value:1.678,status:'observed',source:'test',as_of_date:'2026-10-14'},beta:{value:0.1273084078625435,status:'estimated',sample_count:200,start:'2021-10-15',end:'2026-10-15'},erp:{value:6,status:'assumption'},kd:{value:3.2470819173262853,status:'estimated'},tax:{value:16.268795579183625,history_value:16.268795579183625,status:'estimated',history_status:'estimated'},weight:{value:28.865160940429256,status:'estimated'}},warnings:[]};
   const automatic=await domTest(fixture,false,autoData);
@@ -174,6 +183,11 @@ async function domTest(data,failFirst=false,autoData=null){
   assert.match(automatic.panel.querySelector('#dcf-wacc-evidence').innerHTML,/历史有效税率，自动用于WACC/);
   assert.match(automatic.panel.querySelector('#dcf-wacc-result').textContent,/WACC/,'automatic estimates should calculate WACC immediately when all inputs exist');
   assert.match(automatic.panel.querySelector('#dcf-wacc-result').textContent,/WACC \d+\.\d{1,3}%/,'WACC results should display at most three decimal places');
+  const referenceEstimate=wacc({rf:1.678,beta:0.1273084078625435,erp:6,cost:3.2470819173262853,tax:16.268795579183625,weight:28.865160940429256}).value;
+  await automatic.panel.querySelector('#dcf-estimate-wacc-reference').fire('click');
+  assert.equal(automatic.panel.querySelector('#dcf-discount-reference').textContent,`折现率参考：${Number(referenceEstimate.toFixed(3)).toString()}%`);
+  automatic.panel.querySelector('#dcf-apply-discount-reference').fire('click');
+  assert.equal(automatic.panel.querySelector('#dcf-discount').value,Number(referenceEstimate.toFixed(3)).toString(),'the WACC reference applies only after clicking the card action');
   automatic.panel.querySelector('#dcf-beta').value='1.5';automatic.panel.querySelector('#dcf-beta').fire('input');
   assert.match(automatic.panel.querySelector('#dcf-wacc-evidence').innerHTML,/人工覆盖/);
   automatic.panel.querySelector('#dcf-reset-wacc').fire('click');assert.equal(automatic.panel.querySelector('#dcf-beta').value,'0.127');

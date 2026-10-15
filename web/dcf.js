@@ -68,9 +68,20 @@
     button.closest('.panel').querySelector('.panel-head').after(panel);
     let payload=null,loading=false,stale=false;
     let autoWacc=null;
+    const preciseInputs=new Map();
     const code=JSON.parse(document.getElementById('payload').textContent).code;
     const el=id=>panel.querySelector('#'+id);
     const input=(id,label,value,step='0.1')=>`<label>${label}<input id="${id}" type="number" step="${step}" value="${value}" /></label>`;
+    const displayInput=value=>finite(value)?Number(value.toFixed(3)).toString():'';
+    function setPreciseInput(id,value) {
+      const input=el(id);
+      if(finite(value)){preciseInputs.set(id,value);input.value=displayInput(value);}
+      else {preciseInputs.delete(id);input.value='';}
+    }
+    function inputValue(id) {
+      const value=num(el(id).value),precise=preciseInputs.get(id);
+      return finite(value)&&finite(precise)&&value===Number(displayInput(precise))?precise:value;
+    }
     const skeleton=()=>`<h3>DCF 估值 · 简化模式</h3>
       <p class="dcf-note">FCF＝经营活动现金流净额 − 资本开支；此口径未经FCFF／FCFE桥接。总折现值与每股参考值不等于归母股权价值或投资安全边际。</p>
       <div id="dcf-evidence"></div><div class="dcf-controls">
@@ -91,12 +102,49 @@
       el('dcf-base').disabled=windowValue!=='manual';
       if (windowValue==='manual') {el('dcf-base-basis').textContent='手动假设：请核对年度口径与亿元单位；保留负值和零值。';}
       else {
-        el('dcf-base').value=finite(base?.value)&&base?.available!==false ? base.value/1e8 : '';
+        setPreciseInput('dcf-base',finite(base?.value)&&base?.available!==false ? base.value/1e8 : null);
         el('dcf-base-basis').textContent=`${(base?.periods||[]).join('、')||'没有完整年度'}；${base?.reason||'经营净现金流减资本开支的年度均值'}；来源：${source(base?.source)}`;
       }
       render();
     }
-    function assumptions() {return [num(el('dcf-base').value),num(el('dcf-growth').value),num(el('dcf-discount').value),num(el('dcf-terminal').value)];}
+    function assumptions() {return [inputValue('dcf-base'),inputValue('dcf-growth'),inputValue('dcf-discount'),inputValue('dcf-terminal')];}
+    function updateWindowGrowth() {
+      const windowValue=el('dcf-window').value, periods=payload.bases?.[windowValue]?.periods||[];
+      const selectedYears=periods.map(period=>Number(String(period).slice(0,4))).filter(Number.isFinite).sort((a,b)=>a-b);
+      const firstYear=selectedYears[0],lastYear=selectedYears.at(-1);
+      const rows=(payload.history||[]).filter(row=>{
+        const year=Number(String(row.period).slice(0,4));
+        return Number.isFinite(year)&&year>=firstYear-1&&year<=lastYear&&finite(row.free_cash_flow);
+      }).sort((a,b)=>String(a.period).localeCompare(String(b.period)));
+      const changes=[];
+      for(let i=1;i<rows.length;i++){
+        const previous=rows[i-1],current=rows[i],previousYear=Number(String(previous.period).slice(0,4)),currentYear=Number(String(current.period).slice(0,4));
+        if(currentYear===previousYear+1&&previous.free_cash_flow>0&&current.free_cash_flow>=0)changes.push((current.free_cash_flow/previous.free_cash_flow-1)*100);
+      }
+      const card=el('dcf-growth-reference'),basis=el('dcf-growth-reference-basis'),apply=el('dcf-apply-growth-reference');
+      if(!card)return;
+      const method=el('dcf-growth-method')?.value||'annual_average';
+      let estimate=null,methodText='';
+      if(method==='endpoint_cagr'){
+        const start=rows.find(row=>Number(String(row.period).slice(0,4))===firstYear-1),end=rows.find(row=>Number(String(row.period).slice(0,4))===lastYear);
+        if(start&&end&&start.free_cash_flow>0&&end.free_cash_flow>0&&lastYear>firstYear-1){
+          estimate=(Math.pow(end.free_cash_flow/start.free_cash_flow,1/(lastYear-firstYear+1))-1)*100;
+          methodText=`首尾复合增长率：${firstYear-1}—${lastYear}年，按${lastYear-firstYear+1}年计算。`;
+        }
+      } else if(changes.length){
+        estimate=changes.reduce((sum,value)=>sum+value,0)/changes.length;
+        methodText=`相邻年度简化FCF增长率算术平均值，样本${changes.length}组。`;
+      }
+      if(finite(estimate)){
+        card.textContent=`增长率参考：${decimal(estimate)}%`;
+        basis.textContent=`状态：基于当前基准FCF窗口估算；基准年度${periods.join('、')||'年度缺失'}，另取窗口前一年作为比较基期；${methodText}年度增长率算法要求年度连续且基期FCF为正、当年FCF非负。`;
+        apply.dataset.value=String(estimate);apply.disabled=false;
+      } else {
+        card.textContent='增长率参考：待补';
+        basis.textContent=method==='endpoint_cagr'?`状态：首尾年度FCF缺失、非正或窗口年份无效，无法计算端点CAGR（${firstYear-1}—${lastYear}年）。`:`状态：当前基准FCF窗口没有可用的连续正值年度简化FCF数据（${periods.join('、')||'无年度数据'}）。`;
+        apply.dataset.value='';apply.disabled=true;
+      }
+    }
     function setMode() {
       const growth=el('dcf-mode').value==='three_stage';
       el('dcf-standard-controls').hidden=growth;
@@ -169,7 +217,8 @@
         const status={available:'可用',assumption:'配置假设',unavailable:'缺失',limited:'样本有限',insufficient:'样本不足，使用假设',estimated:'基于历史估算',cautious:'谨慎参考'}[rec.status]||rec.status||'缺失';
         const provenance=rec.source||(key==='growth'?'已保存历史财务，年度及来源见下表':'配置假设，非自动实测资本成本／成熟度');
         const date=rec.date||(key==='growth'?payload.updated_at||'未记录':'配置假设，非实测日期');
-        return `<div><strong>${esc(label)}参考：${finite(rec.value_pct)?decimal(rec.value_pct)+'%':'待补'}</strong><p>状态：${esc(status)}；${esc(rec.basis||'没有可用依据')} ${rec.range_pct?'参考区间：'+esc(rec.range_pct.join('—'))+'%。':''}<br>来源：${esc(source(provenance))}；日期：${esc(date)}</p>${(rec.metrics||[]).map(metric=>`<p>${esc(metric.label)}：可比样本${esc(metric.sample_count)}，增长中位数${decimal(metric.median_growth_pct)}%，波动${decimal(metric.volatility_pct)}%，负值年${esc(metric.negative_years)}</p>`).join('')}<button type="button" data-dcf-recommend="${id}" data-value="${finite(rec.value_pct)?rec.value_pct:''}"${finite(rec.value_pct)?'':' disabled'}>应用${esc(label)}参考</button></div>`;
+        const discount=key==='discount';
+        return `<div><strong${discount?' id="dcf-discount-reference"':key==='growth'?' id="dcf-growth-reference"':''}>${esc(label)}参考：${finite(rec.value_pct)?decimal(rec.value_pct)+'%':'待补'}</strong>${key==='growth'?'<label class="dcf-growth-method">参考算法<select id="dcf-growth-method"><option value="annual_average">年度增长率算术平均</option><option value="endpoint_cagr">首尾复合增长率（CAGR）</option></select></label>':''}<p${discount?' id="dcf-discount-reference-basis"':key==='growth'?' id="dcf-growth-reference-basis"':''}>状态：${esc(status)}；${esc(rec.basis||'没有可用依据')} ${rec.range_pct?'参考区间：'+esc(rec.range_pct.join('—'))+'%。':''}<br>来源：${esc(source(provenance))}；日期：${esc(date)}</p>${(rec.metrics||[]).map(metric=>`<p>${esc(metric.label)}：可比样本${esc(metric.sample_count)}，增长中位数${decimal(metric.median_growth_pct)}%，波动${decimal(metric.volatility_pct)}%，负值年${esc(metric.negative_years)}</p>`).join('')}<span class="dcf-reference-actions"><button type="button"${discount?' id="dcf-apply-discount-reference"':key==='growth'?' id="dcf-apply-growth-reference"':''} data-dcf-recommend="${id}" data-value="${finite(rec.value_pct)?rec.value_pct:''}"${finite(rec.value_pct)?'':' disabled'}>应用${esc(label)}参考</button>${discount?'<button type="button" id="dcf-estimate-wacc-reference">自动估算WACC</button>':''}</span></div>`;
       }).join('');
       el('dcf-professional').innerHTML=`<p class="dcf-note">当前不可用。必须核对CFO利息归类、税盾和非经营现金流，再用WACC折现严格FCFF。股权桥接须核实有息债务、超额现金、非经营资产、少数股东和优先索取权；不能把所有货币资金视为超额现金，缺项不能记零，租赁不能重复扣除。</p><ul>${(payload.professional?.gaps||[]).map(gap=>`<li>${esc(gap)}</li>`).join('')}</ul>`;
       el('dcf-history').innerHTML=table(['完整年度','营业收入','归母净利润','经营净现金流','资本开支','简化FCF','来源／公式'],(payload.history||[]).map(row=>[esc(row.period),amount(row.revenue),amount(row.profit),amount(row.operating_cash_flow),amount(row.capex),amount(row.free_cash_flow),`<details><summary>来源</summary><pre>${esc(source(row.sources))}</pre></details>`]));
@@ -185,7 +234,7 @@
         const defaults=payload.defaults||{};
         el('dcf-window').value=['1','3','5'].includes(String(defaults.base_window))?String(defaults.base_window):'3';
         for(const [id,key] of [['growth','growth_pct'],['discount','discount_pct'],['terminal','terminal_growth_pct']]) {
-          if(finite(defaults[key]))el('dcf-'+id).value=defaults[key];
+          if(finite(defaults[key]))setPreciseInput('dcf-'+id,defaults[key]);
         }
         el('dcf-mode').value='standard';
         for(const [id,key] of [['stage1','stage1_pct'],['stage2','stage2_pct'],['stage3','stage3_pct']]) {
@@ -193,8 +242,25 @@
         }
         el('dcf-mode').addEventListener('change',setMode);
         el('dcf-window').addEventListener('change',setBase);
-        ['base','growth','stage1','stage2','stage3','discount','terminal'].forEach(key=>el('dcf-'+key).addEventListener('input',render));
-        panel.querySelectorAll('[data-dcf-recommend]').forEach(btn=>btn.addEventListener('click',()=>{el(btn.dataset.dcfRecommend).value=btn.dataset.value;render();}));
+        ['base','growth','stage1','stage2','stage3','discount','terminal'].forEach(key=>el('dcf-'+key).addEventListener('input',()=>{if(preciseInputs.has('dcf-'+key)&&num(el('dcf-'+key).value)!==Number(displayInput(preciseInputs.get('dcf-'+key))))preciseInputs.delete('dcf-'+key);render();}));
+        panel.querySelectorAll('[data-dcf-recommend]').forEach(btn=>btn.addEventListener('click',()=>{setPreciseInput(btn.dataset.dcfRecommend,Number(btn.dataset.value));render();}));
+        el('dcf-estimate-wacc-reference').addEventListener('click',async()=>{
+          const estimateButton=el('dcf-estimate-wacc-reference'),basis=el('dcf-discount-reference-basis');
+          estimateButton.disabled=true;estimateButton.textContent='正在估算…';
+          try{
+            const response=await fetch('/api/dcf/wacc?'+new URLSearchParams({code,years:el('dcf-beta-window').value}));
+            if(!response.ok)throw new Error('WACC自动估算请求失败');
+            const data=await response.json(),p=data.parameters||{};
+            const estimate=wacc({rf:p.rf?.value,beta:p.beta?.value,erp:p.erp?.value,cost:p.kd?.value,tax:p.tax?.value,weight:p.weight?.value});
+            if(estimate.error)throw new Error(estimate.error);
+            const apply=el('dcf-apply-discount-reference');
+            el('dcf-discount-reference').textContent=`折现率参考：${waccDecimal(estimate.value)}%`;
+            basis.textContent=`状态：自动WACC估算；基准日 ${data.as_of_date||'未记录'}；Beta窗口 ${data.beta_window_years||el('dcf-beta-window').value}年；ERP ${decimal(p.erp?.value)}%（模型假设）；Rf来源 ${p.rf?.source||'未记录'}；财务口径及数据限制见WACC自动估算。`;
+            apply.dataset.value=String(estimate.value);apply.disabled=false;
+            estimateButton.textContent='重新估算WACC';
+          }catch(error){basis.textContent=`状态：自动估算不可用；${error.message}`;estimateButton.textContent='自动估算WACC';}
+          finally{estimateButton.disabled=false;}
+        });
         const currentWaccValues=()=>{
           const ids={rf:'rf',beta:'beta',erp:'erp',kd:'cost',tax:'tax',weight:'weight'};
           return Object.fromEntries(Object.entries(ids).map(([key,id])=>{
@@ -244,11 +310,11 @@
           const estimate=wacc(values);
           if (estimate.error) {el('dcf-wacc-result').textContent=estimate.error;return;}
           if(estimate.value<=num(el('dcf-terminal').value)){el('dcf-wacc-result').textContent='WACC必须高于当前永续增长率，暂不应用。';return;}
-          el('dcf-discount').value=waccNumber(estimate.value);
+          setPreciseInput('dcf-discount',estimate.value);
           el('dcf-wacc-result').textContent=`已将WACC ${waccDecimal(estimate.value)}%（Ke ${waccDecimal(estimate.equity)}%）应用到当前DCF折现率。`;
           render();
         });
-        setBase();setMode();
+        setBase();setMode();updateWindowGrowth();el('dcf-window').addEventListener('change',updateWindowGrowth);el('dcf-growth-method').addEventListener('change',updateWindowGrowth);
       } catch (error) {payload=null;panel.innerHTML=`<p class="dcf-warning" role="alert">${esc(error.message)}。关闭后重新展开可重试。</p>`;}
       finally {loading=false;}
     }

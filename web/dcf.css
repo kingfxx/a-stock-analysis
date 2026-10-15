@@ -15,6 +15,9 @@
 .dcf-recommendations p { font-size:12px; color:var(--muted); line-height:1.6; overflow-wrap:anywhere; }
 .dcf-panel button { padding:9px 12px; background:#355363; color:var(--ink); font-size:13px; }
 .dcf-panel button:disabled { opacity:.45; cursor:default; }
+.dcf-reference-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:8px; }
+.dcf-growth-method { display:flex; flex-direction:column; gap:6px; max-width:320px; margin-top:10px; color:var(--muted); font-size:12px; }
+.dcf-growth-method select { padding:7px 9px; border:1px solid #4b616d; border-radius:6px; background:#202a30; color:var(--ink); }
 .dcf-scroll { overflow-x:auto; max-width:100%; }
 .dcf-panel table { border-collapse:collapse; width:100%; font-size:13px; font-variant-numeric:tabular-nums; }
 .dcf-panel th,.dcf-panel td { border-bottom:1px solid var(--line); padding:10px 12px; text-align:right; white-space:nowrap; }
