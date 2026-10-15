@@ -365,12 +365,76 @@
     function table(rows,comparison,denominator) {
       const prior=new Map(comparison.map(x=>[x.item_source+':'+x.field,x]));
       const currentUnit=el('fs-unit').value;
-      return `<table class="fs-table"><thead><tr><th>科目</th><th>本期</th><th>占比</th><th>比较期</th><th>变动额</th><th>说明</th></tr></thead><tbody>`+
-        rows.map(x=>{const old=prior.get(x.item_source+':'+x.field),ratio=kind==='fzb'?balanceShare(x,data.values):null;
+      const groups={
+        fzb:[
+          ['流动资产',new Set(['TOTCURRASSET','CURFDS','CASHANDDEPOCENB','TRADFINASSET','DERIFINAASSET','NOTESRECE','ACCORECE','NOTESACCORECE','PREP','OTHERRECE','INVE','CONTRACTASSET','ACCHELDFORS','OTHERCURRASSE'])],
+          ['非流动资产',new Set(['TOTALNONCASSETS','EQUIINVE','INVEPROP','FIXEDASSETOT','FIXEDASSENET','CONSPROG','CONSPROGTOT','INTAASSET','GOODWILL','LOGPREPEXPE','DEFETAXASSET','OTHERNONCASSE'])],
+          ['流动负债',new Set(['TOTALCURRLIAB','SHORTTERMBORR','TRADFINLIAB','NOTESPAYA','ACCOPAYA','NOTESACCOPAYA','CONTRACTLIAB','ADVAPAYM','COPEWORKERSAL','TAXESPAYA','OTHERCURRELIABI','EXPECURRLIAB'])],
+          ['非流动负债',new Set(['TOTALNONCLIAB','LONGBORR','BDSPAYA','LEASELIAB','LONGPAYA','DEFEINCOTAXLIAB','OTHERNONCLIABI'])],
+          ['所有者权益',new Set(['RIGHAGGR','TOTSHAREQUI','PARESHARRIGH','MINYSHARRIGH','CAPISTOCK','CAPISURP','RESE','UNDIPROF','TREASTK','OCL','OTHEQUIN','GENERISKRESE'])]
+        ],
+        lrb:[
+          ['营业收入',new Set(['BIZINCO','BIZTOTINCO','EARNPREM','INTEINCO','POUNINCO','NETINTEINCO','NETPOUNINCO','NETINVINCO'])],
+          ['营业成本与税费',new Set(['BIZCOST','BIZTOTCOST','BIZTAX'])],
+          ['期间费用',new Set(['SALESEXPE','MANAEXPE','DEVEEXPE','FINEXPE'])],
+          ['其他经营损益',new Set(['OTHERINCO','INVEINCO','VALUECHGLOSS','CREDITIMPLOSSEPROFIT','ASSEIMPALOSSPROFIT','ASSETSDISLINCO','OPERPROFIT','PERPROFIT'])],
+          ['利润与所得税',new Set(['NONOREVE','NONOEXPE','TOTPROFIT','INCOTAXEXPE','INCOTAX','NETPROFIT','PARENETP','NETPARECOMPPROF','MINYSHARRIGH'])]
+        ],
+        llb:[
+          ['经营活动现金流',new Set(['BIZCASHINFL','LABORGETCASH','TAXREFD','OTHERBIZGETCASH','RECEOTHERBIZCASH','BIZCASHOUTF','LABOPAYC','PAYWORKCASH','PAYTAX','PAYACTICASH','PAYOTHERBIZCASH','MANANETR','DEPONETR','CUSTDEPO','CUSTLOANNETDECR','LOANSNETR','FININSTDEPO','FININSTNETR','FDSBORRNETR','LENDCASHOUTFNET','DEPOTOCENBANK','DEPOTOOTHERBANKS','WITHFINDEPONET','REDUFINDEPONET','REPAYFINBORRNET','REPAYCENBORRNET'])],
+          ['投资活动现金流',new Set(['INVCASHINFL','WITHINVGETCASH','INVERETUGETCASH','DISPFIXASSEGETCASH','DISPEQUIINVGETC','INVCASHOUTF','ACQUASSETCASH','INVPAYC','PAYINVECASH','INVNETCASHFLOW'])],
+          ['筹资活动现金流',new Set(['FINCASHINFL','LOANGETCASH','RECEFROMLOAN','CENBANKBORRNETINCR','BANKLOANNETINCR','INVRECECASH','INCREQUIGETCASH','ISSBDRECECASH','FINCASHOUTF','DEBTPAYCASH','DIVIPROFPAYCASH','FINNETCFLOW'])],
+          ['其他项目',new Set(['CHGEXCHGCHGS','EXCHCHGCASHEFFE','CASHEQUINETINCR','CASHNETR','CASHEQUIOPENBALA','CASHEQUFINBALA','CASHOPENBALA','CASHFINALBALA'])]
+        ]
+      }[kind]||[];
+      const buckets=groups.map(([label,codes])=>({label,rows:[]}));
+      const other={label:'其他科目',rows:[]};
+      const inferred=new Map();
+      for(const item of rows){
+        let bucket=buckets.find((group,index)=>groups[index][1].has(item.field));
+        if(!bucket){
+          let label='其他科目';
+          if(kind==='fzb'){
+            const title=item.label;
+            if(item.balance_side==='liabilities')label=/非流动|长期|租赁负债|应付债券|递延所得税负债|预计负债/.test(title)?'非流动负债':'流动负债';
+            else if(item.balance_side==='equity')label='所有者权益';
+            else if(/非流动|长期|固定资产|无形资产|商誉|在建工程|投资性房地产|使用权资产|递延所得税资产|长期待摊|债权投资/.test(title))label='非流动资产';
+            else if(/流动|货币资金|现金|应收|存货|预付|结算备付|拆出资金|合同资产|持有待售|一年内到期/.test(title))label='流动资产';
+            else label='其他资产';
+          }
+          else if(kind==='lrb')label=/收入|收益/.test(item.label)?'其他收入与收益':/费用|成本|税金|损失/.test(item.label)?'其他成本与费用':'其他利润项目';
+          else if(kind==='llb')label=/投资|处置|购建|股权投资|债券投资|证券投资|收回投资|取得投资收益/.test(item.label)?'投资活动现金流':/筹资|借款|发行|吸收投资|股本|债务|股利|偿还|融资/.test(item.label)?'筹资活动现金流':/经营|商品|劳务|职工|税费|保费|再保险|存款|贷款|拆入|拆出|中央银行|同业|回购|金融机构|利息|手续费|委托|贴现|客户/.test(item.label)?'经营活动现金流':'其他项目';
+          if(label==='其他科目')other.rows.push(item);
+          else if(buckets.some(group=>group.label===label))buckets.find(group=>group.label===label).rows.push(item);
+          else {if(!inferred.has(label))inferred.set(label,{label,rows:[]});inferred.get(label).rows.push(item);}
+        } else bucket.rows.push(item);
+      }
+      const renderRows=(items,shareDenominator=null)=>items.map(x=>{const old=prior.get(x.item_source+':'+x.field),ratio=kind==='fzb'?balanceShare(x,data.values):null;
           const share=x.unit==='元'&&x.value!==null?(kind==='fzb'?(ratio.pct===null?'—':ratio.pct.toFixed(2)+'%'):
+            kind==='llb'?shareDenominator?.value!==null&&shareDenominator?.value!==undefined&&shareDenominator.value!==0?(x.value/shareDenominator.value*100).toFixed(2)+'%':'—':
             denominator>0?(x.value/denominator*100).toFixed(2)+'%':'—'):'—';
           const diff=x.value!==null&&old?.value!==null&&old?.value!==undefined&&old.unit===x.unit?amount({...x,value:x.value-old.value},currentUnit):'—';
-          return `<tr><td>${esc(x.label)}</td><td class="${x.value===null?'fs-missing':''}" title="${esc(x.reason || '')}">${esc(amount(x,currentUnit))}</td><td>${share}</td><td>${esc(amount(old,currentUnit))}</td><td>${esc(diff)}</td><td>${sourceHTML(x,currentUnit,old,null,{kind,mode:data.mode})}</td></tr>`;}).join('')+'</tbody></table>';
+          return `<tr><td>${esc(x.label)}</td><td class="${x.value===null?'fs-missing':''}" title="${esc(x.reason || '')}">${esc(amount(x,currentUnit))}</td><td>${share}</td><td>${esc(amount(old,currentUnit))}</td><td>${esc(diff)}</td><td>${sourceHTML(x,currentUnit,old,null,{kind,mode:data.mode})}</td></tr>`;}).join('');
+      const header='<table class="fs-table"><thead><tr><th>科目</th><th>本期</th><th>占比</th><th>比较期</th><th>变动额</th><th>说明</th></tr></thead><tbody>';
+      const renderGroup=group=>{
+        if(kind!=='llb')return `<details class="fs-report-group" open><summary>${esc(group.label)}</summary>${header}${renderRows(group.rows)}</tbody></table></details>`;
+        const directions=[['流入',new Set(['BIZCASHINFL','INVCASHINFL','FINCASHINFL','LABORGETCASH','TAXREFD','OTHERBIZGETCASH','RECEOTHERBIZCASH','WITHINVGETCASH','INVERETUGETCASH','DISPFIXASSEGETCASH','DISPEQUIINVGETC','DISPSUBSGETCASH','LOANGETCASH','RECEFROMLOAN','CENBANKBORRNETINCR','BANKLOANNETINCR','INVRECECASH','INCREQUIGETCASH','ISSBDRECECASH','DEPONETR','CUSTDEPO','CUSTLOANNETDECR','FDSBORRNETR','FININSTNETR','WITHFINDEPONET'])],
+          ['流出',new Set(['BIZCASHOUTF','INVCASHOUTF','FINCASHOUTF','LABOPAYC','PAYWORKCASH','PAYTAX','PAYACTICASH','PAYOTHERBIZCASH','ACQUASSETCASH','INVPAYC','PAYINVECASH','DEBTPAYCASH','DIVIPROFPAYCASH','LOANSNETR','DEPOTOCENBANK','DEPOTOOTHERBANKS','REPAYFINBORRNET','REPAYCENBORRNET','REDUFINDEPONET'])],
+          ['净额',new Set(['MANANETR','INVNETCASHFLOW','FINNETCFLOW'])],['其他流量',new Set()]];
+        const branches=Object.fromEntries(directions.map(([label])=>[label,[]]));
+        for(const item of group.rows){
+          let direction=directions.find(([,codes])=>codes.has(item.field))?.[0];
+          if(!direction)direction=/净额|净现金流/.test(item.label)?'净额':/流入|收到|收取|收回|取得借款|净增加/.test(item.label)?'流入':/流出|支付|偿还|缴纳|购建|净减少/.test(item.label)?'流出':'其他流量';
+          branches[direction].push(item);
+        }
+        const subtotalFields={'经营活动现金流':{流入:'BIZCASHINFL',流出:'BIZCASHOUTF'},'投资活动现金流':{流入:'INVCASHINFL',流出:'INVCASHOUTF'},'筹资活动现金流':{流入:'FINCASHINFL',流出:'FINCASHOUTF'}}[group.label]||{};
+        return `<details class="fs-report-group" open><summary>${esc(group.label)}</summary>`+directions.filter(([label])=>branches[label].length).map(([label])=>{
+          const subtotal=subtotalFields[label]?data.sections[kind].full_items.find(item=>item.field===subtotalFields[label]):null;
+          return `<details class="fs-report-subgroup" open><summary>${esc(label)}</summary>${header}${renderRows(branches[label],subtotal)}</tbody></table></details>`;
+        }).join('')+`</details>`;
+      };
+      return [...buckets,...inferred.values()].filter(group=>group.rows.length).map(renderGroup).join('')+
+        (other.rows.length?`<details class="fs-report-group" open><summary>${esc(other.label)}</summary>${header}${renderRows(other.rows)}</tbody></table></details>`:'');
     }
     function balanceChart(section) {
       const valid=section.items.filter(x=>x.value!==null);
@@ -491,7 +555,7 @@
       el('fs-secondary-note').textContent=kind==='fzb'?(data.financial_company?'金融企业按资产、负债与权益总额展示，不套用工业企业流动结构。':'流动与非流动结构；资产和负债＋权益使用同一金额坐标。'):kind==='lrb'?'对照同一期间窗口；财务费用保留原始正负号，不重复加入利息费用子项目。':'同时展示流入与流出小计，避免净额掩盖现金进出规模；负值保留来源符号。';
       if(active){if(kind==='fzb')balanceChart(section);else{drawWaterfall(data.charts[kind],titles[kind]);secondaryFlows(section);if(kind==='lrb'&&!data.financial_company)expenseChart(section);}}
       const denominator=kind==='fzb'?data.values.assets.value:kind==='lrb'?data.values.revenue.value:null;
-      el('fs-table-note').textContent=`本期 ${data.period}，比较期 ${section.baseline}；${kind==='fzb'?'资产占总资产、负债占总负债、权益占股东权益':kind==='lrb'?'占比以营业收入为分母':'现金流量不统一计算占比'}。金额单位 ${unit}，每股指标单列单位。`;
+      el('fs-table-note').textContent=`本期 ${data.period}，比较期 ${section.baseline}；${kind==='fzb'?'占比＝科目金额÷对应合计：资产类÷资产总计，负债类÷负债合计，权益类÷股东权益合计。':kind==='lrb'?'占比＝科目金额÷营业收入×100%；营业总收入因包含其他业务收入可能略高于100%，费用保留正负号。':'流入／流出科目占比＝科目金额÷对应活动的流入／流出小计×100%；净额和其他项目不计算该占比。'}金额单位 ${unit}，每股指标单列单位。`;
       el('fs-table').innerHTML=table(section.items,section.comparison_items,denominator);
       el('fs-full-table').innerHTML=table(section.full_items,section.comparison_items,denominator);
       const obs=new Map(data.observations.map(x=>[x.key,x]));
