@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard.dcf import (calculate_dcf, calculate_growth_dcf, discount_cash_flows,
+from quarterly_dashboard.dcf import (calculate_beta, calculate_debt_cost, calculate_effective_tax,
+                                     sum_interest_bearing_debt, parse_sina_gov_bond_yields, calculate_dcf, calculate_growth_dcf, discount_cash_flows,
                                      forecast_standard, forecast_three_stage, estimate_wacc,
                                      read_dcf, _growth_recommendation)
 from quarterly_dashboard.fundamental_service import SOURCE
@@ -133,10 +134,119 @@ def test_growth_risk_warnings_do_not_clip_assumptions():
 
 def test_wacc_matches_weighted_cost_and_missing_is_not_zero():
     assert estimate_wacc(2,1.2,5,4,25,20)['wacc_pct'] == pytest.approx(7)
+    assert estimate_wacc(2,-0.5,5,4,25,20)['equity_cost_pct'] == pytest.approx(-0.5)
     with pytest.raises(ValueError):
         estimate_wacc(2,None,5,4,25,20)
     with pytest.raises(ValueError):
         estimate_wacc(2,1,5,4,25,101)
+
+
+def test_beta_uses_aligned_weekly_returns_and_preserves_negative_beta():
+    from datetime import date, timedelta
+    end=date(2025,12,31); stock=[]; market=[]; m=s=100.0
+    for i in range(60):
+        day=(end-timedelta(days=(59-i)*7)).isoformat()
+        stock.append({'date':day,'close':s});market.append({'date':day,'close':m})
+        change=.01 if i%2 else -.01
+        m*=1+change;s*=1-.5*change
+    result=calculate_beta(stock,market,years=2,as_of='2025-12-31',min_samples=50)
+    assert result['value']==pytest.approx(-.5,abs=1e-8)
+    assert result['sample_count']==59
+
+
+def test_beta_marks_short_history_unavailable():
+    rows=[{'date':f'2025-01-{day:02d}','close':100+day} for day in range(1,6)]
+    result=calculate_beta(rows,rows,years=5,as_of='2025-12-31')
+    assert result['value'] is None and result['status']=='unavailable'
+
+
+def test_sina_bond_parser_uses_latest_close_not_later_than_asof():
+    rows=[{'date':'2025-01-02','close':1.678},{'date':'2025-01-03','close':1.7},
+          {'date':'2025-01-01','close':None}]
+    result=parse_sina_gov_bond_yields(rows,'2025-01-02')
+    assert result['value']==1.678 and result['as_of_date']=='2025-01-02'
+    assert result['status']=='observed'
+    assert result['stale'] is False
+
+
+def test_sina_bond_parser_reports_missing_history_without_fabricating_yield():
+    result=parse_sina_gov_bond_yields([{'date':'2025-01-03','close':1.7}], '2025-01-02')
+    assert result['value'] is None and result['status']=='unavailable'
+
+
+def test_risk_free_rate_caches_successful_akshare_result_in_memory(monkeypatch):
+    from quarterly_dashboard import dcf
+    dcf._RISK_FREE_CACHE.clear()
+    calls=[]
+    monkeypatch.setattr(dcf,'_call_akshare_gov_bond_history',lambda: calls.append(1) or [
+        {'date':'2025-01-02','close':1.678}])
+    first=dcf.fetch_risk_free_rate('2025-01-02')
+    second=dcf.fetch_risk_free_rate('2025-01-02')
+    assert first['value']==second['value']==1.678
+    assert len(calls)==1
+    assert first['source'].startswith('AkShare bond_gb_zh_sina')
+    dcf._RISK_FREE_CACHE.clear()
+
+
+def test_interest_bearing_debt_sum_reports_partial_fields_without_zero_filling():
+    fields=('SHORTTERMBORR','SHORTTERMBDSPAYA','DUENONCLIAB','LONGBORR','BDSPAYA','LEASELIAB')
+    raw={'data':[{'item_field':key,'item_value':value} for key,value in zip(fields,[10,2,3,20,4,1])]
+         +[{'item_field':'TOTLIAB','item_value':999}]}
+    result=sum_interest_bearing_debt(raw)
+    assert result['value']==40
+    assert result['missing']==[]
+    partial=sum_interest_bearing_debt({'data':raw['data'][:-2]})
+    assert partial['value']==39
+    assert partial['complete'] is False
+    assert partial['missing']==['LEASELIAB']
+    assert sum_interest_bearing_debt({'data':[]})['value'] is None
+
+
+def test_auto_wacc_uses_annual_interest_tax_latest_interim_debt_and_same_day_market_cap(facts,monkeypatch):
+    import json
+    from quarterly_dashboard import dcf
+    monkeypatch.setattr(dcf,'fetch_risk_free_rate',lambda as_of:dict(value=None,status='unavailable'))
+    six=('SHORTTERMBORR','SHORTTERMBDSPAYA','DUENONCLIAB','LONGBORR','BDSPAYA','LEASELIAB')
+    def balance(values): return raw('fzb',list(zip(six,six,values)))
+    identity=facts.ensure_instrument('600519','测试企业')
+    def put_report(conn,kind,period,document):
+        run_id=conn.execute('SELECT id FROM sync_runs WHERE instrument_id=? AND dataset=? ORDER BY id DESC LIMIT 1',(identity,'financial:'+kind)).fetchone()[0]
+        payload=json.dumps(document)
+        existing=conn.execute('SELECT 1 FROM financial_reports WHERE instrument_id=? AND source=? AND report_type=? AND period=?',(identity,SOURCE,kind,period)).fetchone()
+        if existing:
+            conn.execute('UPDATE financial_reports SET raw_json=?,obtained_at=? WHERE instrument_id=? AND source=? AND report_type=? AND period=?',(payload,'2026-10-15',identity,SOURCE,kind,period))
+        else:
+            conn.execute('INSERT INTO financial_reports(instrument_id,source,report_type,period,raw_json,content_hash,obtained_at,run_id) VALUES (?,?,?,?,?,?,?,?)',(identity,SOURCE,kind,period,payload,'test-'+period,'2026-10-15',run_id))
+    with facts.connection(write=True) as conn:
+        put_report(conn,'fzb','2024-12-31',balance([10,None,0,20,5,1]))
+        put_report(conn,'fzb','2025-12-31',balance([12,None,0,25,7,1]))
+        put_report(conn,'fzb','2026-06-30',balance([15,None,0,30,10,5]))
+        put_report(conn,'lrb','2025-12-31',raw('lrb',[
+            ('INTERESTEXPENSE','利息费用',8),('INCOTAXEXPE','所得税费用',20),('TOTPROFIT','利润总额',100)]))
+    with facts.connection(write=True) as conn:
+        conn.execute("INSERT INTO collection_batches(id,operation_id,domain,dataset,source_system,trigger_type,status,started_at) VALUES (1,'wacc','market','snapshot','test','manual','complete','2026-06-30')")
+        conn.execute("INSERT INTO collection_sources(id,batch_id,source_system,dataset,request_key,attempt_no,request_json) VALUES (1,1,'test','snapshot','wacc',1,'{}')")
+        conn.execute("INSERT INTO market_trade_snapshot(exchange,trade_date,version,is_latest,definition_version,batch_id,source_id,content_hash,obtained_at,updated_at,security_code,total_market_cap) VALUES ('sh','2026-06-30',1,1,'em-valueanalysis-v1',1,1,'hash','2026-06-30','2026-06-30','600519',900)")
+    result=dcf.build_auto_wacc(facts,'600519',as_of='2026-10-15')
+    params=result['parameters']
+    assert params['kd']['value']==pytest.approx(8/((36+45)/2)*100)
+    assert params['kd']['partial'] is True
+    assert params['tax']['history_value']==20
+    assert params['tax']['value']==20
+    assert params['tax']['status']=='estimated'
+    assert params['weight']['value']==pytest.approx(60/960*100)
+    assert params['weight']['as_of_date']=='2026-06-30'
+    assert params['weight']['partial'] is True
+    assert any('部分估算' in warning for warning in result['warnings'])
+
+
+def test_cost_of_debt_and_effective_tax_reject_invalid_denominators_and_extremes():
+    assert calculate_debt_cost(10,90,110)==pytest.approx(10)
+    assert calculate_debt_cost(10,0,0) is None
+    assert calculate_debt_cost(100,1,1) is None
+    assert calculate_effective_tax(25,100)==25
+    assert calculate_effective_tax(25,0) is None
+    assert calculate_effective_tax(25,-100) is None
 
 
 def save(db, kind, records):

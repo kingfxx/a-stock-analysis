@@ -4,6 +4,8 @@
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const num = text => String(text ?? '').trim() === '' ? null : Number(text);
+  const waccNumber = value => finite(value) ? Number(value.toFixed(3)).toString() : '';
+  const waccDecimal = value => finite(value) ? Number(value.toFixed(3)).toString() : '—';
   const parameterError = '基准FCF或增长／折现参数缺失或无效。';
   function forecastStandard(base, growth) {
     return Array.from({length:10}, (_,i)=>base*Math.pow(1+growth/100,i+1));
@@ -45,7 +47,7 @@
   }
   function wacc(values) {
     if (!['rf','beta','erp','cost','tax','weight'].every(key=>finite(values[key]))) return {error:'请完整填写六项资本成本假设，不将缺项视为零。'};
-    if (values.rf<0||values.beta<0||values.erp<0||values.cost<0||values.tax<0||values.tax>100||values.weight<0||values.weight>100) return {error:'收益率、Beta、ERP和债务成本不能为负；税率与债务权重须在 0%—100%。'};
+    if (values.rf < -5||values.rf>20||values.beta < -10||values.beta>10||values.erp<0||values.cost<0||values.tax<0||values.tax>100||values.weight<0||values.weight>100) return {error:'Rf须在−5%至20%；ERP和债务成本不能为负；Beta须在−10至10；税率与债务权重须在0%—100%。'};
     const equity=values.rf+values.beta*values.erp;
     const value=equity*(1-values.weight/100)+values.cost*(1-values.tax/100)*values.weight/100;
     return finite(value)&&value>0 ? {value,equity} : {error:'估算折现率须为有效正值。'};
@@ -65,6 +67,7 @@
     panel.id='dcf-panel';panel.className='dcf-panel';panel.hidden=true;panel.setAttribute('aria-label','DCF估值计算');
     button.closest('.panel').querySelector('.panel-head').after(panel);
     let payload=null,loading=false,stale=false;
+    let autoWacc=null;
     const code=JSON.parse(document.getElementById('payload').textContent).code;
     const el=id=>panel.querySelector('#'+id);
     const input=(id,label,value,step='0.1')=>`<label>${label}<input id="${id}" type="number" step="${step}" value="${value}" /></label>`;
@@ -77,10 +80,9 @@
       <span id="dcf-stage1-control" hidden>${input('dcf-stage1','第1—3年增长率（%）',15)}</span><span id="dcf-stage2-control" hidden>${input('dcf-stage2','第4—7年增长率（%）',8)}</span><span id="dcf-stage3-control" hidden>${input('dcf-stage3','第8—10年增长率（%）',4)}</span>${input('dcf-discount','折现率（%）',9)}${input('dcf-terminal','永续增长率（%）',2)}</div>
       <p id="dcf-mode-basis" class="dcf-note"></p><p id="dcf-base-basis" class="dcf-note"></p><div id="dcf-recommendations" class="dcf-recommendations"></div>
       <p id="dcf-status" class="dcf-warning" role="status" aria-live="polite"></p><div id="dcf-forecast-chart" class="dcf-forecast-chart" hidden aria-label="未来10年FCF预测及三个增长阶段"></div><div id="dcf-results" aria-live="polite"></div>
-      <details class="dcf-details"><summary>WACC 人工假设估算器</summary><p class="dcf-note">系统暂无可靠自动资本成本来源。以下输入均为人工假设，输入来源及日期后才可应用；简化FCF应用WACC也不能使其成为专业FCFF。</p>
-      <div class="dcf-controls">${input('dcf-rf','10年期国债收益率（%）','')}${input('dcf-beta','Beta','','0.01')}${input('dcf-erp','股权风险溢价（%）','')}${input('dcf-cost','税前债务成本（%）','')}${input('dcf-tax','有效税率（%）','')}${input('dcf-weight','债务市值权重 D/(D+E)（%）','')}
-      <label>各项来源／估算依据<input id="dcf-wacc-source" type="text" placeholder="注明国债、Beta、ERP及资本结构依据" /></label><label>假设依据日期<input id="dcf-wacc-date" type="date" /></label></div>
-      <p class="dcf-note">Ke＝Rf＋Beta×ERP；WACC＝Ke×(1−债务权重)＋Kd×(1−税率)×债务权重。</p><p id="dcf-wacc-result" role="status"></p><button type="button" id="dcf-apply-wacc">估算并应用折现率</button></details>
+      <details class="dcf-details"><summary>WACC 自动估算</summary><p class="dcf-note">估值基准日：<span id="dcf-wacc-as-of">按今天自动选择</span>。自动估算优先读取本地已保存行情和财报；不补采历史行情。ERP为6%模型假设。简化FCF并非严格FCFF，使用WACC仍需核对口径。</p>
+      <div class="dcf-controls"><label>Beta窗口<select id="dcf-beta-window"><option value="2">2年</option><option value="3">3年</option><option value="5" selected>5年</option></select></label><label>ERP情景<select id="dcf-erp-scenario"><option value="5">5% 假设</option><option value="6" selected>6% 假设</option><option value="7">7% 假设</option></select></label><button type="button" id="dcf-auto-wacc">自动估算</button><button type="button" id="dcf-reset-wacc" disabled>恢复自动估算值</button></div>
+      <div class="dcf-controls">${input('dcf-rf','10年期国债收益率（%）','','0.001')}${input('dcf-beta','Beta','','0.001')}${input('dcf-erp','股权风险溢价（%）','','0.001')}${input('dcf-cost','税前债务成本（%）','','0.001')}${input('dcf-tax','历史有效税率（%）','','0.001')}${input('dcf-weight','债务市值权重 D/(D+E)（%）','','0.001')}</div><div id="dcf-wacc-evidence"></div><p class="dcf-note">Ke＝Rf＋Beta×ERP；WACC＝Ke×(1−债务权重)＋Kd×(1−税率)×债务权重。</p><p id="dcf-wacc-result" role="status"></p><div id="dcf-wacc-breakdown"></div><h4>Beta × ERP 敏感性（WACC）</h4><div id="dcf-wacc-sensitivity"></div><button type="button" id="dcf-apply-wacc">应用WACC到折现率</button></details>
       <details class="dcf-details"><summary>专业FCFF模式 · 数据缺口与调整</summary><div id="dcf-professional"></div></details>
       <details class="dcf-details"><summary>历史财务与来源（金额：亿元）</summary><div id="dcf-history" class="dcf-scroll"></div></details>`;
     const table=(headers,rows)=>`<div class="dcf-scroll"><table><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(cell=>`<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
@@ -193,12 +195,57 @@
         el('dcf-window').addEventListener('change',setBase);
         ['base','growth','stage1','stage2','stage3','discount','terminal'].forEach(key=>el('dcf-'+key).addEventListener('input',render));
         panel.querySelectorAll('[data-dcf-recommend]').forEach(btn=>btn.addEventListener('click',()=>{el(btn.dataset.dcfRecommend).value=btn.dataset.value;render();}));
+        const currentWaccValues=()=>{
+          const ids={rf:'rf',beta:'beta',erp:'erp',kd:'cost',tax:'tax',weight:'weight'};
+          return Object.fromEntries(Object.entries(ids).map(([key,id])=>{
+            const value=num(el('dcf-'+id).value),automatic=autoWacc?.parameters?.[key]?.value;
+            return [key,finite(automatic)&&value===Number(waccNumber(automatic))?automatic:value];
+          }));
+        };
+        const renderWacc=()=>{
+          const values=currentWaccValues();values.cost=values.kd;delete values.kd;
+          const estimate=wacc(values);el('dcf-wacc-result').textContent=estimate.error||`Ke ${waccDecimal(estimate.equity)}%；WACC ${waccDecimal(estimate.value)}%。`;
+          if(estimate.error){el('dcf-wacc-breakdown').innerHTML='';el('dcf-wacc-sensitivity').innerHTML='';return;}
+          const dw=values.weight/100,afterTax=values.cost*(1-values.tax/100),equityContribution=estimate.equity*(1-dw),debtContribution=afterTax*dw;
+          el('dcf-wacc-breakdown').innerHTML=`<p>Ke：${waccDecimal(estimate.equity)}% · 税后债务成本：${waccDecimal(afterTax)}% · 股权权重：${waccDecimal(100-values.weight)}% · 债务权重：${waccDecimal(values.weight)}% · 股权贡献：${waccDecimal(equityContribution)}% · 债务贡献：${waccDecimal(debtContribution)}% · WACC：${waccDecimal(estimate.value)}%</p>`;
+          const betas=[values.beta-0.5,values.beta,values.beta+0.5],erps=[values.erp-1,values.erp,values.erp+1];
+          el('dcf-wacc-sensitivity').innerHTML=table(['Beta / ERP',...erps.map(v=>waccDecimal(v)+'%')],betas.map(b=>[waccDecimal(b),...erps.map(e=>{const result=wacc({...values,beta:b,erp:e});return result.error?'—':waccDecimal(result.value)+'%';})]));
+        };
+        const showWaccEvidence=()=>{
+          if(!autoWacc)return;
+          const ids={rf:'rf',beta:'beta',erp:'erp',kd:'cost',tax:'tax',weight:'weight'};
+          el('dcf-wacc-evidence').innerHTML=table(['参数','数值/历史参考','状态','来源、日期与方法'],Object.entries(autoWacc.parameters||{}).map(([key,p])=>{
+            const input=num(el('dcf-'+ids[key]).value),overridden=finite(input)&&input!==Number(waccNumber(p.value));
+            const value=finite(input)?waccDecimal(input)+(key==='beta'?'':'%'):finite(p.history_value)?'历史 '+waccDecimal(p.history_value)+'%':'不可用';
+            const status=overridden?'人工覆盖':key==='tax'&&finite(p.history_value)?(p.history_status==='estimated'?'历史有效税率，自动用于WACC':'历史值异常，不能采用'):({observed:'实测',estimated:'估算',assumption:'假设',unavailable:'不可用'})[p.status]||p.status||'不可用';
+            const sample=key==='beta'?`共同周收益率样本${p.sample_count??0}组；区间${p.start||'未记录'}—${p.end||'未记录'}`:null;
+            return [esc(({rf:'Rf',beta:'Beta',erp:'ERP',kd:'Kd',tax:'税率',weight:'债务权重'})[key]||key),value,esc(status),esc([p.source,p.as_of_date||'未记录',sample,p.method,p.reason,p.stale?'数据超过7天，可能过期':null].filter(Boolean).join('；'))];
+          }));
+          if(autoWacc.warnings?.length) el('dcf-wacc-evidence').insertAdjacentHTML('beforeend',`<p class="dcf-warning">${autoWacc.warnings.map(esc).join(' ')}</p>`);
+        };
+        ['rf','beta','erp','cost','tax','weight'].forEach(key=>el('dcf-'+key).addEventListener('input',()=>{showWaccEvidence();renderWacc();}));
+        el('dcf-erp-scenario').addEventListener('change',()=>{el('dcf-erp').value=el('dcf-erp-scenario').value;showWaccEvidence();renderWacc();});
+        el('dcf-auto-wacc').addEventListener('click',async()=>{
+          el('dcf-wacc-result').textContent='正在读取本地历史价格和财务数据…';
+          try{
+            const res=await fetch('/api/dcf/wacc?'+new URLSearchParams({code,years:el('dcf-beta-window').value}));
+            if(!res.ok)throw new Error('自动估算请求失败');autoWacc=await res.json();
+            el('dcf-wacc-as-of').textContent=autoWacc.as_of_date||'今天';
+            const ids={rf:'rf',beta:'beta',erp:'erp',kd:'cost',tax:'tax',weight:'weight'};
+            for(const [key,id] of Object.entries(ids)){const p=autoWacc.parameters?.[key];if(p&&finite(p.value))el('dcf-'+id).value=waccNumber(p.value);else if(p&&key!=='erp')el('dcf-'+id).value='';}
+            if(finite(autoWacc.parameters?.erp?.value))el('dcf-erp-scenario').value=String(autoWacc.parameters.erp.value);
+            showWaccEvidence();
+            el('dcf-reset-wacc').disabled=false;renderWacc();
+          }catch(error){el('dcf-wacc-result').textContent=error.message;}
+        });
+        el('dcf-reset-wacc').addEventListener('click',()=>{if(!autoWacc)return;const ids={rf:'rf',beta:'beta',erp:'erp',kd:'cost',tax:'tax',weight:'weight'};for(const [key,id] of Object.entries(ids)){const p=autoWacc.parameters?.[key];el('dcf-'+id).value=waccNumber(p?.value);}el('dcf-erp-scenario').value=String(autoWacc.parameters?.erp?.value||6);showWaccEvidence();renderWacc();});
         el('dcf-apply-wacc').addEventListener('click',()=>{
-          const values=Object.fromEntries(['rf','beta','erp','cost','tax','weight'].map(key=>[key,num(el('dcf-'+key).value)]));
-          const estimate=wacc(values),basis=el('dcf-wacc-source').value.trim(),date=el('dcf-wacc-date').value;
-          if (estimate.error||!basis||!/^\d{4}-\d{2}-\d{2}$/.test(date)) {el('dcf-wacc-result').textContent=estimate.error||'请填写人工假设的来源依据和日期。';return;}
-          el('dcf-discount').value=estimate.value.toFixed(4);
-          el('dcf-wacc-result').textContent=`已应用人工WACC假设 ${estimate.value.toFixed(4)}%（Ke ${decimal(estimate.equity)}%）；${basis}；依据日期 ${date}。`;
+          const values=currentWaccValues();values.cost=values.kd;delete values.kd;
+          const estimate=wacc(values);
+          if (estimate.error) {el('dcf-wacc-result').textContent=estimate.error;return;}
+          if(estimate.value<=num(el('dcf-terminal').value)){el('dcf-wacc-result').textContent='WACC必须高于当前永续增长率，暂不应用。';return;}
+          el('dcf-discount').value=waccNumber(estimate.value);
+          el('dcf-wacc-result').textContent=`已将WACC ${waccDecimal(estimate.value)}%（Ke ${waccDecimal(estimate.equity)}%）应用到当前DCF折现率。`;
           render();
         });
         setBase();setMode();

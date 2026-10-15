@@ -28,7 +28,7 @@ from .fundamental_service import FundamentalService
 from .announcement_service import AnnouncementService
 from .disclosure_dates import is_earnings_notice
 from .statements import read_statements
-from .dcf import read_dcf
+from .dcf import read_dcf, build_auto_wacc
 from .industry_service import IndustryService
 from .maintenance import MaintenanceService
 from .index_collection import start_operation, run_operation, cancel_operation, recover_operations
@@ -1357,6 +1357,17 @@ class Handler(BaseHTTPRequestHandler):
                 status, data = 503, {'error': str(exc)}
             body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode('utf-8')
             content_type = 'application/json; charset=utf-8'
+        elif parsed.path == "/api/dcf/wacc":
+            query = parse_qs(parsed.query)
+            try:
+                years=int(query.get('years',['5'])[0])
+                data=build_auto_wacc(Database(DATABASE_PATH),query.get('code',['601919'])[0],years=years)
+            except (ValueError,TypeError) as exc:
+                status,data=400,{'error':str(exc)}
+            except (OSError,StorageError,sqlite3.DatabaseError) as exc:
+                status,data=503,{'error':str(exc)}
+            body=json.dumps(data,ensure_ascii=False,allow_nan=False).encode('utf-8')
+            content_type='application/json; charset=utf-8'
         elif parsed.path == "/api/statements":
             query = parse_qs(parsed.query)
             try:
