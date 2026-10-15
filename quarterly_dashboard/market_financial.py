@@ -8,6 +8,8 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from uuid import uuid4
 
 from .industry_sources import EM
@@ -185,85 +187,158 @@ def _cached_financial_pages(db, dataset, period, scope, spec, same_day):
     return {}
 
 
-def collect_public(db, operation_id, period, request_collector, progress=lambda message:None, *, recheck=False):
-    """Collect one report period into public request provenance; caller publishes atomically."""
+def _collect_public_dataset(db, operation_id, period, dataset, spec, request_collector, progress,
+                            *, recheck=False, progress_state=None, industry_profile=None):
     from .collection import (begin_batch as begin_public_batch, parsed_source, read_source,
                              finish_batch, reusable_source)
-    data=[]
-    for dataset,spec in FIELDS.items():
-        public_dataset='market.financial.'+dataset
-        scope={'period':period,'report_name':spec['report'],'columns':'ALL','page_size':500,
-               'security_type_code':'058001001','date_field':spec.get('date_field','REPORT_DATE'),
-               'definition_version':spec['definition_version']}
-        batch_id=begin_public_batch(db,operation_id,public_dataset,'eastmoney',period,period,scope=scope,
-            frequency='quarterly',trigger='manual',domain='market',parser_version='market-financial-v1',
-            definition_version=spec['definition_version'],universe_version='eastmoney-a-share-v1')
-        pages,count,page=1,None,1
-        rows=[];sources=[]
-        same_day=datetime.fromtimestamp(request_collector.clock(),timezone.utc).date().isoformat()
-        cached_pages={} if recheck else _cached_financial_pages(db,dataset,period,scope,spec,same_day)
-        try:
-            while page<=pages:
-                date_field=spec.get('date_field','REPORT_DATE')
-                params={'reportName':spec['report'],'columns':'ALL',
-                    'filter':f'({date_field}=\'{period}\')(SECURITY_TYPE_CODE="058001001")',
-                    'sortColumns':'SECURITY_CODE','sortTypes':'1','pageSize':500,'pageNumber':page,
-                    'source':'WEB','client':'WEB'}
-                def healthy(response):
-                    try:
-                        payload=response.json()
-                        return (payload.get('code')==9201 and payload.get('message')=='返回数据为空') or (
-                            payload.get('success') is True and isinstance((payload.get('result') or {}).get('data'),list))
-                    except (ValueError,AttributeError):
-                        return False
-                source_id=reusable_source(db,batch_id,cached_pages[page]) if page in cached_pages else None
-                if source_id is None:
-                    response,source_id=request_collector.get(batch_id,'eastmoney',public_dataset,EM,params,
-                        headers={'User-Agent':'Mozilla/5.0','Referer':'https://data.eastmoney.com/'},
-                        expect='json',healthy_response=healthy)
-                raw,source_record=read_source(db,source_id)
-                source=dict(page_number=page,collection_source_id=source_id,obtained_at=source_record['obtained_at'],
-                    raw_bytes=source_record['raw_bytes'] or 0,stored_bytes=source_record['stored_bytes'] or 0,
-                    params=params,url=EM)
+    public_dataset='market.financial.'+dataset
+    scope={'period':period,'report_name':spec['report'],'columns':'ALL','page_size':500,
+           'security_type_code':'058001001','date_field':spec.get('date_field','REPORT_DATE'),
+           'definition_version':spec['definition_version']}
+    batch_id=begin_public_batch(db,operation_id,public_dataset,'eastmoney',period,period,scope=scope,
+        frequency='quarterly',trigger='manual',domain='market',parser_version='market-financial-v1',
+        definition_version=spec['definition_version'],universe_version='eastmoney-a-share-v1')
+    pages,count,page=1,None,1
+    rows=[];sources=[]
+    same_day=datetime.fromtimestamp(request_collector.clock(),timezone.utc).date().isoformat()
+    cached_pages={} if recheck else _cached_financial_pages(db,dataset,period,scope,spec,same_day)
+    def update(state, message=None):
+        if progress_state:
+            progress_state(dataset, state)
+        if message:
+            progress(message)
+    update({'status':'cached' if cached_pages else 'downloading','page':0,'pages':None,'records':0,'total':None})
+    try:
+        while page<=pages:
+            date_field=spec.get('date_field','REPORT_DATE')
+            params={'reportName':spec['report'],'columns':'ALL',
+                'filter':f'({date_field}=\'{period}\')(SECURITY_TYPE_CODE="058001001")',
+                'sortColumns':'SECURITY_CODE','sortTypes':'1','pageSize':500,'pageNumber':page,
+                'source':'WEB','client':'WEB'}
+            def healthy(response):
                 try:
-                    payload=json.loads(raw)
-                    if payload.get('code')==9201 and payload.get('message')=='返回数据为空' and page==1:
-                        parsed_source(db,source_id,fields=[])
-                        progress(f'{spec["label"]} {period} · 来源明确返回空')
-                        sources.append(source)
-                        pages=0
-                        break
-                    result=payload.get('result') or {}
-                    if not payload.get('success') or not isinstance(result.get('data'),list):
-                        raise ValueError('分页响应无效')
-                    if count is None:
-                        count,pages=result.get('count'),result.get('pages')
-                        if type(count) is not int or not 0<count<=20000 or pages!=math.ceil(count/500):
-                            raise ValueError('范围或分页数量异常')
-                    if result.get('count')!=count or result.get('pages')!=pages:
-                        raise ValueError('分页数量变化，整段未发布')
-                    if len(result['data'])!=min(500,count-(page-1)*500):
-                        raise ValueError('来源分页截断，整段未发布')
-                    for row in result['data']:
-                        if not isinstance(row,dict) or not isinstance(row.get(date_field),str) or row[date_field][:10]!=period:
-                            raise ValueError('来源报告期不匹配')
-                        normalized(dataset,row,period)
-                        if set(row)!=set(spec['fields']):
-                            raise ValueError('接口字段与 ALL 映射不一致')
-                    parsed_source(db,source_id,fields=sorted(result['data'][0]) if result['data'] else [])
-                    rows.extend(result['data']);sources.append(source)
-                    progress(f'{spec["label"]} {page}/{pages} 页 · 已获取 {len(rows)}/{count} 家')
-                    page+=1
-                except Exception as exc:
-                    parsed_source(db,source_id,error=type(exc).__name__+': '+str(exc))
-                    raise
-            if len({r['SECURITY_CODE'] for r in rows})!=len(rows):
-                raise ValueError('分页证券代码重复，整段未发布')
-            data.append(dict(dataset=dataset,rows=rows,sources=sources,collection_batch_id=batch_id))
-        except BaseException as exc:
-            finish_batch(db,batch_id,'failed',error=type(exc).__name__+': '+str(exc))
-            raise
-    return data
+                    payload=response.json()
+                    return (payload.get('code')==9201 and payload.get('message')=='返回数据为空') or (
+                        payload.get('success') is True and isinstance((payload.get('result') or {}).get('data'),list))
+                except (ValueError,AttributeError):
+                    return False
+            source_id=reusable_source(db,batch_id,cached_pages[page]) if page in cached_pages else None
+            if source_id is None:
+                profile_kwargs={'industry_profile':industry_profile} if industry_profile else {}
+                response,source_id=request_collector.get(batch_id,'eastmoney',public_dataset,EM,params,
+                    headers={'User-Agent':'Mozilla/5.0','Referer':'https://data.eastmoney.com/'},
+                    expect='json',healthy_response=healthy,**profile_kwargs)
+            raw,source_record=read_source(db,source_id)
+            source=dict(page_number=page,collection_source_id=source_id,obtained_at=source_record['obtained_at'],
+                raw_bytes=source_record['raw_bytes'] or 0,stored_bytes=source_record['stored_bytes'] or 0,
+                params=params,url=EM)
+            try:
+                payload=json.loads(raw)
+                if payload.get('code')==9201 and payload.get('message')=='返回数据为空' and page==1:
+                    parsed_source(db,source_id,fields=[])
+                    update({'status':'validated_empty','page':0,'pages':0,'records':0,'total':0},
+                           f'{spec["label"]} {period} · 来源明确返回空')
+                    sources.append(source)
+                    pages=0
+                    break
+                result=payload.get('result') or {}
+                if not payload.get('success') or not isinstance(result.get('data'),list):
+                    raise ValueError('分页响应无效')
+                if count is None:
+                    count,pages=result.get('count'),result.get('pages')
+                    if type(count) is not int or not 0<count<=20000 or pages!=math.ceil(count/500):
+                        raise ValueError('范围或分页数量异常')
+                    update({'status':'cached' if cached_pages else 'downloading','page':page-1,
+                            'pages':pages,'records':len(rows),'total':count})
+                if result.get('count')!=count or result.get('pages')!=pages:
+                    raise ValueError('分页数量变化，整段未发布')
+                if len(result['data'])!=min(500,count-(page-1)*500):
+                    raise ValueError('来源分页截断，整段未发布')
+                for row in result['data']:
+                    if not isinstance(row,dict) or not isinstance(row.get(date_field),str) or row[date_field][:10]!=period:
+                        raise ValueError('来源报告期不匹配')
+                    normalized(dataset,row,period)
+                    if set(row)!=set(spec['fields']):
+                        raise ValueError('接口字段与 ALL 映射不一致')
+                parsed_source(db,source_id,fields=sorted(result['data'][0]) if result['data'] else [])
+                rows.extend(result['data']);sources.append(source)
+                update({'status':'cached' if page in cached_pages else 'downloading','page':page,
+                        'pages':pages,'records':len(rows),'total':count},
+                       f'{spec["label"]} {page}/{pages} 页 · 已获取 {len(rows)}/{count} 家')
+                page+=1
+            except Exception as exc:
+                parsed_source(db,source_id,error=type(exc).__name__+': '+str(exc))
+                raise
+        if len({r['SECURITY_CODE'] for r in rows})!=len(rows):
+            raise ValueError('分页证券代码重复，整段未发布')
+        update({'status':'validated_empty' if pages==0 else 'validated','page':pages,'pages':pages,
+                'records':len(rows),'cached_pages':len(cached_pages),
+                'total':count if count is not None else 0})
+        return dict(dataset=dataset,rows=rows,sources=sources,collection_batch_id=batch_id)
+    except BaseException as exc:
+        update({'status':'failed','page':page-1,'pages':pages if count is not None else None,
+                'records':len(rows),'total':count,'error':'该接口校验失败，四表未发布'})
+        finish_batch(db,batch_id,'failed',error=type(exc).__name__+': '+str(exc))
+        raise
+
+
+def collect_public(db, operation_id, period, request_collector, progress=lambda message:None, *, recheck=False,
+                   parallel_interfaces=False, progress_state=None):
+    """Collect four validated datasets; the caller publishes all four in one transaction.
+
+    The explicitly enabled daily industry path uses two independent HTTP sessions. Historical
+    backfill callers keep the legacy sequential behavior unless they opt in themselves.
+    """
+    if not parallel_interfaces:
+        return [_collect_public_dataset(db,operation_id,period,name,spec,request_collector,progress,
+                    recheck=recheck,progress_state=progress_state) for name,spec in FIELDS.items()]
+    workers={}
+    results={}
+    errors=[]
+    state_lock=Lock()
+    live={name:{'status':'pending','page':0,'pages':None,'records':0,'total':None} for name in FIELDS}
+    def update(dataset, details):
+        with state_lock:
+            live[dataset].update(details)
+            snapshot={key:dict(value) for key,value in live.items()}
+            if progress_state:
+                progress_state({'kind':'financial','phase':'downloading','interfaces':snapshot})
+    try:
+        with ThreadPoolExecutor(max_workers=2,thread_name_prefix='industry-financial') as pool:
+            futures={}
+            for name,spec in FIELDS.items():
+                worker=request_collector.spawn()
+                workers[name]=worker
+                futures[pool.submit(_collect_public_dataset,db,operation_id,period,name,spec,worker,progress,
+                    recheck=recheck,progress_state=update,industry_profile='financial')]=name
+            for future in as_completed(futures):
+                name=futures[future]
+                try:
+                    results[name]=future.result()
+                except BaseException as exc:
+                    errors.append(exc)
+    finally:
+        request_collector.requests+=sum(worker.requests for worker in workers.values())
+        request_collector.retries+=sum(worker.retries for worker in workers.values())
+        request_collector.halted.update({key:value for worker in workers.values() for key,value in worker.halted.items()})
+        for worker in workers.values():
+            close=getattr(getattr(worker,'session',None),'close',None)
+            if callable(close):
+                close()
+    if progress_state:
+        progress_state({'kind':'financial','phase':'validated' if not errors else 'failed',
+                        'interfaces':{key:dict(value) for key,value in live.items()}})
+    if errors:
+        from .collection import finish_batch
+        reason='四表采集未完整，所有未发布接口段均关闭'
+        with db.connection() as conn:
+            abandoned=[row[0] for row in conn.execute(
+                "SELECT id FROM collection_batches WHERE operation_id=? AND status='running'",
+                (operation_id,))]
+        for batch_id in abandoned:
+            finish_batch(db,batch_id,'failed',error=reason)
+        raise errors[0]
+    return [results[name] for name in FIELDS]
 
 
 def publish(conn, batch_id, period, datasets):

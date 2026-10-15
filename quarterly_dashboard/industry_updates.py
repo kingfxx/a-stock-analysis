@@ -110,7 +110,7 @@ def fetch_cap_quarter(db, directory, stocks, target_date, progress, *, reuse_loc
     return facts,failures
 
 
-def perform(service, action, target, recheck, progress, *, run_id=None):
+def perform(service, action, target, recheck, progress, *, run_id=None, progress_state=None):
     validate_request(action,target,recheck)
     from .market_financial import now,encoded
     batch_id=None
@@ -123,13 +123,15 @@ def perform(service, action, target, recheck, progress, *, run_id=None):
                 "VALUES(?,?,? ,?,'running')",(action,target,int(recheck),now())).lastrowid
             owns_run=True
     try:
-        result=_perform(service,action,target,recheck,progress,batch_id,run_id=run_id)
+        result=_perform(service,action,target,recheck,progress,batch_id,run_id=run_id,progress_state=progress_state)
         if owns_run:
             with service.db.connection(write=True) as conn:
                 conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
                     (now(),merge_run_result(conn,run_id,result),run_id))
         return result
     except Exception as exc:
+        if progress_state:
+            progress_state({'kind':'industry','phase':'failed','message':'任务未完成；已发布分段保留'})
         if batch_id is not None:
             from .market_financial import fail_batch
             fail_batch(service.db,batch_id,exc)
@@ -159,7 +161,7 @@ def merge_run_result(conn, run_id, result):
     return json.dumps(merged,ensure_ascii=False,separators=(',',':'))
 
 
-def _perform(service, action, target, recheck, progress, batch_id, *, run_id=None):
+def _perform(service, action, target, recheck, progress, batch_id, *, run_id=None, progress_state=None):
     from .industry_memberships import ensure_daily_memberships
     from . import market_financial
     validate_request(action,target,recheck)
@@ -167,7 +169,8 @@ def _perform(service, action, target, recheck, progress, batch_id, *, run_id=Non
     foundation=service.foundation()
     if action=='cap_quarter':
         from .market_trade_snapshot import refresh_quarter
-        return refresh_quarter(service,target,recheck,foundation,membership_check,progress)
+        return refresh_quarter(service,target,recheck,foundation,membership_check,progress,
+                               progress_state=progress_state)
     stocks=sorted(r['stock_code'] for r in foundation['members'])
     if not 4000<=len(stocks)<=10000:
         raise ValueError('全市场沪深分类名单规模异常，请先更新分类资料')
@@ -178,15 +181,26 @@ def _perform(service, action, target, recheck, progress, batch_id, *, run_id=Non
     from .collection import RequestCollector
     collector=RequestCollector(service.db,progress=progress)
     operation_id='sw_update_runs:'+str(run_id) if run_id is not None else 'financial:'+str(target)
-    datasets=market_financial.collect_public(service.db,operation_id,target,collector,progress,recheck=recheck)
+    try:
+        datasets=market_financial.collect_public(service.db,operation_id,target,collector,progress,recheck=recheck,
+            parallel_interfaces=True,progress_state=progress_state)
+    finally:
+        close=getattr(collector.session,'close',None)
+        if callable(close):close()
     sources=[source for data in datasets for source in data['sources']]
     progress('来源已完成，正在保存新增／修订指标并汇总所选一期')
+    if progress_state:
+        progress_state({'kind':'financial','phase':'publishing','message':'四个接口均已完成全页校验，正在统一事务发布'})
     with service.db.connection(write=True) as conn:
         statement_summary=market_financial.publish(conn,None,target,datasets)
+    if progress_state:
+        progress_state({'kind':'financial','phase':'aggregation','message':'财务数据已保存，正在汇总行业指标'})
     data=service._load()
     import_id=data['import']['id']
     effective=service._financial_reader.window(data['token'],data['import']['member_import_id'],
                                                data['nonfinancial'],target,'ytd')
+    if progress_state:
+        progress_state({'kind':'financial','phase':'complete','message':'四表已发布并完成行业汇总'})
     failures=[{'stock_code':s,'error':'指定报告期营收或归母净利润待补'} for s in stocks
               if any(effective.get((s,target),{}).get(m) is None for m in ('revenue','parent_profit'))]
     universe=set(stocks)

@@ -23,6 +23,7 @@
 .sw-controls label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:12px}.sw-controls select{max-width:240px;min-width:120px}
 .sw-controls .sw-toggle{flex-direction:row;align-items:center;gap:6px;padding-bottom:9px}
 .sw-updates{padding:14px;border:1px solid var(--line);border-radius:10px}.sw-updates button{margin-bottom:1px}
+.sw-progress-details{margin:0 14px 12px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:13px;line-height:1.7}.sw-progress-details p{margin:0}.sw-progress-details ul{margin:6px 0 0;padding-left:20px}
 .sw-controls input{width:auto}.sw-path{color:var(--cyan);line-height:1.8;font-size:14px;margin:15px 0}
 .sw-chart{height:420px}.sw-scroll{overflow:auto}.sw-table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
 .sw-table th,.sw-table td{border-bottom:1px solid var(--line);padding:12px 10px;text-align:right;white-space:nowrap}

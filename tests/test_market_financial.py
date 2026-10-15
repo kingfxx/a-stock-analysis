@@ -89,7 +89,8 @@ def test_v32_rebuild_preserves_legacy_rows_and_adds_disjoint_public_references(t
     path=tmp_path/'pre-v32.sqlite3'
     db=Database(path)
     latest=storage.MIGRATIONS
-    monkeypatch.setattr(storage,'MIGRATIONS',latest[:-1])
+    # Build a v31 database, then apply only the v32 migration under test.
+    monkeypatch.setattr(storage,'MIGRATIONS',latest[:-2])
     db.initialize()
     with db.connection(write=True) as conn:
         batch=conn.execute("INSERT INTO market_financial_batches(report_date,started_at,status,obtained_at) VALUES('2025-06-30','2026-01-01','complete','2026-01-01')").lastrowid
@@ -98,7 +99,7 @@ def test_v32_rebuild_preserves_legacy_rows_and_adds_disjoint_public_references(t
             source_id=conn.execute("INSERT INTO market_financial_sources(batch_id,dataset,page_number,url,params_json,file_path,content_hash,raw_bytes,stored_bytes,obtained_at,fields_json) VALUES(?,?,1,'https://old.test','{}','old.gz','abc',1,1,'2026-01-01','[]')",(batch,dataset)).lastrowid
             conn.execute(f"INSERT INTO {table}(exchange,report_date,version,is_latest,batch_id,source_id,content_hash,definition_version,obtained_at,updated_at,security_code) VALUES('sh','2025-06-30',1,1,?,?,'legacy-hash','v1','2026-01-01','2026-01-02','600000')",(batch,source_id))
             ids[table]=(batch,source_id,tuple(conn.execute(f'SELECT * FROM {table}').fetchone()))
-    monkeypatch.setattr(storage,'MIGRATIONS',latest)
+    monkeypatch.setattr(storage,'MIGRATIONS',latest[:-1])
     db.initialize()
     with db.connection() as conn:
         assert conn.execute('PRAGMA user_version').fetchone()[0]==32
@@ -440,7 +441,7 @@ def test_daily_button_collects_once_without_legacy_reads_or_writes(db, tmp_path,
         legacy={table:[tuple(r) for r in conn.execute('SELECT * FROM '+table)] for table in
                 ('sw_financial_facts','sw_financial_provenance','sw_imports','sw_cap_facts')}
     calls = []
-    def collect(database,operation_id,period,request_collector,progress,*,recheck=False):
+    def collect(database,operation_id,period,request_collector,progress,*,recheck=False,**kwargs):
         calls.append((operation_id,period,recheck))
         data = datasets()
         data[0]['rows'][0]['TOTAL_OPERATE_INCOME'] = 50

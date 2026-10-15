@@ -28,8 +28,12 @@
       <p id="sw-status" class="sw-status" role="status" aria-live="polite"></p><p id="sw-path" class="sw-path"></p>
       <p class="sw-alert" id="sw-scope">全市场行业更新独立于个股刷新；每次只处理所选报告期或季度，查看页面只读本地快照。</p>
       <div class="sw-controls sw-updates"><label>更新报告期<select id="sw-update-period"></select></label><button type="button" id="sw-refresh-financial">更新行业财务</button>
+      <button type="button" id="sw-financial-progress-toggle" aria-expanded="false" aria-controls="sw-financial-progress" aria-label="查看行业财务进度">查看财务进度</button>
       <label>市值季度<select id="sw-update-quarter"></select></label><button type="button" id="sw-refresh-cap">补齐季度市值</button>
+      <button type="button" id="sw-snapshot-progress-toggle" aria-expanded="false" aria-controls="sw-snapshot-progress" aria-label="查看交易快照进度">查看快照进度</button>
       <label class="sw-toggle"><input id="sw-recheck-cap" type="checkbox">核对已有市值修订</label></div>
+      <div class="sw-progress-details" id="sw-financial-progress" hidden role="status" aria-live="polite"><p id="sw-financial-progress-text">尚无行业财务任务。</p><ul id="sw-financial-progress-list"></ul></div>
+      <div class="sw-progress-details" id="sw-snapshot-progress" hidden role="status" aria-live="polite"><p id="sw-snapshot-progress-text">尚无交易快照任务。</p></div>
       <p id="sw-job-status" class="sw-status" role="status" aria-live="polite">财务仅更新指定报告期；交易快照保存季末未复权股价、股本、市值和估值。</p>
       <div class="sw-controls sw-industry-filters"><label>一级行业<select id="sw-first"><option value="">全部一级</option></select></label><label>二级行业<select id="sw-second"><option value="">全部二级</option></select></label><label>三级行业<select id="sw-third"><option value="">全部三级</option></select></label>
       <label>排行层级<select id="sw-level"><option value="1">一级</option><option value="2">二级</option><option value="3" selected>三级</option></select></label>
@@ -97,6 +101,51 @@
     el('sw-update-period').innerHTML=completed.map(r=>`<option value="${r.period}">${r.period}</option>`).join('');
     el('sw-update-quarter').innerHTML=completed.filter(r=>r.period>='2015-03-31').map(r=>`<option value="${r.quarter}">${r.quarter}</option>`).join('');
     let updateDefaultsSet=false;
+    function renderProgress(status){
+      const progress=status?.result?.collection_progress;
+      const financial=status?.action==='financial_period';
+      const snapshot=status?.action==='cap_quarter';
+      const error=status?.error;
+      if(financial){
+        if(!progress?.interfaces){el('sw-financial-progress-text').textContent='该历史任务未记录总进度。'+(error?'任务未完成；失败原因：'+error:'');el('sw-financial-progress-list').replaceChildren();return;}
+        const phases={downloading:'正在下载并校验四个接口',validated:'四个接口均已通过完整性校验',publishing:'四表正在统一事务发布',aggregation:'数据已保存，正在汇总行业指标',complete:'四表比对完成，行业汇总已完成；仅保存新增、修订与补全，无变化复用原版本。以下条数按每张表的公司记录计。',failed:'任务未完成；已发布分段保留'};
+        el('sw-financial-progress-text').textContent=(phases[progress.phase]||'行业财务任务运行中')+(error?'。失败原因：'+error:'');
+        const labels={income:'利润表',balance:'资产负债表',cashflow:'现金流量表',performance:'业绩指标'};
+        const states={pending:'未开始',downloading:'下载中',cached:'使用同日缓存',validated:'已完成校验',validated_empty:'来源确认空数据',failed:'校验失败'};
+        const rows=Object.entries(progress.interfaces).map(([key,item])=>{
+          const pages=item.pages===null||item.pages===undefined?'总页数统计中':`第 ${item.page||0}/${item.pages} 页`;
+          const records=item.total===null||item.total===undefined?`已读 ${item.records||0} 条`:`已读 ${item.records||0}/${item.total} 条`;
+          const reused=item.cached_pages?` · 同日缓存 ${item.cached_pages} 页`:'';
+          const saved=status.result?.statements?.[key];
+          const completed=!status.running&&!error&&progress.phase==='complete';
+          const changes=completed?(saved&&['new','revised','enriched','unchanged'].every(field=>Number.isInteger(saved[field]))
+            ?` · 比对结果：新增 ${saved.new}、修订 ${saved.revised}、补全 ${saved.enriched}、无变化 ${saved.unchanged} 条`
+            :' · 数据变化数量未记录'):'';
+          return `${labels[key]||key}：${states[item.status]||'处理中'} · ${pages} · ${records}${reused}${changes}`;
+        });
+        el('sw-financial-progress-list').replaceChildren(...rows.map(value=>{const item=document.createElement('li');item.textContent=value;return item;}));
+      }else if(snapshot){
+        if(!progress?.kind){el('sw-snapshot-progress-text').textContent='该历史任务未记录总进度。'+(error?'任务未完成；失败原因：'+error:'');return;}
+        const phases={downloading:'正在下载并校验交易快照',publishing:'分页校验完成，正在保存快照',saved:'交易快照已保存，正在准备行业汇总',aggregation:'快照已保存，正在汇总行业指标',complete:'交易快照已保存并完成行业汇总',skipped:'该交易日已有完整快照，本次跳过',failed:'任务未完成；已发布分段保留'};
+        const pages=progress.pages===null||progress.pages===undefined?'总页数统计中':`第 ${progress.page||0}/${progress.pages} 页`;
+        const records=progress.total===null||progress.total===undefined?`已接收 ${progress.records||0} 条`:`已接收 ${progress.records||0}/${progress.total} 条`;
+        const phase=progress.collection_status==='skipped'&&progress.phase==='aggregation'?'快照已存在，本次跳过下载，正在汇总行业指标':phases[progress.phase]||'交易快照任务运行中';
+        el('sw-snapshot-progress-text').textContent=`${phase} · ${pages} · ${records}`+(error?'。失败原因：'+error:'');
+      }else{
+        el('sw-financial-progress-text').textContent='该历史任务未记录总进度。';el('sw-financial-progress-list').replaceChildren();
+        el('sw-snapshot-progress-text').textContent='该历史任务未记录总进度。';
+      }
+    }
+    function renderJobStatus(status){
+      if(status.message!=='尚未刷新')el('sw-job-status').textContent=status.message+(status.error?'：'+status.error:'');
+      renderProgress(status);
+    }
+    [['sw-financial-progress-toggle','sw-financial-progress'],['sw-snapshot-progress-toggle','sw-snapshot-progress']].forEach(([buttonId,panelId])=>{
+      el(buttonId).addEventListener('click',()=>{const button=el(buttonId),panel=el(panelId),expanded=button.getAttribute('aria-expanded')==='true';
+        button.setAttribute('aria-expanded',String(!expanded));
+        button.textContent=expanded?(buttonId==='sw-financial-progress-toggle'?'查看财务进度':'查看快照进度'):
+          (buttonId==='sw-financial-progress-toggle'?'收起财务进度':'收起快照进度');panel.hidden=expanded;});
+    });
     async function load(){
       const request=++seq;controller?.abort();controller=new AbortController();
       el('sw-status').textContent='正在读取本地行业数据…';
@@ -111,7 +160,7 @@
         const statusResponse=await fetch('/api/industry/status',{cache:'no-store'});
         if(statusResponse.ok&&request===seq){
           const status=await statusResponse.json();busy(status.running);
-          if(status.message!=='尚未刷新')el('sw-job-status').textContent=status.message+(status.error?'：'+status.error:'');
+          renderJobStatus(status);
           if(status.running&&!pollTimer)pollTimer=setTimeout(poll,1500);
           if(!status.running){clearTimeout(pollTimer);pollTimer=null;}
         }
@@ -268,7 +317,7 @@
     el('sw-companies').addEventListener('click',e=>{const button=e.target.closest('[data-company-sort]');if(!button)return;companyDirection=button.dataset.companySort===companySort?-companyDirection:-1;companySort=button.dataset.companySort;renderCompanies();});
     async function poll(){
       try{const response=await fetch('/api/industry/status',{cache:'no-store'});const status=await response.json();if(!response.ok)throw new Error(status.error||'读取刷新状态失败');
-        el('sw-job-status').textContent=status.message+(status.error?'：'+status.error:'');busy(status.running);
+        renderJobStatus(status);busy(status.running);
         if(status.running)pollTimer=setTimeout(poll,1500);else if(!status.error)await load();
       }catch(e){el('sw-job-status').textContent=e.message;busy(false);}
     }
@@ -278,7 +327,7 @@
       const details=action==='financial_period'
         ?`更新全市场财务？\n\n报告期：${target}\n采集范围：全 A 股（含北交所）\n内容：利润表、资产负债表、现金流量表摘要及业绩指标（含 ROE），四个接口全部字段。\n行业展示范围：${scope}\n四表校验通过后统一保存；无变化不新增财务版本，真实修订保留。`
         :`更新全市场季度交易快照？\n\n季度：${target}\n范围：${scope}；已有季度使用固定季末成员名单。\n方式：${recheck?'重新核对该日快照及修订':'采集该日全字段快照，已完成同口径分段跳过'}。\n东方财富同一请求保存该季末交易日的未复权股价、股本、市值和估值等全部字段；完整分页校验后保存，缺失留空。`;
-      if(!window.confirm(details+'\n\n任务开始前每天最多检查一次沪深公司名单、申万分类和上市日期，新公司自动纳入；检查失败沿用旧名单并提示。已有季度市值成员保持固定。\n任务可能需要数分钟，串行限频并间歇休息。不会刷新个股或其他报告期。\n确认后开始，取消则不执行。'))return;
+      if(!window.confirm(details+'\n\n任务开始前每天最多检查一次沪深公司名单、申万分类和上市日期，新公司自动纳入；检查失败沿用旧名单并提示。已有季度市值成员保持固定。\n全市场财务最多同时采集两个接口，每个接口按页顺序处理；交易快照按页串行采集。任务可能需要数分钟。不会刷新个股或其他报告期。\n确认后开始，取消则不执行。'))return;
       busy(true);
       try{const response=await fetch('/api/industry/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,target,recheck})});const result=await response.json();if(!response.ok)throw new Error(result.error||'刷新失败');clearTimeout(pollTimer);poll();}
       catch(e){el('sw-job-status').textContent=e.message;busy(false);}

@@ -422,7 +422,7 @@ def test_finance_and_cap_tasks_share_one_daily_check(service,monkeypatch):
     from test_market_financial import prepared_public_datasets
     monkeypatch.setattr(market_financial,'collect_public',lambda database,operation_id,period,collector,progress,**kwargs:
         prepared_public_datasets(database,operation_id,period))
-    monkeypatch.setattr(market_trade_snapshot,'refresh_quarter',lambda service,quarter,recheck,foundation,membership_check,progress:
+    monkeypatch.setattr(market_trade_snapshot,'refresh_quarter',lambda service,quarter,recheck,foundation,membership_check,progress,*,progress_state=None:
         {'membership_check':membership_check,'scope_count':len(foundation['members'])})
     financial=industry_updates.perform(service,'financial_period','2025-06-30',False,lambda _:None)
     cap=industry_updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)

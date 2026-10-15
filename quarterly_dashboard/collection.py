@@ -89,6 +89,13 @@ class PacingPolicy:
                     or self.max_concurrency!=2 or not 1<=self.max_attempts<=3):
                 raise ValueError('指数并行限速配置必须符合本轮授权策略')
             return
+        if self.provider in ('industry_financial', 'industry_snapshot'):
+            concurrency = 2 if self.provider == 'industry_financial' else 1
+            if ((self.interval,self.jitter,self.window,self.window_requests,self.rest_every,
+                 self.rest_min,self.rest_max,self.cooldown)!=(2,3,60,30,20,15,15,3600)
+                    or self.max_concurrency!=concurrency or not 1<=self.max_attempts<=3):
+                raise ValueError('行业采集限速配置必须符合本轮授权策略')
+            return
         if (self.provider is not None or self.interval < 10 or self.jitter < 0 or self.window < 60
                 or not 1 <= self.window_requests <= 5 or not 1 <= self.rest_every <= 20
                 or self.rest_min < 60 or self.rest_max < self.rest_min or self.cooldown < 3600
@@ -200,10 +207,13 @@ def retry_after(value, now):
 
 
 class RequestCollector:
-    def __init__(self, db, *, session=None, policy=None, cancelled=lambda: False,
+    def __init__(self, db, *, session=None, session_factory=None, policy=None, cancelled=lambda: False,
                  clock=time.time, sleep=time.sleep, uniform=random.uniform, progress=lambda message: None):
         self.db=db
-        self.session=session or create_data_session()
+        self._owns_session=session is None
+        self._has_session_factory=session_factory is not None
+        self._session_factory=session_factory or create_data_session
+        self.session=session if session is not None else self._session_factory()
         self.policy=policy or PacingPolicy()
         if self.policy.provider is not None:
             raise ValueError('提供方专属策略由RequestCollector按来源选择，不能作为全局policy')
@@ -216,7 +226,16 @@ class RequestCollector:
         self.requests=0
         self.retries=0
 
-    def policy_for(self, provider, *, index_parallel=False):
+    def policy_for(self, provider, *, index_parallel=False, industry_profile=None):
+        if industry_profile is not None:
+            if index_parallel or provider!='eastmoney' or industry_profile not in ('financial','snapshot'):
+                raise ValueError('行业限速策略只能用于明确的东财行业任务')
+            return PacingPolicy(interval=2,jitter=3,window=60,window_requests=30,
+                rest_every=20,rest_min=15,rest_max=15,cooldown=3600,max_attempts=self.policy.max_attempts,
+                provider='industry_financial' if industry_profile=='financial' else 'industry_snapshot',
+                max_concurrency=2 if industry_profile=='financial' else 1)
+        if industry_profile is None and index_parallel and provider=='cninfo':
+            raise ValueError('指数并行策略不能与CNINFO策略混用')
         if provider == 'cninfo':
             return PacingPolicy(interval=2,jitter=0,window=60,window_requests=30,
                 rest_every=20,rest_min=0,rest_max=0,cooldown=3600,max_attempts=self.policy.max_attempts,
@@ -226,6 +245,13 @@ class RequestCollector:
                 rest_every=20,rest_min=10,rest_max=10,cooldown=3600,max_attempts=self.policy.max_attempts,
                 provider='index_parallel',max_concurrency=2)
         return self.policy
+
+    def spawn(self):
+        """Create a worker with its own HTTP session and the same shared pacing hooks."""
+        if not self._owns_session and not self._has_session_factory:
+            raise ValueError('并行采集需要可创建独立Session的session_factory')
+        return RequestCollector(self.db,session_factory=self._session_factory,policy=self.policy,
+            cancelled=self.cancelled,clock=self.clock,sleep=self.sleep,uniform=self.uniform,progress=self.progress)
 
     def check_cancelled(self):
         if self.cancelled():
@@ -359,6 +385,8 @@ class RequestCollector:
                 now=self.clock()
                 inflight=[item for item in budget.get('inflight',[]) if item.get('until',0)>now]
                 budget['inflight']=inflight
+                if not inflight:
+                    budget['parallel_pair_used']=False
                 required=2 if limit==1 else 1
                 lock_base=self.db.path.parent/'collection_sources'/('provider-'+provider+'-slot-')
                 for slot in range(2):
@@ -379,10 +407,11 @@ class RequestCollector:
                         ready=max(ready,budget['completed_at']+policy.interval)
                     if not fast_exempt and len(starts)>=policy.window_requests:
                         ready=max(ready,starts[-policy.window_requests]+policy.window+.001)
-                    # The initial sibling can overlap; a completed request always paces later sends.
-                    completed_at=budget.get('completed_at',0)
-                    overlap=(policy.max_concurrency==2 and
-                             any(item.get('started_at',0)>completed_at for item in inflight))
+                    # One sibling may join an active wave to reach concurrency two. Once
+                    # that pair is formed, a completion cannot admit a third early request.
+                    overlap=(policy.max_concurrency==2 and len(inflight)==1 and
+                             not budget.get('parallel_pair_used',False) and
+                             inflight[0].get('started_at',0)>=budget.get('completed_at',0))
                     if not fast_exempt and not overlap and ready>now:
                         for context in reversed(held):context.__exit__(None,None,None)
                         held=[]
@@ -408,6 +437,8 @@ class RequestCollector:
                             slot_item.update(source_ref=list(source_ref),attempt_no=attempt_no)
                         budget.update(starts=starts,count=count,ready_at=max(ready,now+policy.interval),
                                       inflight=inflight+[slot_item])
+                        if overlap:
+                            budget['parallel_pair_used']=True
                         state['budget_json']=encoded(budget)
                         self.save_state(state)
                         self.requests+=1
@@ -421,6 +452,8 @@ class RequestCollector:
                 state=self.state(provider)
                 budget=json.loads(state['budget_json'])
                 budget['inflight']=[item for item in budget.get('inflight',[]) if item.get('token')!=token and item.get('until',0)>self.clock()]
+                if not budget['inflight']:
+                    budget['parallel_pair_used']=False
                 ready=self.clock()+policy.interval+self.uniform(0,policy.jitter)
                 completed=budget.get('completed',0)+1
                 if completed%policy.rest_every==0:
@@ -467,7 +500,9 @@ class RequestCollector:
     def report(self):
         return dict(policy=asdict(self.policy),provider_policies={
                         'cninfo':asdict(self.policy_for('cninfo')),
-                        'index_parallel':asdict(self.policy_for('index_parallel',index_parallel=True))},
+                        'index_parallel':asdict(self.policy_for('index_parallel',index_parallel=True)),
+                        'industry_financial':asdict(self.policy_for('eastmoney',industry_profile='financial')),
+                        'industry_snapshot':asdict(self.policy_for('eastmoney',industry_profile='snapshot'))},
                     network_requests=self.requests,retries=self.retries,halted=self.halted)
 
     def invoke(self, batch_id, provider, dataset, request, callback, *, serialize,
@@ -564,25 +599,29 @@ class RequestCollector:
         raise RuntimeError('SDK transport attempts exhausted')
 
     def get(self, batch_id, provider, dataset, url, params=None, *, headers=None, expect='json', healthy_response=None,
-            evidence_mode='archive', recovery_token=None, stock_fast=False, index_parallel=False):
+            evidence_mode='archive', recovery_token=None, stock_fast=False, index_parallel=False, industry_profile=None):
         return self.request(batch_id, provider, dataset, 'GET', url, params=params, headers=headers, expect=expect,
                             healthy_response=healthy_response, evidence_mode=evidence_mode,
-                            recovery_token=recovery_token, stock_fast=stock_fast,index_parallel=index_parallel)
+                            recovery_token=recovery_token, stock_fast=stock_fast,index_parallel=index_parallel,
+                            industry_profile=industry_profile)
 
     def post(self, batch_id, provider, dataset, url, data=None, *, params=None, headers=None, expect='json',
-             healthy_response=None, evidence_mode='archive', recovery_token=None, stock_fast=False,index_parallel=False):
+             healthy_response=None, evidence_mode='archive', recovery_token=None, stock_fast=False,index_parallel=False,
+             industry_profile=None):
         return self.request(batch_id, provider, dataset, 'POST', url, params=params, data=data, headers=headers,
                             expect=expect, healthy_response=healthy_response, evidence_mode=evidence_mode,
-                            recovery_token=recovery_token, stock_fast=stock_fast,index_parallel=index_parallel)
+                            recovery_token=recovery_token, stock_fast=stock_fast,index_parallel=index_parallel,
+                            industry_profile=industry_profile)
 
     def request(self, batch_id, provider, dataset, method, url, params=None, *, data=None, headers=None, expect='json',
-                healthy_response=None, evidence_mode='archive', recovery_token=None, stock_fast=False,index_parallel=False):
+                healthy_response=None, evidence_mode='archive', recovery_token=None, stock_fast=False,index_parallel=False,
+                industry_profile=None):
         method=method.upper()
         if method not in ('GET','POST'):
             raise ValueError('仅支持 GET/POST')
         if evidence_mode not in ('archive', 'metadata_only'):
             raise ValueError('不支持的来源证据策略')
-        policy=self.policy_for(provider,index_parallel=index_parallel)
+        policy=self.policy_for(provider,index_parallel=index_parallel,industry_profile=industry_profile)
         scrub=lambda values:{k:v for k,v in (values or {}).items() if k.lower() not in ('token','apikey','api_key')}
         request=dict(transport='http',method=method,url=url,params=scrub(params))
         if method=='POST': request['data']=scrub(data)

@@ -135,7 +135,11 @@ def batch_key(day,scope):
     return digest(encoded(dict(day=day,scope=scope,parser=PARSER,definition=DEFINITION,columns='ALL')).encode())
 
 
-def collect_day(db,operation,day,*,quarter=None,http=None,recheck=False,progress=print,universe_version=None):
+def collect_day(db,operation,day,*,quarter=None,http=None,recheck=False,progress=print,universe_version=None,
+                progress_state=None):
+    def report(phase, **details):
+        if progress_state:
+            progress_state({'kind':'snapshot','phase':phase,'trade_date':day,'quarter':quarter,**details})
     date.fromisoformat(day)
     scope=dict(trade_date=day,sampling='quarter_end' if quarter else 'all_trading_days',
                quarter=quarter,market_scope='source_returned_SH_SZ_BJ_securities',columns='ALL')
@@ -146,12 +150,15 @@ def collect_day(db,operation,day,*,quarter=None,http=None,recheck=False,progress
     if completed and not recheck:
         result=json.loads(completed['result_json'])
         # Empty is a known gap, not full coverage; subsequent manual recheck remains possible.
+        report('skipped',page=result.get('pages',0),pages=result.get('pages',0),records=result.get('rows',0),
+               total=result.get('count',result.get('rows',0)))
         return {**result,'batch_id':completed['id'],'skipped':True}
     batch=begin_batch(db,operation,DATASET,'eastmoney',day,day,scope=scope,frequency='daily',
                       trigger='review' if recheck else 'manual',idempotency_key=None if recheck else key,
                       parser_version=PARSER,definition_version=DEFINITION,universe_version=universe_version)
     http=http or RequestCollector(db,progress=progress)
     page=1; pages=1; count=None; rows=[]; sources=[]; seen=set(); fields=set()
+    report('downloading',page=0,pages=None,records=0,total=None)
     try:
         while page<=pages:
             params=request_params(day,page)
@@ -168,7 +175,8 @@ def collect_day(db,operation,day,*,quarter=None,http=None,recheck=False,progress
                     raw=raw,obtained_at=previous['obtained_at'],request_status='reused',reused_source_id=previous['id'])
             else:
                 reply,source=http.get(batch,'eastmoney',DATASET,EM,params,
-                    headers={'User-Agent':'Mozilla/5.0','Referer':'https://data.eastmoney.com/'},healthy_response=healthy)
+                    headers={'User-Agent':'Mozilla/5.0','Referer':'https://data.eastmoney.com/'},healthy_response=healthy,
+                    industry_profile='snapshot')
                 raw=reply.content
             sources.append(source)
             try:
@@ -178,6 +186,7 @@ def collect_day(db,operation,day,*,quarter=None,http=None,recheck=False,progress
                     parsed_source(db,source,fields=[])
                     summary=dict(trade_date=day,quarter=quarter,rows=0,sources=sources,empty=True,coverage_status='empty')
                     finish_batch(db,batch,'complete','empty',result=summary)
+                    report('saved',page=0,pages=0,records=0,total=0)
                     return {**summary,'batch_id':batch}
                 if not payload.get('success') or not isinstance(result.get('data'),list):
                     raise ValueError('来源响应结构无效')
@@ -185,6 +194,7 @@ def collect_day(db,operation,day,*,quarter=None,http=None,recheck=False,progress
                     count,pages=result.get('count'),result.get('pages')
                     if type(count) is not int or not 0<count<=20000 or pages!=math.ceil(count/500):
                         raise ValueError('分页总数或500行页容量异常')
+                    report('downloading',page=page-1,pages=pages,records=len(rows),total=count)
                 data=result['data']
                 if result.get('count')!=count or result.get('pages')!=pages or len(data)!=min(500,count-(page-1)*500):
                     raise ValueError('分页总数变化、页长截断或缺页')
@@ -202,8 +212,10 @@ def collect_day(db,operation,day,*,quarter=None,http=None,recheck=False,progress
                 parsed_source(db,source,error=exc)
                 raise
             progress(f'{day} · ALL · 分页 {page}/{pages} · {len(rows)}/{count} 家')
+            report('downloading',page=page,pages=pages,records=len(rows),total=count)
             page+=1
         http.check_cancelled()
+        report('publishing',page=pages,pages=pages,records=len(rows),total=count)
         valid={k:sum(v[k] is not None for v,_,_ in rows) for k in [v['column'] for v in FIELDS.values()]}
         summary=dict(trade_date=day,quarter=quarter,rows=len(rows),count=count,pages=pages,sources=sources,
                      fields=sorted(fields),valid_counts=valid,coverage_status='unknown',
@@ -213,8 +225,11 @@ def collect_day(db,operation,day,*,quarter=None,http=None,recheck=False,progress
             # Facts and completion share the transaction: a crash cannot publish an unfinished day.
             conn.execute("UPDATE collection_batches SET status='complete',coverage_status='unknown',finished_at=?,result_json=? WHERE id=?",
                          (utc_now(),encoded(summary),batch))
+        report('saved',page=pages,pages=pages,records=len(rows),total=count)
         return {**summary,'batch_id':batch}
     except BaseException as exc:
+        report('failed',page=page-1,pages=pages if count is not None else None,
+               records=len(rows),total=count)
         finish_batch(db,batch,'cancelled' if isinstance(exc,(Cancelled,KeyboardInterrupt)) else 'failed',error=exc,
                      result=dict(rows_not_published=len(rows),sources=sources,trade_date=day))
         raise
@@ -265,7 +280,7 @@ def quarters(start,end):
     return [f'{n//4}Q{n%4+1}' for n in range(begin.year*4+(begin.month-1)//3,finish.year*4+(finish.month-1)//3+1)]
 
 
-def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress):
+def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress,*,progress_state=None):
     # Rollback-journal maintenance reads can exceed the dashboard's 5s default.
     db=Database(service.db.path,journal_mode=service.db.journal_mode,busy_timeout_ms=60000)
     with db.connection() as conn:
@@ -278,10 +293,20 @@ def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress
     http=RequestCollector(db,progress=progress,cancelled=cancelled)
     day=target_date(db,quarter,operation=operation,http=http,progress=progress)
     item=collect_day(db,operation,day,quarter=quarter,http=http,recheck=recheck,progress=progress,
-                     universe_version=str(foundation['member_import_id']))
+                     universe_version=str(foundation['member_import_id']),progress_state=progress_state)
     freeze_roster(db,quarter,day)
     from .industry_cap_summary import aggregate_quarter
+    if progress_state:
+        progress_state({'kind':'snapshot','phase':'aggregation','trade_date':day,'quarter':quarter,
+                        'page':item.get('pages',0),'pages':item.get('pages',0),'records':item.get('rows',0),
+                        'total':item.get('count',item.get('rows',0)),
+                        'collection_status':'skipped' if item.get('skipped') else 'saved'})
     aggregation=aggregate_quarter(db,quarter,run[0],operation)
+    if progress_state:
+        progress_state({'kind':'snapshot','phase':'complete','trade_date':day,'quarter':quarter,
+                        'page':item.get('pages',0),'pages':item.get('pages',0),'records':item.get('rows',0),
+                        'total':item.get('count',item.get('rows',0)),
+                        'collection_status':'skipped' if item.get('skipped') else 'saved'})
     with db.connection() as conn:
         stocks=[r[0] for r in conn.execute('SELECT stock_code FROM sw_cap_quarter_members WHERE quarter=?',(quarter,))]
         found={r[0] for r in conn.execute('SELECT security_code FROM market_trade_snapshot WHERE trade_date=? AND is_latest=1 '
@@ -352,6 +377,16 @@ def run(db,start,end,report,*,recheck=False):
                      'total_quarters':len(selected),'report':str(report)}
             conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=? AND status=\'running\'',
                          (encoded(payload),run_id))
+    def progress_state(update):
+        with db.connection(write=True) as conn:
+            row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=? AND status=\'running\'',(run_id,)).fetchone()
+            try:
+                saved=json.loads(row['result_json'] or '{}') if row else {}
+            except json.JSONDecodeError:
+                saved={}
+            saved['collection_progress']={**(saved.get('collection_progress') or {}),**update}
+            conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=? AND status=\'running\'',
+                         (encoded(saved),run_id))
     http=RequestCollector(db,cancelled=cancelled,progress=progress)
     try:
         previous=json.loads(Path(report).read_text(encoding='utf-8')) if Path(report).exists() else {}
@@ -363,7 +398,8 @@ def run(db,start,end,report,*,recheck=False):
             result['backup']=str(db.backup(db.path.parent/'backups'/('before-trade-snapshot-history-'+uuid4().hex[:12]+'.sqlite3')))
         for q in selected:
             http.check_cancelled();progress(f'季度 {len(result["periods"])+1}/{len(selected)} · {q}')
-            item=collect_day(db,operation,dates[q],quarter=q,http=http,recheck=recheck,progress=progress)
+            item=collect_day(db,operation,dates[q],quarter=q,http=http,recheck=recheck,progress=progress,
+                             progress_state=progress_state)
             freeze_roster(db,q,dates[q])
             from .industry_cap_summary import aggregate_quarter
             aggregation=aggregate_quarter(db,q,run_id,operation)
@@ -389,6 +425,7 @@ def run(db,start,end,report,*,recheck=False):
                 saved={}
             result['aggregation_results']={**(saved.get('aggregation_results') or {}),
                                            **result.get('aggregation_results',{})}
+            result['collection_progress']=saved.get('collection_progress',result.get('collection_progress',{}))
             conn.execute('UPDATE sw_update_runs SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
                          (result['status'],result['finished_at'],encoded(result),result.get('error'),run_id))
     return result

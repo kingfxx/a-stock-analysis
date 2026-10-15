@@ -12,6 +12,17 @@ from .industry_storage import latest_financial_rows, store_provenance, store_cap
 from .statements import find, previous_quarter
 from .industry_financial_reader import IndustryFinancialReader
 
+
+def financial_change_summary(statements):
+    """Describe saved changes, counting company records separately in each table."""
+    fields=[('new','新增'),('revised','修订'),('enriched','补全'),('unchanged','无变化')]
+    if not statements or any(type(item.get(key)) is not int for item in statements.values() for key,_ in fields):
+        return '本次数据变化数量未记录'
+    totals={key:sum(item[key] for item in statements.values()) for key,_ in fields}
+    outcome='比对后无变化，复用原版本' if not sum(totals[key] for key in ('new','revised','enriched')) else '比对并保存完成'
+    return outcome+' · '+'、'.join(f'{label} {totals[key]} 条' for key,label in fields)+'（按各表记录计）'
+
+
 NOTES = [
     '申万 2021 三级分类；全市场范围为当前沪深 A 股，北交所、已退市公司不在当前成分中。未分类公司单列，不强行归属。',
     '营收为合并营业总收入，按当前成分回溯；历史不是当时的行业成分，不能作为无偏历史回测。上市母子公司报表未抵销，不等于宏观行业产值。',
@@ -168,14 +179,19 @@ class IndustryService:
     def status(self):
         with self._lock:
             status = dict(self._status)
+        with self.db.connection() as conn:
+            run = conn.execute("SELECT * FROM sw_update_runs ORDER BY id DESC LIMIT 1").fetchone()
+        if run and run['status']=='running':
+            try:
+                result=json.loads(run['result_json'] or '{}')
+            except json.JSONDecodeError:
+                result={}
+            status.update(running=True,action=run['action'],target=run['target'],error=None,result=result,
+                          message=result.get('message') or status.get('message') or f"行业任务运行中 · {run['target']}")
+        elif status['running'] and run:
+            status['running']=False
         if not status['running']:
-            with self.db.connection() as conn:
-                run = conn.execute("SELECT * FROM sw_update_runs ORDER BY id DESC LIMIT 1").fetchone()
-            if run and run['status']=='running':
-                progress = json.loads(run['result_json'] or '{}')
-                status.update(running=True,action=run['action'],target=run['target'],error=None,
-                              message=progress.get('message',f"行业任务运行中 · {run['target']}"))
-            elif run and run['action']=='cap_quarter':
+            if run and run['action']=='cap_quarter':
                 from .industry_prices import price_status
                 result=json.loads(run['result_json'] or '{}')
                 message=(f"全市场市值更新完成 · {run['target']} · 待补 {len(result.get('failures',[]))} 家"
@@ -198,9 +214,7 @@ class IndustryService:
             elif run and run['action']=='financial_period':
                 result=json.loads(run['result_json'] or '{}')
                 statements=result.get('statements',{})
-                detail=' · '.join(f"{label} {statements[key]['rows']} 家" for key,label in
-                    [('income','利润表'),('balance','资产负债表'),('cashflow','现金流量表')]
-                    if key in statements)
+                detail=financial_change_summary(statements) if run['status']=='complete' else ''
                 message=('全市场财务更新完成' if run['status']=='complete' else '财务更新失败，已有版本继续可用')
                 status.update(running=False,action=run['action'],target=run['target'],error=run['error'],result=result,
                               message=message+' · '+run['target']+(' · '+detail if detail else ''))
@@ -249,25 +263,51 @@ class IndustryService:
     def _refresh(self, action, target, recheck):
         from .industry_updates import merge_run_result, perform
         run_id=None
+        def persist_progress(update):
+            if run_id is None:
+                return
+            with self.db.connection(write=True) as conn:
+                row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+                try:
+                    saved=json.loads(row['result_json'] or '{}') if row else {}
+                except json.JSONDecodeError:
+                    saved={}
+                current=saved.get('collection_progress') or {}
+                merged={**current,**update}
+                if isinstance(update.get('interfaces'),dict):
+                    merged['interfaces']=update['interfaces']
+                saved['collection_progress']=merged
+                if update.get('message'):
+                    saved['message']=update['message']
+                conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?',
+                             (json.dumps(saved,ensure_ascii=False,separators=(',',':')),run_id))
         def progress(message):
             with self._lock:
                 self._status['message'] = message
+            if run_id is not None:
+                with self.db.connection(write=True) as conn:
+                    row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+                    try:
+                        saved=json.loads(row['result_json'] or '{}') if row else {}
+                    except json.JSONDecodeError:
+                        saved={}
+                    saved['message']=message
+                    conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?',
+                                 (json.dumps(saved,ensure_ascii=False,separators=(',',':')),run_id))
         try:
             with self.db.connection(write=True) as conn:
                 if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
                     raise ValueError('已有行业任务运行，未启动重复更新')
                 run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES(?,?,?,?,'running')",
                     (action,target,int(recheck),datetime.now(timezone.utc).isoformat())).lastrowid
-            result=perform(self,action,target,recheck,progress,run_id=run_id)
+            result=perform(self,action,target,recheck,progress,run_id=run_id,progress_state=persist_progress)
             with self.db.connection(write=True) as conn:
                 conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
                              (datetime.now(timezone.utc).isoformat(),merge_run_result(conn,run_id,result),run_id))
             with self._lock:
                 warning=result.get('membership_check',{}).get('warning')
                 statements=result.get('statements',{})
-                detail=' · '.join(f"{label} {statements[key]['rows']} 家" for key,label in
-                    [('income','利润表'),('balance','资产负债表'),('cashflow','现金流量表'),('performance','业绩指标')]
-                    if key in statements)
+                detail=financial_change_summary(statements) if action=='financial_period' else ''
                 self._status.update(running=False,message=f"行业更新完成 · {target} · 请求 {result['requested_count']} 家 · 待补 {len(result['failures'])} 家"+
                                     (' · '+detail if detail else '')+
                                     (' · '+warning if warning else ''),

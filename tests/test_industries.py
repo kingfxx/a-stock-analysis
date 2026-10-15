@@ -356,7 +356,7 @@ def test_financial_task_one_period_reuses_local_and_never_fetches_caps(service,m
     service.import_bundle(bundle)
     before=service.read(industry='630701',mode='ytd')['market_series']
     requested=[]
-    def collect(database,operation_id,period,collector,progress,*,recheck=False):
+    def collect(database,operation_id,period,collector,progress,*,recheck=False,**kwargs):
         requested.append((operation_id,period,recheck))
         payload=datasets()
         for item in payload:

@@ -143,7 +143,7 @@ def test_task_entrypoint_keeps_published_cap_aggregation_current_and_visible(db,
     monkeypatch.setattr(industry_memberships,'ensure_daily_memberships',
                         lambda *args,**kwargs:{'warning':None})
 
-    def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress):
+    def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress,*,progress_state=None):
         with db.connection(write=True) as conn:
             run_id=conn.execute("SELECT id FROM sw_update_runs WHERE status='running'").fetchone()[0]
             conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?',
@@ -194,7 +194,7 @@ def test_failed_task_entrypoint_preserves_already_published_aggregation(db,monke
     monkeypatch.setattr(industry_memberships,'ensure_daily_memberships',
                         lambda *args,**kwargs:{'warning':None})
 
-    def refresh_then_fail(service,quarter,recheck,foundation,membership_check,progress):
+    def refresh_then_fail(service,quarter,recheck,foundation,membership_check,progress,*,progress_state=None):
         with db.connection() as conn:
             run_id=conn.execute("SELECT id FROM sw_update_runs WHERE status='running'").fetchone()[0]
         aggregate_quarter(db,quarter,run_id,f'sw_update_runs:{run_id}')
