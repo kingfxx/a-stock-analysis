@@ -266,23 +266,28 @@ def build_auto_wacc(db, code, *, years=5, as_of=None):
     # a semiannual statement is preferable for current capital structure.
     weight_period=balance_periods[-1] if balance_periods else None
     total_debt,weight_components,weight_missing=debt_for(weight_period) if weight_period else (None,{},list(DEBT_FIELDS))
-    # Pair the market capitalization with its own snapshot date and definition.
+    # Match market capitalization to the balance-sheet reporting date.
     market_cap=None; market_date=None
     snapshot=db.connection()
     with snapshot as conn:
-        s=conn.execute("SELECT total_market_cap,trade_date FROM market_trade_snapshot WHERE security_code=? AND is_latest=1 AND definition_version IN ('em-valueanalysis-v1','historical-composite-v1') AND total_market_cap IS NOT NULL AND trade_date<=? ORDER BY trade_date DESC,CASE definition_version WHEN 'em-valueanalysis-v1' THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT 1",(code,as_of)).fetchone()
+        if weight_period:
+            period_date=date.fromisoformat(weight_period)
+            quarter_start=date(period_date.year,((period_date.month-1)//3)*3+1,1).isoformat()
+            s=conn.execute("SELECT total_market_cap,trade_date FROM market_trade_snapshot WHERE security_code=? AND is_latest=1 AND definition_version IN ('em-valueanalysis-v1','historical-composite-v1') AND total_market_cap IS NOT NULL AND trade_date BETWEEN ? AND ? ORDER BY trade_date DESC,CASE definition_version WHEN 'em-valueanalysis-v1' THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT 1",(code,quarter_start,weight_period)).fetchone()
+        else:
+            s=None
         if s and _finite(s['total_market_cap']) is not None:
             market_cap=_finite(s['total_market_cap']); market_date=s['trade_date']
     weight=total_debt/(total_debt+market_cap)*100 if total_debt is not None and market_cap and total_debt+market_cap>0 else None
     params['weight']=dict(value=weight,source='financial_reports Sina 最近一期合并资产负债表 + market_trade_snapshot.total_market_cap',as_of_date=weight_period,
-        method=f'已披露有息债务分项合计 / (有息债务账面值 + A股总市值)；债务账面值近似市场价值；市值交易日 {market_date or "未记录"}',
+        method=f'已披露有息债务分项合计 / (有息债务账面值 + A股总市值)；债务账面值近似市场价值；市值取同季度不晚于报告期末的最后交易日 {market_date or "未记录"}',
         status='estimated' if weight is not None else 'unavailable',partial=bool(weight is not None and weight_missing),missing_components=weight_missing or [],
         reason=('债务分项存在未披露项，权重按已披露分项部分估算：'+', '.join(debt_labels[k] for k in weight_missing)) if weight is not None and weight_missing else None if weight is not None else '债务或基准日总市值不可用；A+H结构需人工核验')
     warnings=['简化FCF=CFO−资本开支不等同严格FCFF；应用WACC后现金流与折现率口径仍可能不匹配。',
             '金融企业不适用普通工业企业WACC。']
     if ending == 0: warnings.append('最新完整年度已披露有息债务为零；未将零债务成本视为可用Kd。')
     if latest and latest != as_of[:4]+'-12-31': warnings.append('财务年度与估值基准日不一致。')
-    if market_date and weight_period and market_date != weight_period: warnings.append('市值与最新有息债务资产负债表日期不一致。')
+    if weight_period and not market_date: warnings.append('缺少与最近一期有息债务资产负债表同季度的市值快照，债务权重不可用。')
     if weight_missing: warnings.append('债务权重基于已披露有息债务分项部分估算，未将缺失分项填零；请核对资产负债表。')
     if kd_missing: warnings.append('Kd基于两个年度已披露有息债务分项部分估算，遗漏项可能影响债务成本。')
     if effective is not None and not 0<=effective<=100: warnings.append('历史有效税率异常，未作为预期税率。')

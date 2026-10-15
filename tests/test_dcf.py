@@ -227,6 +227,7 @@ def test_auto_wacc_uses_annual_interest_tax_latest_interim_debt_and_same_day_mar
         conn.execute("INSERT INTO collection_batches(id,operation_id,domain,dataset,source_system,trigger_type,status,started_at) VALUES (1,'wacc','market','snapshot','test','manual','complete','2026-06-30')")
         conn.execute("INSERT INTO collection_sources(id,batch_id,source_system,dataset,request_key,attempt_no,request_json) VALUES (1,1,'test','snapshot','wacc',1,'{}')")
         conn.execute("INSERT INTO market_trade_snapshot(exchange,trade_date,version,is_latest,definition_version,batch_id,source_id,content_hash,obtained_at,updated_at,security_code,total_market_cap) VALUES ('sh','2026-06-30',1,1,'em-valueanalysis-v1',1,1,'hash','2026-06-30','2026-06-30','600519',900)")
+        conn.execute("INSERT INTO market_trade_snapshot(exchange,trade_date,version,is_latest,definition_version,batch_id,source_id,content_hash,obtained_at,updated_at,security_code,total_market_cap) VALUES ('sh','2026-09-30',1,1,'em-valueanalysis-v1',1,1,'hash-q3','2026-09-30','2026-09-30','600519',1200)")
     result=dcf.build_auto_wacc(facts,'600519',as_of='2026-10-15')
     params=result['parameters']
     assert params['kd']['value']==pytest.approx(8/((36+45)/2)*100)
@@ -236,6 +237,7 @@ def test_auto_wacc_uses_annual_interest_tax_latest_interim_debt_and_same_day_mar
     assert params['tax']['status']=='estimated'
     assert params['weight']['value']==pytest.approx(60/960*100)
     assert params['weight']['as_of_date']=='2026-06-30'
+    assert '同季度不晚于报告期末的最后交易日 2026-06-30' in params['weight']['method']
     assert params['weight']['partial'] is True
     assert any('部分估算' in warning for warning in result['warnings'])
 
