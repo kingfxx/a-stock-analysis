@@ -244,23 +244,7 @@
         el('dcf-window').addEventListener('change',setBase);
         ['base','growth','stage1','stage2','stage3','discount','terminal'].forEach(key=>el('dcf-'+key).addEventListener('input',()=>{if(preciseInputs.has('dcf-'+key)&&num(el('dcf-'+key).value)!==Number(displayInput(preciseInputs.get('dcf-'+key))))preciseInputs.delete('dcf-'+key);render();}));
         panel.querySelectorAll('[data-dcf-recommend]').forEach(btn=>btn.addEventListener('click',()=>{setPreciseInput(btn.dataset.dcfRecommend,Number(btn.dataset.value));render();}));
-        el('dcf-estimate-wacc-reference').addEventListener('click',async()=>{
-          const estimateButton=el('dcf-estimate-wacc-reference'),basis=el('dcf-discount-reference-basis');
-          estimateButton.disabled=true;estimateButton.textContent='正在估算…';
-          try{
-            const response=await fetch('/api/dcf/wacc?'+new URLSearchParams({code,years:el('dcf-beta-window').value}));
-            if(!response.ok)throw new Error('WACC自动估算请求失败');
-            const data=await response.json(),p=data.parameters||{};
-            const estimate=wacc({rf:p.rf?.value,beta:p.beta?.value,erp:p.erp?.value,cost:p.kd?.value,tax:p.tax?.value,weight:p.weight?.value});
-            if(estimate.error)throw new Error(estimate.error);
-            const apply=el('dcf-apply-discount-reference');
-            el('dcf-discount-reference').textContent=`折现率参考：${waccDecimal(estimate.value)}%`;
-            basis.textContent=`状态：自动WACC估算；基准日 ${data.as_of_date||'未记录'}；Beta窗口 ${data.beta_window_years||el('dcf-beta-window').value}年；ERP ${decimal(p.erp?.value)}%（模型假设）；Rf来源 ${p.rf?.source||'未记录'}；财务口径及数据限制见WACC自动估算。`;
-            apply.dataset.value=String(estimate.value);apply.disabled=false;
-            estimateButton.textContent='重新估算WACC';
-          }catch(error){basis.textContent=`状态：自动估算不可用；${error.message}`;estimateButton.textContent='自动估算WACC';}
-          finally{estimateButton.disabled=false;}
-        });
+        el('dcf-estimate-wacc-reference').addEventListener('click',()=>runAutoWacc(el('dcf-estimate-wacc-reference'),true));
         const currentWaccValues=()=>{
           const ids={rf:'rf',beta:'beta',erp:'erp',kd:'cost',tax:'tax',weight:'weight'};
           return Object.fromEntries(Object.entries(ids).map(([key,id])=>{
@@ -289,21 +273,49 @@
           }));
           if(autoWacc.warnings?.length) el('dcf-wacc-evidence').insertAdjacentHTML('beforeend',`<p class="dcf-warning">${autoWacc.warnings.map(esc).join(' ')}</p>`);
         };
-        ['rf','beta','erp','cost','tax','weight'].forEach(key=>el('dcf-'+key).addEventListener('input',()=>{showWaccEvidence();renderWacc();}));
-        el('dcf-erp-scenario').addEventListener('change',()=>{el('dcf-erp').value=el('dcf-erp-scenario').value;showWaccEvidence();renderWacc();});
-        el('dcf-auto-wacc').addEventListener('click',async()=>{
-          el('dcf-wacc-result').textContent='正在读取本地历史价格和财务数据…';
+        const runAutoWacc=async(button,updateReference=false)=>{
+          const label=button.textContent,basis=el('dcf-discount-reference-basis');
+          button.disabled=true;button.textContent='正在估算…';
+          if(!updateReference)el('dcf-wacc-result').textContent='正在读取本地历史价格和财务数据…';
           try{
-            const res=await fetch('/api/dcf/wacc?'+new URLSearchParams({code,years:el('dcf-beta-window').value}));
-            if(!res.ok)throw new Error('自动估算请求失败');autoWacc=await res.json();
+            const response=await fetch('/api/dcf/wacc?'+new URLSearchParams({code,years:el('dcf-beta-window').value}));
+            if(!response.ok)throw new Error('WACC自动估算请求失败');
+            autoWacc=await response.json();
             el('dcf-wacc-as-of').textContent=autoWacc.as_of_date||'今天';
             const ids={rf:'rf',beta:'beta',erp:'erp',kd:'cost',tax:'tax',weight:'weight'};
-            for(const [key,id] of Object.entries(ids)){const p=autoWacc.parameters?.[key];if(p&&finite(p.value))el('dcf-'+id).value=waccNumber(p.value);else if(p&&key!=='erp')el('dcf-'+id).value='';}
-            if(finite(autoWacc.parameters?.erp?.value))el('dcf-erp-scenario').value=String(autoWacc.parameters.erp.value);
-            showWaccEvidence();
-            el('dcf-reset-wacc').disabled=false;renderWacc();
-          }catch(error){el('dcf-wacc-result').textContent=error.message;}
-        });
+            for(const [key,id] of Object.entries(ids)){
+              const parameter=autoWacc.parameters?.[key];
+              if(parameter&&finite(parameter.value))el('dcf-'+id).value=waccNumber(parameter.value);
+              else if(parameter&&key!=='erp')el('dcf-'+id).value='';
+            }
+            const erp=autoWacc.parameters?.erp?.value;
+            if(finite(erp))el('dcf-erp-scenario').value=String(erp);
+            el('dcf-reset-wacc').disabled=false;
+            showWaccEvidence();renderWacc();
+            const values=currentWaccValues();values.cost=values.kd;delete values.kd;
+            const estimate=wacc(values);
+            if(updateReference){
+              const apply=el('dcf-apply-discount-reference');
+              if(estimate.error){
+                el('dcf-discount-reference').textContent='折现率参考：待补';
+                apply.dataset.value='';apply.disabled=true;
+                basis.textContent=`状态：参数已填入下方WACC面板，但暂不可计算；${estimate.error}`;
+              }else{
+                el('dcf-discount-reference').textContent=`折现率参考：${waccDecimal(estimate.value)}%`;
+                basis.textContent=`状态：自动WACC估算；基准日 ${autoWacc.as_of_date||'未记录'}；Beta窗口 ${autoWacc.beta_window_years||el('dcf-beta-window').value}年；ERP ${decimal(erp)}%（模型假设）；Rf来源 ${autoWacc.parameters?.rf?.source||'未记录'}；财务口径及数据限制见WACC自动估算。`;
+                apply.dataset.value=String(estimate.value);apply.disabled=false;
+              }
+            }
+            button.textContent=updateReference?'重新估算WACC':label;
+          }catch(error){
+            if(updateReference)basis.textContent=`状态：自动估算不可用；${error.message}`;
+            else el('dcf-wacc-result').textContent=error.message;
+            button.textContent=label;
+          }finally{button.disabled=false;}
+        };
+        ['rf','beta','erp','cost','tax','weight'].forEach(key=>el('dcf-'+key).addEventListener('input',()=>{showWaccEvidence();renderWacc();}));
+        el('dcf-erp-scenario').addEventListener('change',()=>{el('dcf-erp').value=el('dcf-erp-scenario').value;showWaccEvidence();renderWacc();});
+        el('dcf-auto-wacc').addEventListener('click',()=>runAutoWacc(el('dcf-auto-wacc')));
         el('dcf-reset-wacc').addEventListener('click',()=>{if(!autoWacc)return;const ids={rf:'rf',beta:'beta',erp:'erp',kd:'cost',tax:'tax',weight:'weight'};for(const [key,id] of Object.entries(ids)){const p=autoWacc.parameters?.[key];el('dcf-'+id).value=waccNumber(p?.value);}el('dcf-erp-scenario').value=String(autoWacc.parameters?.erp?.value||6);showWaccEvidence();renderWacc();});
         el('dcf-apply-wacc').addEventListener('click',()=>{
           const values=currentWaccValues();values.cost=values.kd;delete values.kd;

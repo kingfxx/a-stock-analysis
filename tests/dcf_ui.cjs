@@ -174,6 +174,13 @@ async function domTest(data,failFirst=false,autoData=null){
   assert.equal(configured.panel.querySelector('#dcf-window').value,'1');assert.equal(configured.panel.querySelector('#dcf-growth').value,'1');assert.equal(configured.panel.querySelector('#dcf-terminal').value,'0');
   assert.equal(configured.panel.querySelector('#dcf-stage1').value,12.5);assert.equal(configured.panel.querySelector('#dcf-stage3').value,2.5);
   const autoData={as_of_date:'2026-10-15',parameters:{rf:{value:1.678,status:'observed',source:'test',as_of_date:'2026-10-14'},beta:{value:0.1273084078625435,status:'estimated',sample_count:200,start:'2021-10-15',end:'2026-10-15'},erp:{value:6,status:'assumption'},kd:{value:3.2470819173262853,status:'estimated'},tax:{value:16.268795579183625,history_value:16.268795579183625,status:'estimated',history_status:'estimated'},weight:{value:28.865160940429256,status:'estimated'}},warnings:[]};
+  const referenceAutomatic=await domTest(fixture,false,autoData);
+  await referenceAutomatic.panel.querySelector('#dcf-estimate-wacc-reference').fire('click');
+  for(const [id,value] of Object.entries({rf:'1.678',beta:'0.127',erp:'6',cost:'3.247',tax:'16.269',weight:'28.865'}))assert.equal(referenceAutomatic.panel.querySelector('#dcf-'+id).value,value,`reference-card estimation should populate ${id}`);
+  assert.equal(referenceAutomatic.panel.querySelector('#dcf-reset-wacc').disabled,false);
+  assert.equal(referenceAutomatic.panel.querySelector('#dcf-wacc-as-of').textContent,'2026-10-15');
+  assert.match(referenceAutomatic.panel.querySelector('#dcf-wacc-evidence').innerHTML,/历史有效税率，自动用于WACC/);
+  assert.match(referenceAutomatic.panel.querySelector('#dcf-discount-reference').textContent,/折现率参考：\d+\.\d+%/);
   const automatic=await domTest(fixture,false,autoData);
   await automatic.panel.querySelector('#dcf-auto-wacc').fire('click');
   assert.equal(automatic.panel.querySelector('#dcf-rf').value,'1.678');assert.equal(automatic.panel.querySelector('#dcf-beta').value,'0.127');
