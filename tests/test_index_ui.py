@@ -363,3 +363,44 @@ def test_current_taxonomy_mapping_is_unique_and_does_not_change_history(db):
     assert result['rows'][0]['catalog_as_of'] is None
     with db.connection() as conn:
         assert conn.execute("SELECT parent_index_code FROM index_catalog WHERE index_code='sw:801011'").fetchone()[0] is None
+
+
+def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state(index_server):
+    playwright=pytest.importorskip('playwright.sync_api')
+    from quarterly_dashboard.collection import encoded
+    from quarterly_dashboard.index_collection import start_operation
+    base,_,db=index_server
+    operation=start_operation(db,mode='incremental',providers=['csindex'])
+    with db.connection(write=True) as conn:
+        conn.execute('UPDATE index_collection_operations SET error=?,result_json=? WHERE operation_id=?',
+            (encoded({'csindex':'ValueError: fixture error'}),encoded({'errors':{'csindex':'ValueError: fixture error'}}),operation))
+    with playwright.sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page();errors=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/indices',wait_until='networkidle')
+            toggle=page.locator('#progress-toggle');details=page.locator('#progress-details')
+            assert toggle.inner_text()=='查看进度'
+            assert toggle.get_attribute('aria-expanded')=='false' and details.is_hidden()
+            toggle.click()
+            assert toggle.inner_text()=='收起进度'
+            assert toggle.get_attribute('aria-expanded')=='true' and not details.is_hidden()
+            assert '该历史任务未记录总进度' in page.locator('#progress-summary').inner_text()
+            assert 'ValueError' not in page.locator('#progress-details').inner_text()
+            with db.connection(write=True) as conn:
+                conn.execute('UPDATE index_collection_operations SET status=?,error=NULL,result_json=? WHERE operation_id=?',
+                    ('running',encoded({'work_progress':{'phase':'running','total':4,'success':1,'skipped':1,'failed':0,
+                        'cancelled':0,'pending':1,'running':1,'providers':{'csindex':{'total':4,'success':1,'skipped':1,
+                            'failed':0,'cancelled':0,'pending':1,'running':1,'current':'中证指数历史 000300'}}}}),operation))
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+            page.wait_for_function("document.getElementById('progress-summary').textContent.includes('已采集成功 1 项')")
+            assert not details.is_hidden() and toggle.get_attribute('aria-expanded')=='true'
+            assert '中证指数' in page.locator('#progress-sources').inner_text()
+            toggle.click()
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+            page.wait_for_timeout(200)
+            assert details.is_hidden() and toggle.get_attribute('aria-expanded')=='false'
+            assert 'cancelled' not in page.locator('#progress').inner_text().lower()
+            assert not errors
+        finally:browser.close()

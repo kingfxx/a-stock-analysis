@@ -18,8 +18,9 @@
 <header><div><h1>指数分析</h1><p>宽基、申万行业与红利策略；不同来源和统计口径分别展示。</p></div></header>
 <section aria-label="采集任务"><h2>采集进度</h2><div class="controls">
 <button id="incremental" title="只补最后已有日期之后的数据，日期已最新时跳过估值请求">更新近期估值</button><button id="review" title="重新核对最近10个交易日；乐咕核对最近4个月，用于检查来源修订">核对近期修订</button><button id="full">采集／恢复十年历史</button><button id="audit">轮换核对历史月份</button><button id="cancel" disabled>停止采集</button>
-</div><p id="progress" role="status" aria-live="polite">正在读取…</p><p id="cooldowns"></p>
-<p class="muted">同源串行，间隔至少10秒并随机延迟，遇拒绝访问停止并冷却。历史任务可能持续数小时，已提交分段保留。主题指数本次不采集。</p></section>
+<button id="progress-toggle" type="button" aria-expanded="false" aria-controls="progress-details">查看进度</button>
+</div><p id="progress" role="status" aria-live="polite">正在读取…</p><div id="progress-details" class="index-progress-details" hidden aria-live="polite"><p id="progress-summary"></p><ul id="progress-sources"></ul></div><p id="cooldowns"></p>
+<p class="muted">跨来源并行、同源最多2个请求；每完成请求间隔2—5秒，滚动60秒最多30次，每20次额外休息10秒。遇拒绝访问停止并冷却。历史任务可能持续数小时，已提交分段保留。进度按独立采集任务计数，不代表已覆盖数据行数。主题指数本次不采集。</p></section>
 <section class="valuation-panel" aria-label="指数估值与分位">
 <div class="panel-head"><h2>估值与分位</h2><p class="muted">指数估值走势 · 所选区间历史分布与当前历史位置</p>
 <div class="controls index-controls">
