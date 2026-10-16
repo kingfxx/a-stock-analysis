@@ -86,7 +86,7 @@ class PacingPolicy:
         if self.provider == 'index_parallel':
             if ((self.interval,self.jitter,self.window,self.window_requests,self.rest_every,
                  self.rest_min,self.rest_max,self.cooldown)!=(2,3,60,30,20,10,10,3600)
-                    or self.max_concurrency!=2 or not 1<=self.max_attempts<=3):
+                    or self.max_concurrency not in (1,2) or not 1<=self.max_attempts<=3):
                 raise ValueError('指数并行限速配置必须符合本轮授权策略')
             return
         if self.provider in ('industry_financial', 'industry_snapshot'):
@@ -243,7 +243,7 @@ class RequestCollector:
         if index_parallel:
             return PacingPolicy(interval=2,jitter=3,window=60,window_requests=30,
                 rest_every=20,rest_min=10,rest_max=10,cooldown=3600,max_attempts=self.policy.max_attempts,
-                provider='index_parallel',max_concurrency=2)
+                provider='index_parallel',max_concurrency=1 if provider=='legu' else 2)
         return self.policy
 
     def spawn(self):
@@ -501,6 +501,7 @@ class RequestCollector:
         return dict(policy=asdict(self.policy),provider_policies={
                         'cninfo':asdict(self.policy_for('cninfo')),
                         'index_parallel':asdict(self.policy_for('index_parallel',index_parallel=True)),
+                        'index_legu':asdict(self.policy_for('legu',index_parallel=True)),
                         'industry_financial':asdict(self.policy_for('eastmoney',industry_profile='financial')),
                         'industry_snapshot':asdict(self.policy_for('eastmoney',industry_profile='snapshot'))},
                     network_requests=self.requests,retries=self.retries,halted=self.halted)

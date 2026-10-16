@@ -695,7 +695,8 @@ class IndexCollector:
                 raise
             return
         workers=[];failures=[]
-        with ThreadPoolExecutor(max_workers=2,thread_name_prefix='index-legu') as pool:
+        with ThreadPoolExecutor(max_workers=self.http.policy_for('legu',index_parallel=True).max_concurrency,
+                                thread_name_prefix='index-legu') as pool:
             tasks={}
             for item in jobs:
                 worker=self.new_worker()

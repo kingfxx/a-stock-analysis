@@ -64,6 +64,36 @@ def test_different_index_providers_overlap_and_default_policy_remains_conservati
     assert clients[0].policy_for('csindex',index_parallel=True).max_concurrency==2
 
 
+def test_legu_shared_scheduler_serializes_independent_collectors(db):
+    lock=threading.Lock();active=[0];maximum=[0];spans=[]
+    class SerialSession:
+        def get(self,url,**kwargs):
+            with lock:
+                active[0]+=1
+                maximum[0]=max(maximum[0],active[0])
+                started=time.monotonic()
+            time.sleep(.1)
+            with lock:
+                spans.append((started,time.monotonic()))
+                active[0]-=1
+            reply=requests.Response();reply.status_code=200
+            reply._content=b'{"data":[]}'
+            reply.headers['Content-Type']='application/json'
+            return reply
+    batch=begin_batch(db,'serial-legu','index.legu.test','legu')
+    clients=[RequestCollector(db,session=SerialSession(),uniform=lambda low,high:low) for _ in range(2)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures=[pool.submit(client.get,batch,'legu','index.legu.test',
+                             f'https://example.test/{i}',index_parallel=True)
+                 for i,client in enumerate(clients)]
+        results=[future.result(timeout=15) for future in futures]
+    spans.sort()
+    assert maximum[0]==1 and len(results)==2
+    assert spans[1][0]-spans[0][1]>=1.95
+    with db.connection() as conn:
+        assert conn.execute('SELECT count(*) FROM collection_sources').fetchone()[0]==2
+
+
 class FakeClock:
     def __init__(self):self.now=1000
     def time(self):return self.now
@@ -144,6 +174,31 @@ def test_policy_rejects_unapproved_concurrency_and_reports_index_exception(db):
     report=RequestCollector(db).report()
     assert report['provider_policies']['index_parallel']['window_requests']==30
     assert report['provider_policies']['index_parallel']['rest_min']==10
+    assert report['provider_policies']['index_parallel']['max_concurrency']==2
+    assert report['provider_policies']['index_legu']['max_concurrency']==1
+    assert report['provider_policies']['index_legu']['interval']==2
+    assert report['provider_policies']['index_legu']['window_requests']==30
+
+
+def test_legu_work_units_run_serially(db,monkeypatch):
+    from quarterly_dashboard import index_collection as ic
+    operation=start_operation(db,providers=['legu'],start='2026-10-01',end='2026-10-15')
+    collector=IndexCollector(db,operation)
+    monkeypatch.setattr(ic,'LG_CODES',{'000016.SH':'上证50','000300.SH':'沪深300'})
+    def setup(worker,batch):
+        worker.lg_headers={'X-CSRF-Token':'fixture'};worker.lg_token='fixture'
+    monkeypatch.setattr(IndexCollector,'setup_legu',setup)
+    lock=threading.Lock();active=[0];maximum=[0];calls=[]
+    def collect(worker,code,name,dataset,start,end,batch):
+        with lock:
+            active[0]+=1;maximum[0]=max(maximum[0],active[0]);calls.append((code,dataset))
+        time.sleep(.02)
+        with lock:active[0]-=1
+    monkeypatch.setattr(IndexCollector,'_collect_legu_item',collect)
+    try:collector.collect_legu('2026-10-01','2026-10-15','incremental')
+    finally:collector.http.session.close()
+    assert maximum[0]==1
+    assert calls==[(code,metric) for code in ic.LG_CODES for metric in ('pe','pb')]
 
 
 def test_legu_worker_copies_csrf_headers_token_and_cookie_jar(db):
