@@ -149,11 +149,45 @@ def parse_rows(rows, *, provider, series_keys, code_key, name_key, date_key, sta
     return observations,list(identities.values()),anomalies
 
 
-def publish_segment(db, batch_id, observations, identities, result, *, complete=True, coverage='unknown', check_cancelled=lambda: None, prices=()):
+def compact_coverage(items):
+    metrics={}
+    missing_by_index={}
+    index_codes=set()
+    for item in items:
+        code=item.get('index_code')
+        if code is not None:
+            index_codes.add(code)
+        fields=item.get('metrics',item.get('fields',{}))
+        for name,counts in fields.items():
+            missing=counts.get('missing_in_returned_rows',counts.get('missing',0)) or 0
+            totals=metrics.setdefault(name,dict(valid=0,missing=0))
+            totals['valid']+=counts.get('valid',0) or 0
+            totals['missing']+=missing
+            if missing and code is not None:
+                fields_by_name=missing_by_index.setdefault(code,{})
+                fields_by_name[name]=fields_by_name.get(name,0)+missing
+    return dict(unique_indices=len(index_codes),metrics=metrics,indices_with_missing=[
+        dict(index_code=code,fields=fields) for code,fields in sorted(missing_by_index.items())])
+
+
+def publish_segment(db, batch_id, observations, identities, result, *, complete=True, coverage='unknown', check_cancelled=lambda: None, prices=(), compact_index_coverage=False):
     # Entire page set has already validated; bounded fact transactions follow.
+    result=dict(result)
+    for key,summary_key in (('anomalies','anomaly_summary'),('price_anomalies','price_anomaly_summary')):
+        details=result.pop(key,None)
+        if details is not None:
+            by_reason={}
+            for item in details:
+                reason=item.get('reason','unknown') if isinstance(item,dict) else 'unknown'
+                by_reason[reason]=by_reason.get(reason,0)+1
+            result[summary_key]=dict(total=len(details),by_reason=by_reason,samples=details[:3])
+    if compact_index_coverage and isinstance(result.get('coverage'),list):
+        result['coverage_summary']=compact_coverage(result.pop('coverage'))
     counts=dict(inserted=0,revised=0,unchanged=0)
     if prices:
-        result={**result,'price_coverage':price_coverage(prices)}
+        price_result=price_coverage(prices)
+        result={**result,('price_coverage_summary' if compact_index_coverage else 'price_coverage'):
+                compact_coverage(price_result) if compact_index_coverage else price_result}
     price_counts=dict(inserted=0,revised=0,unchanged=0)
     groups={}
     for row in observations:
@@ -788,7 +822,7 @@ class IndexCollector:
                 page+=1
             state,coverage=coverage_summary(all_rows,self.trading_days,begin,finish)
             publish_segment(self.db,batch,all_rows,list(identities.values()),dict(coverage=coverage,anomalies=anomalies,
-                returned=returned,reported_total=total,price_anomalies=price_anomalies,classification_history='pending',**self.http.report()),coverage=state,check_cancelled=self.http.check_cancelled,prices=all_prices)
+                returned=returned,reported_total=total,price_anomalies=price_anomalies,classification_history='pending',**self.http.report()),coverage=state,check_cancelled=self.http.check_cancelled,prices=all_prices,compact_index_coverage=True)
         except Exception as exc:
             self.failed(batch,sources[-1] if sources else None,exc)
             raise

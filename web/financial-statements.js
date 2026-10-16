@@ -241,7 +241,7 @@
     const el = id => document.getElementById(id);
     const panel = el('statements-panel');
     panel.innerHTML = `<div class="fs-head"><div><h2>财务分析</h2><p>资产结构、利润来源与现金去向 · <span id="fs-company"></span></p></div><button id="fs-reload" class="refresh" type="button">重新读取本地数据</button></div>
-      <div class="fs-controls"><button id="fs-prev" type="button" disabled>上一期</button><label>报告期<select id="fs-period" aria-label="财务分析报告期"></select></label><button id="fs-next" type="button" disabled>下一期</button>
+      <div class="fs-controls"><div class="fs-period-control"><label>报告期<select id="fs-period" aria-label="财务分析报告期"></select></label><div class="fs-period-nav" role="group" aria-label="报告期快速切换"><button type="button" id="fs-prev" disabled>上一期</button><button type="button" id="fs-period-step" aria-pressed="false" title="点击切换季度或年度步长">季度</button><button type="button" id="fs-next" disabled>下一期</button></div></div>
       <label id="fs-mode-label">利润与现金流口径<select id="fs-mode"><option value="ytd">本年累计</option><option value="quarter">单季度</option></select></label>
       <label>比较对象<select id="fs-comparison"><option value="year_end">上年末（流量用上年同期）</option><option value="yoy">上年同期</option><option value="previous">上一报告期</option></select></label>
       <label>金额单位<select id="fs-unit"><option>亿元</option><option>万元</option><option>元</option></select></label>
@@ -255,10 +255,14 @@
       <details class="panel fs-panel fs-full"><summary>展开完整原始报表</summary><p>保留来源科目名称；单季度金额按同口径累计差分，现金期初取上季末余额。空白科目显示待补，不作为零。</p><div id="fs-full-table" class="fs-table-scroll"></div></details>
       <div class="panel fs-panel"><h3>三表关联观察</h3><p>比较上年同期，展示事实和差异。应收、存货余额变化只是线索，不能替代净利润到经营现金流的精确调节。</p><div id="fs-observations" class="fs-observations"></div></div>
       <div class="panel fs-panel"><h3>分析口径</h3><p id="fs-notes"></p></div></div>`;
+    const statementFilters=el('statement-filter-details');
+    statementFilters.querySelector('.statement-filter-body').append(panel.querySelector('.fs-controls'));
     let data = null, kind = 'fzb', active = false, dirty = true, sequence = 0, controller = null, loading = false;
     function selectTab(selected) {
       active = selected === 'statements';
       try{sessionStorage.setItem('investment-research-tab-v1',selected);}catch{}
+      statementFilters.hidden = !active;
+      el('trend-tab').closest('.shell').classList.toggle('statement-filters-active',active);
       for (const key of ['trend','business','statements','industry','maintenance']) {
         const id=key+'-tab';
         const on = key === selected; el(id).setAttribute('aria-selected',String(on)); el(id).tabIndex = on?0:-1;
@@ -317,6 +321,7 @@
         data=fresh;
         el('fs-period').innerHTML=fresh.periods.map(p=>`<option value="${esc(p)}">${esc(p)} · ${{'03-31':'一季报','06-30':'中报','09-30':'三季报','12-31':'年报'}[p.slice(5)]}</option>`).join('');
         el('fs-period').value=fresh.period || '';
+        updatePeriodNav();
         render();
       } catch(error) {
         if(request!==sequence || error.name==='AbortError')return;
@@ -324,11 +329,34 @@
         el('fs-status').textContent='读取失败：'+error.message+(data?'。当前保留 '+data.period+' 的上一份展示，点击重新读取重试。':'。点击重新读取重试。');
       } finally {if(request===sequence){loading=false;if(dirty&&active&&data && el('fs-status').textContent==='正在读取本地财报…')load();}}
     }
-    ['fs-period','fs-mode','fs-comparison'].forEach(id=>el(id).addEventListener('change',load));
+    el('fs-period').addEventListener('change',()=>{updatePeriodNav();load();});
+    ['fs-mode','fs-comparison'].forEach(id=>el(id).addEventListener('change',load));
     ['fs-unit','fs-display'].forEach(id=>el(id).addEventListener('change',render));
     el('fs-reload').addEventListener('click',load);
-    function move(offset){const select=el('fs-period'),index=select.selectedIndex+offset;if(index>=0&&index<select.options.length){select.selectedIndex=index;load();}}
-    el('fs-prev').addEventListener('click',()=>move(1));el('fs-next').addEventListener('click',()=>move(-1));
+    let periodStep='quarter';
+    function updatePeriodNav(){
+      const options=[...el('fs-period').options].map(option=>option.value),current=el('fs-period').value,index=options.indexOf(current);
+      const target=direction=>{
+        if(index<0)return -1;
+        if(periodStep==='quarter')return index-direction>=0&&index-direction<options.length?index-direction:-1;
+        const [year,month,day]=current.split('-').map(Number),targetDate=`${year+direction}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        const candidates=options.filter(p=>direction<0?p<current&&p<=targetDate:p>current&&p>=targetDate).sort();
+        const destination=direction<0?candidates.at(-1):candidates[0];
+        return destination?options.indexOf(destination):-1;
+      };
+      el('fs-prev').disabled=target(-1)<0;el('fs-next').disabled=target(1)<0;
+      el('fs-period-step').textContent=periodStep==='quarter'?'季度':'年度';
+      el('fs-period-step').setAttribute('aria-pressed',String(periodStep==='year'));
+      el('fs-period-step').title=`当前按${periodStep==='quarter'?'季度':'年度'}跳转，点击切换`;
+      return target;
+    }
+    function navigatePeriod(direction){
+      const target=updatePeriodNav()(direction);
+      if(target<0)return;
+      el('fs-period').selectedIndex=target;updatePeriodNav();load();
+    }
+    el('fs-prev').addEventListener('click',()=>navigatePeriod(-1));el('fs-next').addEventListener('click',()=>navigatePeriod(1));
+    el('fs-period-step').addEventListener('click',()=>{periodStep=periodStep==='quarter'?'year':'quarter';updatePeriodNav();});
     window.addEventListener('financial-facts-updated',event=>{if(event.detail.code===state.code){dirty=true;if(active)load();}});
     window.addEventListener('dashboard-data-state',event=>{if(event.detail.code===state.code&&!event.detail.updating){dirty=true;if(active)load();}});
     function plot(id,traces,extra={}) {

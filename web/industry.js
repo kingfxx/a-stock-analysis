@@ -47,6 +47,7 @@
       <details class="panel fs-panel sw-notes"><summary>数据来源与汇总口径</summary><div id="sw-notes"></div></details>`;
     const sidebarFilters=document.getElementById('industry-filter-details');
     const shell=document.querySelector('.shell');
+    sidebarFilters.open=true;
     sidebarFilters.querySelector('.industry-filter-body').append(panel.querySelector('.sw-industry-filters'));
     document.querySelector('.research-tabs').addEventListener('click',event=>{
       const tab=event.target.closest('[role="tab"]');

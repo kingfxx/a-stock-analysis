@@ -123,7 +123,8 @@ def replay(db, *, start='2016-10-11', end='2026-10-09', report_path=None):
                     if provider=='sws' and (len(set(totals))!=1 or len(seen)!=totals[0]):
                         raise ValueError('申万缓存分页数量不完整或总数不一致')
                     result=publish_segment(db,batch,[],[],dict(original_batch=original_id,network_requests=0,
-                        raw_rows=len(seen),price_anomalies=anomalies),prices=all_prices,coverage='unknown' if all_prices else 'empty')
+                        raw_rows=len(seen),price_anomalies=anomalies),prices=all_prices,coverage='unknown' if all_prices else 'empty',
+                        compact_index_coverage=provider=='sws')
                     report['results'].append(dict(batch_id=batch,provider=provider,**result))
                 except Exception as exc:
                     with db.connection() as conn:
