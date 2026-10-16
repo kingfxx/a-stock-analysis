@@ -1,8 +1,12 @@
 #business-panel[hidden]{display:none!important}
 #business-panel{scroll-margin-top:20px}
+.bs-results{min-width:0}
 .bs-controls{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 16px}
 .bs-controls label{display:flex;flex-direction:column;gap:7px;color:var(--muted);font-size:13px;min-width:130px}
 .bs-controls select{min-width:0;width:100%}
+.business-filter-body .bs-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:9px;margin:12px 0 4px}
+.business-filter-body .bs-controls label{min-width:0;width:100%;gap:4px}
+.business-filter-body .bs-controls select{width:100%;min-width:0;max-width:none;padding:8px 7px;font-size:12px}
 .bs-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0}
 .bs-metric{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:19px 22px;min-width:0}
 .bs-metric>span,.bs-metric small{display:block;color:var(--muted);font-size:12px;line-height:1.7}
@@ -30,5 +34,5 @@
 .bs-table th:first-child{position:sticky;left:0;text-align:left;min-width:190px;max-width:300px;white-space:normal;overflow-wrap:anywhere;background:#1a2227;font-weight:500}
 .bs-table .bs-report-row th{position:static;text-align:left;background:#22343d;color:#b9dbe0;font-size:11px;white-space:normal}
 .bs-history summary{padding:0 24px 16px;font-size:13px}.bs-explanation{padding:18px 24px;font-size:13px}.bs-explanation p{color:var(--muted);line-height:1.9}
-@media(max-width:800px){#business-panel{scroll-margin-top:185px}.bs-summary{grid-template-columns:1fr}.bs-metric{padding:14px 16px}.bs-controls label{flex:1;min-width:125px}.bs-table-scroll{margin:12px 14px 16px}.bs-chart{height:440px}.bs-history summary{padding-left:14px}.bs-explanation{padding:16px}}
+@media(max-width:800px){#business-panel{scroll-margin-top:185px}.bs-summary{grid-template-columns:1fr}.bs-metric{padding:14px 16px}.bs-table-scroll{margin:12px 14px 16px}.bs-chart{height:440px}.bs-history summary{padding-left:14px}.bs-explanation{padding:16px}}
 @media(max-width:800px){.stock-sidebar .research-tabs>button,.stock-sidebar .research-tabs>.nav-link{flex:1 1 calc(33.333% - 6px)}}

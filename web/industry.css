@@ -23,7 +23,9 @@
 .industry-filter-body .sw-period-nav button{padding:7px 8px;border:1px solid var(--line);border-radius:5px;background:#202e35;color:var(--ink);font-size:12px}
 .industry-filter-body .sw-period-nav button:disabled{opacity:.4;cursor:default}
 .industry-filter-body .sw-period-nav button:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
-@media(min-width:1808px){.shell.industry-filters-active,.shell.statement-filters-active{max-width:1760px;margin-left:calc((100% - 1580px)/2 - 180px);margin-right:auto;grid-template-columns:360px minmax(0,1fr)}}
+.business-filter-body .bs-controls{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(min-width:1808px){.shell.industry-filters-active,.shell.statement-filters-active,.shell.business-filters-active{max-width:1760px;margin-left:calc((100% - 1580px)/2 - 180px);margin-right:auto;grid-template-columns:360px minmax(0,1fr)}}
+@media(min-width:801px){.shell.business-filters-active{grid-template-columns:300px minmax(0,1fr)}}
 @media(min-width:801px) and (max-width:1807px){.industry-filter-body .sw-controls{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:800px){.industry-filter-details{grid-column:1/-1;max-height:calc(100dvh - 180px)}}
 .sw-head{display:flex;justify-content:space-between;align-items:start;gap:16px;flex-wrap:wrap}

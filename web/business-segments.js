@@ -42,7 +42,7 @@
   function yoySeries(periods, allPeriods, dimension, field, keys) {
     const recent=periods.filter(p=>!p.missing).slice(-3);
     const byDate=new Map(allPeriods.map(p=>[p.report_date,p]));
-    const categories=catalog(periods,dimension).filter(row=>keys.has(row.item_key));
+    const categories=catalog(periods,dimension).filter(row=>keys.has(row.item_key)&&recent.some(p=>{const previous=byDate.get(`${Number(p.report_date.slice(0,4))-1}${p.report_date.slice(4)}`);return valid(items(p,dimension).find(r=>r.item_key===row.item_key)?.[field])&&valid(items(previous,dimension).find(r=>r.item_key===row.item_key)?.[field])&&items(previous,dimension).find(r=>r.item_key===row.item_key)?.[field]>0;}));
     return recent.map(p=>{
       const previous=byDate.get(`${Number(p.report_date.slice(0,4))-1}${p.report_date.slice(4)}`);
       return {name:p.report_date,x:categories.map(r=>r.item_name),customdata:categories.map(row=>{const now=items(p,dimension).find(r=>r.item_key===row.item_key),before=items(previous,dimension).find(r=>r.item_key===row.item_key);const names=r=>r?(r.source_items||[r]).map(x=>x.item_name).join(' ＋ '):'—';return [names(now),names(before)];}),y:categories.map(row=>growth(
@@ -56,7 +56,8 @@
     const el=id=>document.getElementById(id);
     const panel=el('business-panel');
     panel.innerHTML=`<div class="fs-head"><div><h2>主营构成</h2><p>业务规模、结构与盈利能力 · <span id="bs-company"></span></p></div><button id="bs-reload" class="refresh" type="button">重新读取本地数据</button></div>
-      <div class="bs-controls">
+      <div class="bs-results">
+      <div class="bs-controls" aria-label="筛选条件">
         <label>分类维度<select id="bs-dimension"><option value="2">按产品</option><option value="1">按行业</option><option value="3">按地区</option></select></label>
         <label>报告口径<select id="bs-frequency"></select></label>
         <label>时间范围<select id="bs-range"><option value="10">最近10年</option><option value="5">最近5年</option><option value="3">最近3年</option></select></label>
@@ -69,9 +70,12 @@
         <div id="bs-summary" class="bs-summary"></div>
         <details class="bs-projects"><summary id="bs-project-caption">选择展示项目</summary><div id="bs-project-options"></div><p>项目选择联动规模、占比、同比与毛利率。隐藏项目不重新计算占比；地区概览保留完整地区项目。</p></details>
         <details class="bs-projects bs-mappings"><summary id="bs-mapping-caption">名称归并依据</summary><div id="bs-mappings" class="bs-table-scroll"></div></details>
-        ${[['scale','分项收入趋势'],['share','收入结构变化'],['yoy','分项收入同比'],['margin','分业务毛利率'],['region','地区收入分布']].map(([key,title])=>`<section id="bs-${key}-panel" class="panel bs-panel"><div class="panel-head"><div><h3 id="bs-${key}-title">${title}</h3><p id="bs-${key}-note"></p></div>${key==='region'?'<label id="bs-region-mode-label" class="bs-region-control">地区图展示<select id="bs-region-mode"><option value="amount">金额</option><option value="share">占比</option></select></label>':''}</div><div class="bs-scroll-hint">窄屏可横向滑动查看完整图表</div><div class="bs-chart-scroll"><div id="bs-${key}" class="bs-chart" role="img" aria-label="${title}"></div></div>${key==='scale'?'<details class="bs-history"><summary>展开历史完整明细</summary><div id="bs-history" class="bs-table-scroll"></div></details>':''}${key==='region'?'<div id="bs-region-table" class="bs-table-scroll"></div>':''}</section>`).join('')}
+        ${[['scale','分项收入趋势'],['share','收入结构变化'],['yoy','分项收入同比'],['margin','分业务毛利率'],['region','地区收入分布']].map(([key,title])=>`<section id="bs-${key}-panel" class="panel bs-panel"><div class="panel-head"><div><h3 id="bs-${key}-title">${title}</h3><p id="bs-${key}-note"></p></div>${key==='region'?'<label id="bs-region-mode-label" class="bs-region-control">地区图展示<select id="bs-region-mode"><option value="amount">金额</option><option value="share">占比</option></select></label>':''}</div><div class="bs-scroll-hint">窄屏可横向滑动查看完整图表</div><div class="bs-chart-scroll"><div id="bs-${key}" class="bs-chart" role="img" aria-label="${title}"></div></div>${key==='scale'?'<details class="bs-history"><summary>展开历史完整明细</summary><div id="bs-history" class="bs-table-scroll"></div></details>':''}</section>`).join('')}
         <details class="panel bs-explanation"><summary>来源与分析口径</summary><p id="bs-provenance"></p><p>毛利（来源称主营利润）不是净利润。单个来源项目的收入、成本、毛利、三种占比及毛利率均取原值；已确认同地区互斥业务分项汇总时，金额和占比须各分项完整才相加，毛利率以完整毛利合计÷收入合计计算，并在悬浮中标注；不以收入减成本补齐毛利，不将缺失比例显示为零，也不将占比归一化。</p><p>每次仅展示同类累计报告期，不做单季度差分或TTM。同比＝（本期÷上年同期－1）×100%；统一名称模式按展示归并身份匹配，原始模式按来源代码和名称匹配；基期非正或缺少任一期时不可比。只使用名称规范与明确别名，未确认的更名不拼接，同一期冲突整组不归并。图线在缺项处断开。项目可能含抵销或分组小计，保留负值；图表排除明确命名的整维度合计及以“其中:”或“其中：”标识的下级明细，完整表格仍保留；其他分类层级不自动猜测，不据此推算公司总收入。未展示的其他累计报告期仍保存在本地。</p><p>金额按来源元值换算所选单位；已验收样本601919、605499按人民币元解释，其他公司的币种须核对正式报告。时间范围按所选报告类型最新已存年份向前计算。</p></details>
       </div>`;
+    const sidebarFilters=el('business-filter-details');
+    sidebarFilters.querySelector('.business-filter-body').append(panel.querySelector('.bs-controls'));
+    const initialBusinessActive=!panel.hidden;sidebarFilters.hidden=!initialBusinessActive;el('trend-tab').closest('.shell').classList.toggle('business-filters-active',initialBusinessActive);
     let data=null,rawData=null,nameView=null,dirty=true,sequence=0,controller=null,selected=new Set(),selectionDimension=null;
     const active=()=>!panel.hidden;
     const title=key=>el(`bs-${key}-title`);
@@ -97,9 +101,9 @@
       const colorsByKey=colorMap(dimension);
       return series(periods,dimension,field,keys,scale).map(s=>({
         name:esc(s.name),x:s.x.map(dateLabel),y:s.y,type:line?'scatter':'bar',mode:line?'lines+markers':undefined,
-        customdata:s.source_names.map((name,i)=>[esc(name),s.methods[i]]),
+        customdata:s.source_names.map((name,i)=>{const row=items(periods[i],dimension).find(r=>r.item_key===s.key);const amount=valid(row?.[el('bs-field').value])?number(row[el('bs-field').value]/Number(el('bs-unit').value))+' '+el('bs-unit').selectedOptions[0].text:'—';return [amount,percent(row?.[shares[el('bs-field').value]])];}),
         connectgaps:false,marker:{color:colorsByKey.get(s.key)},line:{color:colorsByKey.get(s.key),width:2},
-        hovertemplate:`${esc(s.name)}<br>%{x}<br>%{y:,.2f}${percentMode?'%':el('bs-unit').selectedOptions[0].text}<br>原始名称：%{customdata[0]}<br>%{customdata[1]}<extra></extra>`
+        hovertemplate:`${esc(s.name)}<br>%{x}<br>%{y:,.2f}${percentMode?'%':el('bs-unit').selectedOptions[0].text}<br>${percentMode?'金额：%{customdata[0]}':'占比：%{customdata[1]}'}<extra></extra>`
       }));
     }
     function table(periods,dimension) {
@@ -146,19 +150,20 @@
       note('share').textContent='采用来源占比，负抵销保留，不强制合计100%；缺失、隐藏项目和分类层级差异均可能影响可见合计。';
       plot('bs-share',traces(periods,dimension,shares[field],selected,0.01,true),'%');
       title('yoy').textContent=`分项${fields[field]}同比`;
-      note('yoy').textContent='最近三个已存同类报告期，各自与上年同日比较；按当前名称口径匹配；基期非正或缺失时不可比。颜色区分报告期。';
-      plot('bs-yoy',yoySeries(periods,data.periods,dimension,field,selected).map((s,i)=>({...s,name:dateLabel(s.name),x:s.x.map(esc),customdata:s.customdata.map(pair=>pair.map(esc)),type:'bar',marker:{color:colors[i]},hovertemplate:'%{x}<br>%{fullData.name}<br>同比 %{y:,.2f}%<br>本期原名：%{customdata[0]}<br>上年原名：%{customdata[1]}<extra></extra>'})),'%','group');
+      note('yoy').textContent=`最近三个已存同类报告期，纵轴为${unit}金额；悬浮查看金额、同比变化及占比。基期非正或缺失时不可比；三期都不可比的项目隐藏。颜色区分报告期。`;
+      const comparePeriods=periods.filter(p=>!p.missing).slice(-3),allByDate=new Map(data.periods.map(p=>[p.report_date,p]));
+      const yoyTraces=catalog(periods,dimension).filter(row=>selected.has(row.item_key)).map((item,index)=>{
+        const points=comparePeriods.map(p=>{const previous=allByDate.get(`${Number(p.report_date.slice(0,4))-1}${p.report_date.slice(4)}`);const current=items(p,dimension).find(r=>r.item_key===item.item_key);const before=items(previous,dimension).find(r=>r.item_key===item.item_key);return {period:p,current,growth:growth(current?.[field],before?.[field])};});
+        if(!points.some(point=>valid(point.growth)))return null;
+        return {name:esc(item.item_name),x:points.map(point=>dateLabel(point.period.report_date)),y:points.map(point=>valid(point.current?.[field])?point.current[field]/scale:null),customdata:points.map(point=>[valid(point.current?.[field])?number(point.current[field]/scale)+' '+unit:'—',valid(point.growth)?(point.growth>0?'+':'')+number(point.growth)+'%':'—',percent(point.current?.[shares[field]])]),type:'bar',marker:{color:colorMap(dimension).get(item.item_key)||colors[index%colors.length]},hovertemplate:'%{x}<br>'+esc(item.item_name)+'<br>金额：%{customdata[0]}<br>同比：%{customdata[1]}<br>占比：%{customdata[2]}<extra></extra>'};
+      }).filter(Boolean);
+      plot('bs-yoy',yoyTraces,unit,'group');
       note('margin').textContent=`${context} · 单个项目用来源毛利率；同地区多业务汇总用完整毛利÷收入，缺项断线。颜色与规模图中的业务一致。`;
       plot('bs-margin',traces(periods,dimension,'gross_margin',selected,0.01,true,true),'%');
-      title('region').textContent=dimension==='3'?'最新地区完整明细':`地区${fields[field]}分布`;
-      el('bs-region').parentElement.hidden=dimension==='3';
-      el('bs-region-mode-label').hidden=dimension==='3';
-      note('region').textContent=`${dateLabel(latest.report_date)} · 地区与产品、行业不可跨维度相加；地区缺少成本或毛利时保留空值。`;
-      if(dimension!=='3'){
-        const regionShare=el('bs-region-mode').value==='share';
-        plot('bs-region',traces(periods,'3',regionShare?shares[field]:field,new Set(catalog(periods,'3').map(r=>r.item_key)),regionShare?0.01:scale,regionShare),regionShare?'%':unit);
-      }
-      el('bs-region-table').innerHTML=table([latest],'3');
+      title('region').textContent=`地区${fields[field]}分布`;
+      const regionShare=el('bs-region-mode').value==='share';
+      note('region').textContent=`${dateLabel(latest.report_date)} · 按当前名称口径展示实际披露的地区项目；切换金额或占比，年份与范围跟随上方筛选。地区与产品、行业不可跨维度相加，缺失值留空。`;
+      plot('bs-region',traces(periods,'3',regionShare?shares[field]:field,new Set(catalog(periods,'3').map(row=>row.item_key)),regionShare?0.01:scale,regionShare),regionShare?'%':unit);
       el('bs-history').innerHTML=table(periods,dimension);
       el('bs-provenance').textContent=`来源：东方财富 RPT_F10_FN_MAINOP，本地已存当前修订。最新所选报告期 ${latest.report_date}，修订 ${latest.revision}，实际取得时间 ${latest.obtained_at}。历史明细保留整维度合计及原始分类名称。`;
     }
@@ -199,7 +204,7 @@
     ['bs-dimension','bs-frequency','bs-range'].forEach(id=>el(id).addEventListener('change',()=>render(true)));
     ['bs-field','bs-unit','bs-region-mode'].forEach(id=>el(id).addEventListener('change',()=>render()));
     el('bs-reload').addEventListener('click',load);
-    window.addEventListener('research-tab-changed',event=>{if(event.detail.tab==='business'){if(dirty)load();else render();}});
+    window.addEventListener('research-tab-changed',event=>{const selectedTab=event.detail.tab;sidebarFilters.hidden=selectedTab!=='business';el('trend-tab').closest('.shell').classList.toggle('business-filters-active',selectedTab==='business');if(selectedTab==='business'){if(dirty)load();else render();}});
     ['financial-facts-updated','dashboard-data-state'].forEach(name=>window.addEventListener(name,event=>{if(event.detail.code===state.code&&!event.detail.updating){dirty=true;if(active())load();}}));
     if(active())load();
   };
