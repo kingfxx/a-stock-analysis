@@ -1,12 +1,19 @@
 """Server-facing announcement integration stays metadata-only and read-only on page views."""
 
 import json
+import pytest
 from types import SimpleNamespace
 
 from quarterly_dashboard import server
 from quarterly_dashboard.announcement_service import AnnouncementService
 from quarterly_dashboard.fundamental_service import FundamentalService
 from quarterly_dashboard.storage import Database
+
+
+@pytest.fixture(autouse=True)
+def no_unrelated_mainop_requests(monkeypatch):
+    monkeypatch.setattr(server.BusinessSegmentService, 'update',
+                        lambda *args, **kwargs: {'sync': {}, 'warnings': []})
 
 
 def _seed_legacy(db, root):

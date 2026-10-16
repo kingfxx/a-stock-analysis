@@ -9,6 +9,13 @@ from quarterly_dashboard.storage import Database
 from industry_financial_fixture import PublishedIndustryService
 
 
+@pytest.fixture(autouse=True)
+def no_unrelated_mainop_requests(monkeypatch):
+    from quarterly_dashboard.business_segment_service import BusinessSegmentService
+    monkeypatch.setattr(BusinessSegmentService, 'update',
+                        lambda *args, **kwargs: {'sync': {}, 'warnings': []})
+
+
 def fixture_bundle():
     return {'obtained_at':'2026-10-03T00:00:00+00:00','asof':'2026-10-03',
             'taxonomy':[{'code':'630000','name':'电力设备','level':1,'parent_code':None},

@@ -26,6 +26,7 @@ from .price_service import PriceService, PriceVersionUnavailable, month_closes
 from .price_projection import chip_prices, financial_prices, valuation_prices
 from .fundamental_service import FundamentalService
 from .announcement_service import AnnouncementService
+from .business_segment_service import BusinessSegmentService
 from .disclosure_dates import is_earnings_notice
 from .statements import read_statements
 from .dcf import read_dcf, build_auto_wacc
@@ -38,7 +39,7 @@ from .collection import ProviderBlocked, read_source
 from .database_restore import RestoreManager, RequestGate, MAX_UPLOAD
 from .dividend_service import DividendService
 from .valuation_service import ValuationService
-from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update
+from .update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update, recent_sync_failure
 from .storage import SyncKey
 from .stock_collection import (begin_stock_batch, complete_stock_batch, fail_stock_batch,
                                recent_failed_stock_batch, routed_stock_requests)
@@ -507,13 +508,15 @@ def _financial_payload(data: dict) -> dict:
     return {"code": data["code"], "name": data.get("name"), "updated_at": data.get("updated_at"),
             "views": {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")},
             "warnings": data.get("warnings", []), "needs_dividends": _needs_dividends(data),
-            "announcement_sync": data.get("announcement_sync", {})}
+            "announcement_sync": data.get("announcement_sync", {}),
+            "business_segment_sync": data.get("business_segment_sync", {})}
 
 
 def _financial_with_announcement_state(data, db):
     if data and data.get("code"):
         sync = AnnouncementService(db).read(data["code"]).get("sync", {})
         data = {**data, "announcement_sync": sync}
+        data['business_segment_sync'] = BusinessSegmentService(db).read(data['code']).get('sync', {})
     return data
 
 
@@ -627,13 +630,16 @@ def p4_loading(code):
     if not identity:
         return {"financial": True, "dividends": True, "valuation": True}
     datasets = {"financial": [(f"financial:{kind}", "sina:CompanyFinanceService.getFinanceReport2022")
-                              for kind in ("lrb", "fzb", "llb")],
+                              for kind in ("lrb", "fzb", "llb")]
+                             + [("business_segments", "eastmoney:RPT_F10_FN_MAINOP")],
                 "dividends": [("dividends", "eastmoney:RPT_SHAREBONUS_DET")],
                 "valuation": [(f"valuation:{metric}", "baidu:opendata")
                               for metric in ("pe", "pb", "market_cap")]
                 + [("industry", "eastmoney:RPT_PCF10_INDUSTRY_CVALUE")]}
-    loading = {section: any((not (state := sync_state(db, SyncKey(identity, dataset, source)))
-                           or not recently_checked(state, seconds=86400) or audit_due(state, dataset))
+    loading = {section: any((dataset != 'business_segments' or not recent_sync_failure(
+                               db, SyncKey(identity, dataset, source))) and
+                           (not (state := sync_state(db, SyncKey(identity, dataset, source)))
+                            or not recently_checked(state, seconds=86400) or audit_due(state, dataset))
                           for dataset, source in keys)
             for section, keys in datasets.items()}
     with db.connection() as conn:
@@ -730,7 +736,17 @@ def load_chart_data(code: str, section: str, refresh: bool = False, *, price_ver
         if Path(DATABASE_PATH).exists():
             fundamentals, dividends, valuations = p4_services()
             if section == "financial":
-                data = fundamentals.update(code, refresh=refresh, full=full)
+                try:
+                    data = fundamentals.update(code, refresh=refresh, full=full)
+                except (ValueError, OSError, StorageError, sqlite3.DatabaseError, requests.RequestException) as exc:
+                    data = fundamentals.read(code)
+                    data.setdefault('warnings', []).append(f'财务同步失败，保留缓存：{exc}')
+                try:
+                    segments = BusinessSegmentService(fundamentals.db).update(code, refresh=refresh, full=full)
+                except (ValueError, OSError, StorageError, sqlite3.DatabaseError, requests.RequestException) as exc:
+                    segments = {'sync': {'status': 'failed', 'error': str(exc)},
+                                'warnings': [f'主营构成独立同步失败，保留财报结果：{exc}']}
+                data.setdefault('warnings', []).extend(segments.get('warnings', []) if segments.get('sync', {}).get('status') == 'failed' else [])
                 financial_warnings = list(data.get("warnings", []))
                 if data.get("reports"):
                     try:
@@ -754,6 +770,7 @@ def load_chart_data(code: str, section: str, refresh: bool = False, *, price_ver
                 else:
                     data = _financial_with_announcement_state(data, fundamentals.db)
                 data = _add_sqlite_missing_name(fundamentals.db, data)
+                data['business_segment_sync'] = segments.get('sync', {})
                 data["dividend_events"] = dividends.read(code)
                 data["dividend_basis"] = DIVIDEND_BASIS if data["dividend_events"] else None
                 if price_version is not None or services()[1].read(code, "raw"):
@@ -1178,6 +1195,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == '/api/business-segments':
+            query = parse_qs(parsed.query)
+            try:
+                self._ai_reply(BusinessSegmentService(services()[0].db).read(
+                    query.get('code', [''])[0], start=query.get('start', [None])[0],
+                    end=query.get('end', [None])[0]))
+            except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
+                self._ai_reply({'error': str(exc)}, 400)
+            return
         if parsed.path == '/api/stock-announcements':
             query = parse_qs(parsed.query)
             try:
@@ -1298,7 +1324,7 @@ class Handler(BaseHTTPRequestHandler):
             body = (ROOT / "web" / "samples" / "industry-summary.html").read_bytes()
             content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
-                             "/financial-statements.js", "/financial-statements.css", "/industry.js", "/industry.css",
+                             "/financial-statements.js", "/financial-statements.css", "/business-segments.js", "/business-segments.css", "/business-segment-aliases.js", "/business-segment-names.js", "/industry.js", "/industry.css",
                              "/maintenance.js", "/maintenance.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"

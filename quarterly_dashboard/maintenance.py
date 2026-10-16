@@ -42,6 +42,8 @@ def compact_database(db, validate):
         conn.close()
 
 DESCRIPTIONS={
+ 'business_segment_versions':('个股数据','主营构成报告期完整结构化版本、真实修订及来源批次；不保存原始JSON'),
+ 'business_segment_items':('个股数据','主营构成行业、产品、地区明细；十进制原值及精确来源页引用'),
  'index_price_definitions':('指数数据','指数点位来源字段、点数单位、采样频率及缺值规则的版本定义'),
  'index_price_series':('指数数据','宽基、行业、策略共用的点位序列身份；提供方、频率及收益口径独立'),
  'index_price_observations':('指数数据','指数收盘点位和来源实际提供的开高低点；来源、真实取得时间及修订版本'),
@@ -119,6 +121,7 @@ DESCRIPTIONS={
 TIME_COLUMNS=('updated_at','obtained_at','checked_at','completed_at','finished_at','started_at','validated_at',
               'captured_at','imported_at','applied_at','viewed_at','created_at','unfollowed_at')
 PARENT_TIMES={
+ 'business_segment_items':('business_segment_versions','version_id','id','obtained_at'),
  'stock_unfollowed_groups':('stock_unfollowed','instrument_id','instrument_id','unfollowed_at'),
  'adjusted_daily_prices':('adjusted_price_versions','version_id','id','created_at'),
  'industry_snapshots':('sync_runs','run_id','id','finished_at'),

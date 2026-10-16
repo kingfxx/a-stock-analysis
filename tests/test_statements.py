@@ -167,15 +167,16 @@ def test_api_is_read_only_and_static_assets_are_served(facts,monkeypatch):
         with urlopen(base+'/api/statements?code=600519&period=2025-06-30&mode=quarter') as response:
             payload=json.load(response)
         assert payload['values']['cash_start']['value']==120
-        for file in ['financial-statements.js','financial-statements.css']:
+        for file in ['financial-statements.js','financial-statements.css','business-segments.js','business-segments.css','business-segment-aliases.js','business-segment-names.js']:
             with urlopen(base+'/'+file) as response:assert response.status==200
     finally:httpd.shutdown();httpd.server_close();thread.join(timeout=2)
 
 
-def test_frontend_formatting_handles_zero_units_and_escaping():
+@pytest.mark.parametrize('script',['statements_ui.cjs','business_segments_ui.cjs','business_segment_names.cjs'])
+def test_frontend_formatting_handles_zero_units_and_escaping(script):
     node=shutil.which('node')
     if not node:pytest.skip('Node unavailable')
-    result=subprocess.run([node,str(Path(__file__).with_name('statements_ui.cjs'))],capture_output=True,text=True)
+    result=subprocess.run([node,str(Path(__file__).with_name(script))],capture_output=True,text=True)
     assert result.returncode==0,result.stdout+result.stderr
 
 

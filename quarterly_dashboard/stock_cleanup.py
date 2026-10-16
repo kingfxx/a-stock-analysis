@@ -20,11 +20,13 @@ CATEGORIES = {
 }
 # Never discover deletion scope by a generic instrument_id column or table prefix.
 FACT_TABLES = ('financial_reports', 'report_overrides', 'raw_daily_prices',
+               'business_segment_items', 'business_segment_versions',
                'stock_announcement_identities', 'stock_announcement_metadata', 'report_disclosure_dates',
                'adjusted_daily_prices', 'adjusted_price_versions', 'valuation_observations',
                'dividend_events', 'financing_daily', 'shareholder_observations',
                'legacy_valuation_snapshots', 'industry_snapshots')
 DELETE_ORDER = ('ai_analysis_runs', 'ai_analysis_snapshots', 'report_disclosure_dates',
+                'business_segment_items', 'business_segment_versions',
                 'stock_announcement_metadata', 'stock_announcement_identities', 'company_report_facts',
                 'company_report_parses', 'company_report_documents', 'sync_state', 'legacy_imports',
                 'price_version_leases', 'adjusted_price_versions', 'adjusted_daily_prices', 'financial_reports',
@@ -247,10 +249,16 @@ class StockCleanupService:
             price_reference = any(r[0] in referenced_versions for r in conn.execute(
                 'SELECT id FROM adjusted_price_versions WHERE instrument_id=?', (identity,)))
             retained_datasets = {'industry'}
+            segment_referenced = any(r[0] in references for r in conn.execute(
+                'SELECT content_hash FROM business_segment_versions WHERE instrument_id=?', (identity,)))
             for table in FACT_TABLES:
                 where = 'version_id IN (SELECT id FROM adjusted_price_versions WHERE instrument_id=?)' if table=='adjusted_daily_prices' else 'instrument_id=?'
+                if table == 'business_segment_items':
+                    where = 'version_id IN (SELECT id FROM business_segment_versions WHERE instrument_id=?)'
                 for row in query(table, where, (identity,)):
                     reason = financial_reason
+                    if table in ('business_segment_items', 'business_segment_versions') and segment_referenced:
+                        reason = '保留研究引用的主营构成及完整修订链'
                     if 'content_hash' in row.keys() and row['content_hash'] in references:
                         reason = '保留研究引用该来源哈希，保留事实记录'
                     # Explicit financial cleanup removes the original rows. Retained
@@ -264,6 +272,7 @@ class StockCleanupService:
                     add_rows(table, [row], code, 'financial', reason)
                     if reason or 'financial' not in categories:
                         if table=='financial_reports': retained_datasets.add('financial:'+row['report_type'])
+                        elif table in ('business_segment_items','business_segment_versions'): retained_datasets.add('business_segments')
                         elif table=='adjusted_price_versions': retained_datasets.add('prices_adjusted')
                         elif table=='raw_daily_prices': retained_datasets.add('prices_raw')
                         elif table=='valuation_observations': retained_datasets.add('valuation:'+row['metric'])
@@ -418,7 +427,7 @@ class StockCleanupService:
                                 raise ValueError('暂存文件与预览哈希不一致，已取消清理')
                         for table in DELETE_ORDER:
                             records = plan['rows'].get(table, [])
-                            if table=='company_report_documents':
+                            if table in ('company_report_documents', 'business_segment_versions'):
                                 records = sorted(records, key=lambda r:r['id'], reverse=True)
                             conn.executemany(f'DELETE FROM {table} WHERE rowid=?', ((r['cleanup_rowid'],) for r in records))
                         if conn.execute('PRAGMA foreign_key_check').fetchone():

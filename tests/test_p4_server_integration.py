@@ -1,10 +1,17 @@
 """Normal dashboard reads survive removal of migrated JSON caches."""
 
 import json
+import pytest
 
 from quarterly_dashboard import server
 from quarterly_dashboard.fundamental_service import FundamentalService
 from quarterly_dashboard.storage import Database
+
+
+@pytest.fixture(autouse=True)
+def no_unrelated_mainop_requests(monkeypatch):
+    monkeypatch.setattr(server.BusinessSegmentService, 'update',
+                        lambda *args, **kwargs: {'sync': {}, 'warnings': []})
 
 
 def test_render_page_reads_imported_financial_fact_without_json(tmp_path, monkeypatch):

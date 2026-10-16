@@ -1,5 +1,7 @@
 # 后台维护页
 
+Schema v34的 `business_segment_versions`、`business_segment_items` 登记为「个股数据」。版本表时间读取形成该版本的来源页最后一个实际 `obtained_at`，明细通过 `version_id` 关联该时间；重复检查不改写旧版本时间，最新检查见 `sync_state.checked_at`。空表或关联时间缺失显示「未记录」，不从报告期推断。两表纳入未关注股票「个股财务与行情数据」清理：先删明细、再按版本ID倒序删除修订链；研究引用主营构成哈希时整套版本及明细保留。具体口径见[个股主营构成](stock-collection.md#个股主营构成)。
+
 v31未新增表，交易快照及市值View用途说明增加经停牌、股本和除权核验的参考价估值。快照按 `obtained_at/updated_at` 显示真实时间，View仍无独立写入时间；实际价格日不代替更新时间。详见[停牌参考价补齐](data-sources/market-suspended-price.md)。
 
 v30未新增表，交易快照用途扩展为东财原始值及独立历史合成口径，市值View优先级为东财、合成、旧同日值；维护页两项描述已同步。快照仍以真实 `obtained_at/updated_at` 识别时间，逻辑View显示「未记录」，不以交易日代替。详见[历史合成快照](data-sources/market-trade-snapshot-composite.md)。

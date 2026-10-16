@@ -78,7 +78,7 @@ def checked_today(state):
     return stamp.astimezone(local).date() == datetime.now(local).date()
 
 
-AUDIT_DAYS = {"financial": 180, "valuation": 90, "prices_adjusted": 30}
+AUDIT_DAYS = {"financial": 180, "business_segments": 180, "valuation": 90, "prices_adjusted": 30}
 
 
 def audit_due(state, dataset="prices_adjusted"):

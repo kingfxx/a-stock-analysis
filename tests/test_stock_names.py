@@ -9,6 +9,12 @@ from quarterly_dashboard.stock_library import StockLibrary
 from quarterly_dashboard.storage import Database
 
 
+@pytest.fixture(autouse=True)
+def no_unrelated_mainop_requests(monkeypatch):
+    monkeypatch.setattr(server.BusinessSegmentService, 'update',
+                        lambda *args, **kwargs: {'sync': {}, 'warnings': []})
+
+
 @pytest.fixture
 def cached_company(tmp_path, monkeypatch):
     db = Database(server.DATABASE_PATH);db.initialize()

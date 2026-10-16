@@ -176,7 +176,7 @@ class RoutedSession:
                     expected = min(size, max(0, count - (page - 1) * size))
                     expected_pages = max(1, (count + size - 1) // size)
                     pages_valid = (pages == expected_pages if count else
-                                   pages in ((0, 1) if report == "RPT_SHAREBONUS_DET" else (1,)))
+                                   pages in ((0, 1) if report in ("RPT_SHAREBONUS_DET", "RPT_F10_FN_MAINOP") else (1,)))
                     if (count < 0 or pages < 0 or (pages and page > pages) or not pages_valid
                             or len(rows) != expected):
                         return False
@@ -198,6 +198,16 @@ class RoutedSession:
                                 if f"({field}>=" in params.get("filter", ""):
                                     from datetime import date
                                     date.fromisoformat(str(row.get(field) or "")[:10])
+                    elif report == 'RPT_F10_FN_MAINOP':
+                        from .business_segment_service import parse_rows
+                        import re
+                        query_filter = str(params.get('filter', ''))
+                        stock = re.search(r'SECUCODE="(\d{6}\.(?:SH|SZ))"', query_filter)
+                        start = re.search(r"REPORT_DATE>='(\d{4}-\d{2}-\d{2})'", query_filter)
+                        end = re.search(r"REPORT_DATE<='(\d{4}-\d{2}-\d{2})'", query_filter)
+                        if not (stock and start and end):
+                            return False
+                        parse_rows(rows, stock.group(1), start.group(1), end.group(1))
                     return True
             except (KeyError, IndexError, TypeError, ValueError, AttributeError, OverflowError):
                 return False

@@ -43,7 +43,8 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (30, "030_composite_market_cap.sql"),
               (31, "031_suspended_market_cap.sql"),
               (32, "032_financial_public_sources.sql"),
-              (33, "033_stock_announcement_metadata.sql"))
+              (33, "033_stock_announcement_metadata.sql"),
+              (34, "034_business_segments.sql"))
 
 
 class StorageError(RuntimeError):
@@ -626,6 +627,19 @@ class Database:
                     "WHERE (f.origin='manual' AND f.run_id IS NOT NULL) "
                     "OR (f.origin='legacy' AND (r.id IS NULL OR r.instrument_id<>f.instrument_id "
                     "OR r.dataset<>'report_overrides' OR r.status<>'success'))"
+                ).fetchone()[0]
+            if schema_count >= 34:
+                invalid_provenance += conn.execute(
+                    "SELECT count(*) FROM business_segment_versions v JOIN sync_runs r ON r.id=v.run_id "
+                    "JOIN collection_batches b ON b.id=v.batch_id WHERE r.instrument_id<>v.instrument_id "
+                    "OR r.dataset<>'business_segments' OR r.source<>v.source OR r.status<>'success' "
+                    "OR b.status<>'complete' OR b.operation_id<>'sync_runs:'||r.id "
+                    "OR v.row_count<>(SELECT count(*) FROM business_segment_items i WHERE i.version_id=v.id)"
+                ).fetchone()[0]
+                invalid_provenance += conn.execute(
+                    "SELECT count(*) FROM business_segment_items i JOIN business_segment_versions v ON v.id=i.version_id "
+                    "JOIN collection_sources s ON s.id=i.source_id WHERE i.batch_id<>v.batch_id OR s.batch_id<>i.batch_id "
+                    "OR s.source_system<>'eastmoney' OR s.dataset<>'stock.business_segments'"
                 ).fetchone()[0]
             if invalid_runs or invalid_versions or invalid_active or invalid_provenance:
                 raise StorageError("Successful synchronization/price version relationships are inconsistent")

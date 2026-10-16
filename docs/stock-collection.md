@@ -1,5 +1,23 @@
 # 个股数据公共调度
 
+## 个股主营构成
+
+已存主营构成的前端分析入口及计算限制见[主营构成页面说明](business-segments-page.md)，页面读取本身不触发本节采集流程。
+
+2026-10-16新增 `BusinessSegmentService`，使用东财 `RPT_F10_FN_MAINOP`，只查询单只股票。个股既有financial操作（普通到期检查／refresh／full）在财务子任务之后独立检查主营构成；财务失败仍可更新主营构成，主营构成失败不撤销财务成功。不新增全市场、定时任务、图表或跨期产品分类映射。
+
+- 首次、显式full、180天审计按上海今天前十个日历年（闰日回退二月28日）至今天过滤REPORT_DATE；不使用PageAjax的200条截断结果。滚出窗口的已存事实仍保留。
+- 增量从窗口内最近两个实际报告期的较早一期至今天，只一期则从该期；没有实际期则查十年。接受实际出现的年报、中报、一季报、三季报，不强求季度都有主营构成，不做单季差分或TTM。旧窗口之外补登／修订由full或审计发现。
+- 独立 `SyncKey(dataset='business_segments', source='eastmoney:RPT_F10_FN_MAINOP')`；成功含空结果缓存24小时，失败自动抑制600秒。手动刷新不能绕过公共eastmoney冷却。checked_at表示成功检查，coverage_start/end为累计已成功查询外边界，实际报告期水位独立；各次精确查询范围在sync_runs及batch.result_json，不把边界解释为逐字段覆盖完整。
+- 每页显式500条，按报告期、分类、RANK、名称、代码排序；核验总数／页数／页长、股票、日期、类型、十进制有限数值、唯一项目和跨页重复。多页后重查首页业务内容，整窗口校验完才短事务发布；批次coverage_status保持unknown，result_json记录本次范围、总数、页数、实际期和缺字段数。
+- 请求使用既有routed_stock_requests、stock_fast及metadata_only：共用eastmoney锁、预算、拒绝停止和冷却。只在内存解析原始JSON；公共来源保留请求参数／状态／取得时间，原文文件／双哈希为空。
+- `business_segment_versions`按公司×来源×报告期保存完整业务版本，业务相同不新增，数值修订或补行补字段新增版本并保留旧版；项目消失或已有有效值变空则整段拒绝并保留旧事实。来源排序变化不触发修订。每条明细引用其实际来源页；版本取得时间为该期参与来源页的最后取得时间。
+- `business_segment_items`保留来源行业1／产品2／地区3、代码及名称；金额和比例以Decimal规范化后存TEXT。收入MAIN_BUSINESS_INCOME、成本MAIN_BUSINESS_COST、毛利MAIN_BUSINESS_RPOFIT，比例MBI_RATIO/MBC_RATIO/MBR_RATIO/GROSS_RPOFIT_RATIO按小数保留。零、负值和null原样表达，比例不限定0至1；毛利不是净利润，缺值不自行收入减成本补齐。样本601919、605499金额按人民币元解释，接口未提供统一币种字段，其他币种须另核实，不在API臆造币种。
+
+`GET /api/business-segments?code=605499`仅读本地当前版本，默认当前十年，可显式start/end查询已存更早历史，不发网络。返回periods（report_date、revision、obtained_at及三个dimensions）、独立sync状态和warnings；金额和比例在API转换为JSON数值，存储保留十进制精度，精确复算须读取TEXT／Decimal，JSON数值有浮点限制。行业、产品、地区不能跨维度加总，不保证每期三类齐备，名称／代码变更不自动拼接趋势。财务API另返回business_segment_sync供后续界面使用。
+
+不增加独立任务表；sync run、两表事实、公共batch和成功水位统一事务发布，重启恢复沿用stock batch关闭规则。SQLite备份包含两张业务表；metadata_only没有新增响应文件。清理按未关注股票明确预览范围执行，来源日志保留。实现设计见[当前计划](plans/20261016_个股主营构成采集/PLAN.md)。
+
 更新时间：2026-10-14。个股常规页面更新继续使用原有同步水位、事实表、价格版本与缓存策略；每次后端数据集同步 run 另关联一个 `domain=stock` 的公共批次。`operation_id` 为 `sync_runs:<id>`，表示该数据集同步子任务，不表示一次完整浏览器点击。
 
 ## 提供方及真实请求范围
@@ -33,7 +51,7 @@
 
 个股 batch scope 显式记录股票代码、sync run、数据集、实际来源接口、更新模式和 `evidence_mode=metadata_only`。每次 HTTP 请求与重试经同一个 `RequestCollector` 登记到 `collection_sources`，包含脱敏参数、请求状态、HTTP 状态、解析状态、错误类别和真实取得时间。`collection_sources.parse_status` 表示该次响应是否完成来源页级解码／解析；它不表示整个数据集的跨页完整性或业务候选验证结果。后续跨页／业务校验失败时 batch 仍标记失败，失败 run 不提交业务事实。
 
-个股响应体只在内存交给现有解析器，不写到 `collection_sources/`，不保存正文片段、原文哈希、压缩副本或 BLOB；相关文件、哈希和字节数为空。`read_source` 与 `reusable_source` 不能重放此类请求。业务表原有 raw_json 继续保留来源拆分后的业务记录，它不是完整 HTTP 原文。事实不新增公共 source 外键，公共 batch 与业务事实通过既有 `sync_runs` 及行内 run_id 关联，不能声称逐行精确映射到分页来源。
+个股响应体只在内存交给现有解析器，不写到 `collection_sources/`，不保存正文片段、原文哈希、压缩副本或 BLOB；相关文件、哈希和字节数为空。`read_source` 与 `reusable_source` 不能重放此类请求。业务表原有 raw_json 继续保留来源拆分后的业务记录，它不是完整 HTTP 原文。旧个股事实不新增公共 source 外键，公共 batch 与旧业务事实通过既有 `sync_runs` 及行内 run_id 关联，不能声称旧表逐行精确映射到分页来源；新主营构成明细是独立设计，具有精确source/batch外键，不存raw_json。
 
 公共批次完成状态与成功 sync run、事实发布及水位更新在同一事务提交；失败时保留来源请求记录、关闭关联批次并保留旧事实。服务重启时，将 `sync_runs:<id>` 对应的未完成 stock 批次关闭为失败。无原文缓存，未发布段恢复只能按原同步策略重新请求；已发布事实段继续复用，不代表可重放原响应。
 

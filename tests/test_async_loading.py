@@ -14,6 +14,12 @@ import pytest
 from quarterly_dashboard import server
 
 
+@pytest.fixture(autouse=True)
+def no_unrelated_mainop_requests(monkeypatch):
+    monkeypatch.setattr(server.BusinessSegmentService, 'update',
+                        lambda *args, **kwargs: {'sync': {}, 'warnings': []})
+
+
 def payload(page):
     return json.loads(re.search(r'<script id="payload" type="application/json">(.*?)</script>',
                                 page, re.S).group(1))

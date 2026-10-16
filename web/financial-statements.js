@@ -259,19 +259,20 @@
     function selectTab(selected) {
       active = selected === 'statements';
       try{sessionStorage.setItem('investment-research-tab-v1',selected);}catch{}
-      for (const key of ['trend','statements','industry','maintenance']) {
+      for (const key of ['trend','business','statements','industry','maintenance']) {
         const id=key+'-tab';
         const on = key === selected; el(id).setAttribute('aria-selected',String(on)); el(id).tabIndex = on?0:-1;
         el(key+'-panel').hidden = !on;
       }
       if (active) { if (dirty && !loading) load(); else if (data) render(); }
       else window.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(new CustomEvent('research-tab-changed',{detail:{tab:selected}}));
     }
     const researchNav=el('trend-tab').closest('[role="tablist"]');
     const compactNav=window.matchMedia('(max-width:800px)');
     const navOrientation=()=>researchNav.setAttribute('aria-orientation',compactNav.matches?'horizontal':'vertical');
     navOrientation();compactNav.addEventListener('change',navOrientation);
-    ['trend','statements','industry','maintenance'].forEach(key=>el(key+'-tab').addEventListener('click',()=>{
+    ['trend','business','statements','industry','maintenance'].forEach(key=>el(key+'-tab').addEventListener('click',()=>{
       selectTab(key);el(key+'-panel').scrollIntoView({block:'start',behavior:'instant'});
     }));
     function tabKeys(buttons, activate) {
@@ -288,7 +289,7 @@
         if (next!==undefined) {event.preventDefault();activate(buttons[next]);buttons[next].focus();}
       }));
     }
-    tabKeys(['trend','statements','industry','maintenance'].map(key=>el(key+'-tab')),button=>button.click());
+    tabKeys(['trend','business','statements','industry','maintenance'].map(key=>el(key+'-tab')),button=>button.click());
     const subtabButtons = [...panel.querySelectorAll('[data-statement]')];
     function selectStatement(selected) {
       kind=selected;
@@ -565,6 +566,6 @@
         ['利润与现金',`合并净利润 ${grow('net_profit')}；经营净现金 ${grow('cfo')}`,data.financial_company?'金融企业经营现金受贷款、存款等影响，应结合业务结构解释。':'结合经营占款与购建支出；利润基期非正时不展示增长百分比。']].map(([title,text,note])=>`<div class="fs-observation"><strong>${title}</strong><p>${esc(text)}</p><p>${esc(note)}</p></div>`).join('');
       el('fs-notes').textContent='金额优先核对同口径关键指标，缺少适用值时回退三表。累计与单季度分别计算；余额科目不做季度差分。缺失字段、空值均不当作零，有息债务优先资产负债表，缺值回退关键指标，仅汇总有效分项，缺项列于来源且不代表零；一年内到期非流动负债可能包含非有息项目。货币资金可能含受限资金，不等于可用现金。自由现金流采用经营净现金流减 Capex，不等于严格 FCFF／FCFE；投资收益等不自动认定为非经常性损益。'+(data.financial_company?'金融企业不套用工业企业毛利率及自由现金流指标，完整科目以原报表为准。':'');
     }
-    try{const tabs=['trend','statements','industry','maintenance'],requested=new URLSearchParams(window.location?.search||'').get('tab');const selected=tabs.includes(requested)?requested:sessionStorage.getItem('investment-research-tab-v1');if(tabs.includes(selected))selectTab(selected);}catch{}
+    try{const tabs=['trend','business','statements','industry','maintenance'],requested=new URLSearchParams(window.location?.search||'').get('tab');const selected=tabs.includes(requested)?requested:sessionStorage.getItem('investment-research-tab-v1');if(tabs.includes(selected))selectTab(selected);}catch{}
   };
 })();
