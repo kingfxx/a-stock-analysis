@@ -2,6 +2,8 @@
 
 ## 已实现适配器
 
+`financial_reports.raw_json` 兼容旧 JSON TEXT 及 v35 的 `ASTKFR` v1 压缩 BLOB。独立脚本使用标准库 zlib 解码并核对 64 MiB 上限、原始长度、完整流及内嵌 SHA256，再沿用原字段解析；不导入应用或写入数据库。数据库 `content_hash` 仍标识未压缩原文。
+
 `investment-sina-v1` 读取用户现有 SQLite 的公开资料表：`instruments`、`financial_reports`、`report_overrides`、`raw_daily_prices`、`valuation_observations`、`dividend_events`、`company_report_documents`、`company_report_parses`。只读连接，不调用项目模块、采集器、迁移、缓存重建或后台服务。不导出其他公司、模型任务、凭据或用户组织信息。行业批量数据不是第一版个股财务的自动替代源。
 
 若数据库结构不同，先检查 schema，新增显式适配器或使用 `--input <normalized.json>`；不要修改原表。通用导入格式为 `{schema_version: "equity_research_facts_v1", company: {code,name,exchange}, as_of: "YYYY-MM-DD", sources: [...], facts: [...], warnings: [...]}`。每条事实至少有 id、metric、period、value、unit、scope、status、source_id；缺失金额用 null。每条来源有 id、title、location、published_on、obtained_at。通用导入不执行 SQL，人工提供数据也需标明出处；声明模式为 `normalized-json`，不假称已验证数据库。

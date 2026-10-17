@@ -9,6 +9,7 @@ import math
 from pathlib import Path
 import re
 import sqlite3
+import zlib
 
 SCHEMA = 'equity_research_facts_v1'
 VERSION = 'project_research_v2'
@@ -38,6 +39,23 @@ POINTS={'cash','trading_assets','receivables','inventory','parent_equity','asset
 OVERRIDES={'revenue_ytd':'operating_revenue','profit_ytd':'parent_profit',
  'net_profit_ytd':'net_profit','operating_cost_ytd':'operating_cost',
  'operating_cash_flow_ytd':'cfo','capex_ytd':'capex','monetary_funds':'cash','equity':'parent_equity'}
+
+
+def financial_json_text(value):
+    """ASTKFR v1 protocol; standalone reader, no investment app imports."""
+    if isinstance(value, str):return value
+    magic=b'ASTKFR\x01';header=len(magic)+8+32
+    if not isinstance(value,bytes) or not value.startswith(magic) or len(value)<=header:
+        raise ValueError('Unknown financial JSON encoding')
+    size=int.from_bytes(value[len(magic):len(magic)+8],'big')
+    if size>64*1024*1024:raise ValueError('Financial JSON exceeds 64 MiB')
+    decoder=zlib.decompressobj()
+    try:raw=decoder.decompress(value[header:],size+1)
+    except zlib.error as exc:raise ValueError('Damaged compressed financial JSON') from exc
+    if (len(raw)!=size or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail
+        or hashlib.sha256(raw).digest()!=value[len(magic)+8:header]):
+        raise ValueError('Financial JSON length/hash/stream mismatch')
+    return raw.decode('utf-8')
 
 
 def number(value):
@@ -238,7 +256,7 @@ def _extract(conn,db,root,code,as_of,years,out):
         if not r.get('publish_date'):
             warnings.append('披露日缺失，未选入事实：'+r['period']+' '+r['report_type']);continue
         if r['publish_date']>as_of or not r['source'].startswith('sina:'):continue
-        j=json.loads(r['raw_json']);sid='db.'+r['report_type']+'.'+r['period']+'.'+r['content_hash'][:12]
+        j=json.loads(financial_json_text(r['raw_json']));sid='db.'+r['report_type']+'.'+r['period']+'.'+r['content_hash'][:12]
         sources.append({'id':sid,'kind':'sqlite','title':company['name']+' '+r['period']+' '+r['report_type'],
           'location':str(db),'table':'financial_reports','key':{'instrument_id':identity,'source':r['source'],'report_type':r['report_type'],'period':r['period']},
           'published_on':r['publish_date'],'obtained_at':r['obtained_at'],'sha256':r['content_hash'],

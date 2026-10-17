@@ -1,5 +1,6 @@
 import copy
 import json
+from quarterly_dashboard.financial_storage import decompress_json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -530,7 +531,7 @@ def test_snapshot_debt_matches_dashboard_with_empty_reported_components(database
     from quarterly_dashboard.core import DEBT_COMPONENTS
     with database.connection(write=True) as conn:
         stored=conn.execute("SELECT period,raw_json FROM financial_reports WHERE period=?",(period,)).fetchone()
-        report=json.loads(stored['raw_json'])
+        report=json.loads(decompress_json(stored['raw_json']))
         report.update({field:None for field in DEBT_COMPONENTS})
         report['short_term_borrowings']=150
         report['lease_liabilities']=0

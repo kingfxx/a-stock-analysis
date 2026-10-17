@@ -19,6 +19,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterator
 
+from .financial_storage import compress_json, financial_row, migrate_financial_json, check_financial_json
+
 DEFAULT_DATABASE = Path(__file__).resolve().parent.parent / "data" / "stock_analysis.sqlite3"
 APPLICATION_ID = 0x4153544B  # ASTK; refuse an unrelated SQLite file.
 MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_facts.sql"),
@@ -44,7 +46,8 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (31, "031_suspended_market_cap.sql"),
               (32, "032_financial_public_sources.sql"),
               (33, "033_stock_announcement_metadata.sql"),
-              (34, "034_business_segments.sql"))
+              (34, "034_business_segments.sql"),
+              (35, "035_financial_json_compression.sql"))
 
 
 class StorageError(RuntimeError):
@@ -282,6 +285,8 @@ class Database:
                         conn.execute(statement)
                     if version == 32:
                         _migrate_financial_public_sources(conn)
+                    if version == 35:
+                        migrate_financial_json(conn)
                     if version == 4:
                         from .financing_storage import migrate_financing
                         audit = migrate_financing(conn)
@@ -362,11 +367,11 @@ class Database:
                 "publish_date=excluded.publish_date,update_time=excluded.update_time,raw_json=excluded.raw_json,"
                 "content_hash=excluded.content_hash,obtained_at=excluded.obtained_at,run_id=excluded.run_id",
                 (key.instrument_id, key.source, report_type, row["period"], row.get("publish_date"),
-                 row.get("update_time"), raw_json, content_hash, utc_now(), run_id))
+                 row.get("update_time"), compress_json(raw_json), content_hash, utc_now(), run_id))
 
     def financial_reports(self, instrument_id: int, source: str, report_type: str) -> list[dict]:
         with self.connection() as conn:
-            return [dict(row) for row in conn.execute(
+            return [financial_row(row) for row in conn.execute(
                 "SELECT * FROM financial_reports WHERE instrument_id=? AND source=? AND report_type=? ORDER BY period",
                 (instrument_id, source, report_type))]
 
@@ -647,6 +652,11 @@ class Database:
                 from .financing_storage import check_retained_fields
                 try:
                     check_retained_fields(conn)
+                except ValueError as exc:
+                    raise StorageError(str(exc)) from exc
+            if schema_count >= 35:
+                try:
+                    check_financial_json(conn)
                 except ValueError as exc:
                     raise StorageError(str(exc)) from exc
             result = {"path": str(self.path), "sqlite_version": sqlite3.sqlite_version,

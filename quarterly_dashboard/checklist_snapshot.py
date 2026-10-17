@@ -12,6 +12,7 @@ from .fundamental_service import FundamentalService
 from .core import build_period_rows, view_rows
 from .checklist_validation import ITEMS
 from .company_report_service import PARSER_VERSION, EXTRACTION_VERSION
+from .financial_storage import financial_row
 INPUT_VERSION="stock_checklist_input_v2"
 CALCULATION_VERSION="stock_checklist_calc_v5"
 PROFILE={"style":"qualitative_checklist","chips_window":"one_year_weekly","holders_periods":3,"valuation_years":10}
@@ -33,7 +34,7 @@ def capture(db, code, *, as_of=None):
         instrument=conn.execute('SELECT * FROM instruments WHERE code=?',(code,)).fetchone()
         if not instrument:raise SnapshotError('没有本地股票数据，请先刷新股票')
         identity=instrument['id']
-        def rows(table,order):return [dict(r) for r in conn.execute(f'SELECT * FROM {table} WHERE instrument_id=? ORDER BY {order}',(identity,))]
+        def rows(table,order):return [(financial_row(r) if table == 'financial_reports' else dict(r)) for r in conn.execute(f'SELECT * FROM {table} WHERE instrument_id=? ORDER BY {order}',(identity,))]
         local=FundamentalService(reader,Path('.')).read(code)['reports']
         local_by_period={r['period']:r for r in local}
         reports=[r for r in rows('financial_reports','period,source,report_type')

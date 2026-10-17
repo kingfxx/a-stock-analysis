@@ -61,7 +61,7 @@ DESCRIPTIONS={
  'index_valuation_observations':('指数数据','整数序列 ID 引用的指数估值事实、原始来源及真实修订版本'),
  'index_collection_operations':('运行与配置','指数采集操作、取消请求、分段进度和结果'),
  'instruments':('个股数据','股票代码、交易所与名称'),
- 'financial_reports':('个股数据','新浪关键指标和三表原始财报，按公司及报告期保存'),
+ 'financial_reports':('个股数据','新浪关键指标和三表原始财报，按公司及报告期逐条无损压缩保存'),
  'stock_announcement_identities':('个股数据','股票对应巨潮组织标识及身份来源、查询和真实更新时间'),
  'stock_announcement_metadata':('个股数据','巨潮公告结构化元数据及真实修订版本；不保存原文/PDF'),
  'report_disclosure_dates':('个股数据','公告候选推导的报告期首次披露/最新已知修订日期和版本状态'),

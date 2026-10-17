@@ -6,6 +6,7 @@ from datetime import date
 
 from .fundamental_service import SOURCE
 from .sources import _number, normalize_code
+from .financial_storage import decompress_json
 
 
 # Exact field codes matter: gjzb.BIZTOTCOST is total operating cost, despite its title.
@@ -355,7 +356,7 @@ def read_statements(db, code, *, period=None, mode='ytd', comparison='yoy'):
     reports = {}
     for row in rows:
         if row['period'][5:] in {'03-31','06-30','09-30','12-31'}:
-            reports.setdefault(row['period'], {})[row['report_type']] = json.loads(row['raw_json'])
+            reports.setdefault(row['period'], {})[row['report_type']] = json.loads(decompress_json(row['raw_json']))
     periods = sorted((p for p,r in reports.items() if any(k in r for k in ('fzb','lrb','llb'))), reverse=True)
     period = period or (periods[0] if periods else None)
     if period and period not in periods:

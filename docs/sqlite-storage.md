@@ -1,6 +1,8 @@
 # SQLite 存储、数据更新与备份
 
-v34 新增个股主营构成 `business_segment_versions` 与 `business_segment_items`；当前结构版本以v34及维护页为准。首次／full／180天审计获取上海当天前十个日历年内实际报告期，增量重叠最近两期。复用公共来源和个股同步状态，HTTP原始JSON不落盘，仅保存结构化业务版本；详见[个股主营构成](stock-collection.md#个股主营构成)。
+v35 对 `financial_reports.raw_json` 逐条 zlib 6 无损压缩，历史行在 schema 事务中校验原内容哈希后迁移，其他列、索引及来源关系不变。SQLite 原 TEXT 列兼容存储自描述 BLOB，不新增业务表或科目字典。应用仓储和直接读取入口通过 `financial_storage` 显式恢复原 JSON 文本；独立研报技能支持相同编码。详见 [压缩协议与迁移](financial-json-storage.md)。
+
+v34 新增个股主营构成 `business_segment_versions` 与 `business_segment_items`；当前结构版本以v35及维护页为准。首次／full／180天审计获取上海当天前十个日历年内实际报告期，增量重叠最近两期。复用公共来源和个股同步状态，HTTP原始JSON不落盘，仅保存结构化业务版本；详见[个股主营构成](stock-collection.md#个股主营构成)。
 
 v31继续只更新 `market_cap_latest`，新增可读取的同表独立停牌估值系列 `historical-suspended-preclose-v1`：东财有效值优先，其次经验证的停牌参考价系列、普通历史合成、旧同日市值。原空价记录保留；实际价格日集中登记于发布batch的 `result_json.price_dates`，快照交易日仍为季末，真实取得／更新时间规则不变。详见[停牌参考价补齐](data-sources/market-suspended-price.md)。
 
@@ -10,7 +12,7 @@ v29新增业务表 `market_trade_snapshot`：全市场未复权股价、涨跌�
 
 指数采集新增 v23/v24：公共 `collection_batches/sources/provider_state`，稳定指数身份、历史目录、提供方映射、指标定义、统一估值事实及操作状态。未迁移旧财务或价格记录；用途与真实时间依据已登记维护页。表关系、来源目录完整备份及采集保护见[指数估值采集说明](index-valuation-collection.md)。
 
-本文依据当前代码整理；取消关注、恢复和个股清理部分更新于 2026-10-07，全行业结构索引更新于 2026-10-10，指数点位说明更新于 2026-10-11，交易日快照更新于 2026-10-14，主营构成更新于2026-10-16，当前数据库结构版本为 **34**，表数量以维护页实时统计为准。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
+本文依据当前代码整理；取消关注、恢复和个股清理部分更新于 2026-10-07，全行业结构索引更新于 2026-10-10，指数点位说明更新于 2026-10-11，交易日快照更新于 2026-10-14，主营构成更新于2026-10-16，当前数据库结构版本为 **35**，表数量以维护页实时统计为准。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
 
 ## 1. 文件位置与启动过程
 
@@ -52,7 +54,7 @@ v29新增业务表 `market_trade_snapshot`：全市场未复权股价、涨跌�
 | `instruments` | 股票交易所、六位代码、名称和创建时间 | `id` 为主键；`(exchange, code)` 唯一。代码是文本，保留前导零 |
 | `business_segment_versions` | 主营构成股票、来源、报告期／报告名、递增修订号、前版、当前标志、结构化业务哈希、定义版本、明细数、run／batch及实际取得时间 | 股票×来源×报告期×修订号唯一；部分唯一索引确保每期仅一个当前版本。哈希不含排序及取得时间，允许A→B→A；不保存原始JSON |
 | `business_segment_items` | 所属版本、行业／产品／地区、原始项目代码／名称、收入／成本／毛利及四种比例、展示排序、source／batch | 版本×维度×项目键唯一；项目键为代码与名称的JSON编码，不跨期归类。金额及比例为可空十进制TEXT；source与batch复合外键，触发器核验父版本批次。时间关联父版本obtained_at |
-| `financial_reports` | 财报原始 JSON、报告类型、报告期、披露日期、来源更新时间、内容哈希与取得时间 | `(instrument_id, source, report_type, period)`；新浪类型为 `lrb` 利润表、`fzb` 资产负债表、`llb` 现金流量表、`gjzb` 关键指标，旧合并记录以 `legacy/merged` 保留 |
+| `financial_reports` | 逐条无损压缩的财报原始 JSON、报告类型、报告期、披露日期、来源更新时间、内容哈希与取得时间 | `(instrument_id, source, report_type, period)`；新浪类型为 `lrb` 利润表、`fzb` 资产负债表、`llb` 现金流量表、`gjzb` 关键指标，旧合并记录以 `legacy/merged` 保留 |
 | `stock_announcement_identities` | 巨潮提供方组织标识、身份状态、来源/批次及实际查询和更新时间 | 股票 `instrument_id` 唯一；身份来源通过公共 `collection_sources` 与同一批次外键追溯 |
 | `stock_announcement_metadata` | 公告编号及标题、公告时间、附件路径、报告期候选、类型/修订标记、字段指纹和版本来源 | 股票×公告编号×版本唯一；`periods_json` 保留一条多年度说明涉及的多个期间；仅结构化元数据 |
 | `report_disclosure_dates` | 报告期首次披露日、最新已知修订日、规则/结果版本、候选依据及状态 | 股票×报告期单一当前结果，旧结果保留版本链；人工覆盖仍由 `report_overrides` 最后应用 |

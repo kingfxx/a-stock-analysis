@@ -11,6 +11,7 @@ from .industry_sources import STORED_FINANCIAL_FIELDS, number
 from .industry_storage import latest_financial_rows, store_provenance, store_cap_provenance
 from .statements import find, previous_quarter
 from .industry_financial_reader import IndustryFinancialReader
+from .financial_storage import decompress_json
 
 
 def financial_change_summary(statements):
@@ -63,7 +64,7 @@ def local_financials(conn, *, period=None, stocks=None):
         where+=' AND i.code IN ('+','.join('?' for _ in stocks)+')';params.extend(stocks)
     for row in conn.execute("SELECT i.code,f.period,f.report_type,f.source,f.raw_json,f.content_hash FROM financial_reports f "
                             "JOIN instruments i ON i.id=f.instrument_id WHERE "+where+" ORDER BY f.obtained_at",params):
-        raw = json.loads(row['raw_json'])
+        raw = json.loads(decompress_json(row['raw_json']))
         if raw.get('rCurrency') != 'CNY' or raw.get('rType') != '合并期末':
             continue
         reports.setdefault((row['code'],row['period']), {})[row['report_type']] = (raw,row['source'])

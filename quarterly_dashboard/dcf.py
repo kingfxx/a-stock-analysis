@@ -16,6 +16,7 @@ from .fundamental_service import FundamentalService, SOURCE
 from .price_service import PriceService
 from .sources import normalize_code
 from .statements import metric
+from .financial_storage import decompress_json
 
 
 DEFAULTS = dict(base_window='3', growth_pct=3, discount_pct=9, terminal_growth_pct=2)
@@ -223,7 +224,7 @@ def build_auto_wacc(db, code, *, years=5, as_of=None):
             'JOIN instruments i ON i.id=f.instrument_id WHERE i.code=? AND f.source=? AND f.period<=? ORDER BY f.period',
             (code,SOURCE,as_of)).fetchall()
     raw={}
-    for r in reports: raw.setdefault(r['period'],{})[r['report_type']]=json.loads(r['raw_json'])
+    for r in reports: raw.setdefault(r['period'],{})[r['report_type']]=json.loads(decompress_json(r['raw_json']))
     def consolidated_cny(doc):
         return bool(doc and doc.get('rCurrency')=='CNY' and doc.get('rType')=='合并期末')
     years_available=sorted(p for p in raw if p.endswith('-12-31') and
@@ -446,7 +447,7 @@ def read_dcf(db, code, legacy_root):
         industry = conn.execute('SELECT d.name,m.effective_date FROM sw_memberships m JOIN sw_industries d ON d.code=m.industry_code WHERE m.stock_code=? ORDER BY m.import_id DESC LIMIT 1', (code,)).fetchone()
     raw, metadata = {}, {}
     for r in raw_rows:
-        raw.setdefault(r['period'], {})[r['report_type']] = json.loads(r['raw_json'])
+        raw.setdefault(r['period'], {})[r['report_type']] = json.loads(decompress_json(r['raw_json']))
         metadata[(r['period'], r['report_type'])] = dict(content_hash=r['content_hash'], obtained_at=r['obtained_at'], run_id=r['run_id'])
     override_map = {(r['period'], r['field_name']): r for r in overrides}
     mappings = [('revenue_ytd', 'revenue'), ('profit_ytd', 'parent_profit'), ('operating_cash_flow_ytd', 'cfo'), ('capex_ytd', 'capex')]

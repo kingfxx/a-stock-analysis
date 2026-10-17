@@ -140,7 +140,7 @@ def test_refresh_uses_two_period_window_and_keeps_old_report(tmp_path):
     service = FundamentalService(db, tmp_path / "legacy", fetch_page=fetch)
     first = service.update("601919")
     assert first["reports"][-1]["revenue_ytd"] == 100
-    assert list((tmp_path / "backups").glob("facts-daily-*.sqlite3"))
+    assert list((tmp_path / "backups").rglob("facts-daily-*.sqlite3"))
     assert {num for _, num, _ in requested} == {200}
 
     requested.clear()

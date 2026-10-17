@@ -13,6 +13,7 @@ import shutil
 from .company_report_service import CompanyReportService, _PREPARE_LOCK
 from .stock_library import StockLibrary
 from .storage import utc_now
+from .financial_storage import financial_row
 
 CATEGORIES = {
     'cache': '可重建缓存', 'financial': '个股财务与行情数据',
@@ -159,7 +160,8 @@ class StockCleanupService:
                 'sha256':file_hash(path) if fingerprint else None}
 
         def query(table, where, args):
-            return conn.execute(f'SELECT rowid AS cleanup_rowid,* FROM {table} WHERE {where}', args).fetchall()
+            records = conn.execute(f'SELECT rowid AS cleanup_rowid,* FROM {table} WHERE {where}', args).fetchall()
+            return [financial_row(r) for r in records] if table == 'financial_reports' else records
 
         member_codes = {r[0] for r in conn.execute('SELECT DISTINCT stock_code FROM sw_memberships')}
         deleting_exports = {p for s in stocks for p in self._research_files(s['exchange'], s['code'])} if 'research' in categories else set()

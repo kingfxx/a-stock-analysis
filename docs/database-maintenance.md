@@ -1,5 +1,7 @@
 # 后台维护页
 
+Schema v35 将 `financial_reports.raw_json` 的历史行及新写入改为逐条无损压缩 BLOB，分类仍为「个股数据」，用途增加压缩说明；表名、索引和列不变。更新时间仍取原 `obtained_at`，迁移不刷新时间；空表或缺时间沿用原显示。维护页统计压缩后的物理页，迁移释放的页可在空间整理后回收为文件空间；整理前应备份并排除活动任务。备份/恢复保留 BLOB，完整性检查校验解压长度、完整流、内嵌 SHA256 和原 content_hash。详见[财务 JSON 压缩](financial-json-storage.md)。
+
 Schema v34的 `business_segment_versions`、`business_segment_items` 登记为「个股数据」。版本表时间读取形成该版本的来源页最后一个实际 `obtained_at`，明细通过 `version_id` 关联该时间；重复检查不改写旧版本时间，最新检查见 `sync_state.checked_at`。空表或关联时间缺失显示「未记录」，不从报告期推断。两表纳入未关注股票「个股财务与行情数据」清理：先删明细、再按版本ID倒序删除修订链；研究引用主营构成哈希时整套版本及明细保留。具体口径见[个股主营构成](stock-collection.md#个股主营构成)。
 
 v31未新增表，交易快照及市值View用途说明增加经停牌、股本和除权核验的参考价估值。快照按 `obtained_at/updated_at` 显示真实时间，View仍无独立写入时间；实际价格日不代替更新时间。详见[停牌参考价补齐](data-sources/market-suspended-price.md)。

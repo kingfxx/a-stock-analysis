@@ -16,6 +16,7 @@ from .price_service import PriceService
 from .valuation import valuation_summary_observations, merge_dividend_yields, monthly_dividend_yields
 from .sources import normalize_code
 from .storage import utc_now
+from .financial_storage import financial_row
 
 INPUT_VERSION = "stock_assessment_input_v2"
 CALCULATION_VERSION = "stock_assessment_calc_v5"
@@ -58,7 +59,7 @@ def capture(db, code, *, as_of=None):
         raw = price_service.read(code, "raw", lease=False)
         qfq = price_service.read(code, "qfq", version=version or 0, lease=False)
         def rows(table, order):
-            return [dict(r) for r in conn.execute(
+            return [(financial_row(r) if table == 'financial_reports' else dict(r)) for r in conn.execute(
                 f"SELECT * FROM {table} WHERE instrument_id=? ORDER BY {order}", (identity,))]
         holders = rows("shareholder_observations", "stat_date,source,source_record_key")
         report_periods = sorted({r["period"] for r in financial["reports"] if r["period"] <= today})[-2:]

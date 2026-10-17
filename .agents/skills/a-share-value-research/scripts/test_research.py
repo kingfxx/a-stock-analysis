@@ -9,6 +9,8 @@ import subprocess
 import sys
 import os
 import unittest
+import hashlib
+import zlib
 from types import SimpleNamespace
 import research as r
 import valuation as v
@@ -17,6 +19,10 @@ def fact(identifier,value,unit='元'):
     return dict(id=identifier,metric=identifier.rsplit('.',1)[-1],period='2025-12-31',value=value,unit=unit,scope='合并',status='direct',source_id='source')
 def pack(facts):
     return dict(schema_version=r.SCHEMA,as_of='2026-10-05',company={'name':'测试','code':'600066'},facts=facts,sources=[{'id':'source','published_on':'2026-03-31'}])
+
+def compressed_financial_json(value):
+    raw=json.dumps(value,ensure_ascii=False).encode('utf-8')
+    return b'ASTKFR\x01'+len(raw).to_bytes(8,'big')+hashlib.sha256(raw).digest()+zlib.compress(raw,6)
 
 class ResearchTests(unittest.TestCase):
     def test_compressed_json_preserves_raw_values_and_is_reproducible(self):
@@ -139,7 +145,8 @@ class ResearchTests(unittest.TestCase):
             c.execute('create table financial_reports(instrument_id,source,report_type,period,publish_date,obtained_at,content_hash,raw_json)')
             def insert(typ,items,pub='2026-03-31',scope='合并期末'):
                 j={'rCurrency':'CNY','rType':scope,'data':[{'item_field':k,'item_value':value,'item_title':k} for k,value in items.items()]}
-                c.execute('insert into financial_reports values(?,?,?,?,?,?,?,?)',(1,'sina:'+typ,typ,'2025-12-31',pub,'2026-04-01','hash'+typ+pub,json.dumps(j)))
+                payload=compressed_financial_json(j) if typ=='gjzb' else json.dumps(j)
+                c.execute('insert into financial_reports values(?,?,?,?,?,?,?,?)',(1,'sina:'+typ,typ,'2025-12-31',pub,'2026-04-01','hash'+typ+pub,payload))
             insert('gjzb',{'BIZTOTINCO':0,'BIZTOTCOST':70,'PARENETP':None,'FCFFPS':0,'FCFEPS':3.2});insert('lrb',{'BIZTOTINCO':100,'BIZCOST':60,'PARENETP':10});insert('llb',{'MANANETR':1000},'2026-11-01')
             c.commit();out=Path(d)/'out';result=r._extract(c,p,Path(d),'600066','2026-10-05',10,out);c.close()
             self.assertFalse((out/'sources/financial-raw.json').exists())
@@ -164,7 +171,7 @@ class PortabilityTests(unittest.TestCase):
             conn.execute("insert into instruments values(1,'601919','迁移测试','sh')")
             conn.execute('create table financial_reports(instrument_id,source,report_type,period,publish_date,obtained_at,content_hash,raw_json)')
             raw={'rCurrency':'CNY','rType':'合并期末','data':[{'item_field':'BIZTOTINCO','item_value':100,'item_title':'营收'}]}
-            conn.execute('insert into financial_reports values(?,?,?,?,?,?,?,?)',(1,'sina:gjzb','gjzb','2025-12-31','2026-03-31','2026-04-01','hash',json.dumps(raw)))
+            conn.execute('insert into financial_reports values(?,?,?,?,?,?,?,?)',(1,'sina:gjzb','gjzb','2025-12-31','2026-03-31','2026-04-01','hash',compressed_financial_json(raw)))
             conn.commit();conn.close();before=r.sha(db)
             script=skill/'scripts/research.py';out=base/'report output'
             def run(*args):

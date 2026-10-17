@@ -11,6 +11,7 @@ import pytest
 
 from quarterly_dashboard import server
 from quarterly_dashboard.fundamental_service import SOURCE
+from quarterly_dashboard.financial_storage import decompress_json
 from quarterly_dashboard.statements import read_statements
 from quarterly_dashboard.storage import Database, SyncKey, SyncResult
 
@@ -108,7 +109,7 @@ def test_missing_previous_and_invalid_zero_are_not_fabricated(facts):
     assert d['values']['debt']['value']==25
     with facts.connection(write=True) as c:
         row=c.execute("SELECT raw_json FROM financial_reports WHERE report_type='fzb' AND period='2025-06-30'").fetchone()
-        body=json.loads(row[0]);next(x for x in body['data'] if x['item_field']=='BDSPAYA')['item_value']=None
+        body=json.loads(decompress_json(row[0]));next(x for x in body['data'] if x['item_field']=='BDSPAYA')['item_value']=None
         c.execute("UPDATE financial_reports SET raw_json=? WHERE report_type='fzb' AND period='2025-06-30'",(json.dumps(body),))
     assert read_statements(facts,'600519',period='2025-06-30')['values']['debt']['value']==25
 
@@ -186,7 +187,7 @@ def test_financial_tabs_in_real_browser(facts,tmp_path,monkeypatch):
     with facts.connection() as conn:
         records=conn.execute("SELECT report_type,period,raw_json FROM financial_reports WHERE instrument_id=(SELECT id FROM instruments WHERE code='600519')").fetchall()
     for kind in {x['report_type'] for x in records}:
-        save(facts,kind,{x['period']:json.loads(x['raw_json']) for x in records if x['report_type']==kind},'600066','另一测试企业')
+        save(facts,kind,{x['period']:json.loads(decompress_json(x['raw_json'])) for x in records if x['report_type']==kind},'600066','另一测试企业')
     edge=shutil.which('msedge') or r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
     node=shutil.which('node')
     if not Path(edge).is_file() or not node:pytest.skip('Edge and Node are needed')
@@ -258,7 +259,7 @@ def test_debt_prefers_balance_and_sums_available_items(facts):
 @pytest.mark.parametrize('assets',[0,-1,None])
 def test_debt_ratio_requires_positive_assets(facts,assets):
     with facts.connection(write=True) as conn:
-        body=json.loads(conn.execute("SELECT raw_json FROM financial_reports WHERE report_type='fzb' AND period='2025-06-30'").fetchone()[0])
+        body=json.loads(decompress_json(conn.execute("SELECT raw_json FROM financial_reports WHERE report_type='fzb' AND period='2025-06-30'").fetchone()[0]))
     next(x for x in body['data'] if x['item_field']=='TOTASSET')['item_value']=assets
     replace_balance(facts,'2025-06-30',body)
     if assets is None:
