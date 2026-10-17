@@ -699,14 +699,47 @@ class Database:
         if type(keep) is not int or keep < 1:
             raise ValueError("keep must be positive")
         day = day or datetime.now(timezone.utc).date()
-        directory = Path(directory).resolve() if directory else self.path.parent / "backups"
+        # The default daily snapshot is the single cloud-sync copy. Historical
+        # daily snapshots are archived in backups/ beside migration snapshots.
+        cloud_directory = directory is None
+        directory = (self.path.parent / "backups" / "stock_cloud_bkp" if cloud_directory
+                     else Path(directory).resolve())
+        directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{self.path.stem}-daily-{day.isoformat()}.sqlite3"
         if path.exists() and not verify_existing:
-            return path
-        if not path.exists():
+            pass
+        elif not path.exists():
             self.backup(path)
         else:
             Database(path, journal_mode="delete").check(current=False)
+        if cloud_directory:
+            archive_directory = self.path.parent / "backups"
+            for candidate in directory.glob(f"{self.path.stem}-daily-*.sqlite3"):
+                token = candidate.name[len(self.path.stem) + len("-daily-"):-len(".sqlite3")]
+                try:
+                    _day(token)
+                except ValueError:
+                    continue
+                if candidate == path:
+                    continue
+                archived = archive_directory / candidate.name
+                if archived.exists():
+                    # Preserve both snapshots if a legacy backup already uses
+                    # this date; do not replace or hash a potentially huge file.
+                    archived = archive_directory / f"{candidate.stem}-cloud-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}{candidate.suffix}"
+                os.replace(candidate, archived)
+            owned = []
+            for folder in (archive_directory, directory):
+                for candidate in folder.glob(f"{self.path.stem}-daily-*.sqlite3"):
+                    token = candidate.name[len(self.path.stem) + len("-daily-"):-len(".sqlite3")]
+                    try:
+                        candidate_day = _day(token.split("-cloud-", 1)[0])
+                    except ValueError:
+                        continue
+                    owned.append((candidate_day, candidate))
+            for _, candidate in sorted(owned, key=lambda item: (item[0], item[1].stat().st_mtime), reverse=True)[keep:]:
+                candidate.unlink()
+            return path
         # Only the exact daily names owned by this database; pre-migration files stay.
         owned = []
         for candidate in directory.glob(f"{self.path.stem}-daily-*.sqlite3"):

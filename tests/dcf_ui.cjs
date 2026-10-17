@@ -85,6 +85,7 @@ async function domTest(data,failFirst=false,autoData=null){
   button.closest=()=>host;
   const document={readyState:'complete',createElement(){return new Element();},getElementById(id){return id==='dcf-toggle'?button:{textContent:JSON.stringify({code:'600519'})};}};
   const window=new Element();
+  window.DashboardTime=require('../web/datetime.js');
   vm.runInNewContext(fs.readFileSync(file,'utf8'),{window,document,Plotly,URLSearchParams,fetch:async url=>{
     if(url.startsWith('/api/dcf/wacc?'))return {ok:true,json:async()=>autoData};
     requests++;assert.equal(url,'/api/dcf?code=600519');return {ok:!(failFirst&&requests===1),status:503,json:async()=>data};

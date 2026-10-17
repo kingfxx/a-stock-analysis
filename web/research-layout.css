@@ -1,0 +1,14 @@
+.shell{max-width:1580px;display:grid;grid-template-columns:180px minmax(0,1fr);gap:24px;align-items:start;padding:25px 28px 42px}
+.workspace-content{min-width:0}
+.stock-sidebar{position:sticky;top:20px;z-index:30;padding:18px 14px;background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--cyan);border-radius:10px}
+.current-stock{display:flex;flex-direction:column;gap:8px;min-width:0}
+.current-stock-caption{font-size:12px;color:var(--muted)}
+#current-stock-name,#current-index-name{font-size:22px;line-height:1.4;overflow-wrap:anywhere}
+#current-stock-code,#current-index-code{font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums}
+.stock-sidebar .cached-picker{position:relative;min-width:0;margin-top:20px;border-top:1px solid var(--line);padding-top:14px}
+.stock-sidebar .cached-picker summary{cursor:pointer;list-style:none;border:1px solid var(--line);background:#202a30;border-radius:7px;padding:10px 8px;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:normal;font-size:13px}
+.stock-sidebar .cached-picker summary::-webkit-details-marker{display:none}
+.stock-sidebar .cached-picker summary::after{content:'⌄';float:right;color:var(--muted)}
+.stock-sidebar .cached-picker[open] summary{border-color:var(--cyan)}
+.stock-sidebar .cached-menu{left:0;right:auto;max-height:calc(100dvh - 220px)}
+@media(max-width:800px){.shell{grid-template-columns:minmax(0,1fr);gap:18px;padding:18px 12px 32px}.stock-sidebar{top:8px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:11px 12px;box-shadow:0 5px 16px #0005}.current-stock{gap:3px}.current-stock-caption{display:none}#current-stock-name,#current-index-name{font-size:18px}#current-stock-code,#current-index-code{font-size:12px}.stock-sidebar .cached-picker{margin:0;padding:0;border:0;width:auto;position:static;max-width:150px}.stock-sidebar .cached-picker summary{padding:9px 10px}.stock-sidebar .cached-menu{top:calc(100% + 6px);left:0;right:0;width:auto;max-width:none;max-height:calc(100dvh - 110px)}.stock-picker-body{grid-template-columns:1fr}.stock-groups{display:flex;flex-wrap:wrap;gap:4px;border-right:0;border-bottom:1px solid var(--line);padding:0 0 8px;max-height:150px}.stock-group-row{max-width:100%}.stock-group-edit input{width:100%}}

@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -89,7 +90,7 @@ def test_legu_shared_scheduler_serializes_independent_collectors(db):
         results=[future.result(timeout=15) for future in futures]
     spans.sort()
     assert maximum[0]==1 and len(results)==2
-    assert spans[1][0]-spans[0][1]>=1.95
+    assert spans[1][0]-spans[0][1]>=2.95
     with db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM collection_sources').fetchone()[0]==2
 
@@ -109,6 +110,23 @@ class ImmediateSession:
         reply._content=encoded({'code':'200','data':[]}).encode()
         reply.headers['Content-Type']='application/json';reply.encoding='utf-8'
         return reply
+
+
+def test_legu_completion_spacing_uses_three_to_seven_seconds(db):
+    clock=FakeClock();session=ImmediateSession(clock)
+    client=RequestCollector(db,session=session,clock=clock.time,sleep=clock.sleep,uniform=lambda low,high:low)
+    batch=begin_batch(db,'legu-spacing','index.legu.test','legu')
+    def send():client.get(batch,'legu','index.legu.test','https://example.test',index_parallel=True)
+    send();send()
+    assert session.calls[1]-session.calls[0]==3
+    client.uniform=lambda low,high:high
+    send();send()
+    assert session.calls[-1]-session.calls[-2]==7
+    state=client.state('legu')
+    budget=json.loads(state['budget_json']);budget['completed']=19
+    state['budget_json']=encoded(budget);client.save_state(state)
+    send();send()
+    assert session.calls[-1]-session.calls[-2]==17
 
 
 def test_index_spacing_completed_rest_and_shared_window(db):
@@ -176,7 +194,8 @@ def test_policy_rejects_unapproved_concurrency_and_reports_index_exception(db):
     assert report['provider_policies']['index_parallel']['rest_min']==10
     assert report['provider_policies']['index_parallel']['max_concurrency']==2
     assert report['provider_policies']['index_legu']['max_concurrency']==1
-    assert report['provider_policies']['index_legu']['interval']==2
+    assert report['provider_policies']['index_legu']['interval']==3
+    assert report['provider_policies']['index_legu']['jitter']==4
     assert report['provider_policies']['index_legu']['window_requests']==30
 
 

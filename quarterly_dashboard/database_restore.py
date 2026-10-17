@@ -73,19 +73,23 @@ class RestoreManager:
 
     def list_backups(self):
         entries=[]
-        for path in (self.db.path.parent/'backups').glob('*.sqlite3'):
-            if path.is_symlink():continue
-            info=path.stat()
-            entries.append({'name':path.name,'bytes':info.st_size,
-                'file_time':datetime.fromtimestamp(info.st_mtime,timezone.utc).isoformat()})
+        backups=self.db.path.parent/'backups'
+        for folder in (backups,backups/'stock_cloud_bkp'):
+            for path in folder.glob('*.sqlite3'):
+                if path.is_symlink():continue
+                info=path.stat()
+                entries.append({'name':path.relative_to(backups).as_posix(),'bytes':info.st_size,
+                    'file_time':datetime.fromtimestamp(info.st_mtime,timezone.utc).isoformat()})
         return sorted(entries,key=lambda r:r['file_time'],reverse=True)
 
     def _source(self, command):
         if set(command)=={'backup'} and isinstance(command['backup'],str):
             name=command['backup']
             if name not in {r['name'] for r in self.list_backups()}:raise ValueError('备份文件不存在，请刷新列表')
-            path=(self.db.path.parent/'backups'/name).resolve()
-            if path.parent!=(self.db.path.parent/'backups').resolve():raise ValueError('备份路径无效')
+            backups=(self.db.path.parent/'backups').resolve()
+            selected=backups/name
+            path=selected.resolve()
+            if selected.is_symlink() or path.parent not in {backups,(backups/'stock_cloud_bkp').resolve()}:raise ValueError('备份路径无效')
             return path,name
         if set(command)=={'upload'} and command['upload'] in self.uploads:
             return self.uploads[command['upload']]

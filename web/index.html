@@ -215,58 +215,11 @@
       .stock-sidebar .cached-menu { top:calc(100% + 6px); left:0; right:0; width:auto; max-width:none; max-height:calc(100dvh - 110px); }
     }
   </style>
+  <link rel="stylesheet" href="/research-layout.css?v=20261017-shared-sidebar-v1">
 </head>
 <body>
 <main class="shell">
-  <aside class="stock-sidebar" aria-label="当前标的、股票选择和研究视图">
-    <div class="current-stock" aria-live="polite"><span class="current-stock-caption">当前标的</span><strong id="current-stock-name">—</strong><span id="current-stock-code">—</span></div>
-      <details class="cached-picker" id="cached-picker">
-        <summary id="stock-picker-summary">我的股票</summary>
-        <div class="cached-menu">
-          <input id="cached-search" type="search" placeholder="搜索全部股票：代码、名称或拼音首字母" aria-label="搜索全部股票">
-          <div id="stock-group-target" class="stock-group-target" hidden><label for="stock-target-group">当前管理组</label><select id="stock-target-group" aria-label="当前管理组"></select></div>
-          <div id="stock-group-edit" class="stock-group-edit" hidden>
-            <input id="stock-group-name" maxlength="20" placeholder="分组名称（最多 20 个字）" aria-label="分组名称">
-            <button type="button" id="stock-group-create">新建</button>
-            <button type="button" id="stock-group-rename">重命名</button>
-            <button type="button" id="stock-group-delete">删除组</button>
-          </div>
-          <div class="stock-picker-body">
-            <nav id="stock-groups" class="stock-groups" aria-label="股票分组"></nav>
-            <div><div id="stock-results-label" aria-live="polite"></div><div id="cached-list" class="cached-list" aria-label="股票列表"></div></div>
-          </div>
-          <div id="stock-batch" class="stock-batch" hidden>
-            <span id="stock-selected-count">0 只已选</span>
-            <button type="button" id="stock-select-results">选择结果</button>
-            <button type="button" id="stock-group-add">加入所选组</button>
-            <button type="button" id="stock-group-remove">移出当前管理组</button>
-            <button type="button" id="stock-unfollow">取消关注</button>
-          </div>
-          <div class="stock-picker-footer"><span>搜索覆盖全部分组</span><button id="stock-manage" type="button">管理分组</button></div>
-          <p id="stock-picker-message" role="status" aria-live="polite"></p>
-        </div>
-      </details>
-  <nav class="research-tabs" role="tablist" aria-label="研究视图">
-    <button id="trend-tab" type="button" role="tab" aria-selected="true" aria-controls="trend-panel">企业经营趋势</button>
-    <button id="business-tab" type="button" role="tab" aria-selected="false" aria-controls="business-panel" tabindex="-1">主营构成</button>
-    <button id="statements-tab" type="button" role="tab" aria-selected="false" aria-controls="statements-panel" tabindex="-1">财务分析</button>
-    <button id="industry-tab" type="button" role="tab" aria-selected="false" aria-controls="industry-panel" tabindex="-1">行业内对比</button>
-    <a id="indices-link" class="nav-link" href="/indices">指数分析</a>
-    <button id="maintenance-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-panel" tabindex="-1">后台维护</button>
-  </nav>
-  <details id="industry-filter-details" class="industry-filter-details" hidden>
-    <summary>行业筛选</summary>
-    <div class="industry-filter-body"></div>
-  </details>
-  <details id="statement-filter-details" class="industry-filter-details statement-filter-details" open hidden>
-    <summary>财务筛选</summary>
-    <div class="statement-filter-body"></div>
-  </details>
-  <details id="business-filter-details" class="industry-filter-details business-filter-details" hidden>
-    <summary>主营筛选</summary>
-    <div class="business-filter-body"></div>
-  </details>
-  </aside>
+  __RESEARCH_SIDEBAR__
   <div class="workspace-content">
   <header>
     <div>
@@ -527,6 +480,7 @@
   </div>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
+<script src="/datetime.js"></script>
 <script src="/plotly.min.js"></script>
 <script src="/stock-picker.js"></script>
 <link rel="stylesheet" href="/dcf.css?v=20261015-growth">
@@ -603,7 +557,7 @@
   });
   function renderCachedStocks() { stockPicker.setStocks(state.cached_stocks || []); }
   renderCachedStocks();
-  if (state.updated_at) document.getElementById('updated').textContent = new Date(state.updated_at).toLocaleString('zh-CN');
+  if (state.updated_at) document.getElementById('updated').textContent = window.DashboardTime.format(state.updated_at);
   const periods = state.views?.quarter || [];
   if (periods.length) document.getElementById('latest-period').textContent = periods.at(-1).period;
   const warnings = document.getElementById('warnings');
@@ -1300,11 +1254,11 @@
     const announcementText = !announcement.has_data
       ? '公告日期：尚未建档；需手动刷新财务以初始化。'
       : announcement.error ? '公告日期：同步失败，保留已有判断。' + announcement.error
-      : announcement.checked_at ? '公告日期：' + (announcement.status || '已检查') + '；检查时间 ' + announcement.checked_at
+      : announcement.checked_at ? '公告日期：' + (announcement.status || '已检查') + '；检查时间 ' + window.DashboardTime.format(announcement.checked_at,'未记录')
       : '公告日期：已保存判断，检查时间未记录。';
     document.getElementById('announcement-status').textContent = announcementText;
     renderCurrentStock();
-    document.getElementById('updated').textContent = state.updated_at ? new Date(state.updated_at).toLocaleString('zh-CN') : '—';
+    document.getElementById('updated').textContent = window.DashboardTime.format(state.updated_at);
     document.getElementById('latest-period').textContent = state.views?.quarter?.at(-1)?.period || '—';
     state.loading.dividends = Boolean(data.needs_dividends);
     window.dispatchEvent(new CustomEvent('financial-facts-updated', {detail:{code:state.code}}));

@@ -73,6 +73,6 @@ P4 后，正常加载以 data/stock_analysis.sqlite3 为唯一业务事实库。
 
 页面初始 HTML 只读库；后台 /api/financial、/api/dividends、/api/valuation、/api/prices 和筹码接口按需更新。财报计算合并已存报表和手工覆盖；分红图与股息率共用已实施现金事件；PS 将每个市值观察日关联当时已披露的收入 TTM。估值日、周、月频率只聚合已存原始观察，切换频率本身不请求来源。股票切换与异步响应由前端防串图逻辑处理。
 
-数据库置于本地磁盘。启动先取得实例锁、迁移、完整性检查、恢复中断运行，再做当日 Backup API 备份；成功业务提交后刷新日备份。备份恢复到新路径进行完整性检查，不直接覆盖活动库。数据文件和备份由 .gitignore 排除。维护命令、DELETE/WAL 运行时约束见 [SQLite 存储说明](sqlite-storage.md)。
+数据库置于本地磁盘。启动先取得实例锁、迁移、完整性检查、恢复中断运行，再做当日 Backup API 备份；成功业务提交后刷新日备份。每天首次备份位于 `backups/stock_cloud_bkp`，只保留一个版本，旧日备份归档到 `backups`；专项备份直接保存在 `backups`。维护页可从这两个位置恢复。备份恢复到新路径进行完整性检查，不直接覆盖活动库。数据文件和备份由 .gitignore 排除。维护命令、DELETE/WAL 运行时约束见 [SQLite 存储说明](sqlite-storage.md)。
 
 2026-09-30 的 P4 集成在运行库的隔离备份副本上完成，未直接升级结构版本 2 的现有运行库。三只代表股票的冷暖请求、旧新估值差异及未完成的 P5 跨机/WAL 验收见 [P4/P5 验收记录](data-sources/p4-acceptance.md)。

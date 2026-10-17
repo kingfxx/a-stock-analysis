@@ -110,7 +110,7 @@
       const scale=Number(el('bs-unit').value),unit=el('bs-unit').selectedOptions[0].text;
       return `<table class="bs-table"><thead><tr><th>报告期／项目</th><th>收入（${unit}）</th><th>收入占比</th><th>成本（${unit}）</th><th>成本占比</th><th>毛利（${unit}）</th><th>毛利占比</th><th>毛利率</th></tr></thead><tbody>${[...periods].reverse().map(p=>{
         const rows=p.source_dimensions?.[dimension]||p.dimensions?.[dimension]||[];
-        return `<tr class="bs-report-row"><th colspan="8">${esc(dateLabel(p.report_date))}${p.missing?' · 无本地记录':` · 修订${esc(p.revision)} · 取得于 ${esc(p.obtained_at)}`}</th></tr>`+
+        return `<tr class="bs-report-row"><th colspan="8">${esc(dateLabel(p.report_date))}${p.missing?' · 无本地记录':` · 修订${esc(p.revision)} · 取得于 ${esc(window.DashboardTime.format(p.obtained_at,'未记录'))}`}</th></tr>`+
           (rows.length?rows.map(r=>`<tr><th>${esc(r.item_name)}${(()=>{const unified=p.source_dimensions&&(p.dimensions[dimension]||[]).find(x=>(x.source_items||[]).some(source=>source.item_key===r.item_key));return unified&&unified.item_name!==r.item_name?' <span class="bs-alias-label">→ '+esc(unified.item_name)+'</span>':'';})()}${exclusion(r)?'（'+exclusion(r)+'）':''}</th><td>${number(valid(r.revenue)?r.revenue/scale:null)}</td><td>${percent(r.revenue_share)}</td><td>${number(valid(r.cost)?r.cost/scale:null)}</td><td>${percent(r.cost_share)}</td><td>${number(valid(r.gross_profit)?r.gross_profit/scale:null)}</td><td>${percent(r.profit_share)}</td><td>${percent(r.gross_margin)}</td></tr>`).join(''):'<tr><td colspan="8">该报告期无此分类记录</td></tr>');
       }).join('')}</tbody></table>`;
     }
@@ -165,7 +165,7 @@
       note('region').textContent=`${dateLabel(latest.report_date)} · 按当前名称口径展示实际披露的地区项目；切换金额或占比，年份与范围跟随上方筛选。地区与产品、行业不可跨维度相加，缺失值留空。`;
       plot('bs-region',traces(periods,'3',regionShare?shares[field]:field,new Set(catalog(periods,'3').map(row=>row.item_key)),regionShare?0.01:scale,regionShare),regionShare?'%':unit);
       el('bs-history').innerHTML=table(periods,dimension);
-      el('bs-provenance').textContent=`来源：东方财富 RPT_F10_FN_MAINOP，本地已存当前修订。最新所选报告期 ${latest.report_date}，修订 ${latest.revision}，实际取得时间 ${latest.obtained_at}。历史明细保留整维度合计及原始分类名称。`;
+      el('bs-provenance').textContent=`来源：东方财富 RPT_F10_FN_MAINOP，本地已存当前修订。最新所选报告期 ${latest.report_date}，修订 ${latest.revision}，实际取得时间 ${window.DashboardTime.format(latest.obtained_at,'未记录')}。历史明细保留整维度合计及原始分类名称。`;
     }
     function applyNames() {
       data={...rawData,periods:el('bs-name-mode').value==='normalized'?nameView.periods:rawData.periods};

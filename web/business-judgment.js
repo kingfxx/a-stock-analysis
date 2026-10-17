@@ -14,7 +14,7 @@ window.initBusinessJudgment = function(state, actions, openSettings) {
     const data=await response.json();if(!response.ok)throw new Error(data.error || '请求失败');return data;
   }
   const base='/api/business-judgment';
-  const date=value=>value ? new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}) : '—';
+  const date=value=>window.DashboardTime.format(value);
   function header() {
     clearInterval(elapsedTimer);
     dialog.replaceChildren();const h=el('header');h.append(el('h2',`${state.code} 经营判断`),button('关闭',()=>dialog.close()));dialog.append(h);

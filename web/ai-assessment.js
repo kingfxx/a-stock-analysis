@@ -10,7 +10,7 @@ window.initAIAssessment = function(state) {
     const node = el('button', text, 'ai-button'); node.type = 'button';
     node.addEventListener('click', () => Promise.resolve().then(action).catch(showError)); return node;
   };
-  const date = value => value ? new Date(value).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'}) : '—';
+  const date = value => window.DashboardTime.format(value);
   let overview = {}, status = {}, currentReport = null, timer = null, loginTimer = null, epoch = 0;
   let updating = false, openedBy = null, historyCursor = null, pollingDelay = 800, view = 'report';
   const selectedHistory = new Set();

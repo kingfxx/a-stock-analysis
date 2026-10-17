@@ -42,7 +42,7 @@ function fixture(range = '3', persistedFrequency = null, persistedBenchmark = nu
     seriesControls:[], modeOf() {},
     document:{getElementById:element,querySelectorAll:selector =>
       selector === '[data-valuation-metric]' ? metricButtons : []},
-    window:{addEventListener() {}},
+    window:{DashboardTime:require('../web/datetime.js'),addEventListener() {}},
     sessionStorage:{setItem() {}},
     localStorage:{getItem:key => storage.get(key) ?? null,setItem:(key,value) => storage.set(key,value)},
     fetch:url => { requests.push(url); throw new Error('frequency switch requested network'); },

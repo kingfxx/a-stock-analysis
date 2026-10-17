@@ -4,7 +4,7 @@
   const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const size=value=>value===null||value===undefined?'—':value<1024?`${value} B`:value<1048576?`${(value/1024).toFixed(1)} KiB`:`${(value/1048576).toFixed(2)} MiB`;
   const number=value=>Number(value).toLocaleString('zh-CN');
-  const date=value=>!value?'未记录':new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+  const date=value=>window.DashboardTime.format(value,'未记录');
   window.initMaintenance=()=>{
     const panel=document.getElementById('maintenance-panel');
     panel.innerHTML=`<div class="maintenance-head"><div><h2>后台维护</h2><p>本地数据与股票维护</p></div><button id="maintenance-refresh" type="button">刷新本地统计</button></div>

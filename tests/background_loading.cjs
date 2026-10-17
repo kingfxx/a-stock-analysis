@@ -30,7 +30,7 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
       return elements.get(id);
     }},
     confirm: () => false,
-    window: {dispatchEvent(event) { if (event.type === 'dashboard-data-state') events.push(event.detail.updating); }},
+    window: {DashboardTime:require('../web/datetime.js'),dispatchEvent(event) { if (event.type === 'dashboard-data-state') events.push(event.detail.updating); }},
     CustomEvent: class { constructor(type, init) { this.type=type; this.detail=init.detail; } },
     fetch: url => new Promise(resolve => pending.set(url, resolve))
   };

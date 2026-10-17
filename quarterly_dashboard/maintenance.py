@@ -223,7 +223,8 @@ class MaintenanceService:
                 'index_bytes':sum(r['index_bytes'] or 0 for r in tables) if allocated is not None else None,
                 'system_bytes':max(0,page_size*page_count-free_bytes-allocated) if allocated is not None else None,
                 'size_method':method}
-        backups=list((self.db.path.parent/'backups').glob('*.sqlite3'))
+        backup_root=self.db.path.parent/'backups'
+        backups=list(backup_root.glob('*.sqlite3'))+list((backup_root/'stock_cloud_bkp').glob('*.sqlite3'))
         entries=[(p,p.stat()) for p in backups]
         latest=max(entries,key=lambda pair:pair[1].st_mtime,default=None)
         summary['backups']={'count':len(entries),'total_bytes':sum(s.st_size for _,s in entries),

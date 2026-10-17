@@ -72,6 +72,7 @@ _INDUSTRY_SERVICES = {}
 _MAINTENANCE_SERVICES = {}
 LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
 TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+RESEARCH_SIDEBAR_TEMPLATE = (ROOT / "web" / "research-sidebar.html").read_text(encoding="utf-8")
 CHECKLIST_DISPLAY_VERSION = hashlib.sha256((ROOT / 'web' / 'ai-checklist.js').read_bytes()).hexdigest()[:12]
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
@@ -86,6 +87,45 @@ NEW_REPORT_FIELDS = ("operating_cost_ytd", "net_profit_ytd", "monetary_funds",
                      "interest_expense_ytd", "non_operating_interest_income_ytd")
 VALUATION_BASIS = "monthly_qfq_overlay_v1"
 _DATA_LOCKS: dict[str, Lock] = {}
+
+
+def research_sidebar(page: str) -> str:
+    """Render the shared stock picker and research navigation for each page."""
+    views = (
+        ("trend", "企业经营趋势", "trend-panel"),
+        ("business", "主营构成", "business-panel"),
+        ("statements", "财务分析", "statements-panel"),
+        ("industry", "行业内对比", "industry-panel"),
+        ("maintenance", "后台维护", "maintenance-panel"),
+    )
+    if page == "indices":
+        items = [f'<a class="nav-link" data-view="{key}" href="/?tab={key}">{label}</a>' for key, label, _ in views]
+        items.insert(4, '<a class="nav-link" href="/indices" aria-current="page">指数分析</a>')
+        nav_role = ""
+        filters = ""
+        entity = ("当前指数", "current-index-name", "current-index-code", "指数分析", "当前指数、股票选择和研究视图")
+    else:
+        items = []
+        for index, (key, label, panel) in enumerate(views):
+            tabindex = '' if index == 0 else ' tabindex="-1"'
+            items.append(f'<button id="{key}-tab" type="button" role="tab" aria-selected="{str(index == 0).lower()}" aria-controls="{panel}"{tabindex}>{label}</button>')
+        items.insert(4, '<a id="indices-link" class="nav-link" href="/indices">指数分析</a>')
+        nav_role = 'role="tablist"'
+        filters = '''<details id="industry-filter-details" class="industry-filter-details" hidden><summary>行业筛选</summary><div class="industry-filter-body"></div></details>
+  <details id="statement-filter-details" class="industry-filter-details statement-filter-details" open hidden><summary>财务筛选</summary><div class="statement-filter-body"></div></details>
+  <details id="business-filter-details" class="industry-filter-details business-filter-details" hidden><summary>主营筛选</summary><div class="business-filter-body"></div></details>'''
+        entity = ("当前标的", "current-stock-name", "current-stock-code", "—", "当前标的、股票选择和研究视图")
+    caption, name_id, code_id, initial_name, aria_label = entity
+    return (RESEARCH_SIDEBAR_TEMPLATE
+            .replace("__SIDEBAR_LABEL__", aria_label)
+            .replace("__ENTITY_CAPTION__", caption)
+            .replace("__ENTITY_NAME_ID__", name_id)
+            .replace("__ENTITY_CODE_ID__", code_id)
+            .replace("__ENTITY_NAME__", initial_name)
+            .replace("__ENTITY_CODE__", "—")
+            .replace("__NAV_ROLE__", nav_role)
+            .replace("__NAV_ITEMS__", "".join(items))
+            .replace("__FILTERS__", filters))
 
 
 FINANCIAL_VALUES = ("revenue_ytd", "profit_ytd", "shares", "equity") + NEW_REPORT_FIELDS
@@ -901,7 +941,8 @@ def render_page(code: str, refresh: bool) -> str:
     payload["unfollowed"] = (StockLibrary(services()[0].db).is_unfollowed(code) if Path(DATABASE_PATH).exists() else False)
     payload['valuation'] = compact_valuation(payload['valuation'])
     embedded = json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
-    return (TEMPLATE.replace("__PAYLOAD__", embedded)
+    return (TEMPLATE.replace("__RESEARCH_SIDEBAR__", research_sidebar("stock"))
+            .replace("__PAYLOAD__", embedded)
             .replace("__CODE__", html.escape(code, quote=True))
             .replace("__ERROR__", html.escape(error)))
 
@@ -1269,7 +1310,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path in {'/indices','/indices.js','/indices.css'}:
             name='indices.html' if parsed.path=='/indices' else parsed.path.lstrip('/')
-            body=(ROOT/'web'/name).read_bytes()
+            if parsed.path == '/indices':
+                body=(ROOT/'web'/name).read_text(encoding='utf-8').replace('__RESEARCH_SIDEBAR__',research_sidebar('indices')).encode('utf-8')
+            else:
+                body=(ROOT/'web'/name).read_bytes()
             self.send_response(200)
             self.send_header('Content-Type',{'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[name.rsplit('.',1)[1]])
             self.send_header('Content-Length',str(len(body)))
@@ -1323,7 +1367,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/samples/industry-summary.html":
             body = (ROOT / "web" / "samples" / "industry-summary.html").read_bytes()
             content_type = "text/html; charset=utf-8"
-        elif parsed.path in {"/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
+        elif parsed.path in {"/datetime.js", "/research-layout.css", "/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
                              "/financial-statements.js", "/financial-statements.css", "/business-segments.js", "/business-segments.css", "/business-segment-aliases.js", "/business-segment-names.js", "/industry.js", "/industry.css",
                              "/maintenance.js", "/maintenance.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()

@@ -185,7 +185,7 @@
       const series=data.series.filter(r=>inRange(r.period));
       el('sw-period').innerHTML=data.periods.filter(inRange).map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');el('sw-period').value=data.period||'';updatePeriodNav();
       el('sw-path').textContent=`当前股票 ${state.code}：`+(data.stock_path.length?data.stock_path.map(r=>r.name).join(' → '):'分类待补');
-      const timeText=value=>value?new Date(value).toLocaleString('zh-CN'):'未记录';
+      const timeText=value=>window.DashboardTime.format(value,'未记录');
       el('sw-status').textContent=`申万 2021 · ${data.catalog.filter(r=>r.level===1).length} / ${data.catalog.filter(r=>r.level===2).length} / ${data.catalog.filter(r=>r.level===3).length} 个行业 · 分类覆盖 ${data.classified_count}/${data.universe_count} · 财务更新 ${timeText(data.obtained_at)} · 名单采集 ${timeText(data.membership_obtained_at)}`;
       if(!data.selected)return;
       const annual=data.mode==='annual';

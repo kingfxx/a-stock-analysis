@@ -39,7 +39,7 @@ let result={};try{if(operation)result=JSON.parse(operation.result_json)||{};}cat
 el('progress').textContent=!operation?'尚未执行指数采集':operation.status==='running'?'指数采集中':operation.status==='complete'?'指数采集已完成':operation.status==='cancelled'?'指数采集已停止，已完成分段保留':'指数采集未全部完成，请查看进度摘要';
 renderWorkProgress(operation,result);
 el('progress-toggle').textContent=el('progress-details').hidden?'查看进度':'收起进度';
-el('cooldowns').textContent=data.cooldowns.map(row=>`${providers[row.source_system]||row.source_system}：${row.reason}，冷却截止 ${row.cooldown_until}`).join('；');
+el('cooldowns').textContent=data.cooldowns.map(row=>`${providers[row.source_system]||row.source_system}：${row.reason}，冷却截止（北京时间）${window.DashboardTime.format(row.cooldown_until,'未记录')}`).join('；');
 clearTimeout(timer);timer=setTimeout(()=>{if(!document.hidden)load(false);},running?5000:30000);}
 const parentOf=row=>row.navigation_parent_index_code||row.parent_index_code;
 function renderParents(){options('parent',data.catalog.filter(row=>row.index_type==='industry'&&row.industry_level===1).map(row=>[row.index_code,row.name]),el('parent').value);}

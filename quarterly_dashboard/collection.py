@@ -83,10 +83,12 @@ class PacingPolicy:
                     or self.max_concurrency!=1 or not 1 <= self.max_attempts <= 3):
                 raise ValueError('cninfo限速配置必须符合已授权策略')
             return
-        if self.provider == 'index_parallel':
+        if self.provider in ('index_parallel','index_legu'):
+            spacing=(3,4) if self.provider=='index_legu' else (2,3)
             if ((self.interval,self.jitter,self.window,self.window_requests,self.rest_every,
-                 self.rest_min,self.rest_max,self.cooldown)!=(2,3,60,30,20,10,10,3600)
-                    or self.max_concurrency not in (1,2) or not 1<=self.max_attempts<=3):
+                 self.rest_min,self.rest_max,self.cooldown)!=(*spacing,60,30,20,10,10,3600)
+                    or self.max_concurrency not in ((1,) if self.provider=='index_legu' else (1,2))
+                    or not 1<=self.max_attempts<=3):
                 raise ValueError('指数并行限速配置必须符合本轮授权策略')
             return
         if self.provider in ('industry_financial', 'industry_snapshot'):
@@ -241,9 +243,11 @@ class RequestCollector:
                 rest_every=20,rest_min=0,rest_max=0,cooldown=3600,max_attempts=self.policy.max_attempts,
                 provider='cninfo')
         if index_parallel:
-            return PacingPolicy(interval=2,jitter=3,window=60,window_requests=30,
+            return PacingPolicy(interval=3 if provider=='legu' else 2,jitter=4 if provider=='legu' else 3,
+                window=60,window_requests=30,
                 rest_every=20,rest_min=10,rest_max=10,cooldown=3600,max_attempts=self.policy.max_attempts,
-                provider='index_parallel',max_concurrency=1 if provider=='legu' else 2)
+                provider='index_legu' if provider=='legu' else 'index_parallel',
+                max_concurrency=1 if provider=='legu' else 2)
         return self.policy
 
     def spawn(self):

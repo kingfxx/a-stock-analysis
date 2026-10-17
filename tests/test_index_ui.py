@@ -89,6 +89,25 @@ def test_index_point_overlay_http_reports_selected_real_series(index_server):
     assert not missing['available'] and missing['rows']==[]
 
 
+def test_browser_cooldown_time_is_beijing_to_seconds(index_server):
+    playwright=pytest.importorskip('playwright.sync_api')
+    base,calls,db=index_server
+    with db.connection(write=True) as conn:
+        conn.execute('INSERT INTO collection_provider_state VALUES(?,?,?,?,?,?)',
+            ('legu','2026-10-17T07:29:57.867636+00:00','HTTP 429',1,'{}','2026-10-17T06:29:57+00:00'))
+    with playwright.sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page(timezone_id='America/Los_Angeles')
+            errors=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/indices',wait_until='networkidle')
+            assert page.locator('#cooldowns').inner_text()=='乐咕乐股：HTTP 429，冷却截止（北京时间）2026-10-17 15:29:57'
+            assert not errors and not calls
+        finally:
+            browser.close()
+
+
 def test_browser_toggles_real_index_points_on_right_axis(index_server):
     playwright=pytest.importorskip('playwright.sync_api')
     from quarterly_dashboard.index_prices import publish_prices
