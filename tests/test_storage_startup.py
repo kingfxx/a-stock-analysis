@@ -27,7 +27,7 @@ def test_startup_imports_legacy_datasets_without_rewriting_json_or_network(tmp_p
                 assert conn.execute("SELECT count(*) FROM legacy_imports WHERE path=?",
                                     (str(legacy.resolve()),)).fetchone()[0] == 3
             assert legacy.read_bytes() == original
-            assert list((database.parent / "backups").glob("*-daily-*.sqlite3"))
+            assert list((database.parent / "backups" / "stock_cloud_bkp").glob("*-daily-*.sqlite3"))
             events.append("serving")
         def server_close(self):
             events.append("closed")

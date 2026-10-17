@@ -870,6 +870,11 @@ def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None
 
 
 def run_operation(db,operation,*,collector=None):
+    with db.connection() as conn:
+        scope=json.loads(conn.execute('SELECT scope_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
+    if scope.get('dataset')=='market_congestion':
+        from .market_congestion import run
+        return run(db,operation)
     tracker=OperationProgress(db,operation)
     def progress(message,provider=None):
         with db.connection(write=True) as conn:

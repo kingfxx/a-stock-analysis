@@ -47,7 +47,8 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (32, "032_financial_public_sources.sql"),
               (33, "033_stock_announcement_metadata.sql"),
               (34, "034_business_segments.sql"),
-              (35, "035_financial_json_compression.sql"))
+              (35, "035_financial_json_compression.sql"),
+              (36, "036_market_congestion.sql"))
 
 
 class StorageError(RuntimeError):

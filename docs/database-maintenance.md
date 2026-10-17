@@ -40,6 +40,8 @@ v30未新增表，交易快照用途扩展为东财原始值及独立历史合�
 
 ## 新增表交付检查项
 
+v36：`market_indicator_observations`分类“市场指标”，保存市场指标/对象/来源通道/频率/定义版本、四项数值与修订，时间依据obtained_at及updated_at；`collection_schedules`分类“运行与配置”，只保存日程配置，时间依据updated_at。空表无数据时间，不能用观察日或每日设定时刻替代。公共来源metadata-only的空路径/哈希是授权策略，不是文件丢失；初始化归档仍需文件和双哈希。详情见[大盘拥挤度](market-congestion-collection.md)。
+
 Schema v19 新增 `market_financial_performance`，保存全 A 股业绩指标接口 ALL 的 37 个字段，与三表使用统一来源、批次和版本规则；更新时间为 `obtained_at`/`updated_at`。历史采集只更新四张新业务表，不改旧 `sw_financial_facts`。采集进度沿用行业任务状态，页面读取不受影响。
 
 Schema v18 新增 `market_financial_income`、`market_financial_balance`、`market_financial_cashflow`、`market_financial_sources` 和 `market_financial_batches`。三表为全 A 股东财摘要接口全部字段，保留真实修订；来源表保存 gzip 响应引用，批次表记录执行结果。业务表更新时间读取 `obtained_at`/`updated_at`，来源表读取 `obtained_at`，批次读取 `obtained_at`/`finished_at`；空表不推算时间。原始响应位于数据库目录下的 `market_financial_sources/`，单独占磁盘，不包含在 SQLite 表大小和单独数据库备份中。采集与字段说明见 [全市场三表采集](data-sources/market-financial-statements.md)。

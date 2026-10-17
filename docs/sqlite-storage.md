@@ -1,5 +1,9 @@
 # SQLite 存储、数据更新与备份
 
+v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](market-congestion-collection.md)。
+
+2026-10-17用户授权20日离线拥挤度补值，复用同表新增独立身份`ashares_congestion/all_a/bigquant/bigquant_calculated/daily/amount_rank_top5_v1`，不改schema。value为自算比例，close来自现有中证上证同日点数，两类金额为亿元；原Legu缺值观察保留。source是明确标记LOCAL_DERIVATION的计算证据，原行情及点位事实引用在证据中追溯；obtained_at为该计算证据生成时间，updated_at为发布时刻。详见[补值说明](data-sources/market-congestion-gap-backfill.md)。
+
 v35 对 `financial_reports.raw_json` 逐条 zlib 6 无损压缩，历史行在 schema 事务中校验原内容哈希后迁移，其他列、索引及来源关系不变。SQLite 原 TEXT 列兼容存储自描述 BLOB，不新增业务表或科目字典。应用仓储和直接读取入口通过 `financial_storage` 显式恢复原 JSON 文本；独立研报技能支持相同编码。详见 [压缩协议与迁移](financial-json-storage.md)。
 
 v34 新增个股主营构成 `business_segment_versions` 与 `business_segment_items`；当前结构版本以v35及维护页为准。首次／full／180天审计获取上海当天前十个日历年内实际报告期，增量重叠最近两期。复用公共来源和个股同步状态，HTTP原始JSON不落盘，仅保存结构化业务版本；详见[个股主营构成](stock-collection.md#个股主营构成)。
@@ -12,7 +16,7 @@ v29新增业务表 `market_trade_snapshot`：全市场未复权股价、涨跌�
 
 指数采集新增 v23/v24：公共 `collection_batches/sources/provider_state`，稳定指数身份、历史目录、提供方映射、指标定义、统一估值事实及操作状态。未迁移旧财务或价格记录；用途与真实时间依据已登记维护页。表关系、来源目录完整备份及采集保护见[指数估值采集说明](index-valuation-collection.md)。
 
-本文依据当前代码整理；取消关注、恢复和个股清理部分更新于 2026-10-07，全行业结构索引更新于 2026-10-10，指数点位说明更新于 2026-10-11，交易日快照更新于 2026-10-14，主营构成更新于2026-10-16，当前数据库结构版本为 **35**，表数量以维护页实时统计为准。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
+本文依据当前代码整理；取消关注、恢复和个股清理部分更新于 2026-10-07，全行业结构索引更新于 2026-10-10，指数点位说明更新于 2026-10-11，交易日快照更新于 2026-10-14，主营构成更新于2026-10-16，大盘拥挤度更新于2026-10-17，当前数据库结构版本为 **36**，表数量以维护页实时统计为准。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
 
 ## 1. 文件位置与启动过程
 

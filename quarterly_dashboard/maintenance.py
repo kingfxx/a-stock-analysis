@@ -42,13 +42,15 @@ def compact_database(db, validate):
         conn.close()
 
 DESCRIPTIONS={
+ 'market_indicator_observations':('市场指标','市场拥挤度、收盘点位和两类亿元成交额；独立来源通道、真实取得时间及修订'),
+ 'collection_schedules':('运行与配置','已授权的市场指标每日检查开关、北京时间及真实配置更新时间'),
  'business_segment_versions':('个股数据','主营构成报告期完整结构化版本、真实修订及来源批次；不保存原始JSON'),
  'business_segment_items':('个股数据','主营构成行业、产品、地区明细；十进制原值及精确来源页引用'),
  'index_price_definitions':('指数数据','指数点位来源字段、点数单位、采样频率及缺值规则的版本定义'),
  'index_price_series':('指数数据','宽基、行业、策略共用的点位序列身份；提供方、频率及收益口径独立'),
  'index_price_observations':('指数数据','指数收盘点位和来源实际提供的开高低点；来源、真实取得时间及修订版本'),
  'collection_batches':('运行与配置','公共采集批次、操作范围、执行状态及独立覆盖判定；未迁移旧采集'),
- 'collection_sources':('运行与配置','公共逐次请求来源；指数、全市场与行业保存原文双哈希，个股按授权仅登记 metadata-only 请求结果'),
+ 'collection_sources':('运行与配置','公共逐次请求来源；归档保留双哈希，个股及拥挤度日更按授权仅登记 metadata-only 请求结果'),
  'collection_provider_state':('运行与配置','公共来源共享请求预算、拒绝原因及跨任务冷却截止时间'),
  'market_trade_snapshot':('行业数据','全市场交易日快照：东财原值、历史合成及经停牌和股本校验的参考价估值；含价格、股本、市值及估值，当前仅季末'),
  'market_cap_latest':('行业数据','东财、经验证停牌参考价、普通历史合成及旧同日市值依次读取的逻辑视图'),

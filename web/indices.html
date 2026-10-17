@@ -32,4 +32,21 @@ __RESEARCH_SIDEBAR__
 <p id="negative-note" class="note negative-note"></p><div id="chart" role="img" aria-label="指数估值走势与历史参考线"></div>
 <p id="point-overlay-note" class="note muted" hidden></p><p id="coverage" class="note"></p><p id="definition" class="note muted"></p><p id="methodology" class="note muted"></p>
 </section>
-</div></main><script src="/datetime.js"></script><script src="/plotly.min.js"></script><script src="/stock-picker.js"></script><script src="/indices.js"></script></body></html>
+<section class="valuation-panel congestion-panel" aria-label="大盘拥挤度与宽基指数">
+<div class="panel-head"><h2>大盘拥挤度</h2><p class="muted">成交额排名前 5% 个股占全 A 成交额的比例 · 不含大宗交易</p>
+<div class="controls">
+<label>叠加宽基指数<select id="congestion-index"><option value="cn:000001">上证指数</option></select></label>
+<label>时间范围<select id="congestion-range"><option value="5">5 年</option><option value="10">10 年</option><option value="all">全部</option></select></label>
+<label>比较基准<select id="congestion-benchmark"><option value="percentile">历史分位</option><option value="stddev">均值 ±1 标准差</option></select></label>
+<label>展示频率<select id="congestion-frequency"><option value="month">月</option><option value="week">周</option><option value="day" selected>日</option></select></label>
+<button id="congestion-full" type="button">获取／恢复历史</button><button id="congestion-update" type="button">立即更新</button><button id="congestion-cancel" type="button" disabled>停止采集</button>
+</div></div>
+<div class="congestion-summary"><div class="valuation-current"><small>最近有效观测 · 拥挤度</small><div id="congestion-position" class="valuation-position">待判断</div><strong id="congestion-current">—</strong><small id="congestion-basis">暂无有效分位</small><span id="congestion-date">尚未获取数据</span></div><div class="valuation-summary"><p id="congestion-history-summary"></p><p id="congestion-comparison" class="muted"></p></div></div>
+<div class="valuation-levels"><span><i style="background:#ed8180"></i><small id="congestion-high-label">高拥挤（80% 分位）</small><b id="congestion-high">—</b></span><span><i style="background:#f4b560"></i><small id="congestion-median-label">中值（50% 分位）</small><b id="congestion-median">—</b></span><span><i style="background:#6ac9aa"></i><small id="congestion-low-label">低拥挤（20% 分位）</small><b id="congestion-low">—</b></span></div>
+<div id="congestion-chart" role="img" aria-label="大盘拥挤度与所选宽基指数双轴趋势图"></div>
+<div class="congestion-footer"><p id="congestion-status" role="status" aria-live="polite"></p><p id="congestion-check" class="muted"></p>
+<div class="controls"><label class="congestion-switch"><input id="congestion-enabled" type="checkbox">每天检查 HTML 更新</label><label>北京时间<input id="congestion-time" type="time" value="18:00"></label><button id="congestion-save" type="button">保存每日检查设置</button></div>
+<p class="muted">首次获取历史与近期数据；以后只读取网页表格并写入数据库。后台运行时每日检查，页面浏览不触发采集。</p>
+<details id="congestion-explanation"><summary>说明与近期数据</summary><p class="muted">统计按所选范围内每个有效交易日取一个样本，包含有效零值；缺值不补。分位为低于当前值的日样本占比；基准为20%/50%/80%线性插值分位，或均值±总体标准差。判断始终按历史分位；图表缩放和展示频率不改变统计。</p><p id="congestion-coverage"></p><p id="congestion-points" class="muted"></p><p id="congestion-gaps"></p><p id="congestion-conflicts"></p><p class="muted">图中按日期展示拥挤度，重叠日期优先使用网页表格的有效值；底层仍独立保存 API、网页和自算来源及修订。自算值仅填空，原始缺值保留；未补齐日期不连线。周／月按每周期最后一个已记录日期取当日值，缺值留空，不用前日值代替；指数只有月频时保留实际观察日，在对应周期按同日比较。网页日更仅保留请求记录，无响应文件。</p><div class="scroll"><table><thead><tr><th>日期</th><th>拥挤度</th><th>来源收盘价</th><th>前5%成交额（亿元）</th><th>全A成交额（亿元）</th></tr></thead><tbody id="congestion-recent"></tbody></table></div></details>
+</div></section>
+</div></main><script src="/datetime.js"></script><script src="/plotly.min.js"></script><script src="/stock-picker.js"></script><script src="/indices.js"></script><script src="/congestion.js"></script></body></html>

@@ -49,7 +49,7 @@ def old_database(tmp_path, monkeypatch):
     database = Database(tmp_path / 'old.sqlite3')
     migrations = list(storage._migration_files())
     with monkeypatch.context() as patch:
-        patch.setattr(storage, '_migration_files', lambda: iter(migrations[:-1]))
+        patch.setattr(storage, '_migration_files', lambda: iter(item for item in migrations if item[0]<=34))
         database.initialize()
         identity = database.ensure_instrument('600519', '测试')
         key = SyncKey(identity, 'financial:lrb', 'sina')
@@ -69,7 +69,7 @@ def test_v34_history_migration_preserves_every_column_and_backup(tmp_path, monke
         conn.row_factory = sqlite3.Row
         before = [dict(r) for r in conn.execute('SELECT * FROM financial_reports ORDER BY period')]
     with instance_lock(database.path):
-        assert database.initialize()['schema_version'] == 35
+        assert database.initialize()['schema_version'] == storage.MIGRATIONS[-1][0]
     with database.connection() as conn:
         stored = conn.execute('SELECT *,typeof(raw_json) AS encoding FROM financial_reports ORDER BY period').fetchall()
         assert all(r['encoding']=='blob' for r in stored)

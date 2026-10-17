@@ -159,6 +159,8 @@ def parsed_source(db, source_id, *, fields=None, error=None):
 def read_source(db, source_id):
     with db.connection() as conn:
         item=dict(conn.execute('SELECT * FROM collection_sources WHERE id=?',(source_id,)).fetchone())
+    if not item['file_path']:
+        raise ValueError('仅请求记录，无响应文件，不能离线重放')
     path=(db.path.parent/item['file_path']).resolve()
     root=(db.path.parent/'collection_sources').resolve()
     if not path.is_relative_to(root):
@@ -585,7 +587,8 @@ class RequestCollector:
                     raise error
                 text=getattr(response,'text','')[:100000].lower()
                 denied=status in (401,403,429) or any(s in diagnostic+' '+text for s in
-                    ('permission denied','unauthorized','forbidden','access denied','captcha','验证码','too many requests','rate limit','访问频率'))
+                    ('permission denied','unauthorized','forbidden','access denied','captcha','验证码','too many requests','rate limit','访问频率',
+                     '数据配额不足','quota exceeded','insufficient credits','insufficient points','insufficient balance'))
                 if denied:
                     parsed_source(self.db,sid,error='SDK transport access refused')
                     self._block_locked(provider,state,'SDK transport access refused',response)

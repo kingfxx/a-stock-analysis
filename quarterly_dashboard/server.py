@@ -35,6 +35,7 @@ from .maintenance import MaintenanceService
 from .index_collection import start_operation, run_operation, cancel_operation, recover_operations
 from .index_repository import read_indices
 from .index_read_service import IndexReadService
+from . import market_congestion
 from .collection import ProviderBlocked, read_source
 from .database_restore import RestoreManager, RequestGate, MAX_UPLOAD
 from .dividend_service import DividendService
@@ -1184,7 +1185,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/") or path == '/api/business-judgment' or path.startswith('/api/business-judgment/'):
             self._ai_post(path)
             return
-        if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh", "/api/indices/collect", "/api/indices/cancel"}:
+        if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh", "/api/indices/collect", "/api/indices/cancel", "/api/indices/congestion/schedule"}:
             self.send_error(404)
             return
         status = 200
@@ -1198,7 +1199,9 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < size <= 65536:
                 raise ValueError("分组请求大小无效")
             command = json.loads(self.rfile.read(size).decode("utf-8"))
-            if path in {'/api/indices/collect','/api/indices/cancel'}:
+            if path=='/api/indices/congestion/schedule':
+                data=market_congestion.configure(Database(DATABASE_PATH),command)
+            elif path in {'/api/indices/collect','/api/indices/cancel'}:
                 if not isinstance(command,dict):
                     raise ValueError('指数采集请求须为对象')
                 db=Database(DATABASE_PATH)
@@ -1208,9 +1211,14 @@ class Handler(BaseHTTPRequestHandler):
                     cancel_operation(db)
                     data={'cancel_requested':True}
                 else:
-                    if set(command)-{'mode','providers','start','end'}:
+                    if set(command)-{'mode','providers','start','end','datasets'}:
                         raise ValueError('指数采集参数无效')
-                    operation=start_operation(db,command.get('mode','incremental'),command.get('providers',['csindex','legu','sws']),command.get('start'),command.get('end'))
+                    if 'datasets' in command:
+                        if command['datasets']!=['market_congestion'] or command.get('providers',['legu'])!=['legu'] or 'start' in command or 'end' in command:
+                            raise ValueError('拥挤度任务范围无效')
+                        operation=market_congestion.start(db,command.get('mode','incremental'))
+                    else:
+                        operation=start_operation(db,command.get('mode','incremental'),command.get('providers',['csindex','legu','sws']),command.get('start'),command.get('end'))
                     Thread(target=run_operation,args=(db,operation),daemon=True).start()
                     data={'operation_id':operation,'status':'running'}
             elif path == '/api/industry/refresh':
@@ -1270,6 +1278,14 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
                 self._ai_reply({'error': str(exc)}, 400)
             return
+        if parsed.path=='/api/indices/congestion':
+            try:
+                query=parse_qs(parsed.query)
+                self._ai_reply(market_congestion.read(Database(DATABASE_PATH),start=query.get('start',[None])[0],
+                    end=query.get('end',[None])[0],index_code=query.get('code',['cn:000001'])[0]))
+            except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                self._ai_reply({'error':str(exc)},400)
+            return
         if parsed.path in {'/api/indices/catalog','/api/indices/status','/api/indices/chart','/api/indices/price'}:
             try:
                 with _SERVICE_LOCK:
@@ -1308,7 +1324,7 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
                 self._ai_reply({'error':str(exc)},400)
             return
-        if parsed.path in {'/indices','/indices.js','/indices.css'}:
+        if parsed.path in {'/indices','/indices.js','/indices.css','/congestion.js'}:
             name='indices.html' if parsed.path=='/indices' else parsed.path.lstrip('/')
             if parsed.path == '/indices':
                 body=(ROOT/'web'/name).read_text(encoding='utf-8').replace('__RESEARCH_SIDEBAR__',research_sidebar('indices')).encode('utf-8')
@@ -1528,6 +1544,8 @@ def serve(port: int = 8765, open_browser: bool = False):
             server.restore_manager=manager;server.request_gate=RequestGate()
             try:
                 _initialize_runtime(db,skip_legacy=reloaded)
+                scheduler=market_congestion.DailyScheduler(db,gate=server.request_gate)
+                scheduler.start()
                 print(f'季度分析页面：http://127.0.0.1:{port}/',flush=True)
                 if open_browser and not reloaded:webbrowser.open(f'http://127.0.0.1:{port}/')
                 server.serve_forever()
@@ -1535,6 +1553,9 @@ def serve(port: int = 8765, open_browser: bool = False):
                 return
             finally:
                 # Drain request threads and release all connections before replacing SQLite.
+                if 'scheduler' in locals():
+                    scheduler.close()
+                    del scheduler
                 server.server_close()
                 if hasattr(server, 'index_reader'):
                     server.index_reader.close()

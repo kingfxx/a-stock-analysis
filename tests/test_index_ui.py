@@ -399,6 +399,13 @@ def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state
             page=browser.new_page();errors=[]
             page.on('pageerror',lambda error:errors.append(str(error)))
             page.goto(base+'/indices',wait_until='networkidle')
+            page.wait_for_function("document.getElementById('current').textContent==='13.10 倍'")
+            drag=page.locator('#chart .nsewdrag').first
+            drag.scroll_into_view_if_needed();box=drag.bounding_box()
+            page.mouse.move(box['x']+box['width']*.2,box['y']+box['height']*.2);page.mouse.down()
+            page.mouse.move(box['x']+box['width']*.7,box['y']+box['height']*.8,steps=8);page.mouse.up()
+            zoom=page.locator('#chart').evaluate('n=>[n._fullLayout.xaxis.range,n._fullLayout.yaxis.range]')
+            page.locator('#chart').evaluate("n=>n.on('plotly_afterplot',()=>window.valuationRedraws=(window.valuationRedraws||0)+1)")
             toggle=page.locator('#progress-toggle');details=page.locator('#progress-details')
             assert toggle.inner_text()=='查看进度'
             assert toggle.get_attribute('aria-expanded')=='false' and details.is_hidden()
@@ -408,6 +415,7 @@ def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state
             assert '该历史任务未记录总进度' in page.locator('#progress-summary').inner_text()
             assert 'ValueError' not in page.locator('#progress-details').inner_text()
             with db.connection(write=True) as conn:
+                conn.execute("UPDATE index_read_revisions SET revision=revision+1 WHERE scope='indices'")
                 conn.execute('UPDATE index_collection_operations SET status=?,error=NULL,result_json=? WHERE operation_id=?',
                     ('running',encoded({'work_progress':{'phase':'running','total':4,'success':1,'skipped':1,'failed':0,
                         'cancelled':0,'pending':1,'running':1,'providers':{'csindex':{'total':4,'success':1,'skipped':1,
@@ -416,10 +424,16 @@ def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state
             page.wait_for_function("document.getElementById('progress-summary').textContent.includes('已采集成功 1 项')")
             assert not details.is_hidden() and toggle.get_attribute('aria-expanded')=='true'
             assert '中证指数' in page.locator('#progress-sources').inner_text()
+            assert page.evaluate('window.valuationRedraws||0')==0
             toggle.click()
             page.evaluate("window.dispatchEvent(new Event('focus'))")
             page.wait_for_timeout(200)
             assert details.is_hidden() and toggle.get_attribute('aria-expanded')=='false'
             assert 'cancelled' not in page.locator('#progress').inner_text().lower()
+            with db.connection(write=True) as conn:
+                conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(operation,))
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+            page.wait_for_function("window.valuationRedraws>0 && document.getElementById('current').textContent==='13.10 倍'")
+            assert page.locator('#chart').evaluate('n=>[n._fullLayout.xaxis.range,n._fullLayout.yaxis.range]')==zoom
             assert not errors
         finally:browser.close()

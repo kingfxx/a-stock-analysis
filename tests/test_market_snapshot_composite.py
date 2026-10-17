@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import pytest
 import requests
@@ -96,3 +97,27 @@ def test_sdk_retry_preserves_attempt_and_redacts_error(db):
     with db.connection() as c:
         rows=c.execute("SELECT * FROM collection_sources WHERE dataset='test.sdk' ORDER BY id").fetchall()
         assert len(rows)==2 and rows[0]['error']=='Timeout' and rows[1]['attempt_no']==2
+
+
+@pytest.mark.parametrize('message', ['数据配额不足，已使用45309716，本周配额为50000000，当前请求配额为4911296',
+                                   'quota exceeded', 'insufficient credits'])
+def test_sdk_quota_unavailable_is_refusal_without_retry(db, message):
+    class FlightUnavailableError(Exception):
+        pass
+    b,s=source(db);clock=Clock();calls=[]
+    client=RequestCollector(db,clock=clock.time,sleep=clock.sleep,uniform=lambda a,b:a)
+    def callback():
+        calls.append(clock.now)
+        raise FlightUnavailableError(message)
+    with pytest.raises(ProviderBlocked):
+        client.invoke(b,'bigquant','test.sdk',{'transport':'flight'},callback,serialize=lambda v:v)
+    assert len(calls)==1
+    with db.connection() as c:
+        state=c.execute("SELECT * FROM collection_provider_state WHERE source_system='bigquant'").fetchone()
+        assert state['denials']==1
+        deadline=datetime.fromisoformat(state['cooldown_until']).timestamp()
+        assert deadline>=clock.now+3600
+        assert c.execute("SELECT count(*) FROM collection_sources WHERE dataset='test.sdk'").fetchone()[0]==1
+    next_client=RequestCollector(db,clock=clock.time,sleep=clock.sleep,uniform=lambda a,b:a)
+    with pytest.raises(ProviderBlocked):
+        next_client.invoke(b,'bigquant','test.sdk',{},lambda:pytest.fail('request during quota cooldown'),serialize=lambda v:v)
