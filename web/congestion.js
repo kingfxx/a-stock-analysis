@@ -95,7 +95,8 @@
     const overlay=el('index').value===leguCloseKey?leguCloseOverlay(data.channels):data.overlay;
     const pointRows=(overlay.rows||[]).filter(visible);
     const channels=Object.fromEntries(Object.entries(data.channels).map(([key,series])=>[key,{rows:series.rows.filter(visible)}]));
-    const series=chartSeries(channels,pointRows,el('frequency').value,overlay.frequency),dates=series.dates;
+    const frequency=el('frequency').value==='auto'?(el('range').value==='5'?'day':'week'):el('frequency').value;
+    const series=chartSeries(channels,pointRows,frequency,overlay.frequency),dates=series.dates;
     const traces=[{x:dates,y:series.congestion,type:'scatter',mode:'lines',name:'大盘拥挤度',
       line:{color:'#66aaf0',width:2},connectgaps:false,hovertemplate:'拥挤度：%{y:.2%}<extra></extra>'}];
     const pointName=el('index').selectedOptions[0]?.textContent||'指数';
@@ -104,7 +105,7 @@
         line:{color:'#f4d35e',width:1.8},connectgaps:false,hovertemplate:pointName+'：%{y:.2f} 点<extra></extra>'});
     }
     Plotly.react(el('chart'),traces,{paper_bgcolor:'#1a2429',plot_bgcolor:'#1a2429',font:{color:'#edf4f4'},
-      uirevision:JSON.stringify([el('index').value,el('range').value,el('frequency').value]),
+      uirevision:JSON.stringify([el('index').value,el('range').value,frequency]),
       margin:{l:65,r:85,t:20,b:76},hovermode:'x unified',legend:{orientation:'h',x:0.5,xanchor:'center',y:-0.2},
       xaxis:{type:'date',gridcolor:'#30434d',tickformat:'%Y-%m',hoverformat:'%Y-%m-%d',range:[lower||series.firstCongestion||dates[0]||upper,upper]},
       yaxis:{title:{text:'拥挤度（%）'},tickformat:'.0%',gridcolor:'#30434d'},
@@ -187,7 +188,7 @@
   }
   el('full').onclick=()=>collect('full');el('update').onclick=()=>collect('incremental');
   el('cancel').onclick=async()=>{try{await api('/api/indices/cancel',{});notifyCollection();await pollProgress();}catch(error){el('status').textContent=error.message;}};
-  el('range').onchange=()=>{el('frequency').value=el('range').value==='5'?'day':'week';draw();};el('index').onchange=load;
+  el('range').onchange=draw;el('index').onchange=load;
   el('frequency').onchange=draw;
   el('benchmark').onchange=draw;
   for(const id of ['enabled','time'])el(id).onchange=()=>{settingsDirty=true;};

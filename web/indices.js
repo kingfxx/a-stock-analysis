@@ -79,7 +79,8 @@ function overlayPoints(rows,frequency,target){if(!pointData||pointCode!==el('cod
 function draw(){
 if(metricFamily==='crowding'){drawCrowding();return;}
 const metric=el('metric').value,years=el('range').value,view=views[metric]?.[years],yieldMetric=metric==='dividend_yield',std=el('benchmark').value==='stddev';
-const frequency=selectedSummary?.frequency==='monthly'?'month':el('frequency').value==='auto'?({3:'day',5:'week',10:'month'}[years]):el('frequency').value;
+const automaticFrequency={3:'day',5:'week',10:'month'}[years];
+const frequency=selectedSummary?.frequency==='monthly'?'month':el('frequency').value==='auto'?automaticFrequency:el('frequency').value;
 const rows=view?.rows_by_frequency?.[frequency]||[],target=metric?.startsWith('pe_')?'pe':metric?.startsWith('ps')?'ps':metric;
 const format=value=>value==null?'—':Number(value).toFixed(2)+(yieldMetric?'%':' 倍');
 const levels=std?[view?.stddev_high,view?.mean,view?.stddev_low]:[view?.high,view?.median,view?.low];
@@ -140,7 +141,7 @@ function drawCrowding(){
   el('high-dot').style.background=colors[0];el('low-dot').style.background=colors[2];el('negative-note').textContent='';
   el('definition').textContent=crowdingData?.available?`数据来源：${providers[crowdingData.provider]||crowdingData.provider} · 日频成交额占比。`+(crowdingData.provider==='csindex'?'宽基占比为本地估算：指数成交额 ÷ 同日全 A 成交额 × 100%；优先使用 Legu，2026-07-31 至 08-27 的缺值使用已有 BigQuant 汇总补齐，来源口径可能存在差异。':'申万 bargainsumrate 来源占比原值；分母细分统计口径未进一步披露。'):'';
   el('methodology').textContent='拥挤度读取指数点位表 amount_ratio（百分数）；与大盘前5%个股集中度的定义不同。有效零值保留、缺值留空，按区间全部有效日样本计算分位，参考线为80%/50%/20%分位或均值±总体标准差。周／月展示取周期最后已记录日，缺值不以前值填充。';
-  const frequency=el('frequency').value==='auto'?'day':el('frequency').value,periods=new Map();
+  const frequency=el('frequency').value==='auto'?(years==='10'?'week':'day'):el('frequency').value,periods=new Map();
   for(const row of rows)periods.set(periodKey(row.observation_date,frequency),row);
   const shown=[...periods.values()],traces=[{x:shown.map(r=>r.observation_date),y:shown.map(r=>r.amount_ratio),type:'scatter',mode:'lines',name:'拥挤度',line:{color:'#66aaf0',width:2},connectgaps:false,hovertemplate:'拥挤度：%{y:.2f}%<extra></extra>'}];
   if(pointOverlay&&rows.some(row=>row.close!=null))traces.push({x:shown.map(r=>r.observation_date),y:shown.map(r=>r.close),type:'scatter',mode:'lines',name:'指数点位',yaxis:'y2',line:{color:'#f4d35e',width:1.8},connectgaps:false,hovertemplate:'指数点位：%{y:.2f} 点<extra></extra>'});
