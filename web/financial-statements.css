@@ -38,6 +38,21 @@
 .fs-report-group{margin:0 0 10px;border:1px solid var(--line);border-radius:6px;background:#172026}.fs-report-group>summary{cursor:pointer;padding:10px 12px;color:var(--ink);font-size:13px;font-weight:600;list-style:disclosure-closed}.fs-report-group[open]>summary{list-style:disclosure-open}.fs-report-group .fs-table{margin:0}.fs-report-group .fs-table th,.fs-report-group .fs-table td{padding:9px 10px}.fs-report-group .fs-table tbody tr td:first-child{padding-left:22px}
 .fs-report-subgroup{margin:0 10px 10px 18px;border-left:2px solid #38535c;background:#1a252b}.fs-report-subgroup>summary{cursor:pointer;padding:8px 12px;color:#a9d5dc;font-size:12px;font-weight:600;list-style:disclosure-closed}.fs-report-subgroup[open]>summary{list-style:disclosure-open}.fs-report-subgroup .fs-table{margin:0}
 .fs-source-item+.fs-source-item{border-top:1px solid var(--line)}
+.fs-cash-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.fs-cash-buttons button,#fs-cash-close{background:#172026;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:8px 12px;font:inherit;font-size:13px;cursor:pointer}
+.fs-cash-buttons button[aria-expanded="true"]{background:#304149;color:var(--ink);border-color:#8ca9b5}
+.fs-cash-buttons button:hover,#fs-cash-close:hover{background:#304149;color:var(--ink)}
+.fs-cash-buttons button:focus-visible,#fs-cash-close:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+#fs-cash-buttons[hidden],#fs-cash-detail[hidden]{display:none!important}
+#fs-cash-detail{scroll-margin-top:20px}
+@media(max-width:800px){#fs-cash-detail{scroll-margin-top:160px}}
+.fs-cash-heading{display:flex;justify-content:space-between;gap:14px;align-items:start}
+.fs-cash-heading p{margin:0;color:var(--muted);font-size:12px}
+.fs-cash-summary{display:flex;gap:12px 28px;flex-wrap:wrap;margin:14px 0;font-size:14px;font-variant-numeric:tabular-nums}
+.fs-cash-summary strong{font-weight:600}
+#fs-cash-detail .fs-source{margin-top:10px}
+#fs-cash-warning{margin-top:12px}
+@media(max-width:800px){.fs-cash-summary{font-size:13px;gap:10px 18px}}
 .fs-source-item h4{font-size:13px;color:var(--ink);margin:0 0 8px}
 .fs-source-item b{color:var(--ink);font-weight:600}
 .fs-source-values{padding-left:8px;border-left:2px solid var(--line);margin:8px 0}

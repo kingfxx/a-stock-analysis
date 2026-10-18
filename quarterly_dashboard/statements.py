@@ -262,6 +262,83 @@ def summarize(reports, period, mode, financial):
     return values
 
 
+def cashflow_details(raw, full):
+    """Use source section order and subtotal boundaries, without summing child rows twice."""
+    definitions = {
+        'cfo': ('经营活动', 'BIZCASHINFL', 'BIZCASHOUTF', 'MANANETR'),
+        'cfi': ('投资活动', 'INVCASHINFL', 'INVCASHOUTF', 'INVNETCASHFLOW'),
+        'cff': ('筹资活动', 'FINCASHINFL', 'FINCASHOUTF', 'FINNETCFLOW'),
+    }
+    # Fallback only for sources without section headings; never guess from an amount's sign.
+    fields = {
+        'cfo': (('LABORGETCASH','TAXREFD','RECEOTHERBIZCASH','OTHERBIZGETCASH'),
+                ('LABOPAYC','PAYWORKCASH','PAYTAX','PAYACTICASH','PAYOTHERBIZCASH')),
+        'cfi': (('WITHINVGETCASH','INVERETUGETCASH','FIXEDASSETNETC','DISPFIXASSEGETCASH',
+                 'SUBSNETC','RECEINVCASH','REDUCASHPLED'),
+                ('ACQUASSETCASH','INVPAYC','SUBSPAYNETCASH','PAYINVECASH','INCRCASHPLED','LOANNETR')),
+        'cff': (('INVRECECASH','INCREQUIGETCASH','RECEFROMLOAN','LOANGETCASH','ISSBDRECECASH','RECEFINCASH'),
+                ('DEBTPAYCASH','DIVIPROFPAYCASH','FINRELACASH')),
+    }
+    by_field = {row['field']: row for row in full if row['item_source'] == 'llb'}
+    groups = {key: {'label': label, 'items': [], 'children': [],
+                    'inflow': by_field.get(in_code), 'outflow': by_field.get(out_code),
+                    'net': by_field.get(net_code), 'warnings': []}
+              for key, (label, in_code, out_code, net_code) in definitions.items()}
+    subtotals = {code: (key, direction) for key, (_, inc, out, _) in definitions.items()
+                 for code, direction in ((inc, 'inflow'), (out, 'outflow'))}
+    nets = {definition[3] for definition in definitions.values()}
+    parents = {'SUBSRECECASH':'INVRECECASH', 'SUBSPAYDIVID':'DIVIPROFPAYCASH',
+               'CUSTDEPO':'DEPONETR', 'FININSTDEPO':'DEPONETR',
+               'DEPOTOCENBANK':'TRADEPAYMNETR', 'DEPOTOOTHERBANKS':'TRADEPAYMNETR',
+               'INTEINCO':'CHARINTECASH', 'FEEINCO':'CHARINTECASH',
+               'PAYINTE':'PAYINTECASH', 'FEEPAYCASH':'PAYINTECASH',
+               'DIVIPROFGETCASH':'INVERETUGETCASH', 'BONDINTEGETCASH':'INVERETUGETCASH',
+               'EQUIINVPAYCASH':'PAYINVCASH', 'BDINVPAYCASH':'PAYINVCASH',
+               'INTEPAYCASH':'DIVIPROFPAYCASH'}
+    activity, direction, seen = None, 'inflow', set()
+    for item in raw.get('data', []):
+        code, title = item.get('item_field'), item.get('item_title', '')
+        if not code:
+            activity = next((key for key, definition in definitions.items() if definition[0] in title), None)
+            direction = 'inflow'
+            continue
+        if item.get('item_source') != 'llb':
+            continue
+        if code in subtotals:
+            activity, boundary = subtotals[code]
+            direction = 'outflow' if boundary == 'inflow' else None
+            continue
+        if code in nets:
+            activity, direction = None, None
+            continue
+        if code in seen or code not in by_field:
+            continue
+        seen.add(code)
+        fallback = next(((key, flow) for key, pair in fields.items()
+                         for codes, flow in zip(pair, ('inflow', 'outflow')) if code in codes), None)
+        key, flow = fallback or ((activity, direction) if activity and direction else (None, None))
+        if key is None:
+            continue
+        row = {**by_field[code], 'direction': flow}
+        row['signed_value'] = None if row['value'] is None else row['value'] * (-1 if flow == 'outflow' else 1)
+        subtotal = groups[key][flow]
+        denominator = subtotal['value'] if subtotal else None
+        row['share_pct'] = (row['value'] / denominator * 100 if row['value'] is not None
+                            and denominator is not None and denominator > 0 else None)
+        parent = by_field.get(parents.get(code))
+        child = (parent is not None and parent['value'] is not None) or title.lstrip().startswith(('其中', '加：其中', '减：其中'))
+        groups[key]['children' if child else 'items'].append(row)
+    for group in groups.values():
+        for flow in ('inflow', 'outflow'):
+            rows = [row for row in group['items'] if row['direction'] == flow]
+            total = group[flow]
+            if total and total['value'] is not None and rows:
+                available = [row['value'] for row in rows if row['value'] is not None]
+                if available and abs(sum(available) - total['value']) > max(1, abs(total['value']) * 1e-8):
+                    group['warnings'].append(('流入' if flow == 'inflow' else '流出') + '已展示条目与披露小计存在差额，请结合待补条目及原始报表核对。')
+    return groups
+
+
 def build_section(reports, period, mode, kind, financial):
     raw = reports.get(period, {}).get(kind, {})
     raw_items = items(raw)
@@ -307,6 +384,7 @@ def build_section(reports, period, mode, kind, financial):
     else:
         selected = [x for x in selected if x.get('source') is not None]
     return {'items': selected, 'full_items': full,
+            **({'cashflow_details': cashflow_details(raw, full)} if kind == 'llb' else {}),
             'currency': raw.get('rCurrency'), 'scope': raw.get('rType'),
             'data_source': raw.get('data_source'), 'audit': raw.get('is_audit'),
             'available': bool(raw), 'warnings': [] if raw else ['该报告期尚未保存此表，请刷新财务数据。']}

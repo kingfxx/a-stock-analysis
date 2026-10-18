@@ -46,7 +46,7 @@
 
 ## Agent 协作规范
 
-- 计划目录：每个开发任务在 docs/plans/YYYYMMDD_计划名称/ 下建立独立文件夹，包含 PLAN.md、DECISIONS.md、PROGRESS.md。
+- 计划目录：独立的新开发任务在 docs/plans/YYYYMMDD_计划名称/ 下建立文件夹，包含 PLAN.md、DECISIONS.md、PROGRESS.md。同一任务及其后续调整、缺陷修复、验收反馈统一更新原计划目录，不因新的对话轮次、日期变化或细分修复另开计划；仅在工作目标独立或用户明确要求拆分时新建。原计划已归档时仍沿用该计划，不另建重复目录。
 - 只有用户**明确确认**协作开发才按下面的规则运行,如果没有,就按正常流程执行
 - Sol（规划）：创建计划目录，编写 PLAN.md 和 DECISIONS.md。
 - Luna（执行）：读取对应计划的三个文件，按计划开发测试，持续更新 PROGRESS.md。

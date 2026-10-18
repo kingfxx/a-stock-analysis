@@ -41,13 +41,77 @@ def facts(tmp_path):
              'ACCORECE':30,'INVE':40,'SHORTTERMBORR':0,'SHORTTERMBDSPAYA':0,
              'DUENONCLIAB':0,'LONGBORR':25,'BDSPAYA':0,'LEASELIAB':0}
     cash={'INICASHBALA':100,'FINALCASHBALA':140,'MANANETR':60,'INVNETCASHFLOW':-20,
-          'FINNETCFLOW':0,'CHGEXCHGCHGS':0,'CASHNETR':40,'ACQUASSETCASH':15}
+          'FINNETCFLOW':0,'CHGEXCHGCHGS':0,'CASHNETR':40,'ACQUASSETCASH':15,
+          'LABORGETCASH':100,'LABOPAYC':40,'PAYTAX':0,'PAYWORKCASH':None,
+          'BIZCASHINFL':100,'BIZCASHOUTF':40,'WITHINVGETCASH':10,'INVPAYC':15,
+          'INVCASHINFL':10,'INVCASHOUTF':30,'RECEFROMLOAN':20,'DEBTPAYCASH':20,
+          'FINCASHINFL':20,'FINCASHOUTF':20}
     for kind,values in [('lrb',profit),('fzb',balance),('llb',cash)]:
-        prior={k:v/2 for k,v in values.items()}
+        prior={k:v/2 if v is not None else None for k,v in values.items()}
         if kind=='llb':prior.update(INICASHBALA=100,FINALCASHBALA=120)
         save(db,kind,{'2025-06-30':raw(kind,values),'2025-03-31':raw(kind,prior),
                       '2024-06-30':raw(kind,prior),'2024-12-31':raw(kind,prior)})
     return db
+
+
+def test_cashflow_drilldown_uses_source_totals_and_quarter_values(facts):
+    for mode, sale, payment in [('ytd',100,40), ('quarter',50,20)]:
+        groups=read_statements(facts,'600519',period='2025-06-30',mode=mode)['sections']['llb']['cashflow_details']
+        rows={row['field']:row for row in groups['cfo']['items']}
+        assert rows['LABORGETCASH']['signed_value']==sale
+        assert rows['LABOPAYC']['signed_value']==-payment
+        assert rows['LABORGETCASH']['share_pct']==100
+        assert rows['PAYTAX']['share_pct']==0
+        assert rows['PAYWORKCASH']['value'] is None
+        assert rows['PAYWORKCASH']['signed_value'] is None
+        assert not {'BIZCASHINFL','BIZCASHOUTF','MANANETR'} & rows.keys()
+        assert rows['LABORGETCASH']['source']=='llb'
+        assert groups['cfi']['items'][0]['field']=='ACQUASSETCASH'
+
+
+def test_cashflow_drilldown_preserves_reversals_and_missing_denominators(facts):
+    with facts.connection(write=True) as conn:
+        conn.execute("UPDATE financial_reports SET raw_json=? WHERE report_type='llb' AND period='2025-06-30'",
+                     (json.dumps(raw('llb',{'LABORGETCASH':20,'LABOPAYC':-5,'BIZCASHOUTF':10})),))
+    group=read_statements(facts,'600519',period='2025-06-30')['sections']['llb']['cashflow_details']['cfo']
+    rows={row['field']:row for row in group['items']}
+    assert rows['LABORGETCASH']['share_pct'] is None
+    assert rows['LABOPAYC']['signed_value']==5
+    assert rows['LABOPAYC']['share_pct']==-50
+    assert group['warnings']
+
+
+def test_cashflow_drilldown_uses_headers_and_excludes_child_items(facts):
+    record=raw('llb',{})
+    def item(field,title,value=None):
+        return {'item_field':field,'item_source':'llb','item_title':title,'item_value':value}
+    record['data']=[item('','筹资活动产生的现金流量'),
+        item('INVRECECASH','吸收投资收到的现金',20),
+        item('SUBSRECECASH','子公司吸收少数股东投资收到的现金',5),
+        item('FINCASHINFL','筹资活动现金流入小计',20),
+        item('DIVIPROFPAYCASH','分配股利、利润或偿付利息支付的现金',10),
+        item('SUBSPAYDIVID','子公司支付给少数股东的股利、利润',3),
+        item('FINCASHOUTF','筹资活动现金流出小计',10),
+        item('FINNETCFLOW','筹资活动产生的现金流量净额',10),
+        item('','经营活动产生的现金流量'),
+        item('BANKLOANNETINCR','向中央银行借款净增加额',8),
+        item('DEPONETR','客户存款和同业存放款项净增加额',10),
+        item('CUSTDEPO','客户存款',6),item('FININSTDEPO','同业及其他金融机构存放款',4),
+        item('BIZCASHINFL','经营活动现金流入小计',18),
+        item('TRADEPAYMNETR','存放中央银行和同业款项净增加额',18),
+        item('DEPOTOCENBANK','存放中央银行',10),item('DEPOTOOTHERBANKS','存放同业及其他机构存款',8),
+        item('BIZCASHOUTF','经营活动现金流出小计',18),
+        item('MANANETR','经营活动产生的现金流量净额',0)]
+    with facts.connection(write=True) as conn:
+        conn.execute("UPDATE financial_reports SET raw_json=? WHERE report_type='llb' AND period='2025-06-30'",
+                     (json.dumps(record),))
+    groups=read_statements(facts,'600519',period='2025-06-30')['sections']['llb']['cashflow_details']
+    assert [row['field'] for row in groups['cff']['items']]==['INVRECECASH','DIVIPROFPAYCASH']
+    assert [row['field'] for row in groups['cff']['children']]==['SUBSRECECASH','SUBSPAYDIVID']
+    assert not groups['cff']['warnings']
+    assert [row['signed_value'] for row in groups['cfo']['items']]==[8,10,-18]
+    assert len(groups['cfo']['children'])==4
+    assert not groups['cfo']['warnings']
 
 
 def test_balance_items_use_the_correct_side_total(facts):
@@ -195,7 +259,7 @@ def test_financial_tabs_in_real_browser(facts,tmp_path,monkeypatch):
     def page(code,refresh):
         payload={'code':code,'name':'测试企业','views':{},'warnings':[],'valuation':{'views':{}},
                  'loading':{},'price_version':1,'price_needs_update':False,'cached_stocks':[]}
-        return server.TEMPLATE.replace('__PAYLOAD__',json.dumps(payload,ensure_ascii=False)).replace('__CODE__',code).replace('__ERROR__','')
+        return server.TEMPLATE.replace('__RESEARCH_SIDEBAR__',server.research_sidebar('stock')).replace('__PAYLOAD__',json.dumps(payload,ensure_ascii=False)).replace('__CODE__',code).replace('__ERROR__','')
     monkeypatch.setattr(server,'render_page',page)
     httpd=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     thread=Thread(target=httpd.serve_forever,daemon=True);thread.start()

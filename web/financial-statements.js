@@ -401,7 +401,8 @@
       <label id="fs-display-label">资产负债图<select id="fs-display"><option value="amount">金额</option><option value="share">占本侧合计比例</option></select></label></div>
       <div class="fs-subtabs" role="tablist" aria-label="财务报表">${Object.entries(names).map(([k,n])=>`<button type="button" role="tab" id="fs-tab-${k}" data-statement="${k}" aria-controls="fs-content" aria-selected="${k==='fzb'}" tabindex="${k==='fzb'?0:-1}">${n}</button>`).join('')}</div>
       <p id="fs-status" class="fs-status" role="status" aria-live="polite"></p><div id="fs-content" role="tabpanel" aria-labelledby="fs-tab-fzb">
-      <div id="fs-metrics" class="fs-metrics"></div><div class="panel fs-panel"><h3 id="fs-chart-title"></h3><p id="fs-cash-change" hidden></p><p id="fs-chart-note"></p><div class="fs-chart-scroll"><div id="fs-chart" class="fs-chart" role="img"></div></div></div>
+      <div id="fs-metrics" class="fs-metrics"></div><div class="panel fs-panel"><h3 id="fs-chart-title"></h3><p id="fs-cash-change" hidden></p><p id="fs-chart-note"></p><div class="fs-chart-scroll"><div id="fs-chart" class="fs-chart" role="img"></div></div><div id="fs-cash-buttons" class="fs-cash-buttons" hidden aria-label="现金流明细">${[['cfo','经营活动'],['cfi','投资活动'],['cff','筹资活动']].map(([key,label])=>`<button type="button" data-cash-activity="${key}" aria-controls="fs-cash-detail" aria-expanded="false">${label} · 查看明细</button>`).join('')}</div></div>
+      <section id="fs-cash-detail" class="panel fs-panel" hidden aria-labelledby="fs-cash-detail-title"><div class="fs-cash-heading"><div><h3 id="fs-cash-detail-title"></h3><p id="fs-cash-detail-context"></p></div><button type="button" id="fs-cash-close">收起</button></div><div id="fs-cash-summary" class="fs-cash-summary" aria-live="polite"></div><p id="fs-cash-detail-note"></p><div id="fs-cash-detail-chart" class="fs-chart" role="img"></div><div id="fs-cash-missing"></div><div id="fs-cash-children"></div><p id="fs-cash-warning" class="fs-missing"></p></section>
       <div id="fs-expense-panel" class="panel fs-panel" hidden><h3 id="fs-expense-title">期间费用占毛利润</h3><p id="fs-expense-note"></p><div id="fs-expense" class="fs-chart fs-secondary" role="img" aria-label="本期与比较期期间费用占毛利润柱形图"></div></div>
       <div class="panel fs-panel"><h3 id="fs-secondary-title"></h3><p id="fs-secondary-note"></p><div id="fs-secondary" class="fs-chart fs-secondary" role="img"></div></div>
       <div class="panel fs-panel"><h3>关键明细与比较</h3><p id="fs-table-note"></p><div id="fs-table" class="fs-table-scroll"></div></div>
@@ -411,6 +412,24 @@
     const statementFilters=el('statement-filter-details');
     statementFilters.querySelector('.statement-filter-body').append(panel.querySelector('.fs-controls'));
     let data = null, kind = 'fzb', active = false, dirty = true, sequence = 0, controller = null, loading = false;
+    let cashActivity = null;
+    function openCashActivity(key) {
+      cashActivity=key;drawCashDetail();
+      requestAnimationFrame(()=>{
+        if(!el('fs-cash-detail').hidden)el('fs-cash-detail').scrollIntoView({block:'start',
+          behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+      });
+    }
+    panel.querySelectorAll('[data-cash-activity]').forEach(button=>button.addEventListener('click',()=>openCashActivity(button.dataset.cashActivity)));
+    el('fs-cash-close').addEventListener('click',()=>{
+      const button=panel.querySelector(`[data-cash-activity="${cashActivity}"]`);
+      cashActivity=null;drawCashDetail();button?.focus();
+    });
+    let cashResizeTimer;
+    window.addEventListener('resize',()=>{
+      clearTimeout(cashResizeTimer);
+      if(active&&kind==='llb'&&cashActivity)cashResizeTimer=setTimeout(drawCashDetail,100);
+    });
     function selectTab(selected) {
       active = selected === 'statements';
       try{sessionStorage.setItem('investment-research-tab-v1',selected);}catch{}
@@ -515,7 +534,7 @@
     function plot(id,traces,extra={}) {
       if(!el(id)._fullLayout)el(id).replaceChildren();
       if(typeof Plotly==='undefined'){el(id).textContent='图表组件未加载，明细表仍可查看。';return;}
-      Plotly.react(id,traces,{paper_bgcolor:'transparent',plot_bgcolor:'transparent',font:{color:'#d8e6e9',family:'Microsoft YaHei UI, Arial'},
+      return Plotly.react(id,traces,{paper_bgcolor:'transparent',plot_bgcolor:'transparent',font:{color:'#d8e6e9',family:'Microsoft YaHei UI, Arial'},
         margin:{l:65,r:25,t:30,b:95},showlegend:false,hovermode:'closest',
         xaxis:{tickangle:-25,automargin:true},yaxis:{gridcolor:'#304049',zerolinecolor:'#56717e',title:{text:el('fs-unit').value},automargin:true},...extra},
         {responsive:true,displaylogo:false,locale:'zh-CN'});
@@ -543,6 +562,56 @@
         yaxis:{title:{text:el('fs-unit').value},gridcolor:'#304049',zerolinecolor:'#56717e',zerolinewidth:1.5,
           rangemode:'tozero',tickformat:waterfallTickFormat(rows,divisor),exponentformat:'none',automargin:true},margin:{l:75,r:25,t:35,b:75}});
       el('fs-chart').setAttribute('aria-label',title);
+      if(kind==='llb'&&el('fs-chart').on){
+        el('fs-chart').removeAllListeners('plotly_click');
+        el('fs-chart').on('plotly_click',event=>{
+          if(kind!=='llb')return;
+          const row=rows[event.points?.[0]?.pointNumber];
+          const key={'经营净现金流':'cfo','投资净现金流':'cfi','筹资净现金流':'cff'}[row?.label];
+          if(key)openCashActivity(key);
+        });
+      }
+    }
+    function drawCashDetail() {
+      const visible=kind==='llb'&&cashActivity&&data?.period;
+      el('fs-cash-detail').hidden=!visible;
+      panel.querySelectorAll('[data-cash-activity]').forEach(button=>button.setAttribute('aria-expanded',String(Boolean(visible&&button.dataset.cashActivity===cashActivity))));
+      if(!visible)return;
+      const group=data.sections.llb.cashflow_details?.[cashActivity];
+      const labels={cfo:'经营活动',cfi:'投资活动',cff:'筹资活动'},unit=el('fs-unit').value;
+      el('fs-cash-detail-title').textContent=labels[cashActivity]+'现金流明细';
+      el('fs-cash-detail-context').textContent=`${data.period} · ${data.mode==='quarter'?'单季度':'本年累计'} · ${data.sections.llb.scope||'合并范围待确认'} · ${data.sections.llb.currency||'币种待确认'}`;
+      el('fs-cash-summary').innerHTML=[['净现金流（总览）',data.values[cashActivity]],['流入合计',group?.inflow],['流出合计',group?.outflow]].map(([label,item])=>`<span>${label} <strong>${esc(amount(item,unit))}</strong></span>`).join('');
+      el('fs-cash-detail-note').textContent=`绿色为流入科目，橙色为流出科目；横轴为现金影响（${unit}），流出金额取反，来源负值保留反向影响。金额两位小数，占比一位；占比＝原科目金额÷对应活动披露的流入／流出小计，分母缺失或非正显示待补。`;
+      const rows=group?.items||[],valid=rows.filter(row=>row.value!==null),missing=rows.filter(row=>row.value===null);
+      const disclosures=(id,title,items)=>{
+        el(id).innerHTML=items.length?`<details class="fs-source"><summary>${esc(title)}（${items.length} 项）</summary><ul>${items.map(row=>`<li>${esc(row.label)}：${esc(amount(row,unit))}${row.reason?' · '+esc(row.reason):''}</li>`).join('')}</ul></details>`:'';
+      };
+      disclosures('fs-cash-missing','待补条目（不绘制为零）',missing);
+      disclosures('fs-cash-children','其中子项（已包含在父项中，不重复入图）',group?.children||[]);
+      const warnings=[...(group?.warnings||[])];
+      if(group?.net?.value!==null&&group?.net?.value!==undefined&&data.values[cashActivity].value!==null&&Math.abs(group.net.value-data.values[cashActivity].value)>1)
+        warnings.push('总览净额与本现金流量表披露净额不一致，请展开原始报表核对来源修订。');
+      el('fs-cash-warning').textContent=warnings.join(' ');
+      if(!valid.length){empty('fs-cash-detail-chart','本期没有可绘制的现金流明细，请查看待补条目及完整原始报表。');return;}
+      const width=el('fs-cash-detail-chart').clientWidth||900,left=Math.min(350,Math.max(110,width*.36));
+      const wrap=label=>{const count=Math.max(6,Math.floor(left/13)-2);return (label.match(new RegExp('.{1,'+count+'}','gu'))||[label]).map(esc).join('<br>');};
+      const rowHeight=Math.max(48,...valid.map(row=>wrap(row.label).split('<br>').length*18+12));
+      const divisor=scales[unit],values=valid.map(row=>row.signed_value/divisor);
+      const low=Math.min(0,...values),high=Math.max(0,...values),padding=(high-low||1)*.28;
+      el('fs-cash-detail-chart').style.height=Math.max(300,valid.length*rowHeight+75)+'px';
+      plot('fs-cash-detail-chart',[{type:'bar',orientation:'h',x:values,y:valid.map(row=>row.label),
+        marker:{color:valid.map(row=>row.direction==='inflow'?'#64c6b0':'#d99183')},
+        text:valid.map(row=>(row.signed_value>0?'+':'')+(row.signed_value/divisor).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2})+'（'+(row.share_pct===null?'占比待补':row.share_pct.toFixed(1)+'%')+'）'),
+        textposition:'outside',cliponaxis:false,
+        customdata:valid.map(row=>[wrap(row.label),esc(amount(row,unit)),row.share_pct===null?'待补':row.share_pct.toFixed(1)+'%']),
+        hovertemplate:'%{customdata[0]}<br>原科目金额：%{customdata[1]}<br>现金影响：%{x:,.2f} '+esc(unit)+'<br>占对应小计：%{customdata[2]}<extra></extra>'}],
+        {hovermode:'closest',hoverlabel:{bgcolor:'#172026',bordercolor:'#607984',font:{color:'#e9f1f5',size:13,family:'Microsoft YaHei UI, Arial'},align:'left'},
+          bargap:.42,margin:{l:left,r:20,t:25,b:50},
+          xaxis:{title:{text:'现金影响（'+unit+'）'},range:[low-padding,high+padding],tickangle:0,gridcolor:'#304049',zerolinecolor:'#8da8b3',zerolinewidth:1.5,showspikes:false,automargin:true},
+          yaxis:{type:'category',tickmode:'array',tickvals:valid.map(row=>row.label),ticktext:valid.map(row=>wrap(row.label)),
+            categoryorder:'array',categoryarray:valid.map(row=>row.label),autorange:'reversed',showspikes:false,automargin:true,title:{text:''}}});
+      el('fs-cash-detail-chart').setAttribute('aria-label',labels[cashActivity]+'具体条目横向柱状图，流入为正方向，流出取反，占比基于各自披露小计');
     }
     function table(rows,comparison,denominator) {
       const prior=new Map(comparison.map(x=>[x.item_source+':'+x.field,x]));
@@ -701,6 +770,8 @@
       if(!data.period){el('fs-content').hidden=true;el('fs-status').textContent='本地尚未保存三表。点击页面上方“刷新数据”获取当前股票财报。';return;}
       el('fs-content').hidden=false;
       const section=data.sections[kind],unit=el('fs-unit').value;
+      el('fs-cash-buttons').hidden=kind!=='llb';
+      drawCashDetail();
       el('fs-expense-panel').hidden=kind!=='lrb'||data.financial_company;
       const periodText=kind==='fzb'?'期末余额':data.mode==='quarter'?'单季度': '1—'+Number(data.period.slice(5,7))+' 月累计';
       const baselineText=kind==='fzb'?'期末余额':data.mode==='quarter'?'单季度':'1—'+Number(section.baseline.slice(5,7))+' 月累计';
