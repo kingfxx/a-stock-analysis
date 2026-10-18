@@ -22,7 +22,7 @@ def test_weekly_aggregation_keeps_each_metric_actual_date_and_open_period():
     assert weekly[0]["period_complete"] is False
 
 
-def test_sparse_history_uses_same_monthly_percentiles_for_all_display_frequencies():
+def test_sparse_history_uses_all_daily_percentiles_for_all_display_frequencies():
     rows = [
         {"date": "2022-01-05", "pe": 10, "pe_date": "2022-01-05"},
         {"date": "2022-02-05", "pe": 20, "pe_date": "2022-02-05"},
@@ -30,18 +30,18 @@ def test_sparse_history_uses_same_monthly_percentiles_for_all_display_frequencie
         {"date": "2026-09-30", "pe": 40, "pe_date": "2026-09-30"},
     ]
     summary = valuation_summary_observations(rows, "pe", 10, {}, as_of="2026-09-30")
-    assert summary["sample_frequency"] == "month"
-    assert summary["count"] == 3
+    assert summary["sample_frequency"] == "day"
+    assert summary["count"] == summary["sample_count"] == 4
     assert summary["frequency"] == "month"
     assert len(summary["rows_by_frequency"]["day"]) == 4
     assert len(summary["rows_by_frequency"]["month"]) == 3
-    assert summary["percentile"] == 66.7
+    assert summary["percentile"] == 75
     assert summary["current_date"] == "2026-09-30"
 
 
 @pytest.mark.parametrize("metric", ["pe", "pb", "ps"])
 @pytest.mark.parametrize("dense", [False, True])
-def test_five_year_percentiles_always_use_last_valid_observation_each_week(metric, dense):
+def test_all_time_ranges_use_daily_observations_regardless_of_trade_calendar(metric, dense):
     rows = [{"date": day, metric: value} for day, value in (
         ("2026-09-07", 10), ("2026-09-08", 40),
         ("2026-09-14", 20), ("2026-09-15", 30))]
@@ -50,24 +50,24 @@ def test_five_year_percentiles_always_use_last_valid_observation_each_week(metri
         trades.append("2026-09-16")
     summary = valuation_summary_observations(rows, metric, 5, {}, as_of="2026-09-30",
                                              trading_dates=trades)
-    assert summary["sample_frequency"] == summary["percentile_frequency"] == "week"
-    assert summary["count"] == summary["sample_count"] == 2
-    assert summary["percentile"] == 0
-    assert summary["high"] == 38
-    assert summary["median"] == 35
-    assert summary["low"] == 32
+    assert summary["sample_frequency"] == summary["percentile_frequency"] == "day"
+    assert summary["count"] == summary["sample_count"] == 4
+    assert summary["percentile"] == 50
+    assert summary["high"] == 34
+    assert summary["median"] == 25
+    assert summary["low"] == 16
     assert summary["current_date"] == "2026-09-15"
 
 
-def test_weekly_percentiles_skip_invalid_and_nontrading_observations_without_filling_gaps():
+def test_daily_percentiles_skip_invalid_but_keep_valid_daily_observations_without_filling_gaps():
     rows = [{"date": day, "pe": value} for day, value in (
         ("2026-09-07", 10), ("2026-09-08", -1),
         ("2026-09-20", 999), ("2026-09-21", 20), ("2026-09-22", None))]
     summary = valuation_summary_observations(rows, "pe", 5, {}, as_of="2026-09-30",
         trading_dates=["2026-09-07", "2026-09-08", "2026-09-14", "2026-09-21", "2026-09-22"])
-    assert summary["count"] == 2
-    assert summary["percentile"] == 50
-    assert summary["median"] == 15
+    assert summary["count"] == 3
+    assert summary["percentile"] == 33.3
+    assert summary["median"] == 20
 
 
 def test_ps_uses_revenue_disclosed_on_each_cap_observation_date():
@@ -96,8 +96,8 @@ def test_daily_view_uses_known_trading_dates_but_preserves_weekend_fact():
                                              trading_dates=["2026-09-28", "2026-09-29"])
     assert [row["date"] for row in summary["rows_by_frequency"]["day"]] == [
         "2026-09-28", "2026-09-29"]
-    assert summary["sample_frequency"] == "trading_day"
-    assert summary["count"] == 2
+    assert summary["sample_frequency"] == "day"
+    assert summary["count"] == 3
 
 
 def test_price_overlay_distinguishes_whole_week_closure_from_missing_trading_day_price():
@@ -208,16 +208,19 @@ def test_negative_pe_ranges_clip_to_selected_window_and_distinguish_missing_and_
 
 
 @pytest.mark.parametrize("metric", ["pe", "pb", "ps", "dividend_yield"])
-def test_standard_deviation_uses_same_weekly_population_as_percentiles(metric):
+def test_standard_deviation_uses_same_daily_population_as_percentiles(metric):
     rows = [{"date": day, metric: value} for day, value in (
         ("2026-09-07", 999), ("2026-09-08", 10),
         ("2026-09-14", 30), ("2026-09-21", -1), ("2026-09-22", None))]
     summary = valuation_summary_observations(rows, metric, 5, {}, as_of="2026-09-30")
-    assert summary["count"] == 2
-    assert summary["mean"] == 20
-    assert summary["stddev"] == 10
-    assert summary["stddev_high"] == 30
-    assert summary["stddev_low"] == 10
+    values = [999, 10, 30]
+    mean = sum(values) / len(values)
+    stddev = (sum((value - mean) ** 2 for value in values) / len(values)) ** .5
+    assert summary["count"] == 3
+    assert summary["mean"] == pytest.approx(mean)
+    assert summary["stddev"] == pytest.approx(stddev)
+    assert summary["stddev_high"] == pytest.approx(mean + stddev)
+    assert summary["stddev_low"] == pytest.approx(mean - stddev)
     assert summary["median"] == 20
 
 

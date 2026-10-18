@@ -224,6 +224,22 @@ def monthly_dividend_yields(raw_prices: list[dict], events: list[dict]) -> list[
     return result
 
 
+def daily_dividend_yield_observations(raw_prices: list[dict], events: list[dict]) -> list[dict]:
+    """Build daily trailing yields from saved raw closes and paid dividend events."""
+    paid = sorted((date.fromisoformat(event["date"]), float(event["per_share"]))
+                  for event in events if event.get("date") and event.get("per_share") is not None)
+    result = []
+    for price in sorted(raw_prices, key=lambda row: row["date"]):
+        close = _positive(price.get("close"))
+        if close is None:
+            continue
+        day = date.fromisoformat(price["date"])
+        start = day - timedelta(days=365)
+        cash = sum(amount for ex_date, amount in paid if start < ex_date <= day)
+        result.append({"date": day.isoformat(), "dividend_yield": cash / close * 100})
+    return result
+
+
 def fetch_dividend_yields(code: str, session: requests.Session) -> list[dict]:
     events = fetch_dividend_events(code, session)
     today = date.today()
@@ -317,7 +333,7 @@ def _standard_deviation_benchmark(values):
 
 
 def valuation_summary(rows: list[dict], metric: str, years: int, industry: dict,
-                      as_of: str | None = None) -> dict:
+                      as_of: str | None = None, *, sample_rows: list[dict] | None = None) -> dict:
     if metric not in ("pe", "pb", "ps", "dividend_yield") or years not in (3, 5, 10):
         raise ValueError("不支持的估值指标或时间范围")
     end = date.fromisoformat(as_of) if as_of else date.today()
@@ -329,7 +345,11 @@ def valuation_summary(rows: list[dict], metric: str, years: int, industry: dict,
                     key=lambda row: row["date"])
     valid_number = _nonnegative if metric == "dividend_yield" else _positive
     valid = [row for row in window if valid_number(row.get(metric)) is not None]
-    values = sorted(float(row[metric]) for row in valid)
+    sample_window = window if sample_rows is None else sorted(
+        (row for row in sample_rows if start.isoformat() <= row["date"] <= end.isoformat()),
+        key=lambda row: row["date"])
+    samples = [row for row in sample_window if valid_number(row.get(metric)) is not None]
+    values = sorted(float(row[metric]) for row in samples)
     latest = valid[-1] if valid else None
     current = valid_number(latest.get(metric)) if latest else None
     benchmark = _positive(industry.get(metric))
@@ -453,17 +473,7 @@ def valuation_summary_observations(rows, metric, years, industry, *, as_of=None,
         display["day"] = [row for row in display["day"] if row["date"] in known_trade_dates]
     observed_dates = {row["date"] for row in valid}
     dense = bool(known_trade_dates) and known_trade_dates <= observed_dates
-    if years == 5:
-        weekly_rows = [row for row in valid if not known_trade_dates or row["date"] in known_trade_dates]
-        sample = aggregate_valuation_rows(weekly_rows, "week", as_of=end.isoformat())
-        sample_frequency = "week"
-    elif dense:
-        sample = [row for row in valid if row["date"] in known_trade_dates]
-        sample_frequency = "trading_day"
-    else:
-        sample = [row for row in display["month"] if valid_number(row.get(metric)) is not None]
-        sample_frequency = "month"
-    values = sorted(float(row[metric]) for row in sample)
+    values = sorted(float(row[metric]) for row in valid)
     latest = valid[-1] if valid else None
     current = valid_number(latest.get(metric)) if latest else None
     benchmark = _positive(industry.get(metric))
@@ -472,8 +482,8 @@ def valuation_summary_observations(rows, metric, years, industry, *, as_of=None,
         "rows": display[frequency], "rows_by_frequency": display, "frequency": frequency,
         "negative_pe_ranges": negative_pe_ranges,
         "count": len(values), "sample_count": len(values),
-        "sample_frequency": sample_frequency, "percentile_frequency": sample_frequency,
-        "percentile_methodology_version": "uniform_trade_week_or_month_v2",
+        "sample_frequency": "day", "percentile_frequency": "day",
+        "percentile_methodology_version": "uniform_daily_observations_v1",
         "sparse": not dense,
         "sparse_hint": ("较早段观测较稀疏；请以悬浮提示中的实际日期为准。" if not dense else None),
         "current": current,

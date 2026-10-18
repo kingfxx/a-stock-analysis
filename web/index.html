@@ -974,7 +974,7 @@
     document.getElementById('valuation-high-dot').setAttribute('style', '--level-color:' + highColor);
     document.getElementById('valuation-low-dot').setAttribute('style', '--level-color:' + lowColor);
     const history = document.getElementById('valuation-history');
-    const percentileFrequency = {trading_day:'交易日',day:'交易日',week:'周',month:'月'}[view?.percentile_frequency] || '有效';
+    const percentileFrequency = {trading_day:'交易日',observation_day:'日',day:'日',week:'周',month:'月'}[view?.percentile_frequency] || '有效';
     history.textContent = !view?.count ? `历史：近 ${years} 年暂无可用的${valuationNames[valuationMetric]}数据。` :
       current == null || view.percentile == null ? `历史：近 ${years} 年有 ${view.count} 个${percentileFrequency}样本，暂无法计算当前分位。` :
       `历史：当前高于近 ${years} 年 ${view.percentile}% 的${percentileFrequency}样本（${view.count} 个）；切换展示频率不改变分位。`;
@@ -992,20 +992,20 @@
       '股息率＝截至观察日未复权收盘价前 365 天内已除权实施的税前每股现金分红之和 ÷ 该观察日未复权收盘价 × 100%；无已实施分红时显示 0%。分红事件来自东方财富，股价来自腾讯日 K。' : valuationMetric === 'ps' ?
       'PS 为百度总市值 ÷ 截至观察日已披露财报的 TTM 营收；历史财报可能包含后续修订。' :
       'PE(TTM) 与 PB 取百度股市通历史估值。';
-    note.textContent = sourceNote + ` 当前按${frequencyName}展示；周/月取周期内最后一条有效观察，悬停显示指标实际观察日；无效指标不纳入走势与分位。卡片按 5%/20%/40%/60%/80%/95% 分档，仅表示自身历史位置。${useStddev ? '上/中/下线分别为所选区间统一历史样本的均值 +1σ、均值、均值 −1σ；σ 为总体标准差（除以样本数 N），下限不截断，参考区间不表示概率或投资结论。' : '高/中/低线分别为所选区间统一样本口径的 80%/50%/20% 分位。'}` + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
+    note.textContent = sourceNote + ` 当前按${frequencyName}展示；周/月取周期内最后一条有效估值观察。周/月叠加股价时，横轴日期统一对齐至该周期最后交易日，估值值仍来自周期内最后一条有效观察；无效指标不纳入走势与分位。卡片按 5%/20%/40%/60%/80%/95% 分档，仅表示自身历史位置。${useStddev ? '上/中/下线分别为所选区间统一历史样本的均值 +1σ、均值、均值 −1σ；σ 为总体标准差（除以样本数 N），下限不截断，参考区间不表示概率或投资结论。' : '高/中/低线分别为所选区间统一样本口径的 80%/50%/20% 分位。'}` + (isYield ? '' : '行业数据为东方财富当前同行业算术平均，仅用于当前横向比较，不对应历史月份。') + '估值缓存更新：' +
       (state.valuation?.updated_on || '未知') + '。' + (state.valuation?.warnings || []).join(' ');
     if (view?.sparse_hint) note.textContent += ' ' + view.sparse_hint;
     else if (frequency === 'day' && Number(years) > 3) note.textContent += ' 较早段可能只有稀疏观察；图中仅显示已有日期，不插值。';
     const showPrice = valuationPriceOverlay.getAttribute('aria-pressed') === 'true';
     if (showPrice) note.textContent += ' 前复权股价取共享日 K 对应展示周期最后交易日收盘价，显示于右轴；整周期休市时连接前后已有价格点，有交易但缺少股价的周期留空。';
-    const xs = rows.map(row => row.date);
+    const alignToTradeDay = showPrice && (frequency === 'week' || frequency === 'month');
+    const xs = rows.map(row => alignToTradeDay && row.qfq_close_date ? row.qfq_close_date : row.date);
     const ys = rows.map(row => row[valuationMetric]);
-    const observedDates = rows.map(row => row[valuationMetric + '_date'] || row.observation_date || row.date);
     const first = xs[0], last = xs.at(-1);
     const traces = [{type:'scatter',mode:'lines+markers',name:valuationNames[valuationMetric],
-      x:xs,y:ys,customdata:rows.map((row, index) => [observedDates[index], row.period_complete === false ? '（本周期未完结）' : '']),connectgaps:false,fill:'tozeroy',fillcolor:'rgba(84,151,220,0.11)',
+      x:xs,y:ys,customdata:rows.map(row => row.period_complete === false ? '（本周期未完结）' : ''),connectgaps:false,fill:'tozeroy',fillcolor:'rgba(84,151,220,0.11)',
       line:{color:'#69a9ed',width:2.8},marker:{color:'#69a9ed',size:5},
-      hovertemplate:'展示日期：%{x|%Y-%m-%d}%{customdata[1]}<br>实际观察日：%{customdata[0]}<br>' + valuationNames[valuationMetric] + '：%{y:.2f}' + (isYield ? '%' : ' 倍') + '<extra></extra>'}];
+      hovertemplate:valuationNames[valuationMetric] + '：%{y:.2f}' + (isYield ? '%' : ' 倍') + '%{customdata}<extra></extra>'}];
     const referenceLines = useStddev
       ? [['high','上限 · 均值 +1σ',highColor],['median','均值','#f4b560'],['low','下限 · 均值 −1σ',lowColor]]
       : [['high',isYield ? '高息 · 80%' : '高位 · 80%',highColor],['median','中值 · 50%','#f4b560'],['low',isYield ? '低息 · 20%' : '低位 · 20%',lowColor]];
@@ -1016,13 +1016,13 @@
     }
     const priceRows = rows.filter(row => row.qfq_close != null || !row.qfq_no_trades);
     if (showPrice) traces.push({type:'scatter',mode:'lines',name:'前复权股价',yaxis:'y2',
-      x:priceRows.map(row => row.date),y:priceRows.map(row => row.qfq_close ?? null),customdata:priceRows.map(row => [row.qfq_close_date || row.date]),
+      x:priceRows.map(row => alignToTradeDay && row.qfq_close_date ? row.qfq_close_date : row.date),y:priceRows.map(row => row.qfq_close ?? null),
       connectgaps:false,line:{color:'#f4d35e',width:2.5},
-      hovertemplate:'展示日期：%{x|%Y-%m-%d}<br>实际交易日：%{customdata[0]}<br>前复权股价：%{y:.2f} 元/股<extra></extra>'});
+      hovertemplate:'前复权股价：%{y:.2f} 元/股<extra></extra>'});
     Plotly.react('valuation-chart', traces, {
       paper_bgcolor:'#1a2227',plot_bgcolor:'#1a2227',font:{color:'#edf4f4'},
       margin:{l:77,r:showPrice ? 82 : 28,t:30,b:65},hovermode:'x unified',showlegend:false,
-      xaxis:{type:'date',tickformat:'%Y-%m',dtick:years === '10' ? 'M12' : years === '5' ? 'M6' : 'M3',
+      xaxis:{type:'date',tickformat:'%Y-%m',hoverformat:'%Y-%m-%d',dtick:years === '10' ? 'M12' : years === '5' ? 'M6' : 'M3',
         tickfont:{color:'#ffffff',size:12},gridcolor:'#304049',zeroline:false,automargin:true},
       yaxis:{title:{text:isYield ? '股息率（%）' : '估值（倍）',font:{color:'#ffffff',size:14}},tickfont:{color:'#ffffff',size:12},
         gridcolor:'#304049',zeroline:false,rangemode:'tozero',automargin:true},
@@ -1204,18 +1204,19 @@
       customdata:rows.map(row => financing ? [row.week_start || row.date,row.date] : [row.announced_on || '未提供',row.holders]),
       connectgaps:false,line:{color:financing ? '#8ecb49' : '#38c4dc',width:2},
       marker:{color:financing ? '#8ecb49' : '#38c4dc',size:5},
-      hovertemplate:financing ? `${weekly ? '周起始：%{customdata[0]}<br>截至：' : ''}%{x|%Y-%m-%d}<br>${name}：%{y:.3f} 亿元<extra></extra>`
+      hovertemplate:financing ? `${name}：%{y:.3f} 亿元<extra></extra>`
         : '统计截止日：%{x|%Y-%m-%d}<br>股东人数：%{customdata[1]:,} 户<br>公告日：%{customdata[0]}<extra></extra>'},
       {type:'scatter',mode:financing ? 'lines' : 'lines+markers',name:priceName,
        x:dates,y:rows.map(row => row[adjustment + '_close'] ?? null),yaxis:'y2',connectgaps:false,
        customdata:rows.map(row => row[adjustment + '_price_date'] || '无价格'),
        line:{color:'#f4d35e',width:2},marker:{color:'#f4d35e',size:4},
-       hovertemplate:`%{x|%Y-%m-%d}<br>${priceName}：%{y:.2f} 元/股<br>价格日期：%{customdata}<extra></extra>`}];
+       hovertemplate:financing ? `${priceName}：%{y:.2f} 元/股<extra></extra>`
+         : `%{x|%Y-%m-%d}<br>${priceName}：%{y:.2f} 元/股<br>价格日期：%{customdata}<extra></extra>`}];
     Plotly.react(section + '-chart', traces, {
       paper_bgcolor:'#1a2227',plot_bgcolor:'#1a2227',font:{color:'#edf4f4'},
       margin:{l:80,r:80,t:25,b:80},hovermode:'x unified',
       legend:{orientation:'h',x:0,y:-.2},
-      xaxis:{type:'date',tickformat:financing ? '%Y-%m' : '%Y-%m-%d',
+      xaxis:{type:'date',tickformat:financing ? '%Y-%m' : '%Y-%m-%d',hoverformat:financing ? '%Y-%m-%d' : undefined,
         ...(financing ? {range:[financingData.start,financingData.end],dtick:years === '1' ? 'M2' : years === '3' ? 'M6' : 'M12'} : {}),
         gridcolor:'#304049',zeroline:false,automargin:true},
       yaxis:{title:{text:`${name}（${unit}）`},gridcolor:'#304049',zeroline:metric === 'net_buy',

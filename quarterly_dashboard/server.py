@@ -59,7 +59,8 @@ from .sources import (fetch_cash_flow_reports, fetch_financial_reports,
                       fetch_stock_name, normalize_code, normalize_report_dates)
 from .valuation import (fetch_dividend_events, fetch_industry_snapshot, fetch_valuation_series,
                         merge_adjusted_prices, merge_dividend_yields, monthly_valuation, valuation_summary,
-                        monthly_dividend_yields, valuation_summary_observations)
+                        daily_dividend_yield_observations, monthly_dividend_yields,
+                        valuation_summary_observations)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -592,7 +593,12 @@ def _p4_valuation_payload(data, *, raw=None, qfq=None, events=None):
                     observation_rows, metric, years, data.get("industry", {}), trading_dates=trading_dates)
             else:
                 views[str(years)][metric] = valuation_summary(rows, metric, years, data.get("industry", {}))
-        yield_summary = valuation_summary(rows, "dividend_yield", years, data.get("industry", {}))
+        daily_yield_rows = daily_dividend_yield_observations(raw, events) if raw else None
+        yield_summary = valuation_summary(rows, "dividend_yield", years, data.get("industry", {}),
+                                          sample_rows=daily_yield_rows)
+        sample_frequency = "day" if daily_yield_rows is not None else "month"
+        yield_summary["sample_frequency"] = sample_frequency
+        yield_summary["percentile_frequency"] = sample_frequency
         yield_summary["rows_by_frequency"] = {frequency: yield_summary["rows"] for frequency in ("day", "week", "month")}
         yield_summary["frequency"] = {3: "day", 5: "week", 10: "month"}[years]
         views[str(years)]["dividend_yield"] = yield_summary

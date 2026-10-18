@@ -6,6 +6,7 @@
 |---|---|
 | 新增／改造批量采集、采集元数据迁移、历史回填及覆盖验收 | [批量采集规则](./docs/agent-rules/collection.md) |
 | 财务指标、行业财务、Checklist、正式财报、研报技能 | [财务与财报规则](./docs/agent-rules/finance-and-reports.md) 的对应章节 |
+| 新增／修改图表及悬浮提示 | [图表悬浮提示规范](./docs/chart-tooltip-style.md) |
 
 ## Git
 
