@@ -76,9 +76,9 @@
 
 中证/申万原series和事实行就地升级v2，保留原ID及OHLC；不保留v1行情业务副本。旧v1定义JSON作为小型历史口径记录保留，不是一份行情数据。Legu/Sina各自保持v1序列和OHLC hash，不合并不同来源、频率或收益口径。每个序列/实际观察日通过唯一索引只保留一行当前事实，version仅为修订计数。
 
-估算中证成交额占比、申万成交额写入同一行的amount_ratio/amount，不建立provider=derived序列、独立batch/source或估算响应文件。`field_lineage_json._raw`记录稳定原始修订号及各有效字段source/batch/真实取得时间；`estimates`记录估算标记、原始目标NULL、公式、输入值/单位、父行情身份及原始修订、同日Legu事实ID/version/source/batch/取得时间、分母元值、计算时间和口径差异。仅估算更新保留原行source_id/batch_id/obtained_at，updated_at为本次写入时间，computed_at为估算计算时间。重复来源值不变时不改原出处或增加修订；来源缺键继承仅限同日既有字段，官方有效值优先。输入修订后就地重算，依赖失效就地置NULL并保留撤回原因；不会保留陈旧估算或丢掉估算标记。
+估算中证成交额占比、申万成交额写入同一行的amount_ratio/amount，不建立provider=derived序列、独立batch/source或估算响应文件。`field_lineage_json._raw`记录稳定原始修订号及各有效字段source/batch/真实取得时间；`estimates`记录估算标记、原始目标NULL、公式、输入值/单位、父行情身份及原始修订、同日分母事实ID/version/provider/channel/source/batch/取得时间（Legu优先，授权20日可回退BigQuant）、分母元值、计算时间和口径差异。仅估算更新保留原行source_id/batch_id/obtained_at，updated_at为本次写入时间，computed_at为估算计算时间。重复来源值不变时不改原出处或增加修订；来源缺键继承仅限同日既有字段，官方有效值优先。输入修订后就地重算，依赖失效就地置NULL并保留撤回原因；不会保留陈旧估算或丢掉估算标记。
 
-计算仅使用精确同日Legu总额；BigQuant不是Legu，不作为分母。52个重叠交易日的既有Legu/BigQuant金额比较见[分母数值对照报告](../data/verification/reports/20261018_index_denominator_overlap.json)；该报告不能证明申万占比分母与Legu完全同口径。申万来源占比只到0.01个百分点，若T为同日Legu总额，比例舍入对反推金额的误差上限约为`±T×0.00005`，未计来源范围差异；例如T=15,690.66亿元、占比4.82%时估算756.289812亿元，舍入误差约±0.784533亿元。估算用于定性分析，不冒充官方原值或严格可比指标。
+计算优先使用精确同日Legu总额；按用户2026-10-18确认，2026-07-31至08-27这20日缺值可回退已归档的BigQuant全A成交额汇总，同时补算中证amount_ratio和申万amount。仅更新原行情行，不新增行情行或来源；保留原字段及实际父事实ID/version/provider/channel、公式、分母与计算时间。其他日期不自动扩展回退。BigQuant不是Legu，估算溯源和页面说明明确区分，后续Legu有效值优先并触发重算。52个重叠交易日的既有Legu/BigQuant金额比较见[分母数值对照报告](../data/verification/reports/20261018_index_denominator_overlap.json)；该报告不能证明申万占比分母与Legu完全同口径。申万来源占比只到0.01个百分点，若T为同日Legu总额，比例舍入对反推金额的误差上限约为`±T×0.00005`，未计来源范围差异；例如T=15,690.66亿元、占比4.82%时估算756.289812亿元，舍入误差约±0.784533亿元。估算用于定性分析，不冒充官方原值或严格可比指标。
 
 ### 已有来源能力
 
@@ -250,6 +250,12 @@ SQLite备份不包含原始响应。换电脑须同时复制数据库旁的 `col
 
 指数页面沿用主页侧边栏导航样式，当前指数名称随选择更新；从主页进入时保留个股代码供返回各研究页使用。折线图采用横轴统一悬浮提示，显示展示日期、实际观察日、指标值和单位，无需精确命中折线标记。
 
+### 所选指数／行业拥挤度
+
+「估值与分位」新增拥挤度切换，随宽基、行业（一／二级）或策略指数选择联动。只读 `index_price_observations.amount_ratio`（百分数，4.82 即 4.82%），选择有该字段的单一日频来源，行业优先申万、宽基优先中证；不拼接来源、频率或收益口径。查询入口 `/api/indices/crowding?code=...` 复用指数读取版本和有界缓存，不采集、不新增事实表。
+
+该拥挤度为所选指数成交额占全市场比例，区别于下方大盘「前5%个股集中度」。中证宽基值为库中既有估算（指数成交额÷同日全A成交额×100%，Legu优先、授权20日缺值回退BigQuant），申万为 `bargainsumrate` 原值；公式及限制见字段映射。无值留空、有效零保留。3/5/10年分位均按全部有效日样本，使用大盘同一统计函数，低于当前值的比例、80/50/20线性插值分位及总体标准差；频率切换不改变统计。自动展示日频，周／月取最后已记录日，最后日缺值不以前值补齐。可叠加同一来源序列的真实收盘点位，显示百分比卡片、分档、参考线与双轴走势。无可用序列显示空态。
+
 ### 指标优先选择
 
 宽基先选 PE(TTM)/PB；行业先选 PE(TTM)/PB/股息率。宽基 PE 默认中证 `history.rolling` 的 `pe_rolling`，PB 默认乐咕 `pb.ordinary` 的 `pb`（月度）。估值口径选择放在指标旁，只列定义包含当前字段且有有效观察的候选。PE 仅使用 `pe_ttm`/`pe_rolling`/来源披露 `pe_source`，不以静态或动态PE替代TTM；PB 只用 `pb`。首选缺少有效值时从当前指标可用候选选择，显示真实提供方及序列；完全缺失时留空，不切换指标冒充。
@@ -377,3 +383,7 @@ v26新增 `index_read_revisions` 单行版本记录；v28增加`index_price_obse
 <a id="maintenance-and-acceptance"></a>
 
 行情v38重建紧凑点位事实，不增加业务表，维护分类仍为“指数数据”，逻辑真实时间为关联来源obtained_at及解码updated_at；新增列、来源、定义版本和派生估算均可从点位事实及source/batch追溯。拥挤度表与日程表的用途、分类和真实时间见[拥挤度存储说明](#congestion-storage)。维护页统计、隔离测试、原始归档双哈希复核及历史点位上线验收记录见[行情维护与历史验收](#point-maintenance)、[估值验证](#valuation-verification)和[拥挤度验证](#congestion-verification)。正式回放定向只读审计使用`python -m quarterly_dashboard.index_price_audit --report data/verification/reports/index-price-targeted.json`：SQL汇总行情行数/物理唯一/来源关联及逐字段覆盖，每序列首中末抽样核验来源双哈希、字段真实时间、同行估算父依赖及公式；成交额/占比覆盖分别给出原始有效与估算有效条数；不重复历史全量逐来源审计、不扫描未变表hash。已有全量审计报告仅作为未变来源/单位的历史证据，新单行模型通过须有本次迁移和幂等验证；发现异常再扩大对应分段。覆盖状态按序列/字段分别核验，任务完成不等于历史全覆盖。
+
+### 2026-10-18 同行补值验收
+
+已备份并直接更新既有320条中证amount_ratio、3240条申万amount，覆盖2026-07-31至08-27共20个交易日，行情行数保持353116；原始字段及市场来源事实哈希前后相同。每条按实际BigQuant分母复算核验，重复补算修改0行，无网络请求、无新增批次或来源。报告见[补算审计](../data/verification/reports/20261018_index_bigquant_gap_recompute.json)，复用工具为`python -m data.verification.tools.index_bigquant_gap_recompute`（会先备份日常库）。

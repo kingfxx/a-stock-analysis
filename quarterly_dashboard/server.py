@@ -1286,7 +1286,7 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
                 self._ai_reply({'error':str(exc)},400)
             return
-        if parsed.path in {'/api/indices/catalog','/api/indices/status','/api/indices/chart','/api/indices/price'}:
+        if parsed.path in {'/api/indices/catalog','/api/indices/status','/api/indices/chart','/api/indices/price','/api/indices/crowding'}:
             try:
                 with _SERVICE_LOCK:
                     if not hasattr(self.server, 'index_reader'):
@@ -1299,6 +1299,8 @@ class Handler(BaseHTTPRequestHandler):
                     body = reader.status()
                 elif parsed.path.endswith('/price'):
                     body = reader.price_overlay(query.get('code',[None])[0])
+                elif parsed.path.endswith('/crowding'):
+                    body = reader.price_overlay(query.get('code',[None])[0],field='amount_ratio')
                 else:
                     body = reader.chart(code=query.get('code',[None])[0],provider=query.get('provider',[None])[0],
                         series=query.get('series',[None])[0],definition=query.get('definition',['v1'])[0],metric=query.get('metric',[None])[0])

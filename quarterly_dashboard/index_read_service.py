@@ -101,16 +101,16 @@ class IndexReadService:
                     self.cache_bytes -= len(evicted)
             return body
 
-    def price_overlay(self, code):
+    def price_overlay(self, code, *, field='close'):
         if not code:
             raise ValueError('缺少指数代码')
         with self.lock:
             self._revision()
-            key=('point_overlay',code)
+            key=('point_overlay',code,field)
             if key in self.cache:
                 self.cache.move_to_end(key)
                 return self.cache[key]
-            body=encode(dict(revision=self._revision(),**read_overlay(self.db,code)))
+            body=encode(dict(revision=self._revision(),**read_overlay(self.db,code,field=field)))
             if len(body)<=self.max_bytes:
                 self.cache[key]=body
                 self.cache_bytes+=len(body)

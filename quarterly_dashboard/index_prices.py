@@ -279,26 +279,29 @@ def read_prices(db, *, index_code, provider, series_key, frequency, return_type,
     return rows
 
 
-def read_overlay(db, index_code):
+def read_overlay(db, index_code, *, field='close'):
     """Pick one real close series for an index without mixing providers or bases."""
+    if field not in ('close', 'amount_ratio'):
+        raise ValueError('不支持的指数行情指标')
     with db.connection() as conn:
         identity=conn.execute('SELECT s.id,s.index_code,s.provider,s.series_key,s.frequency,s.return_type,s.definition_version,'
             'count(f.close) AS observations,min(CASE WHEN f.close IS NOT NULL THEN f.observation_date END) AS first_date,'
             'max(CASE WHEN f.close IS NOT NULL THEN f.observation_date END) AS last_date '
             'FROM index_price_series s JOIN index_price_observations f ON f.series_id=s.id '
-            'WHERE s.index_code=? AND f.close IS NOT NULL GROUP BY s.id '
+            f'WHERE s.index_code=? AND f.{field} IS NOT NULL '+("AND s.frequency='daily' " if field=='amount_ratio' else '')+'GROUP BY s.id '
             'ORDER BY CASE WHEN s.frequency=\'daily\' THEN 0 ELSE 1 END,'
             'CASE WHEN s.provider=? THEN 0 WHEN s.provider=\'csindex\' THEN 1 WHEN s.provider=\'sws\' THEN 2 WHEN s.provider=\'sina\' THEN 3 WHEN s.provider=\'legu\' THEN 4 ELSE 5 END,'
             'CASE WHEN s.return_type=\'unspecified\' THEN 0 ELSE 1 END,s.series_key,CASE WHEN s.definition_version=\'v2\' THEN 0 ELSE 1 END,s.definition_version LIMIT 1',
             (index_code,'sws' if index_code.startswith('sw:') else 'csindex')).fetchone()
         if identity is None:
             return dict(index_code=index_code,available=False,rows=[])
-        rows=[dict(r) for r in conn.execute('SELECT observation_date,close FROM index_price_observations '
-            'WHERE series_id=? AND close IS NOT NULL ORDER BY observation_date',(identity['id'],))]
+        rows=[dict(r) for r in conn.execute(f'SELECT observation_date,close,{field} FROM index_price_observations '
+            'WHERE series_id=? '+('AND close IS NOT NULL ' if field=='close' else '')+'ORDER BY observation_date',(identity['id'],))]
     for row in rows:row['observation_date']=decode_day(row['observation_date'])
+    valid=[row for row in rows if row[field] is not None]
     return dict(index_code=index_code,available=bool(rows),provider=identity['provider'],series_key=identity['series_key'],
         frequency=identity['frequency'],return_type=identity['return_type'],definition_version=identity['definition_version'],
-        observations=identity['observations'],first_date=decode_day(identity['first_date']),last_date=decode_day(identity['last_date']),rows=rows)
+        observations=len(valid),first_date=valid[0]['observation_date'],last_date=valid[-1]['observation_date'],rows=rows)
 
 
 def price_coverage(rows):

@@ -11,7 +11,7 @@ __RESEARCH_SIDEBAR__
 </div><p id="progress" role="status" aria-live="polite">正在读取…</p><div id="progress-details" class="index-progress-details" hidden aria-live="polite"><p id="progress-summary"></p><ul id="progress-sources"></ul></div><p id="cooldowns"></p>
 <p class="muted">跨来源并行、同源最多2个请求；每完成请求间隔2—5秒，滚动60秒最多30次，每20次额外休息10秒。遇拒绝访问停止并冷却。历史任务可能持续数小时，已提交分段保留。进度按独立采集任务计数，不代表已覆盖数据行数。主题指数本次不采集。</p></section>
 <section class="valuation-panel" aria-label="指数估值与分位">
-<div class="panel-head"><h2>估值与分位</h2><p class="muted">指数估值走势 · 所选区间历史分布与当前历史位置</p>
+<div class="panel-head"><h2>估值与分位</h2><p class="muted">指数估值与拥挤度走势 · 所选区间历史分布与当前历史位置</p>
 <div class="controls index-controls">
 <label>指数类别<select id="kind"><option value="broad">宽基</option><option value="industry">行业</option><option value="strategy">策略</option></select></label>
 <label id="parent-control" hidden>一级行业<select id="parent"></select></label>
@@ -49,4 +49,4 @@ __RESEARCH_SIDEBAR__
 <p class="muted">首次获取历史与近期数据；以后只读取网页表格并写入数据库。后台运行时每日检查，页面浏览不触发采集。</p>
 <details id="congestion-explanation"><summary>说明与近期数据</summary><p class="muted">统计按所选范围内每个有效交易日取一个样本，包含有效零值；缺值不补。分位为低于当前值的日样本占比；基准为20%/50%/80%线性插值分位，或均值±总体标准差。判断始终按历史分位；图表缩放和展示频率不改变统计。</p><p id="congestion-coverage"></p><p id="congestion-points" class="muted"></p><p id="congestion-gaps"></p><p id="congestion-conflicts"></p><p class="muted">图中按日期展示拥挤度，重叠日期优先使用网页表格的有效值；底层仍独立保存 API、网页和自算来源及修订。自算值仅填空，原始缺值保留；未补齐日期不连线。周／月按每周期最后一个已记录日期取当日值，缺值留空，不用前日值代替；指数只有月频时保留实际观察日，在对应周期按同日比较。网页日更仅保留请求记录，无响应文件。</p><div class="scroll"><table><thead><tr><th>日期</th><th>拥挤度</th><th>来源收盘价</th><th>前5%成交额（亿元）</th><th>全A成交额（亿元）</th></tr></thead><tbody id="congestion-recent"></tbody></table></div></details>
 </div></section>
-</div></main><script src="/datetime.js"></script><script src="/plotly.min.js"></script><script src="/stock-picker.js"></script><script src="/indices.js"></script><script src="/congestion.js"></script></body></html>
+</div></main><script src="/datetime.js"></script><script src="/plotly.min.js"></script><script src="/stock-picker.js"></script><script src="/congestion.js"></script><script src="/indices.js"></script></body></html>

@@ -15,6 +15,17 @@ FIELDS=('open','high','low','close','volume','amount','change_points','change_pc
 FORMULAS={'csindex':'same-day raw amount / Legu all-A total amount * 100',
           'sws':'same-day raw amount_ratio / 100 * Legu all-A total amount'}
 BASIS='Legu all-A; excludes block trades; universe may differ'
+
+
+def estimate_definition(provider, market):
+    if market['provider']=='bigquant':
+        formula=('same-day raw amount / BigQuant calculated all-A total amount * 100' if provider=='csindex'
+                 else 'same-day raw amount_ratio / 100 * BigQuant calculated all-A total amount')
+        return (formula,
+                'BigQuant cn_stock_real_bar1d all-A amount sum; estimated fallback; universe may differ')
+    return FORMULAS[provider], BASIS
+
+
 EPOCH=datetime(1970,1,1,tzinfo=timezone.utc)
 
 
@@ -108,8 +119,9 @@ class PriceCodec:
                 source=self.source(source_id);input_meta=self.source(input_source if input_source is not None else source_id)
                 market=self.markets[market_id]
                 if market['version']!=market_version:raise ValueError('估算父事实版本不一致')
+                formula,basis=estimate_definition(provider,market)
                 result['estimates'][field]={
-                    'kind':'estimated','raw_target_value':None,'value':row[field],'formula':FORMULAS[provider],
+                    'kind':'estimated','raw_target_value':None,'value':row[field],'formula':formula,
                     'upstream_status':'current','input_index_field':raw_field,'input_index_value':raw,
                     'input_index_fingerprint':digest(encoded({'fact_id':row['id'],'raw_revision':revision,
                         'field':raw_field,'value':raw,'field_source':input_meta}).encode()),
@@ -121,7 +133,7 @@ class PriceCodec:
                         'channel':market['channel'],'definition_version':market['definition_version'],
                         'source_id':market['source_id'],'batch_id':market['batch_id'],'observation_date':market['observation_date'],
                         'obtained_at':market['obtained_at'],'total_amount_yi':market['total_amount_yi']},
-                    'denominator_cny':float(market['total_amount_yi'])*100_000_000,'market_basis':BASIS,'computed_at':decode_time(at)}
+                    'denominator_cny':float(market['total_amount_yi'])*100_000_000,'market_basis':basis,'computed_at':decode_time(at)}
         return result
 
     def compact(self,lineage,row):

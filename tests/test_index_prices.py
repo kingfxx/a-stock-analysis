@@ -525,3 +525,61 @@ def test_v36_migration_preserves_latest_id_and_is_immediately_idempotent(tmp_pat
         assert not conn.execute('PRAGMA foreign_key_check').fetchall()
     with pytest.raises(sqlite3.IntegrityError,match='identity'):
         with db.connection(write=True) as conn:conn.execute("UPDATE index_price_series SET return_type='price'")
+
+
+def test_bigquant_gap_denominator_fallback_priority_and_roundtrip(db):
+    from quarterly_dashboard import market_congestion as m
+    from quarterly_dashboard.index_price_derived import recompute
+    from test_market_congestion import seed as market_seed
+    day='2026-07-31'
+    b,s,_=seed(db)
+    with db.connection(write=True) as c:
+        publish_prices(c,[point(b,s,observation_date=day,amount=1_000_000_000),
+                          point(b,s,observation_date='2026-08-28',amount=1_000_000_000)])
+    def bigquant(total):
+        batch=begin_batch(db,'test',m.CALCULATED_DATASET,'bigquant',domain='market')
+        sid=archive_source(db,batch,'bigquant',m.CALCULATED_DATASET,dict(url='local:test'),1,raw=b'{}')
+        parsed_source(db,sid,fields=['total_amount_yi'])
+        rows=[dict(observation_date=d,value=.5,close=3800,top5_amount_yi=total/2,total_amount_yi=total,
+                   value_status='observed',precision_digits=None) for d in (day,'2026-08-28')]
+        with db.connection(write=True) as c:m.publish(c,rows,m.CALCULATED_CHANNEL,batch,sid)
+        finish_batch(db,batch,'complete')
+    swb,sws,swcode=seed(db,provider='sws',code='801010',kind='industry')
+    with db.connection(write=True) as c:
+        publish_prices(c,[point(swb,sws,swcode,provider='sws',key='analysis.points',observation_date=day,amount_ratio=5)])
+    bigquant(20)
+    assert recompute(db)['facts']==2
+    with db.connection() as c:
+        row=price_fact(c,'SELECT * FROM index_price_observations_read ORDER BY observation_date,id LIMIT 1')
+        estimate=json.loads(row['field_lineage_json'])['estimates']['amount_ratio']
+        assert row['amount_ratio']==50 and estimate['parent_market']['provider']=='bigquant'
+        assert 'BigQuant' in estimate['formula'] and 'BigQuant' in estimate['market_basis']
+        assert isinstance(json.loads(c.execute('SELECT field_lineage_json FROM index_price_observations ORDER BY observation_date,id LIMIT 1').fetchone()[0]),list)
+        assert c.execute('SELECT amount_ratio FROM index_price_observations_read ORDER BY observation_date DESC LIMIT 1').fetchone()[0] is None
+    assert recompute(db)['facts']==0
+    with db.connection() as c:
+        industry=price_fact(c,"SELECT f.* FROM index_price_observations_read f JOIN index_price_series s ON s.id=f.series_id WHERE s.provider='sws'")
+        assert industry['amount']==100_000_000 and industry['amount_ratio']==5
+        assert 'BigQuant' in json.loads(industry['field_lineage_json'])['estimates']['amount']['formula']
+    bigquant(40)
+    assert recompute(db)['facts']==2
+    with db.connection() as c:assert price_fact(c,'SELECT * FROM index_price_observations_read ORDER BY observation_date,id LIMIT 1')['amount_ratio']==25
+    with db.connection(write=True) as c:
+        c.execute("UPDATE market_indicator_observations SET is_latest=0 WHERE provider='bigquant'")
+    assert recompute(db)['facts']==2
+    with db.connection() as c:
+        assert c.execute('SELECT count(*) FROM index_price_observations').fetchone()[0]==3
+        assert c.execute("SELECT count(*) FROM index_price_observations WHERE amount_ratio IS NOT NULL AND series_id=(SELECT id FROM index_price_series WHERE provider='csindex')").fetchone()[0]==0
+    with db.connection(write=True) as c:
+        c.execute("UPDATE market_indicator_observations SET is_latest=1 WHERE provider='bigquant' AND version=2")
+    assert recompute(db)['facts']==2
+    batch,sid=market_seed(db)
+    rows=m.parse_api({'items':[dict(date=day,congestion=.5,close=3800,top5AmountYi=50,totalAmountYi=100)]})
+    with db.connection(write=True) as c:m.publish(c,rows,'api_history',batch,sid)
+    finish_batch(db,batch,'complete')
+    assert recompute(db)['facts']==2
+    with db.connection() as c:
+        row=price_fact(c,'SELECT * FROM index_price_observations_read ORDER BY observation_date,id LIMIT 1')
+        assert row['amount_ratio']==10
+        assert json.loads(row['field_lineage_json'])['estimates']['amount_ratio']['parent_market']['provider']=='legu'
+    assert recompute(db)['facts']==0

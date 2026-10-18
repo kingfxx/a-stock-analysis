@@ -7,7 +7,7 @@ from .collection import Cancelled, digest, encoded
 from .index_prices import DEFINITIONS, FIELDS, VERSION, validate_values, price_hash
 from .storage import utc_now
 
-from .index_price_codec import FORMULAS,PriceCodec,encode_day,decode_day,logical_hash
+from .index_price_codec import estimate_definition,PriceCodec,encode_day,decode_day,logical_hash
 
 
 def _unchanged_estimate(fact,body,market):
@@ -46,6 +46,15 @@ def recompute(db, operation_id=None, *, start=None, through=None, cancelled=lamb
             amount = row['total_amount_yi']
             if amount is not None and math.isfinite(float(amount)) and float(amount) > 0:
                 market_valid.setdefault(row['observation_date'], row)
+        # Only the previously authorized, locally archived 20-day gap is eligible.
+        estimate_market_valid = dict(market_valid)
+        for row in conn.execute("SELECT * FROM market_indicator_observations WHERE indicator_key='ashares_congestion' "
+                "AND scope_key='all_a' AND provider='bigquant' AND channel='bigquant_calculated' "
+                "AND definition_version='amount_rank_top5_v1' AND frequency='daily' AND is_latest=1 "
+                "AND observation_date BETWEEN '2026-07-31' AND '2026-08-27'"):
+            amount=row['total_amount_yi']
+            if amount is not None and math.isfinite(float(amount)) and float(amount)>0:
+                estimate_market_valid.setdefault(row['observation_date'],dict(row))
         days=[r[0] for r in conn.execute("SELECT DISTINCT observation_date FROM index_price_observations "
             "WHERE (? IS NULL OR observation_date<=?) AND (? IS NULL OR observation_date>=?) ORDER BY observation_date",
             (encode_day(through),encode_day(through),encode_day(start),encode_day(start)))]
@@ -68,7 +77,8 @@ def recompute(db, operation_id=None, *, start=None, through=None, cancelled=lamb
                 if checked%256==0 and cancelled():
                     raise Cancelled('同行估算补算收到取消请求')
                 checked+=1
-                if not _unchanged_estimate(fact,json.loads(fact['field_lineage_json']),market_valid.get(decode_day(day))):
+                markets=estimate_market_valid
+                if not _unchanged_estimate(fact,json.loads(fact['field_lineage_json']),markets.get(decode_day(day))):
                     dirty.append(fact)
             codec=PriceCodec(conn)
             facts=codec.decode_rows(dirty)
@@ -82,7 +92,8 @@ def recompute(db, operation_id=None, *, start=None, through=None, cancelled=lamb
             if fact[field] is not None and field not in estimates:
                 continue
             raw_value = fact[raw_field]
-            market = market_valid.get(fact['observation_date'])
+            markets=estimate_market_valid
+            market = markets.get(fact['observation_date'])
             market_row = market or market_any.get(fact['observation_date'])
             reason = None
             denominator = None
@@ -104,10 +115,11 @@ def recompute(db, operation_id=None, *, start=None, through=None, cancelled=lamb
             estimate = None
             value = None
             if reason is None:
+                formula,basis=estimate_definition(provider,market)
                 value = float(raw_value) / denominator * 100 if provider == 'csindex' else float(raw_value) / 100 * denominator
                 estimate = {
                     'kind': 'estimated', 'raw_target_value': None, 'value': value,
-                    'formula': FORMULAS[provider], 'upstream_status': 'current',
+                    'formula': formula, 'upstream_status': 'current',
                     'input_index_field': raw_field, 'input_index_value': raw_value,
                     'input_index_fingerprint': digest(encoded({'fact_id': fact['id'], 'raw_revision': lineage.get('_raw', {}).get('revision', 0),
                         'field': raw_field, 'value': raw_value, 'field_source': lineage.get('_raw', {}).get('fields', {}).get(raw_field)}).encode()),
@@ -122,7 +134,7 @@ def recompute(db, operation_id=None, *, start=None, through=None, cancelled=lamb
                         'source_id': market['source_id'], 'batch_id': market['batch_id'],
                         'observation_date': market['observation_date'], 'obtained_at': market['obtained_at'],
                         'total_amount_yi': market['total_amount_yi']},
-                    'denominator_cny': denominator, 'market_basis': 'Legu all-A; excludes block trades; universe may differ',
+                    'denominator_cny': denominator, 'market_basis': basis,
                 }
             elif field in estimates:
                 # Withdraw a stale value while preserving the reason and parents for audit.

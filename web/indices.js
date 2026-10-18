@@ -3,14 +3,15 @@ const el=id=>document.getElementById(id), labels={pe_source:'来源披露 PE',pe
 const providers={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源'}, states={running:'采集中',complete:'完成',failed:'失败',cancelled:'已停止',unknown:'未知',partial:'部分',empty:'空'};
 const seriesNames={'history.rolling':'历史滚动 PE',dashboard:'每日板块估值','indicator.total_shares':'近期估值（总股本）','indicator.calculation_shares':'近期估值（计算用股本）','analysis.daily':'行业估值日报','pe.ordinary':'PE（普通）','pe.equal':'PE（等权）','pe.median':'PE（中位数）','pb.ordinary':'PB（普通）','pb.equal':'PB（等权）','pb.median':'PB（中位数）'};
 const methods={source_disclosed:'来源披露口径，详细权重待核对',ordinary:'普通',equal:'等权',median:'中位数'},periods={source_disclosed:'来源披露，未另行推定',rolling:'滚动','static / rolling':'静态及滚动',pending:'待核对','LYR / TTM (source field labels)':'静态及TTM（按来源字段标识）'},shares={pending:'待核对',total_shares:'总股本',calculation_shares:'计算用股本'};
+let crowdingData=null;
 let data,history=[],selectedSummary,views={},metricFamily='pe',timer,historyRevision=0,historyController,pointOverlay=false,pointData,pointCode,pointController,shownIndexCode;
 const chartCache=new Map();let chartCacheBytes=0;
 function clearChartCache(){chartCache.clear();chartCacheBytes=0;}
 function rememberChart(key,text){const size=new TextEncoder().encode(text).length;if(size>8*1024*1024)return;chartCache.set(key,{text,size});chartCacheBytes+=size;while(chartCache.size>6||chartCacheBytes>8*1024*1024){const first=chartCache.keys().next().value;chartCacheBytes-=chartCache.get(first).size;chartCache.delete(first);}}
 function options(id,items,value){const node=el(id);node.replaceChildren();for(const [v,label] of items){const option=document.createElement('option');option.value=v;option.textContent=label;node.append(option);}if(items.some(item=>item[0]===value))node.value=value;}
-const metricNames={pe:'PE(TTM)',pb:'PB',dividend_yield:'股息率'};
+const metricNames={pe:'PE(TTM)',pb:'PB',dividend_yield:'股息率',crowding:'拥挤度'};
 const metricLegendNames={pe_source:'市盈率 PE（来源披露）',pe_static:'市盈率 PE（静态）',pe_dynamic:'市盈率 PE（动态）',pe_ttm:'市盈率 PE（TTM）',pe_rolling:'市盈率 PE（滚动）',pb:'市净率 PB',ps:'市销率 PS',ps_ttm:'市销率 PS（TTM）',dividend_yield:'股息率'};
-function renderMetricButtons(){const group=el('metric-tabs'),families=el('kind').value==='broad'?['pe','pb']:['pe','pb','dividend_yield'];if(!families.includes(metricFamily))metricFamily='pe';group.replaceChildren();for(const family of families){const button=document.createElement('button');button.type='button';button.dataset.metricFamily=family;button.textContent=metricNames[family];button.classList.toggle('active',family===metricFamily);button.setAttribute('aria-pressed',String(family===metricFamily));button.onclick=()=>{metricFamily=family;renderMetricButtons();renderSeries(true);};group.append(button);}}
+function renderMetricButtons(){const group=el('metric-tabs'),families=el('kind').value==='broad'?['pe','pb','crowding']:['pe','pb','dividend_yield','crowding'];if(!families.includes(metricFamily))metricFamily='pe';group.replaceChildren();for(const family of families){const button=document.createElement('button');button.type='button';button.dataset.metricFamily=family;button.textContent=metricNames[family];button.classList.toggle('active',family===metricFamily);button.setAttribute('aria-pressed',String(family===metricFamily));button.onclick=()=>{metricFamily=family;renderMetricButtons();renderSeries(true);};group.append(button);}}
 function definitionFor(row){const entry=data.definitions.find(def=>def.provider===row.provider&&def.series_key===row.series_key&&def.definition_version===row.definition_version);return entry?JSON.parse(entry.definition_json):null;}
 function fieldFor(row){const fields=Object.values(definitionFor(row)?.fields||{});const candidates=metricFamily==='pe'?['pe_ttm','pe_rolling','pe_source']:[metricFamily];return candidates.find(field=>fields.includes(field))||null;}
 async function api(url,body){const response=await fetch(url,body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok)throw Error(result.error||'请求失败');return result;}
@@ -43,7 +44,7 @@ el('cooldowns').textContent=data.cooldowns.map(row=>`${providers[row.source_syst
 clearTimeout(timer);timer=null;if(running&&!document.hidden)timer=setTimeout(()=>load(false),5000);}
 const parentOf=row=>row.navigation_parent_index_code||row.parent_index_code;
 function renderParents(){options('parent',data.catalog.filter(row=>row.index_type==='industry'&&row.industry_level===1).map(row=>[row.index_code,row.name]),el('parent').value);}
-function updateSelectedIndex(selected){const code=selected?.index_code;el('current-index-name').textContent=selected?.name||'暂无指数';el('current-index-code').textContent=code||'—';if(shownIndexCode===code)return;shownIndexCode=code;pointController?.abort();pointController=null;pointData=null;pointCode=null;el('point-overlay-note').hidden=!pointOverlay;if(pointOverlay&&code)loadPointOverlay(code);}
+function updateSelectedIndex(selected){const code=selected?.index_code;el('current-index-name').textContent=selected?.name||'暂无指数';el('current-index-code').textContent=code||'—';if(shownIndexCode===code)return;shownIndexCode=code;pointController?.abort();pointController=null;pointData=null;pointCode=null;el('point-overlay-note').hidden=!pointOverlay;if(pointOverlay&&code&&metricFamily!=='crowding')loadPointOverlay(code);}
 function renderCodes(){
 const industry=el('kind').value==='industry',old=el('code').value;
 el('parent-control').hidden=!industry;el('second-control').hidden=!industry;el('code-control').hidden=industry;
@@ -54,14 +55,14 @@ if(industry){const parent=el('parent').value;options('industry-second',[['','全
 const selected=data.catalog.find(row=>row.index_code===el('code').value);el('current-index-name').textContent=selected?.name||'暂无指数';el('current-index-code').textContent=selected?.index_code||'—';renderMetricButtons();renderSeries(old!==el('code').value);updateSelectedIndex(selected);}
 function renderSeries(reset=false){
 const industry=el('kind').value==='industry',old=reset?'':el('series').value;
-el('series-control').hidden=industry;el('industry-source').hidden=!industry;
+el('series-control').hidden=industry||metricFamily==='crowding';el('industry-source').hidden=!industry||metricFamily==='crowding';
 const preferred=metricFamily==='pb'?'legu|pb.ordinary':metricFamily==='pe'?'csindex|history.rolling':'';
 const rows=data.coverage.filter(row=>row.index_code===el('code').value&&(!industry||row.provider==='sws'&&row.series_key==='analysis.daily')&&fieldFor(row)&&row[fieldFor(row)+'_count']>0);
 const rank=row=>`${row.provider}|${row.series_key}`===preferred?0:row.series_key.endsWith('.ordinary')?1:row.series_key==='dashboard'?3:2;
 rows.sort((a,b)=>rank(a)-rank(b)||b.observations-a.observations||a.series_key.localeCompare(b.series_key));
 options('series',rows.map(row=>[`${row.provider}|${row.series_key}|${row.definition_version}`,`${providers[row.provider]} · ${row.series_key==='dashboard'?'每日板块 '+metricNames[metricFamily]:seriesNames[row.series_key]||row.series_key} · ${row.frequency==='monthly'?'月度':'日度'}`]),old);
 loadHistory();}
-async function loadHistory(){const revision=++historyRevision;historyController?.abort();historyController=new AbortController();try{const code=el('code').value,choice=el('series').value;if(!code||!choice){history=[];views={};selectedSummary=null;options('metric',[]);el('definition').textContent='';el('coverage').textContent='该指数暂无可用的'+metricNames[metricFamily]+'数据';draw();return;}
+async function loadHistory(){const revision=++historyRevision;historyController?.abort();historyController=new AbortController();if(metricFamily==='crowding'){loadCrowding(revision);return;}try{const code=el('code').value,choice=el('series').value;if(!code||!choice){history=[];views={};selectedSummary=null;options('metric',[]);el('definition').textContent='';el('coverage').textContent='该指数暂无可用的'+metricNames[metricFamily]+'数据';draw();return;}
 const [provider,series,definition]=choice.split('|'),summary=data.coverage.find(row=>row.index_code===code&&row.provider===provider&&row.series_key===series&&row.definition_version===definition);selectedSummary=summary;history=[];views={};const field=fieldFor(summary);options('metric',field?[[field,labels[field]]]:[]);el('coverage').textContent='正在读取所选指数…';
 const key=new URLSearchParams({code,provider,series,definition,metric:field}).toString();let result;
 if(chartCache.has(key)){const cached=chartCache.get(key);chartCache.delete(key);chartCache.set(key,cached);result=JSON.parse(cached.text);}else{const response=await fetch('/api/indices/chart?'+key,{cache:'no-store',signal:historyController.signal});const text=await response.text();result=JSON.parse(text);if(!response.ok)throw Error(result.error||'请求失败');if(revision!==historyRevision)return;if(result.revision!==data.revision){clearChartCache();await load(true);return;}rememberChart(key,text);}
@@ -76,6 +77,7 @@ async function loadPointOverlay(code){pointController?.abort();pointController=n
 function bucketKey(day,frequency){if(frequency==='month')return day.slice(0,7);if(frequency==='week'){const date=new Date(day+'T00:00:00Z');date.setUTCDate(date.getUTCDate()-((date.getUTCDay()+6)%7));return date.toISOString().slice(0,10);}return day;}
 function overlayPoints(rows,frequency,target){if(!pointData||pointCode!==el('code').value)return[];const latest=new Map();for(const point of pointData.rows){const key=bucketKey(point.observation_date,frequency),prior=latest.get(key);if(!prior||point.observation_date>prior.observation_date)latest.set(key,point);}return rows.map(row=>{const observed=row[target+'_date']||row.date,point=latest.get(bucketKey(observed,frequency));return point?{date:row.date,close:point.close,actualDate:point.observation_date}:{date:row.date,close:null,actualDate:null};});}
 function draw(){
+if(metricFamily==='crowding'){drawCrowding();return;}
 const metric=el('metric').value,years=el('range').value,view=views[metric]?.[years],yieldMetric=metric==='dividend_yield',std=el('benchmark').value==='stddev';
 const frequency=selectedSummary?.frequency==='monthly'?'month':el('frequency').value==='auto'?({3:'day',5:'week',10:'month'}[years]):el('frequency').value;
 const rows=view?.rows_by_frequency?.[frequency]||[],target=metric?.startsWith('pe_')?'pe':metric?.startsWith('ps')?'ps':metric;
@@ -101,6 +103,51 @@ const shapes=levels.flatMap((value,i)=>value==null?[]:[{type:'line',xref:'paper'
 for(const r of negative)shapes.push({type:'rect',xref:'x',yref:'paper',x0:r.start,x1:r.end===r.start?new Date(Date.parse(r.end)+86400000).toISOString().slice(0,10):r.end,y0:0,y1:1,fillcolor:'rgba(244,211,94,.09)',line:{color:'rgba(244,211,94,.3)',width:1},layer:'below'});
 const traces=[{x:rows.map(row=>row.date),y:rows.map(row=>row[target]??null),customdata:rows.map(row=>row[target+'_date']||row.date),type:'scatter',mode:'lines+markers',name:metricLegendNames[metric]||labels[metric]||'指数估值',line:{color:'#66aaf0',width:2},marker:{size:4},fill:'tozeroy',fillcolor:'rgba(102,170,240,.07)',connectgaps:false,hoveron:'points',hovertemplate:'展示日期：%{x|%Y-%m-%d}<br>实际观察日：%{customdata}<br>'+ (labels[metric]||'估值')+'：%{y:.2f}'+(yieldMetric?'%':' 倍')+'<extra></extra>'}];const pointRows=pointOverlay?overlayPoints(rows,frequency,target):[];if(pointRows.length)traces.push({x:pointRows.map(row=>row.date),y:pointRows.map(row=>row.close),customdata:pointRows.map(row=>row.actualDate||'该周期无收盘点位'),type:'scatter',mode:'lines',name:'指数点位',yaxis:'y2',line:{color:'#f4d35e',width:2.3},connectgaps:false,hovertemplate:'展示日期：%{x|%Y-%m-%d}<br>点位实际日期：%{customdata}<br>指数点位：%{y:.2f}<extra></extra>'});el('point-overlay').setAttribute('aria-pressed',String(pointOverlay));el('point-overlay-note').hidden=!pointOverlay;if(pointOverlay&&!pointData&&!pointController&&pointCode!==el('code').value&&el('code').value)loadPointOverlay(el('code').value);Plotly.react('chart',traces,{paper_bgcolor:'#1a2429',plot_bgcolor:'#1a2429',font:{color:'#edf4f4'},uirevision:JSON.stringify([el('code').value,el('series').value,metric,years,frequency]),margin:{t:25,l:65,r:pointRows.length?68:25,b:82},hovermode:'x unified',hoverdistance:-1,spikedistance:-1,hoverlabel:{bgcolor:'#23343d',bordercolor:'#49616b',font:{color:'#edf4f4'}},legend:{orientation:'h',x:0.5,xanchor:'center',y:-0.22,yanchor:'top',font:{color:'#afc2c9',size:12}},xaxis:{type:'date',gridcolor:'#30434d'},yaxis:{title:yieldMetric?'股息率（%）':'估值（倍）',gridcolor:'#30434d',rangemode:'tozero'},...(pointRows.length?{yaxis2:{title:{text:'指数点位',font:{color:'#f4d35e'}},tickfont:{color:'#f4d35e'},overlaying:'y',side:'right',showgrid:false,rangemode:'tozero',automargin:true}}:{}),shapes},{responsive:true,displaylogo:false});
 }
+
+async function loadCrowding(revision){
+  crowdingData=null;history=[];views={};selectedSummary=null;
+  for(const option of el('frequency').options)option.disabled=false;
+  el('coverage').textContent='正在读取所选指数的拥挤度…';
+  draw();
+  try{
+    const code=el('code').value;
+    const response=await fetch('/api/indices/crowding?'+new URLSearchParams({code}),{cache:'no-store',signal:historyController.signal});
+    const result=await response.json();if(!response.ok)throw Error(result.error||'读取失败');
+    if(revision!==historyRevision)return;
+    if(result.revision!==data.revision){clearChartCache();await load(true);return;}
+    crowdingData=result;
+    el('coverage').textContent=result.available?`拥挤度有效范围 ${result.first_date}—${result.last_date}，${result.observations} 个有效日样本；全历史覆盖率未核实。`:'该指数暂无本地成交额占比数据。';
+    draw();
+  }catch(error){if(error.name!=='AbortError'&&revision===historyRevision){el('coverage').textContent='拥挤度读取失败：'+error.message;draw();}}
+}
+function drawCrowding(){
+  const {periodKey,dailyStatistics}=window.CongestionStats;
+  const years=el('range').value,upper=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const lowerDate=new Date(upper+'T00:00:00Z'),month=lowerDate.getUTCMonth();lowerDate.setUTCFullYear(lowerDate.getUTCFullYear()-Number(years));if(lowerDate.getUTCMonth()!==month)lowerDate.setUTCDate(0);
+  const lower=lowerDate.toISOString().slice(0,10),std=el('benchmark').value==='stddev';
+  const rows=(crowdingData?.rows||[]).filter(row=>row.observation_date>=lower&&row.observation_date<=upper);
+  const stats=dailyStatistics({api_history:{rows:rows.map(row=>({observation_date:row.observation_date,value:row.amount_ratio}))}},lower,upper);
+  const format=value=>value==null?'—':value.toFixed(2)+'%';
+  const levels=std?[stats.stddevHigh,stats.mean,stats.stddevLow]:[stats.high,stats.median,stats.low];
+  el('current-label').textContent='最近有效观测 · 拥挤度';el('current').textContent=format(stats.current);el('current-date').textContent=stats.currentDate||'暂无有效观察';
+  el('position').textContent=stats.count?['极低','低拥挤','偏低','适中','偏高','拥挤','极拥挤'][stats.rank]:'待判断';el('position').dataset.tone=stats.count?String(stats.rank):'';
+  el('position').title='按有效日频成交额占比判断自身历史位置。';
+  el('basis').textContent=stats.count?`近 ${years} 年 · 历史分位 ${stats.percentile.toFixed(1)}%`:'暂无有效分位';
+  el('history-summary').textContent=stats.count?`历史：当前高于近 ${years} 年 ${stats.percentile.toFixed(1)}% 的日样本（${stats.count} 个）；切换展示频率和叠加指数不改变分位。`:`历史：近 ${years} 年暂无可用的拥挤度数据。`;
+  el('comparison').textContent='按所选指数／行业的成交额占全市场比例判断自身历史位置，不代表后续指数涨跌。'+(std&&stats.count?` 均值 ${format(stats.mean)}，总体标准差 ${format(stats.stddev)}。`:'');
+  const colors=['#ed8180','#f4b560','#6ac9aa'];
+  ['high','median','low'].forEach((id,i)=>{el(id).textContent=format(levels[i]);el(id+'-label').textContent=std?['上限（均值 +1σ）','均值','下限（均值 −1σ）'][i]:['高拥挤（80% 分位）','中值（50% 分位）','低拥挤（20% 分位）'][i];});
+  el('high-dot').style.background=colors[0];el('low-dot').style.background=colors[2];el('negative-note').textContent='';
+  el('definition').textContent=crowdingData?.available?`数据来源：${providers[crowdingData.provider]||crowdingData.provider} · 日频成交额占比。`+(crowdingData.provider==='csindex'?'宽基占比为本地估算：指数成交额 ÷ 同日全 A 成交额 × 100%；优先使用 Legu，2026-07-31 至 08-27 的缺值使用已有 BigQuant 汇总补齐，来源口径可能存在差异。':'申万 bargainsumrate 来源占比原值；分母细分统计口径未进一步披露。'):'';
+  el('methodology').textContent='拥挤度读取指数点位表 amount_ratio（百分数）；与大盘前5%个股集中度的定义不同。有效零值保留、缺值留空，按区间全部有效日样本计算分位，参考线为80%/50%/20%分位或均值±总体标准差。周／月展示取周期最后已记录日，缺值不以前值填充。';
+  const frequency=el('frequency').value==='auto'?'day':el('frequency').value,periods=new Map();
+  for(const row of rows)periods.set(periodKey(row.observation_date,frequency),row);
+  const shown=[...periods.values()],traces=[{x:shown.map(r=>r.observation_date),y:shown.map(r=>r.amount_ratio),type:'scatter',mode:'lines',name:'拥挤度',line:{color:'#66aaf0',width:2},connectgaps:false,hovertemplate:'拥挤度：%{y:.2f}%<extra></extra>'}];
+  if(pointOverlay&&rows.some(row=>row.close!=null))traces.push({x:shown.map(r=>r.observation_date),y:shown.map(r=>r.close),type:'scatter',mode:'lines',name:'指数点位',yaxis:'y2',line:{color:'#f4d35e',width:1.8},connectgaps:false,hovertemplate:'指数点位：%{y:.2f} 点<extra></extra>'});
+  el('point-overlay').setAttribute('aria-pressed',String(pointOverlay));el('point-overlay-note').hidden=!pointOverlay;el('point-overlay-note').textContent='点位使用拥挤度同一来源序列的真实收盘值，缺值留空。';
+  Plotly.react('chart',traces,{paper_bgcolor:'#1a2429',plot_bgcolor:'#1a2429',font:{color:'#edf4f4'},uirevision:JSON.stringify([el('code').value,'crowding',years,frequency]),margin:{l:65,r:pointOverlay?85:25,t:20,b:76},hovermode:'x unified',legend:{orientation:'h',x:.5,xanchor:'center',y:-.2},xaxis:{type:'date',gridcolor:'#30434d',tickformat:'%Y-%m',hoverformat:'%Y-%m-%d',range:[lower,upper]},yaxis:{title:{text:'拥挤度（%）'},ticksuffix:'%',gridcolor:'#30434d'},yaxis2:{title:{text:'指数点位'},overlaying:'y',side:'right',showgrid:false,tickfont:{color:'#f4d35e'}},shapes:levels.flatMap((value,i)=>!Number.isFinite(value)?[]:[{type:'line',xref:'paper',yref:'y',x0:0,x1:1,y0:value,y1:value,line:{color:colors[i],dash:'dash',width:1.5}}]),annotations:stats.count?[]:[{text:'所选区间暂无本地拥挤度数据',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false}]},{responsive:true,displaylogo:false});
+}
+
 async function load(refreshChoices=true){try{const status=await api('/api/indices/status');if(!refreshChoices&&data&&status.operations.some(operation=>operation.status==='running')){data.operations=status.operations;data.cooldowns=status.cooldowns;renderStatus();return;}const changed=!data||data.revision!==status.revision;if(refreshChoices||changed){const catalog=await api('/api/indices/catalog');if(!data||catalog.revision!==data.revision)clearChartCache();data={...catalog,...status,revision:catalog.revision};renderStatus();renderParents();renderCodes();}else{Object.assign(data,status);renderStatus();}}catch(error){el('progress').textContent=error.message;}}
 // Refresh versions when returning to a tab; status polling never reads all history.
 document.addEventListener('visibilitychange',()=>{clearTimeout(timer);timer=null;if(!document.hidden)load(false);});
@@ -108,7 +155,7 @@ window.addEventListener('focus',()=>load(false));
 const notifyCollection=()=>document.dispatchEvent(new CustomEvent('index-collection-change',{detail:{source:'indices'}}));
 document.addEventListener('index-collection-change',event=>{if(event.detail?.source!=='indices')load(false);});
 async function collect(mode){try{await api('/api/indices/collect',{mode});notifyCollection();await load(false);}catch(error){el('progress').textContent=error.message;}}
-el('full').onclick=()=>collect('full');el('incremental').onclick=()=>collect('incremental');el('review').onclick=()=>collect('review');el('audit').onclick=()=>collect('audit');el('cancel').onclick=async()=>{try{await api('/api/indices/cancel',{});el('progress').textContent='已请求停止，等待当前请求返回后保存进度';}catch(error){el('progress').textContent=error.message;}};el('point-overlay').onclick=()=>{pointOverlay=!pointOverlay;el('point-overlay').setAttribute('aria-pressed',String(pointOverlay));if(pointOverlay&&(!pointData||pointCode!==el('code').value))loadPointOverlay(el('code').value);else draw();};
+el('full').onclick=()=>collect('full');el('incremental').onclick=()=>collect('incremental');el('review').onclick=()=>collect('review');el('audit').onclick=()=>collect('audit');el('cancel').onclick=async()=>{try{await api('/api/indices/cancel',{});el('progress').textContent='已请求停止，等待当前请求返回后保存进度';}catch(error){el('progress').textContent=error.message;}};el('point-overlay').onclick=()=>{pointOverlay=!pointOverlay;if(metricFamily==='crowding'){draw();return;}el('point-overlay').setAttribute('aria-pressed',String(pointOverlay));if(pointOverlay&&(!pointData||pointCode!==el('code').value))loadPointOverlay(el('code').value);else draw();};
 el('progress-toggle').onclick=()=>{const details=el('progress-details'),expanded=details.hidden;details.hidden=!expanded;el('progress-toggle').setAttribute('aria-expanded',String(expanded));el('progress-toggle').textContent=expanded?'收起进度':'查看进度';};
 el('kind').onchange=renderCodes;el('parent').onchange=()=>{el('industry-second').value='';renderCodes();};el('industry-second').onchange=renderCodes;el('code').onchange=()=>{const selected=data.catalog.find(row=>row.index_code===el('code').value);renderMetricButtons();renderSeries(true);updateSelectedIndex(selected);};el('series').onchange=loadHistory;for(const id of ['range','benchmark','frequency'])el(id).onchange=draw;el('metric').onchange=draw;
 const stock=new URLSearchParams(location.search).get('stock');for(const link of document.querySelectorAll('[data-view]')){const params=new URLSearchParams({tab:link.dataset.view});if(stock&&/^(?:sh|sz|bj)?\d{6}$/i.test(stock))params.set('code',stock);link.href='/?'+params;}

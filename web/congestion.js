@@ -55,6 +55,7 @@
       high:quantile(.8),median:quantile(.5),low:quantile(.2),mean,stddev,stddevHigh:mean+stddev,stddevLow:mean-stddev};
   }
   if(typeof module!=='undefined'&&module.exports)module.exports={periodKey,chartSeries,leguCloseOverlay,dailyStatistics};
+  if(typeof window!=='undefined')window.CongestionStats={periodKey,dailyStatistics};
   if(typeof document==='undefined')return;
   const el=id=>document.getElementById('congestion-'+id);
   const leguCloseKey='legu:congestion-close';
