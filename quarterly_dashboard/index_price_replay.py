@@ -5,9 +5,9 @@ from pathlib import Path
 import re
 from uuid import uuid4
 
-from .collection import begin_batch, encoded, atomic_write, read_source, finish_batch
+from .collection import begin_batch, encoded, atomic_write, read_source, finish_batch, Cancelled
 from .index_collection import IndexCollector, publish_segment, start_operation
-from .index_prices import parse_prices, VERSION
+from .index_prices import parse_prices, version_for
 from .index_repository import catalog
 from .storage import Database, DEFAULT_DATABASE, instance_lock, utc_now
 
@@ -41,6 +41,12 @@ def replay(db, *, start='2016-10-11', end='2026-10-09', report_path=None):
     with instance_lock(db.path.parent/'collection_sources'/'index-operation'):
         operation=start_operation(db,'backfill',start=start,end=end)
         report['operation_id']=operation
+        def cancelled():
+            with db.connection() as conn:
+                row=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+            return not row or bool(row[0])
+        def check_cancelled():
+            if cancelled(): raise Cancelled('点位回放收到取消请求；已发布分段保留')
         try:
             with db.connection() as conn:
                 batches=[dict(r) for r in conn.execute('SELECT * FROM collection_batches WHERE status=\'complete\' AND dataset IN ('+
@@ -55,13 +61,17 @@ def replay(db, *, start='2016-10-11', end='2026-10-09', report_path=None):
             js=MiniRacer()
             js.eval((Path(__file__).parent/'resources/sina_index_history.js').read_text(encoding='utf-8'))
             for original_batch in batches:
+                check_cancelled()
                 original_id=original_batch['id']
                 provider,key,code_key,date_key=DATASETS[original_batch['dataset']]
                 begin=max(start,original_batch['scope_start'] or start)
                 finish=min(end,original_batch['scope_end'] or end)
                 if begin>finish:
                     continue
-                idempotency=encoded(dict(original_batch=original_id,start=begin,end=finish,parser='points-v1',definition=VERSION))
+                point_version=version_for(*({'index.cs.history':('csindex','history.points'),'index.sw.analysis':('sws','analysis.points'),
+                    'index.legu.pe':('legu','pe.points'),'index.legu.pb':('legu','pb.points'),
+                    'index.price.range_probe':('sina','history.points')}[original_batch['dataset']]))
+                idempotency=encoded(dict(original_batch=original_id,start=begin,end=finish,parser='points-'+point_version,definition=point_version))
                 with db.connection() as conn:
                     completed=conn.execute("SELECT id FROM collection_batches WHERE dataset='index.points.replay' AND source_system=? AND idempotency_key=? AND status='complete'",(provider,idempotency)).fetchone()
                     source_ids=[r[0] for r in conn.execute('SELECT s.id FROM collection_sources s WHERE s.batch_id=? AND s.parse_status=\'complete\' '
@@ -72,14 +82,18 @@ def replay(db, *, start='2016-10-11', end='2026-10-09', report_path=None):
                     continue
                 batch=begin_batch(db,operation,'index.points.replay',provider,begin,finish,
                     scope=dict(original_batch=original_id,original_dataset=original_batch['dataset']),
-                    frequency='monthly' if provider=='legu' else 'daily',trigger='backfill',idempotency_key=idempotency)
+                    frequency='monthly' if provider=='legu' else 'daily',trigger='backfill',idempotency_key=idempotency,
+                    parser_version='points-'+point_version,definition_version=point_version)
                 with db.connection(write=True) as conn:
-                    conn.execute('UPDATE collection_batches SET parser_version=? WHERE id=?',('index-points-v1',batch))
+                    conn.execute('UPDATE collection_batches SET parser_version=? WHERE id=?',('index-points-'+point_version,batch))
                 all_prices,anomalies,totals,seen=[],[],[],set()
+                page_lengths=[];page_numbers=[];page_sizes=[];index_types=[]
+                original_scope=json.loads(original_batch['scope_json'] or '{}')
                 try:
                     if not source_ids:
                         raise ValueError('成功批次缺少可校验的原始来源')
                     for original_source in source_ids:
+                        check_cancelled()
                         raw,source=read_source(db,original_source)
                         if source['source_system']!=provider:
                             raise ValueError('原始提供方与数据集不匹配')
@@ -96,13 +110,30 @@ def replay(db, *, start='2016-10-11', end='2026-10-09', report_path=None):
                             if str(payload.get('code','200')) not in ('200','0') or payload.get('success') is False:
                                 raise ValueError('缓存业务状态不是成功')
                             data=payload['data']
-                            if provider=='sws':
+                            if provider=='csindex':
+                                params=request.get('params') or {}
+                                if (params.get('indexCode')!=original_scope.get('code') or not params.get('startDate') or not params.get('endDate')
+                                    or day(params['startDate'])>begin or day(params['endDate'])<finish):
+                                    raise ValueError('中证缓存实际请求代码／范围与回放范围不匹配')
+                                rows=data;expected=params['indexCode']
+                            elif provider=='sws':
                                 rows=data['results'];totals.append(data['count'])
+                                params=request.get('params') or {}
+                                if (type(params.get('page')) is not int or params['page']<1 or type(params.get('page_size')) is not int
+                                    or params['page_size']<1 or params['page_size']>500):
+                                    raise ValueError('申万缓存缺少可核验页号／页容量')
+                                if params.get('type')!='DAY' or params.get('swindexcode')!='all':
+                                    raise ValueError('申万缓存请求类型／指数范围与回放要求不匹配')
+                                if (not params.get('start_date') or not params.get('end_date')
+                                    or day(params['start_date'])>begin or day(params['end_date'])<finish):
+                                    raise ValueError('申万缓存实际请求范围与回放范围不匹配')
+                                page_numbers.append(params['page']);page_sizes.append(params['page_size']);page_lengths.append(len(rows))
+                                index_types.append(params.get('index_type'))
                             elif provider=='legu':
                                 expected=request['params']['indexCode']
                                 rows=[{**r,'_code':expected} for r in data]
                             else:
-                                rows=data;expected=request['params']['indexCode']
+                                raise ValueError('未支持的行情归档提供方')
                         if not isinstance(rows,list):
                             raise ValueError('原始响应缺少记录列表')
                         for row in rows:
@@ -120,20 +151,30 @@ def replay(db, *, start='2016-10-11', end='2026-10-09', report_path=None):
                                     raise ValueError('新浪点位没有现有指数目录身份')
                                 catalog(conn,current['index_code'],current['name'],current['index_type'],provider='sina',provider_code=symbol,source_id=sid)
                         all_prices+=points;anomalies+=bad
-                    if provider=='sws' and (len(set(totals))!=1 or len(seen)!=totals[0]):
-                        raise ValueError('申万缓存分页数量不完整或总数不一致')
+                    if provider=='sws':
+                        scope=json.loads(original_batch['scope_json'] or '{}')
+                        labels={1:'一级行业',2:'二级行业'}
+                        if scope.get('level') not in (1,2) or set(index_types)!={labels[scope['level']]}:
+                            raise ValueError('申万原批次没有明确层级，不能作为完整回放分段')
+                        if (len(set(totals))!=1 or len(seen)!=totals[0] or len(set(page_sizes))!=1
+                            or sorted(page_numbers)!=list(range(1,len(page_numbers)+1))):
+                            raise ValueError('申万缓存分页数量、页号或层级不完整')
+                        size=page_sizes[0]
+                        if any(length!=min(size,max(totals[0]-(page-1)*size,0)) for page,length in zip(page_numbers,page_lengths)):
+                            raise ValueError('申万缓存页长与总数不符')
                     result=publish_segment(db,batch,[],[],dict(original_batch=original_id,network_requests=0,
                         raw_rows=len(seen),price_anomalies=anomalies),prices=all_prices,coverage='unknown' if all_prices else 'empty',
-                        compact_index_coverage=provider=='sws')
+                        compact_index_coverage=provider=='sws',check_cancelled=check_cancelled)
                     report['results'].append(dict(batch_id=batch,provider=provider,**result))
                 except Exception as exc:
                     with db.connection() as conn:
                         previous=json.loads(conn.execute('SELECT result_json FROM collection_batches WHERE id=?',(batch,)).fetchone()[0])
-                    finish_batch(db,batch,'failed','partial' if any(previous.get('price_counts',{}).values()) else 'unknown',result=previous,error=exc)
+                    finish_batch(db,batch,'cancelled' if isinstance(exc,Cancelled) else 'failed',
+                        'partial' if any(previous.get('price_counts',{}).values()) else 'unknown',result=previous,error=exc)
                     raise
             report['status']='complete'
         except BaseException as exc:
-            report.update(status='failed',error=str(exc))
+            report.update(status='cancelled' if isinstance(exc,Cancelled) else 'failed',error=str(exc))
             raise
         finally:
             with db.connection(write=True) as conn:

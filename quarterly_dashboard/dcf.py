@@ -211,7 +211,7 @@ def build_auto_wacc(db, code, *, years=5, as_of=None):
                 "SELECT p.trade_date,p.close FROM adjusted_daily_prices p JOIN adjusted_price_versions v ON v.id=p.version_id "
                 "JOIN sync_state s ON s.active_price_version_id=v.id WHERE v.instrument_id=? AND v.status='complete' "
                 "AND p.trade_date BETWEEN ? AND ? ORDER BY p.trade_date",(identity,start,as_of))]
-    market=read_index_prices(db,index_code='cn:000300',provider='csindex',series_key='history.points',frequency='daily',return_type='unspecified',start=(date.fromisoformat(as_of)-timedelta(days=365*years)).isoformat(),end=as_of)
+    market=read_index_prices(db,index_code='cn:000300',provider='csindex',series_key='history.points',frequency='daily',return_type='unspecified',start=(date.fromisoformat(as_of)-timedelta(days=365*years)).isoformat(),end=as_of,fields=('close',))
     beta=calculate_beta(stock,market,years=years,as_of=as_of)
     beta.update(source='个股 adjusted_daily_prices + index_price_observations(csindex 沪深300)',as_of_date=beta.get('end'),
                 method=beta.get('method','已有价格不足或指数序列缺失'),status=beta.get('status','unavailable'))

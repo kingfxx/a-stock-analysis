@@ -3,7 +3,7 @@
 - 已在`index_collection.py`增加operation.result_json中的结构化`work_progress`，覆盖总计和中证/乐咕/申万各源工作项；用事务短写、状态账本处理并行worker增量，成功只在校验发布后计入，跳过、失败、取消、待执行、进行中分开记录。
 - 交易日历和范围确认后，按本地代码集合、增量水位和交易日一次性预登记分母，再开始来源任务。CS候选复用预规划快照；CS历史按指数计项，看板和近期XLS各一项；乐咕按指数/PE-PB计项；申万按月份/级别计项。分页、重试、cookie初始化不计额外工作项。
 - 指数页新增默认收起的“查看进度”按钮及总体/来源明细，展开后显示成功数、总项数、跳过/失败/已停止/待执行/进行中及当前说明；折叠状态由用户控制，轮询不改变。顶层状态简洁中文，不显示原始JSON/英文cancelled；旧操作明确显示未记录进度及中文摘要。
-- 页面静态限速说明改为本轮已授权的指数策略；`docs/index-valuation-collection.md`补充进度计数单位及其与覆盖率的区别。
+- 页面静态限速说明改为本轮已授权的指数策略；`docs/index-valuation-collection.md`补充进度计数单位及其与覆盖率的区别。该说明已合并至[统一指数采集说明](../../index-data-collection.md)。
 - 隔离验证：backend新测试与并发评审目标 15 passed；新浏览器折叠/轮询测试 1 passed；公共采集、指数并发、进度和`test_index_ui.py`组合回归 110 passed in 53.28s。Sol新增`tests/test_index_progress_review.py`的3项真实工作流模拟也已通过。Python编译、Node语法检查和`git diff --check`通过。
 - 无真实采集、未调用采集按钮、不重启8765、不提交；待Sol最终审查与部署。
 

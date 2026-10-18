@@ -31,6 +31,15 @@ class Clock:
     def sleep(self,seconds):self.now+=seconds
 
 
+@pytest.mark.parametrize(('status','mode','valuation_batches','derived','expected'),[
+    ('complete','incremental',0,{'status':'current'},'日期已最新，未请求估值接口'),
+    ('complete','incremental',0,{'status':'partial','pending_dates':['2026-10-08','2026-10-09']},'日期已最新，未请求估值接口；原始采集完成，派生待补 2 个日期'),
+    ('failed','full',1,{'status':'partial','pending_dates':['2026-10-09']},'指数采集failed'),
+])
+def test_operation_message_keeps_raw_status_and_reports_derived_pending(status,mode,valuation_batches,derived,expected):
+    assert ic._operation_message(status,mode,valuation_batches,derived)==expected
+
+
 def response(payload=None,status=200,headers=None,body=None):
     result=requests.Response()
     result.status_code=status

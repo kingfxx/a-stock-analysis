@@ -851,6 +851,17 @@ class IndexCollector:
         return row is not None
 
 
+def _operation_message(status, mode, valuation_batches, derived_result):
+    message='日期已最新，未请求估值接口' if status=='complete' and mode=='incremental' and not valuation_batches else '指数采集'+status
+    if status=='complete' and derived_result.get('status') in ('pending','partial','failed'):
+        dates=derived_result.get('pending_dates') or []
+        if dates:
+            message+=f'；原始采集完成，派生待补 {len(dates)} 个日期'
+        else:
+            message+='；原始采集完成，派生计算待处理'
+    return message
+
+
 def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None,end=None):
     if mode not in ('full','incremental','backfill','audit','review') or not isinstance(providers,(list,tuple)) or not providers or not set(providers)<= {'csindex','legu','sws'}:
         raise ValueError('指数采集模式／来源无效')
@@ -894,6 +905,9 @@ def run_operation(db,operation,*,collector=None):
     try:collector.task_progress=tracker
     except (AttributeError,TypeError):pass
     errors={}
+    derived_result={'status':'pending','facts':0,'network_requests':0}
+    dependency_result={'status':'pending','network_requests':0}
+    derive_through=None
     status='complete'
     try:
         with instance_lock(db.path.parent/'collection_sources'/'index-operation'):
@@ -917,6 +931,19 @@ def run_operation(db,operation,*,collector=None):
                     start,end=candidates[audit_number%len(candidates)]
             if start>end:
                 raise ValueError('滚动窗口没有已完成交易日')
+            derive_through=end
+            try:
+                from .market_congestion import prepare_index_dependency
+                def dependency_cancelled():
+                    with db.connection() as conn:
+                        item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                    return not item or bool(item[0])
+                dependency_result=prepare_index_dependency(db,operation,end,dependency_cancelled)
+            except Cancelled:
+                raise
+            except Exception as exc:
+                dependency_result={'status':'failed','network_requests':0,'error':str(exc)}
+            collector.http.requests+=dependency_result.get('network_requests',0)
             progress(f'指数采集范围 {start}—{end}；主题指数未纳入')
             legu_plan_start=start
             if row['mode'] in ('incremental','review') and not scope['start']:
@@ -984,9 +1011,27 @@ def run_operation(db,operation,*,collector=None):
                 if cancelled:
                     raise Cancelled('用户取消采集；已发布分段保留')
             with db.connection() as conn:
-                failed=conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND status='failed'",(operation,)).fetchone()[0]
+                failed=conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND status='failed' "
+                    "AND dataset NOT IN ('index.price.derived','market.legu.congestion.page')",(operation,)).fetchone()[0]
             if errors or failed:
                 status='failed'
+            try:
+                from .index_price_derived import recompute
+                def derivation_cancelled():
+                    with db.connection() as conn:
+                        item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                    return not item or bool(item[0])
+                with db.connection() as conn:
+                    affected_start=conn.execute("SELECT min(scope_start) FROM collection_batches WHERE operation_id=? "
+                        "AND status='complete' AND dataset IN ('index.cs.history','index.sw.analysis')",(operation,)).fetchone()[0]
+                # Tail catch-up can extend before the default ten-day review window.
+                estimate_start=min(d for d in (start,affected_start,dependency_result.get('first')) if d)
+                derived_result=recompute(db,operation,start=estimate_start,through=derive_through,cancelled=derivation_cancelled)
+            except Cancelled:
+                raise
+            except Exception as exc:
+                # A failed local estimate never rolls back already committed provider fields.
+                derived_result={'status':'failed','facts':0,'network_requests':0,'error':str(exc)}
     except Cancelled as exc:
         status='cancelled'
         errors['operation']=str(exc)
@@ -999,11 +1044,12 @@ def run_operation(db,operation,*,collector=None):
         progress_result=json.loads(current[0]) if current and current[0] else {}
         totals=[dict(r) for r in conn.execute('SELECT status,coverage_status,count(*) AS batches FROM collection_batches WHERE operation_id=? '
                                             'GROUP BY status,coverage_status',(operation,))]
-        valuation_batches=conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND dataset<>'index.calendar'",(operation,)).fetchone()[0]
+        valuation_batches=conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND dataset NOT IN "
+            "('index.calendar','index.price.derived','market.legu.congestion.page')",(operation,)).fetchone()[0]
         conn.execute('UPDATE index_collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
-            (status,utc_now(),encoded(dict(message='日期已最新，未请求估值接口' if status=='complete' and row['mode']=='incremental' and not valuation_batches else '指数采集'+status,
+            (status,utc_now(),encoded(dict(message=_operation_message(status,row['mode'],valuation_batches,derived_result),
                 providers=progress_result.get('providers',{}),work_progress=progress_result.get('work_progress'),
-                batches=totals,errors=errors,**collector.http.report())),
+                batches=totals,errors=errors,derived=derived_result,dependency=dependency_result,**collector.http.report())),
              encoded(errors) if errors else None,operation))
     report=db.path.parent/'verification'/'reports'/('index-collection-'+operation+'.json')
     with db.connection() as conn:

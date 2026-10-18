@@ -1,0 +1,27 @@
+-- Rebuild price rows losslessly; filled and renamed by the migration hook.
+CREATE TABLE index_price_observations_compact (
+ id INTEGER PRIMARY KEY, series_id INTEGER NOT NULL REFERENCES index_price_series(id),
+ observation_date INTEGER NOT NULL CHECK(typeof(observation_date)='integer'),
+ open REAL CHECK(open IS NULL OR open>0), high REAL CHECK(high IS NULL OR high>0),
+ low REAL CHECK(low IS NULL OR low>0), close REAL CHECK(close IS NULL OR close>0),
+ withdrawal_reason TEXT, content_hash BLOB NOT NULL CHECK(typeof(content_hash)='blob' AND length(content_hash)=32),
+ version INTEGER NOT NULL CHECK(version>0),
+ source_id INTEGER NOT NULL REFERENCES collection_sources(id),
+ updated_at INTEGER NOT NULL,
+ volume REAL CHECK(volume IS NULL OR volume>=0),
+ amount REAL CHECK(amount IS NULL OR amount>=0),
+ change_points REAL,
+ change_pct REAL,
+ turnover_rate REAL CHECK(turnover_rate IS NULL OR turnover_rate>=0),
+ amount_ratio REAL CHECK(amount_ratio IS NULL OR (amount_ratio>=0 AND amount_ratio<=100)),
+ constituent_count INTEGER CHECK(constituent_count IS NULL OR (typeof(constituent_count)='integer' AND constituent_count>=0)),
+ mean_price REAL CHECK(mean_price IS NULL OR mean_price>=0),
+ float_market_cap REAL CHECK(float_market_cap IS NULL OR float_market_cap>=0),
+ mean_float_market_cap REAL CHECK(mean_float_market_cap IS NULL OR mean_float_market_cap>=0),
+ field_lineage_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(field_lineage_json)),
+ CHECK(high IS NULL OR low IS NULL OR high>=low),
+ CHECK(high IS NULL OR close IS NULL OR high>=close),
+ CHECK(low IS NULL OR close IS NULL OR low<=close),
+ CHECK(high IS NULL OR open IS NULL OR high>=open),
+ CHECK(low IS NULL OR open IS NULL OR low<=open)
+);

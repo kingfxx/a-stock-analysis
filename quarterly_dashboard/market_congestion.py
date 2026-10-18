@@ -209,6 +209,66 @@ def initialized(conn):
                             'AND is_latest=1 AND value IS NOT NULL LIMIT 1',identity(ch)).fetchone() for ch in DATASETS)
 
 
+def prepare_index_dependency(db, operation_id, target_date, cancelled=lambda:False):
+    """One metadata-only HTML check inside an existing index operation's lock."""
+    from .collection import begin_batch, finish_batch, parsed_source
+    with db.connection() as conn:
+        existing=conn.execute("SELECT total_amount_yi FROM market_indicator_observations WHERE indicator_key='ashares_congestion' "
+            "AND scope_key='all_a' AND provider='legu' AND definition_version='v1' AND observation_date=? AND is_latest=1 "
+            "AND channel IN ('html_recent_table','api_history') ORDER BY CASE channel WHEN 'html_recent_table' THEN 0 ELSE 1 END",
+            (target_date,)).fetchall()
+        if any(r['total_amount_yi'] is not None and math.isfinite(float(r['total_amount_yi'])) and r['total_amount_yi']>0 for r in existing):
+            return {'status':'reused','target_date':target_date,'network_requests':0}
+        if not initialized(conn):
+            return {'status':'not_initialized','target_date':target_date,'network_requests':0}
+        schedule=conn.execute('SELECT enabled FROM collection_schedules WHERE task_key=?',(TASK,)).fetchone()
+        if schedule and not schedule['enabled']:
+            return {'status':'paused','target_date':target_date,'network_requests':0}
+        schedule_row=conn.execute('SELECT local_time FROM collection_schedules WHERE task_key=?',(TASK,)).fetchone()
+        threshold=schedule_row['local_time'] if schedule_row else '18:00'
+        now_local=local_now()
+        checks=conn.execute("SELECT b.started_at,b.trigger_type FROM collection_batches b WHERE b.dataset=? AND b.source_system='legu' "
+            "AND b.status IN ('complete','failed','cancelled') AND b.trigger_type IN ('manual','scheduled','index_dependency') "
+            "AND substr(datetime(b.started_at,'+8 hours'),1,10)=? "
+            "AND (b.trigger_type<>'index_dependency' OR json_extract(b.scope_json,'$.purpose')='index_derivation_dependency') "
+            "ORDER BY b.id DESC",(DATASETS['html_recent_table'],now_local.date().isoformat())).fetchall()
+        for prior in checks:
+            checked_at=datetime.fromisoformat(prior['started_at']).astimezone(ZONE)
+            if now_local.strftime('%H:%M')<threshold or checked_at.strftime('%H:%M')>=threshold:
+                return {'status':'already_checked','target_date':target_date,'network_requests':0,
+                    'reused_check_trigger':prior['trigger_type'],'checked_at':prior['started_at']}
+    batch=begin_batch(db,operation_id,DATASETS['html_recent_table'],'legu',target_date,target_date,
+        scope={'channel':'html_recent_table','range':'all_returned','evidence_mode':'metadata_only','purpose':'index_derivation_dependency'},
+        frequency='daily',trigger='index_dependency',parser_version='congestion-v1',definition_version='v1')
+    source=None
+    http=RequestCollector(db,policy=PacingPolicy(max_attempts=1),cancelled=cancelled)
+    try:
+        response,source=http.get(batch,'legu',DATASETS['html_recent_table'],PAGE,expect='html',evidence_mode='metadata_only',
+            recovery_token='congestion-'+operation_id,
+            healthy_response=lambda r: RECOVERY_PENDING if parse_html(r.text) else False)
+        rows=parse_html(response.text)
+        http.check_cancelled()
+        parsed_source(db,source,fields=['date',*VALUE_FIELDS])
+        with db.connection(write=True) as conn:
+            counts=publish(conn,rows,'html_recent_table',batch,source)
+        finish_batch(db,batch,'complete','partial' if counts['withheld_dates'] else 'unknown',
+            result={'network_requests':1,'dependency_target':target_date,**counts})
+        if http.state('legu').get('reason')=='recovery_pending:congestion-'+operation_id:
+            http.confirm_recovery('legu','congestion-'+operation_id)
+        exact=next((r for r in rows if r['observation_date']==target_date and r['total_amount_yi'] is not None and r['total_amount_yi']>0),None)
+        return {'status':'available' if exact else 'html_not_updated','target_date':target_date,'network_requests':1,
+            'rows':len(rows),'source_id':source,
+            'first':min(r['observation_date'] for r in rows),'last':max(r['observation_date'] for r in rows)}
+    except Exception as exc:
+        if source is not None: parsed_source(db,source,error=exc)
+        finish_batch(db,batch,'cancelled' if isinstance(exc,Cancelled) else 'failed','unknown',error=exc)
+        if isinstance(exc,Cancelled): raise
+        return {'status':'failed','target_date':target_date,
+            'network_requests':http.requests,'error':str(exc)}
+    finally:
+        http.session.close()
+
+
 def configure(db, command):
     if not isinstance(command,dict) or set(command)-{'enabled','local_time'}:
         raise ValueError('每日检查配置参数无效')
@@ -337,6 +397,16 @@ def run(db, operation, *, http=None):
             with db.connection(write=True) as conn:
                 if initialized(conn):
                     conn.execute('INSERT OR IGNORE INTO collection_schedules VALUES(?,?,?,?,?)',(TASK,1,'Asia/Shanghai','18:00',utc_now()))
+            try:
+                from .index_price_derived import recompute
+                latest=max((item.get('last') for item in completed if item.get('last')),default=None)
+                earliest=min((item.get('first') for item in completed if item.get('first')),default=latest)
+                derived_result=recompute(db,operation,start=earliest,through=latest,cancelled=cancelled) if completed else {'status':'current','facts':0,'network_requests':0}
+            except Cancelled:
+                raise
+            except Exception as exc:
+                # Keep the source refresh successful; local estimates can be retried independently.
+                derived_result={'status':'failed','facts':0,'network_requests':0,'error':str(exc)}
     except Exception as exc:
         status='cancelled' if isinstance(exc,Cancelled) else 'failed';error=str(exc)
         if batch is not None:
@@ -352,7 +422,8 @@ def run(db, operation, *, http=None):
         with db.connection(write=True) as conn:
             current=json.loads(conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
             current.update(message='大盘拥挤度：'+('检查完成，缺值保留' if status=='complete' else error or status),
-                           channels=completed,errors={'legu':error} if error else {})
+                           channels=completed,derived=locals().get('derived_result',{'status':'pending','facts':0,'network_requests':0}),
+                           errors={'legu':error} if error else {})
             conn.execute('UPDATE index_collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
                          (status,utc_now(),encoded(current),error,operation))
         if owns:
@@ -389,8 +460,10 @@ def read(db, *, start=None, end=None, index_code='cn:000001'):
             # Keep explicit NULL closes rather than silently connecting across them.
             overlay['rows']=[dict(r) for r in conn.execute('SELECT f.observation_date,f.close FROM index_price_observations f '
                 'JOIN index_price_series s ON s.id=f.series_id WHERE s.index_code=? AND s.provider=? AND s.series_key=? '
-                'AND s.frequency=? AND s.return_type=? AND s.definition_version=? AND f.is_latest=1 ORDER BY f.observation_date',
+                'AND s.frequency=? AND s.return_type=? AND s.definition_version=? ORDER BY f.observation_date',
                 (index_code,overlay['provider'],overlay['series_key'],overlay['frequency'],overlay['return_type'],overlay['definition_version']))]
+        from .index_price_codec import decode_day
+        for item in overlay['rows']:item['observation_date']=decode_day(item['observation_date'])
         if overlay['frequency']=='monthly':
             overlay['rows']=list({r['observation_date'][:7]:r for r in overlay['rows']}.values())
     valid={r['observation_date'] for r in rows if r['value'] is not None}
@@ -435,7 +508,7 @@ def scheduled_tick(db, *, now=None, execute=run):
     with db.connection() as conn:
         blocked=conn.execute("SELECT cooldown_until,reason FROM collection_provider_state WHERE source_system='legu'").fetchone()
         manual=conn.execute("SELECT 1 FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE s.dataset=? "
-            "AND s.parse_status='complete' AND b.status='complete' AND b.trigger_type='manual' AND substr(datetime(s.obtained_at,'+8 hours'),1,10)=? "
+            "AND s.parse_status='complete' AND b.status='complete' AND b.trigger_type IN ('manual','scheduled','index_dependency') AND substr(datetime(s.obtained_at,'+8 hours'),1,10)=? "
             "AND strftime('%H:%M',s.obtained_at,'+8 hours')>=? LIMIT 1",
             (DATASETS['html_recent_table'],today,schedule['local_time'])).fetchone()
     cooling=blocked and blocked['cooldown_until'] and datetime.fromisoformat(blocked['cooldown_until'])>now

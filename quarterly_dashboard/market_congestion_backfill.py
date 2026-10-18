@@ -74,9 +74,12 @@ def prepare(db, folder=INPUT):
     if len(dates)!=20 or min(dates)!='2026-07-31' or max(dates)!='2026-08-27':raise ValueError('本次仅允许授权的20日范围')
     with db.connection() as conn:
         prices=[dict(r) for r in conn.execute('SELECT f.*,s.index_code,s.provider,s.series_key,s.frequency,s.return_type,s.definition_version '
-            'FROM index_price_observations f JOIN index_price_series s ON s.id=f.series_id WHERE '
+            'FROM index_price_observations_read f JOIN index_price_series s ON s.id=f.series_id WHERE '
             "s.index_code='cn:000001' AND s.provider='csindex' AND s.series_key='history.points' AND s.frequency='daily' "
-            "AND s.return_type='unspecified' AND s.definition_version='v1' AND f.is_latest=1 AND f.observation_date BETWEEN ? AND ? ORDER BY f.observation_date",(min(dates),max(dates)))]
+            "AND s.return_type='unspecified' AND s.definition_version=(SELECT CASE WHEN EXISTS(SELECT 1 FROM index_price_series v2 "
+            "WHERE v2.index_code=s.index_code AND v2.provider=s.provider AND v2.series_key=s.series_key "
+            "AND v2.frequency=s.frequency AND v2.return_type=s.return_type AND v2.definition_version='v2') "
+            "THEN 'v2' ELSE 'v1' END) AND f.is_latest=1 AND f.observation_date BETWEEN ? AND ? ORDER BY f.observation_date",(min(dates),max(dates)))]
     if len(prices)!=len(dates) or {p['observation_date'] for p in prices}!=set(dates):raise ValueError('上证日频点数未完整覆盖20日')
     rows,statistics=calculate(table.select(['date','instrument','amount','volume']).to_pylist(),{p['observation_date']:p['close'] for p in prices})
     actual_counts={r['date'].date().isoformat():{k:int(v) for k,v in r.items() if k!='date'} for r in counts.to_pylist()}
@@ -130,7 +133,7 @@ def apply(db, evidence, *, backup_path):
             parsed_source(db,source,fields=['observation_date',*congestion.VALUE_FIELDS])
             with db.connection(write=True) as conn:
                 for fact in evidence['price_facts']:
-                    current=conn.execute('SELECT content_hash,is_latest FROM index_price_observations WHERE id=?',(fact['id'],)).fetchone()
+                    current=conn.execute('SELECT content_hash,is_latest FROM index_price_observations_read WHERE id=?',(fact['id'],)).fetchone()
                     if not current or not current['is_latest'] or current['content_hash']!=fact['content_hash']:raise ValueError('准备后点位已修订，拒绝过期计算证据')
                 counts=publish_gaps(conn,rows,batch,source)
                 result=dict(status='complete',operation_id=operation,batch_id=batch,source_id=source,backup=str(backup_path),**counts)

@@ -8,7 +8,7 @@ v31未新增表，交易快照及市值View用途说明增加经停牌、股本�
 
 v30未新增表，交易快照用途扩展为东财原始值及独立历史合成口径，市值View优先级为东财、合成、旧同日值；维护页两项描述已同步。快照仍以真实 `obtained_at/updated_at` 识别时间，逻辑View显示「未记录」，不以交易日代替。详见[历史合成快照](data-sources/market-trade-snapshot-composite.md)。
 
-结构 v27 新增 `index_price_definitions / index_price_series / index_price_observations`，均归入「指数数据」。更新时间分别依据 `updated_at`、`created_at`、`updated_at, obtained_at`，不使用观察日；空表显示暂无数据。用途、大小和索引由维护统计自动发现。方案见[指数点位存储](index-price-storage.md)。
+结构 v27 新增 `index_price_definitions / index_price_series / index_price_observations`，均归入「指数数据」。更新时间分别依据 `updated_at`、`created_at`、`updated_at, obtained_at`，不使用观察日；空表显示暂无数据。v37只为既有点位事实增加10个可空交易字段，表用途、分类和时间依据不变。用途、大小和索引由维护统计自动发现。方案见[指数行情字段映射](index-data-collection.md#field-mapping)。
 
 经营判断复用 AI 任务和输入快照表；用途说明包含随结果保存的联网来源，更新时间继续使用任务/快照的实际写入时间。没有新增表。详见 [经营判断](business-judgment.md)。
 
@@ -18,7 +18,7 @@ v30未新增表，交易快照用途扩展为东财原始值及独立历史合�
 
 ## 统计内容与口径
 
-结构 v23/v24 的公共采集、指数目录／映射／定义／估值表和任务／冷却状态已登记为「指数数据」或「运行与配置」。时间依据只用真实采集／写入／批次时间，未知时间不以观察日补充；旧采集未迁移。详见[指数估值采集](index-valuation-collection.md)。
+结构 v23/v24 的公共采集、指数目录／映射／定义／估值表和任务／冷却状态已登记为「指数数据」或「运行与配置」。时间依据只用真实采集／写入／批次时间，未知时间不以观察日补充；旧采集未迁移。详见[指数估值采集](index-data-collection.md)。
 
 个股接入公共调度后继续复用三张公共采集表，不新增数据库表。个股 `collection_batches` 以 `domain=stock` 区分，`collection_sources` 记录逐次请求元数据；个股证据策略为 `metadata_only`，请求取得时间仍使用 `obtained_at`，原文路径、双哈希和字节数为空。批次与请求状态在维护统计中按真实更新时间字段识别，不能由报告期或交易日推算。共享 provider 预算／冷却在 `collection_provider_state`；详见[个股采集说明](stock-collection.md)。
 
@@ -40,7 +40,7 @@ v30未新增表，交易快照用途扩展为东财原始值及独立历史合�
 
 ## 新增表交付检查项
 
-v36：`market_indicator_observations`分类“市场指标”，保存市场指标/对象/来源通道/频率/定义版本、四项数值与修订，时间依据obtained_at及updated_at；`collection_schedules`分类“运行与配置”，只保存日程配置，时间依据updated_at。空表无数据时间，不能用观察日或每日设定时刻替代。公共来源metadata-only的空路径/哈希是授权策略，不是文件丢失；初始化归档仍需文件和双哈希。详情见[大盘拥挤度](market-congestion-collection.md)。
+v36：`market_indicator_observations`分类“市场指标”，保存市场指标/对象/来源通道/频率/定义版本、四项数值与修订，时间依据obtained_at及updated_at；`collection_schedules`分类“运行与配置”，只保存日程配置，时间依据updated_at。空表无数据时间，不能用观察日或每日设定时刻替代。公共来源metadata-only的空路径/哈希是授权策略，不是文件丢失；初始化归档仍需文件和双哈希。详情见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
 
 Schema v19 新增 `market_financial_performance`，保存全 A 股业绩指标接口 ALL 的 37 个字段，与三表使用统一来源、批次和版本规则；更新时间为 `obtained_at`/`updated_at`。历史采集只更新四张新业务表，不改旧 `sw_financial_facts`。采集进度沿用行业任务状态，页面读取不受影响。
 
@@ -131,4 +131,14 @@ Schema v16 新增 `stock_cleanup_runs`，保存清理范围和结果（兼容字
 
 ### 指数读取版本（v26）
 
-`index_read_revisions` 登记为指数数据及缓存失效版本用途，正常固定为1条记录。维护统计自动显示大小、记录数，更新时间依据 `updated_at`，记录实际初始化或相关触发器写入时间；版本号不代表观察条数。空表更新时间显示未记录。只有指数估值、序列、目录、定义和申万行业关系写入会递增；其他业务表及采集进度不影响该版本。事务回滚同时回滚版本变化。
+`index_read_revisions` 登记为指数数据及缓存失效版本用途，正常固定为1条记录。维护统计自动显示大小、记录数，更新时间依据 `updated_at`，记录实际初始化或相关触发器写入时间；版本号不代表观察条数。空表更新时间显示未记录。指数估值及点位事实、序列、目录、定义和申万行业关系写入会递增；其他业务表及采集进度不影响该版本。事务回滚同时回滚版本变化。
+
+## v37 行情单份存储
+
+index_price_observations每序列/日期仅一行，version为更新计数；field_lineage_json保留字段原出处和同行估算依赖/计算时间。维护统计仍使用obtained_at/updated_at（真实取得/写入），不以交易日或估算父日期代替。定义迁移后新库有5项行情定义，因此定义表不再为空；series和行情空表时间仍未记录。定向审计范围及命令见[统一指数说明](index-data-collection.md#maintenance-and-acceptance)。
+
+## v38 紧凑行情与逻辑视图
+
+物理行情表23列，索引2项，BLOB存完整hash、观察日存整数日，来源批次/取得时间从source_id关联恢复。`index_price_observations_read`只读视图不另存业务数据，分类和用途已登记。两个对象的table_time专门从物理表分开取整数/文本updated_at最大值，并与关联collection_sources.obtained_at按真实时间比较，最后返回原ISO字符串；空表返回无数据，观察日不参与。不能直接把整数微秒显示为日期字符串或以报告日代替更新时间。
+
+数据库检查验证紧凑hash/日期/协议版本等格式，原v37备份保持可校验并在恢复副本上升级。源码的v37迁移不改；v38转换失败整笔schema事务回滚。实际释放空间须持实例锁VACUUM；本次不清理正式备份/来源。

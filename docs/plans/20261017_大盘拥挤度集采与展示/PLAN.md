@@ -1,6 +1,6 @@
 # 大盘拥挤度集采与指数页展示
 
-状态：2026-10-17已实现并上线主机8765，schema v36；已完成初次导入并启用每日18:00 HTML检查。实现说明见docs/market-congestion-collection.md，验收记录见本目录PROGRESS.md。
+状态：2026-10-17已实现并上线主机8765，schema v36；已完成初次导入并启用每日18:00 HTML检查。实现说明原见docs/market-congestion-collection.md，现已合并至[统一指数采集说明](../../index-data-collection.md)；验收记录见本目录PROGRESS.md。
 
 ## 1. 用户确认的流程
 
@@ -110,7 +110,7 @@
 
 事实真实取得时间沿用source，回放不改；发布/修订时间另记updated_at。初始化事实可追溯已归档原文；后续metadata_only事实仅追溯请求元数据与业务修订，不宣称原始响应可重放。检查时间和执行状态来自公共batch/source，配置更新时间不能替代数据更新时间。
 
-同步SQLite说明、维护页DESCRIPTIONS用途/分类与TIME_COLUMNS/PARENT_TIMES依据；新表空值/空表不显示虚构时间。指标表分类“市场指标”，调度配置归“运行与配置”。新设计细节写入docs/market-congestion-collection.md，指数文档提供链接。迁移与备份同时处理collection_sources文件及哈希。
+同步SQLite说明、维护页DESCRIPTIONS用途/分类与TIME_COLUMNS/PARENT_TIMES依据；新表空值/空表不显示虚构时间。指标表分类“市场指标”，调度配置归“运行与配置”。新设计细节原写入docs/market-congestion-collection.md，现已合并至[统一指数采集说明](../../index-data-collection.md)，指数文档提供链接。迁移与备份同时处理collection_sources文件及哈希。
 
 以上来源文件迁移/双哈希规则仅对实际归档的初始化及既有文件适用；metadata_only记录无文件为正常状态，不误报文件丢失。实现时在采集说明及SQLite文档同步登记本指标后续更新的用户授权例外。
 

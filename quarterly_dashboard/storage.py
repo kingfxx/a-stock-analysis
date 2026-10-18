@@ -48,7 +48,8 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (33, "033_stock_announcement_metadata.sql"),
               (34, "034_business_segments.sql"),
               (35, "035_financial_json_compression.sql"),
-              (36, "036_market_congestion.sql"))
+              (36, "036_market_congestion.sql"), (37, "037_index_price_market_fields.sql"),
+              (38, "038_compact_index_prices.sql"))
 
 
 class StorageError(RuntimeError):
@@ -221,6 +222,36 @@ def _migrate_financial_public_sources(conn):
         conn.execute(sql)
 
 
+def _migrate_single_row_index_prices(conn):
+    """Upgrade current CSI/SWS facts in place; migration never fetches source data."""
+    from .collection import encoded
+    from .index_prices import DEFINITIONS, FIELDS, install_definitions, price_hash
+
+    # Keep the current observation for each business date; version history is
+    # represented by the row's version counter and archived collection sources.
+    conn.execute("DELETE FROM index_price_observations WHERE is_latest=0")
+    install_definitions(conn)
+    conn.execute("DROP TRIGGER IF EXISTS index_price_series_immutable")
+    conn.execute("""UPDATE index_price_series SET definition_version='v2'
+        WHERE provider IN ('csindex','sws') AND definition_version='v1'""")
+    conn.execute("""CREATE TRIGGER index_price_series_immutable BEFORE UPDATE ON index_price_series
+        BEGIN SELECT RAISE(ABORT,'insert a new index price series identity'); END""")
+
+    for row in conn.execute("""SELECT f.*,s.provider,s.series_key FROM index_price_observations f
+        JOIN index_price_series s ON s.id=f.series_id WHERE s.provider IN ('csindex','sws')""").fetchall():
+        provider, key = row['provider'], row['series_key']
+        definition = DEFINITIONS[(provider, key)]
+        lineage = {'_raw': {'revision': int(row['version']), 'fields': {
+            name: {'source_id': row['source_id'], 'batch_id': row['batch_id'], 'obtained_at': row['obtained_at']}
+            for name in FIELDS if row[name] is not None
+        }}}
+        values = {name: row[name] for name in FIELDS}
+        content_hash = price_hash(values, definition, row['withdrawal_reason'], lineage)
+        conn.execute("UPDATE index_price_observations SET field_lineage_json=?,content_hash=? WHERE id=?",
+                     (encoded(lineage), content_hash, row['id']))
+    conn.execute("CREATE UNIQUE INDEX index_price_one_row_per_date ON index_price_observations(series_id,observation_date)")
+
+
 class Database:
     def __init__(self, path: Path | str = DEFAULT_DATABASE, *, journal_mode="auto", busy_timeout_ms=5000):
         self.path = Path(path).resolve()
@@ -288,6 +319,11 @@ class Database:
                         _migrate_financial_public_sources(conn)
                     if version == 35:
                         migrate_financial_json(conn)
+                    if version == 38:
+                        from .index_price_codec import migrate
+                        migrate(conn)
+                    if version == 37:
+                        _migrate_single_row_index_prices(conn)
                     if version == 4:
                         from .financing_storage import migrate_financing
                         audit = migrate_financing(conn)
@@ -658,6 +694,12 @@ class Database:
             if schema_count >= 35:
                 try:
                     check_financial_json(conn)
+                except ValueError as exc:
+                    raise StorageError(str(exc)) from exc
+            if schema_count >= 38:
+                from .index_price_codec import check_storage
+                try:
+                    check_storage(conn)
                 except ValueError as exc:
                     raise StorageError(str(exc)) from exc
             result = {"path": str(self.path), "sqlite_version": sqlite3.sqlite_version,

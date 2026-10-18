@@ -22,7 +22,8 @@ def test_revision_migration_preserves_facts_and_tracks_transaction(tmp_path,monk
     with db.connection() as conn:
         assert [tuple(r) for r in conn.execute('SELECT * FROM index_valuation_observations')]==before
         revision=conn.execute('SELECT revision,updated_at FROM index_read_revisions').fetchone()
-        assert revision[0]==0 and revision[1]
+        # v37 installs price definitions; v38 also invalidates after rebuilding facts.
+        assert revision[0]==conn.execute('SELECT count(*) FROM index_price_definitions').fetchone()[0]+1 and revision[1]
         assert conn.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
         assert not conn.execute('PRAGMA foreign_key_check').fetchall()
         assert conn.execute("SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE 'index_read_%'").fetchone()[0]==24

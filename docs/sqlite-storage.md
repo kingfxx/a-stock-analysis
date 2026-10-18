@@ -1,6 +1,29 @@
 # SQLite 存储、数据更新与备份
 
-v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](market-congestion-collection.md)。
+当前结构版本为v38。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
+
+v37仅扩展既有`index_price_observations`，新增volume、amount、change_points、change_pct、turnover_rate、amount_ratio、constituent_count、mean_price、float_market_cap和mean_float_market_cap十个可空字段，另增field_lineage_json字段级来源/估算JSON，不新增业务表。中证/申万原series及行情行就地升级v2，保留ID及OHLC，不保留v1行情副本；Legu/Sina继续v1。每个series_id/observation_date物理唯一，历史修订就地更新，version只作计数；不建立独立derived行情。估算字段标记及父依赖同行存储，官方值优先；仅补算保留原source/batch/obtained_at，computed_at在估算JSON中，updated_at是真实写入时间；缺依赖保持NULL或撤回。单位、字段映射、缺值和派生估算规则见[指数行情字段映射](index-data-collection.md#field-mapping)。v38后逻辑来源/时间语义保持，物理来源/时间格式见下节。
+
+## v38 指数行情紧凑存储
+
+`index_price_observations`仍为唯一物理行情表，不新增业务副本，26列重建为23列，保留原行/序列ID、14数值及NULL/零/负值、修订计数、来源、逻辑内容hash和完整溯源：
+
+| 物理列/结构 | 存储及读取规则 |
+|---|---|
+| `observation_date` | 1970-01-01起整数日；查询参数先转换，读取返回原ISO日期，保留日期范围索引命中 |
+| `content_hash` | 完整SHA256的32字节BLOB，外部读取恢复64字符hex，不截短哈希；原逻辑hash不变 |
+| `updated_at` | 可精确恢复的规范UTC ISO时间存整数微秒，其他历史ISO形式保留原字符串；维护统计分类型取真实最大值后解码 |
+| `source_id` | FK关联`collection_sources.id`；逻辑`batch_id/obtained_at`从该来源读取，发布仍校验来源/批次/提供方/真实时间，不重复逐行存储 |
+| 最新行 | `(series_id,observation_date)`物理唯一，逻辑`is_latest`恒为1；历史修订不追加副本 |
+| `field_lineage_json` | 固定格式2的位置数组，字段位图顺序固定；原始修订/字段来源差异、计算时来源/输入/修订/分母事实ID/version/计算时间均保留。空证据为`[]`，异常/撤回/未知成员显式`{"fallback":完整原证据}`，不丢失未识别信息 |
+| 索引 | 仅序列×日期唯一、日期×序列检索两项；移除被物理唯一覆盖的版本唯一和latest部分索引 |
+
+统一编解码在`quarterly_dashboard/index_price_codec.py`。源批次/取得时间通过来源ID恢复，估算父分母事实保留原修订行，不能就地修改已引用历史。格式2的公式/口径及14字段序号固定，改动必须升级协议/定义，不能修改常量使旧证据产生新解释。完整展开时批量加载父引用并缓存，日常图表仅读日期/点位；未变化估算直接检查紧凑依赖快照，不展开整套证据。
+
+新增只读View `index_price_observations_read`恢复ISO日期、hex hash、来源批次/取得时间和最新标记；其中`field_lineage_json`仍为内部紧凑结构，完整说明通过codec恢复。View不占业务存储，维护分类“指数数据”。物理表和View的维护时间依据均为解码后的真实updated_at及关联来源obtained_at，空表显示无数据，不用观察日替代。
+
+v38迁移逐行校验完整逻辑还原后原子切换，恢复缓存失效触发器；失败回滚可修复后重试。schema事务不联网、不自动回放，已有v37迁移文件保持不变。物理释放空间需在正式备份和实例锁保护下执行VACUUM；来源原文仍另行保留。性能和发布验收见当前[实施计划](plans/20261018_行情紧凑存储落地与性能验收/PLAN.md)。
+
 
 2026-10-17用户授权20日离线拥挤度补值，复用同表新增独立身份`ashares_congestion/all_a/bigquant/bigquant_calculated/daily/amount_rank_top5_v1`，不改schema。value为自算比例，close来自现有中证上证同日点数，两类金额为亿元；原Legu缺值观察保留。source是明确标记LOCAL_DERIVATION的计算证据，原行情及点位事实引用在证据中追溯；obtained_at为该计算证据生成时间，updated_at为发布时刻。详见[补值说明](data-sources/market-congestion-gap-backfill.md)。
 
@@ -14,9 +37,9 @@ v30仅更新 `market_cap_latest`，不新增表：按字段优先读取东财有
 
 v29新增业务表 `market_trade_snapshot`：全市场未复权股价、涨跌幅、股本、市值、估值等22个源字段，当前只采季度末，事实按实际交易日识别以兼容以后日频。复用公共 `collection_batches/sources/provider_state` 和现有 `sw_update_runs`，不新增采集控制表。`market_cap_latest` 为新快照优先、旧同日市值回退的逻辑View。新表为行业数据，时间依据为真实 `obtained_at/updated_at`；空表或缺时间显示未记录，交易日不代替更新时间。公共来源表分类为运行与配置。原文归档在公共 `collection_sources/`，SQLite备份不包含来源文件。详见[全市场交易日快照](data-sources/market-trade-snapshot.md)。
 
-指数采集新增 v23/v24：公共 `collection_batches/sources/provider_state`，稳定指数身份、历史目录、提供方映射、指标定义、统一估值事实及操作状态。未迁移旧财务或价格记录；用途与真实时间依据已登记维护页。表关系、来源目录完整备份及采集保护见[指数估值采集说明](index-valuation-collection.md)。
+指数采集新增 v23/v24：公共 `collection_batches/sources/provider_state`，稳定指数身份、历史目录、提供方映射、指标定义、统一估值事实及操作状态。未迁移旧财务或价格记录；用途与真实时间依据已登记维护页。表关系、来源目录完整备份及采集保护见[指数估值采集说明](index-data-collection.md)。
 
-本文依据当前代码整理；取消关注、恢复和个股清理部分更新于 2026-10-07，全行业结构索引更新于 2026-10-10，指数点位说明更新于 2026-10-11，交易日快照更新于 2026-10-14，主营构成更新于2026-10-16，大盘拥挤度更新于2026-10-17，当前数据库结构版本为 **36**，表数量以维护页实时统计为准。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
+本文依据当前代码整理；取消关注、恢复和个股清理部分更新于 2026-10-07，全行业结构索引更新于 2026-10-10，指数点位说明更新于 2026-10-18，交易日快照更新于 2026-10-14，主营构成更新于2026-10-16，大盘拥挤度更新于2026-10-17，当前数据库结构版本为 **37**，表数量以维护页实时统计为准。历史验收中的文件大小、行数和耗时属于当时的测量，不代表当前数据库状态，详见文末专项记录。
 
 ## 1. 文件位置与启动过程
 
@@ -177,7 +200,7 @@ Schema v33 新增三张巨潮公告日期元数据表。`metadata_only` 请求�
 
 ### 2.6 指数估值整数序列（v25）
 
-`index_valuation_series` 保存指数、提供方、口径、频率及定义版本，事实仅存整数series_id。两套整数唯一索引分别保护历史版本与最新观察，旧index_valuation_dates已移除。API还原原有身份字段，来源/批次组合外键仍保留。迁移自动备份，并在事务内核对全部旧值；序列created_at是真实建档时间，历史事实obtained_at/updated_at不改变。详见[指数数据说明](index-valuation-collection.md)。
+`index_valuation_series` 保存指数、提供方、口径、频率及定义版本，事实仅存整数series_id。两套整数唯一索引分别保护历史版本与最新观察，旧index_valuation_dates已移除。API还原原有身份字段，来源/批次组合外键仍保留。迁移自动备份，并在事务内核对全部旧值；序列created_at是真实建档时间，历史事实obtained_at/updated_at不改变。详见[指数数据说明](index-data-collection.md)。
 
 ### 2.7 指数估值公共采集与更新
 
@@ -194,17 +217,17 @@ Schema v33 新增三张巨潮公告日期元数据表。`metadata_only` 请求�
 
 常规“更新近期估值”先查本地各来源／序列水位，仅补尾部新增日期；已最新的序列跳过估值请求。申万一级／二级独立检查成功分段，不能只用全表最大日期判定。月频移动观察点按真实日期保存。单独“核对近期修订”重抓日频10交易日／乐咕4个月，另有历史月份轮换核对。无变化不新增事实版本，真实修订留档；跳过请求仍记录任务状态。
 
-2026-10-15授权的指数提速复用上述表，不新增结构迁移。三个提供方并行，同源最多2个在途请求；完成后等待2—5秒，滚动60秒30次，每完成20次额外休息10秒。`collection_provider_state.budget_json`继续保存共享发送记录与累计数，并登记完成计数、完成时间及在途请求／尝试号预留；真实占槽由数据库旁的提供方OS文件锁保证，进程退出释放锁，重启不清空预算或冷却。`index_collection_operations.result_json.providers`保存各来源当前进度，失败和取消来源也计入最终请求统计。其他采集继续执行各自原策略，详情见[指数采集说明](index-valuation-collection.md)。
+2026-10-15授权的指数提速复用上述表，不新增结构迁移。三个提供方并行，同源最多2个在途请求；完成后等待2—5秒，滚动60秒30次，每完成20次额外休息10秒。`collection_provider_state.budget_json`继续保存共享发送记录与累计数，并登记完成计数、完成时间及在途请求／尝试号预留；真实占槽由数据库旁的提供方OS文件锁保证，进程退出释放锁，重启不清空预算或冷却。`index_collection_operations.result_json.providers`保存各来源当前进度，失败和取消来源也计入最终请求统计。其他采集继续执行各自原策略，详情见[指数采集说明](index-data-collection.md)。
 
 指数进度面板的结构化计数另存于同一 `result_json.work_progress`：包含工作项账本、总体与各来源的成功／跳过／失败／已停止／待执行／进行中数量及当前说明。分母在范围确认后、估值请求前由本地范围预登记；并发状态更新使用短事务，结束后保留统计。该JSON为任务进度，不替代事实、来源或数据覆盖记录；旧操作没有此字段时显示未记录，不补造历史总数。此次仅扩展现有JSON内容，无表结构迁移。
 
 日期已最新不代表历史完整或数值未修订，内部缺口与逐指标缺值需独立核验。公共结构目前用于指数和全市场交易日快照；旧财务／价格历史尚未统一迁移。SQLite备份不包含原始响应，完整追溯恢复须同步复制来源目录并校验双哈希。
 
-来源能力、口径、请求保护、更新／修订核对、取消恢复与接口限制的detail文档见[指数估值采集与查询说明](index-valuation-collection.md)。
+来源能力、口径、请求保护、更新／修订核对、取消恢复与接口限制的detail文档见[指数估值采集与查询说明](index-data-collection.md)。
 
 ### 2.8 指数读取版本（v26）
 
-`index_read_revisions` 保存单行 `scope='indices'`、非负整数 `revision` 及真实写入时间 `updated_at`。15个触发器覆盖估值事实、序列、目录、定义及 `sw_industries` 的新增／修改／删除，在同一事务递增版本，用于目录和图表内存缓存失效。其他页面普通写入不触发；回滚不改变已提交版本。迁移不修改业务事实，初始化先备份；维护用途及更新时间依据已登记。
+`index_read_revisions` 保存单行 `scope='indices'`、非负整数 `revision` 及真实写入时间 `updated_at`。v26的15个触发器覆盖估值事实、序列、目录、指标定义及 `sw_industries`；v28再为点位定义、序列、事实的新增／修改／删除各增加触发器。相关变更在同一事务递增版本，用于目录和图表内存缓存失效。其他页面普通写入不触发；回滚不改变已提交版本。迁移不修改业务事实，初始化先备份；维护用途及更新时间依据已登记。
 
 ### 2.9 指数点位与归档复用（v27）
 
@@ -214,13 +237,13 @@ Schema v33 新增三张巨潮公告日期元数据表。`metadata_only` 请求�
 | --- | --- | --- |
 | `index_price_definitions` | 来源字段、点数单位、频率与缺值规则的版本定义 | `(provider, series_key, definition_version)`；`updated_at` 为实际登记时间 |
 | `index_price_series` | 指数、提供方、接口序列、频率、收益口径及定义版本 | `id` 为主键，六字段联合唯一；事实引用整数 `series_id`，`created_at` 为实际建档时间 |
-| `index_price_observations` | 实际观察日期、收盘点位及来源提供的开高低点、修订、批次与来源 | `(series_id, observation_date, version)` 唯一；部分唯一索引保证每序列／日期只有一个最新版本；`source_id / batch_id` 组合外键追溯来源，`obtained_at / updated_at` 分别为真实取得／写入时间 |
+| `index_price_observations` | 实际观察日期、收盘点位及来源提供的开高低点、修订、批次与来源 | v37起`(series_id, observation_date)`物理唯一，`version`仅为同行修订计数；v38以source_id外键关联来源，batch_id/obtained_at由来源恢复，updated_at紧凑存储并解码为真实写入时间 |
 
 中证历史响应提供日频开高低收，申万一级／二级分析响应提供日频收盘点位，乐咕 PE/PB 响应提供月频收盘点位。未来采集复用同一估值响应同步写入点位，不增加行情请求；已有成功归档通过显式启动的离线回放导入，保留原来源时间及复用关系，不重新采集。迁移本身不自动回放。
 
-不同提供方、接口、日／月频、收益口径和定义版本分别保存，不拼接。有效点数须为有限正数，缺值留空，不由收盘点位补造开高低点；重复数据不新增修订，真实变化保留历史。点位查询为本地读取，目前未新增页面、HTTP 接口或缓存；采集成功不等于历史覆盖完整。
+不同提供方、接口、日／月频、收益口径和定义版本分别保存，不拼接。有效点数须为有限正数，缺值留空，不由收盘点位补造开高低点；重复数据不改原出处，真实变化从v37起更新当前行；追溯复用公共来源归档和正式备份，不追加行情历史副本。点位查询为本地读取，指数页面本地叠加行情；采集成功不等于历史覆盖完整。
 
-字段与收益口径、来源能力、回放／增量写入、读取及验收的详细说明见 [指数点位存储与归档复用](index-price-storage.md)。
+字段与收益口径、来源能力、回放／增量写入、读取及验收的详细说明见 [指数点位存储与归档复用](index-data-collection.md#指数点位存储与归档复用)。
 
 ### 2.10 全市场交易日快照（v29）
 

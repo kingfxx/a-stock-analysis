@@ -48,7 +48,8 @@ DESCRIPTIONS={
  'business_segment_items':('个股数据','主营构成行业、产品、地区明细；十进制原值及精确来源页引用'),
  'index_price_definitions':('指数数据','指数点位来源字段、点数单位、采样频率及缺值规则的版本定义'),
  'index_price_series':('指数数据','宽基、行业、策略共用的点位序列身份；提供方、频率及收益口径独立'),
- 'index_price_observations':('指数数据','指数收盘点位和来源实际提供的开高低点；来源、真实取得时间及修订版本'),
+ 'index_price_observations_read':('指数数据','紧凑行情的日期/hash/来源时间逻辑读取视图，溯源按codec展开，无额外业务副本'),
+ 'index_price_observations':('指数数据','指数OHLC及交易字段，每序列日期一行；字段来源、同行估算标记/依赖和真实取得/写入时间，修订仅计数'),
  'collection_batches':('运行与配置','公共采集批次、操作范围、执行状态及独立覆盖判定；未迁移旧采集'),
  'collection_sources':('运行与配置','公共逐次请求来源；归档保留双哈希，个股及拥挤度日更按授权仅登记 metadata-only 请求结果'),
  'collection_provider_state':('运行与配置','公共来源共享请求预算、拒绝原因及跨任务冷却截止时间'),
@@ -144,6 +145,11 @@ def quote(name):
 
 
 def table_time(conn, name, columns):
+    if name in ('index_price_observations','index_price_observations_read') and (name.endswith('_read') or 'obtained_at' not in columns):
+        from .index_price_codec import decode_time
+        integer,text,obtained=conn.execute("SELECT max(CASE WHEN typeof(f.updated_at)='integer' THEN f.updated_at END),max(CASE WHEN typeof(f.updated_at)='text' THEN f.updated_at END),max(s.obtained_at) FROM index_price_observations f JOIN collection_sources s ON s.id=f.source_id").fetchone()
+        values=[v for v in (decode_time(integer),text,obtained) if v]
+        return max(values,key=lambda v:datetime.fromisoformat(v),default=None),'updated_at（整数微秒解码）, collection_sources.obtained_at'
     if name=='sw_memberships':
         values=conn.execute('SELECT max(i.obtained_at),max(s.obtained_at),max(cs.obtained_at) FROM sw_memberships m '
             'JOIN sw_imports i ON i.id=m.import_id LEFT JOIN sw_listing_sources s ON s.id=m.listing_source_id '

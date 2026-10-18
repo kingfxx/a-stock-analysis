@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import requests
@@ -92,6 +92,7 @@ class Session:
         r=requests.Response();r.status_code=self.status;r.encoding='utf-8'
         r.headers['Content-Type']='text/html';r._content=self.text.encode()
         return r
+    def close(self):pass
 
 
 def client(db,session):
@@ -167,6 +168,37 @@ def test_daily_schedule_restart_busy_disabled_and_cooldown(db):
     assert len(calls)==1
     m.configure(db,{'enabled':False})
     assert m.scheduled_tick(db,now=now+timedelta(days=3),execute=execute) is None
+
+
+def test_index_dependency_respects_pre_and_post_threshold_deduplication(db,monkeypatch):
+    from quarterly_dashboard import collection
+    from quarterly_dashboard.index_collection import start_operation
+    ready(db)
+    current={'now':datetime(2026,10,17,17,59,tzinfo=m.ZONE)}
+    monkeypatch.setattr(m,'local_now',lambda:current['now'])
+    monkeypatch.setattr(collection,'utc_now',lambda:current['now'].astimezone(timezone.utc).isoformat())
+    operation=start_operation(db,'incremental')
+    sessions=[]
+    def collector_factory(database,**kwargs):
+        session=Session(html(day='2026-10-16'))
+        clock=Clock();clock.now=current['now'].timestamp()
+        sessions.append(session)
+        return RequestCollector(database,session=session,policy=PacingPolicy(max_attempts=1),
+            clock=clock.time,sleep=clock.sleep,cancelled=kwargs.get('cancelled',lambda:False))
+    monkeypatch.setattr(m,'RequestCollector',collector_factory)
+    def check():
+        result=m.prepare_index_dependency(db,operation,'2026-10-17',lambda:False)
+        return result
+    assert check()['status']=='html_not_updated'
+    assert check()['status']=='already_checked'
+    current['now']=datetime(2026,10,17,18,5,tzinfo=m.ZONE)
+    assert check()['status']=='html_not_updated'
+    assert check()['status']=='already_checked'
+    assert [len(session.calls) for session in sessions]==[1,1]
+    with db.connection() as conn:
+        checks=conn.execute("SELECT count(*) FROM collection_batches WHERE dataset=? AND trigger_type='index_dependency' "
+            "AND json_extract(scope_json,'$.purpose')='index_derivation_dependency'",(m.DATASETS['html_recent_table'],)).fetchone()[0]
+    assert checks==2
 
 
 def test_config_and_identity_definition_guards(db):
