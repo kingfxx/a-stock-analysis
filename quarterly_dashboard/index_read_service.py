@@ -1,5 +1,6 @@
 """Bounded serialized chart cache; independent lightweight collection status."""
 from collections import OrderedDict
+from bisect import bisect_left
 from datetime import date
 import json
 import sqlite3
@@ -111,6 +112,72 @@ class IndexReadService:
                 self.cache.move_to_end(key)
                 return self.cache[key]
             body=encode(dict(revision=self._revision(),**read_overlay(self.db,code,field=field)))
+            if len(body)<=self.max_bytes:
+                self.cache[key]=body
+                self.cache_bytes+=len(body)
+                while len(self.cache)>self.max_entries or self.cache_bytes>self.max_bytes:
+                    _,evicted=self.cache.popitem(last=False)
+                    self.cache_bytes-=len(evicted)
+            return body
+
+    def industry_crowding(self, level, start, end):
+        try:
+            level=int(level)
+            first=date.fromisoformat(start)
+            last=date.fromisoformat(end)
+        except (TypeError,ValueError):
+            raise ValueError('行业热力图须提供有效的层级和日期范围') from None
+        if level not in (1,2) or first>last or (last-first).days>366:
+            raise ValueError('行业热力图层级须为1或2，日期范围不得超过367天')
+        with self.lock:
+            revision=self._revision()
+            key=('industry_crowding',level,start,end)
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                return self.cache[key]
+            catalog=read_indices(self.db,kind='industry',level=level)['catalog']
+            catalog=[row for row in catalog if (row.get('classification_system') or '').lower() in ('sw','sw2021')]
+            indices={row['index_code']:row for row in catalog}
+            output=[]
+            if indices:
+                placeholders=','.join('?' for _ in indices)
+                with self.db.connection() as conn:
+                    identities=conn.execute(
+                        'SELECT s.id,s.index_code FROM index_price_series s WHERE s.index_code IN ('+placeholders+") "
+                        "AND s.provider='sws' AND s.series_key='analysis.points' AND s.frequency='daily' "
+                        "ORDER BY s.index_code,CASE WHEN s.definition_version='v2' THEN 0 ELSE 1 END,s.id",
+                        tuple(indices)).fetchall()
+                    series_by_code={}
+                    for identity in identities:
+                        series_by_code.setdefault(identity['index_code'],identity['id'])
+                    for code,index in indices.items():
+                        series_id=series_by_code.get(code)
+                        if series_id is None:
+                            output.append(dict(index_code=code,name=index['name'],industry_level=level,
+                                parent_index_code=index.get('parent_index_code'),
+                                navigation_parent_index_code=index.get('navigation_parent_index_code'),values=[]))
+                            continue
+                        facts=[dict(row) for row in conn.execute(
+                            'SELECT observation_date,amount,amount_ratio,turnover_rate FROM index_price_observations_read '
+                            'WHERE series_id=? ORDER BY observation_date',(series_id,))]
+                        turnover=sorted(row['turnover_rate'] for row in facts
+                            if isinstance(row['turnover_rate'],(int,float)))
+                        values=[]
+                        for fact in facts:
+                            day=fact['observation_date']
+                            if not start<=day<=end:
+                                continue
+                            rate=fact['turnover_rate']
+                            percentile=(round(1000*bisect_left(turnover,rate)/len(turnover))/10
+                                if turnover and isinstance(rate,(int,float)) else None)
+                            values.append(dict(date=day,amount=fact['amount'],congestion=fact['amount_ratio'],turnover_percentile=percentile))
+                        output.append(dict(index_code=code,name=index['name'],industry_level=level,
+                            parent_index_code=index.get('parent_index_code'),
+                            navigation_parent_index_code=index.get('navigation_parent_index_code'),values=values))
+            output.sort(key=lambda row:row['name'])
+            dates=sorted({value['date'] for row in output for value in row['values']
+                if value['congestion'] is not None},reverse=True)
+            body=encode(dict(revision=revision,level=level,start=start,end=end,dates=dates,industries=output))
             if len(body)<=self.max_bytes:
                 self.cache[key]=body
                 self.cache_bytes+=len(body)

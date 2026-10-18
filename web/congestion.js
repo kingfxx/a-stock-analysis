@@ -54,12 +54,27 @@
     return {count,current,currentDate:rows.at(-1)[0],firstDate:rows[0][0],percentile,rank,
       high:quantile(.8),median:quantile(.5),low:quantile(.2),mean,stddev,stddevHigh:mean+stddev,stddevLow:mean-stddev};
   }
-  if(typeof module!=='undefined'&&module.exports)module.exports={periodKey,chartSeries,leguCloseOverlay,dailyStatistics};
+  function totalAmountSeries(channels,dates,frequency) {
+    const byDate=new Map();
+    for(const channel of ['bigquant_calculated','api_history','html_recent_table']) {
+      for(const row of channels[channel]?.rows||[]) {
+        const value=row.total_amount_yi;
+        if(Number.isFinite(value)&&value>=0)byDate.set(row.observation_date,value);
+      }
+    }
+    const totals=new Map();
+    for(const [day,value] of byDate) {
+      const key=periodKey(day,frequency);
+      totals.set(key,(totals.get(key)||0)+value);
+    }
+    return dates.map(day=>totals.get(periodKey(day,frequency))??null);
+  }
+  if(typeof module!=='undefined'&&module.exports)module.exports={periodKey,chartSeries,leguCloseOverlay,dailyStatistics,totalAmountSeries};
   if(typeof window!=='undefined')window.CongestionStats={periodKey,dailyStatistics};
   if(typeof document==='undefined')return;
   const el=id=>document.getElementById('congestion-'+id);
   const leguCloseKey='legu:congestion-close';
-  let data=null,controller=null,requestNumber=0,settingsDirty=false,pollTimer=null;
+  let data=null,controller=null,requestNumber=0,settingsDirty=false,pollTimer=null,amountOverlay=false,crosshairTimer=null;
   const fmt=value=>value===null||value===undefined?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:2,minimumFractionDigits:2});
   const time=value=>window.DashboardTime.format(value);
   const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -97,22 +112,59 @@
     const channels=Object.fromEntries(Object.entries(data.channels).map(([key,series])=>[key,{rows:series.rows.filter(visible)}]));
     const frequency=el('frequency').value==='auto'?(el('range').value==='5'?'day':'week'):el('frequency').value;
     const series=chartSeries(channels,pointRows,frequency,overlay.frequency),dates=series.dates;
+    const amountValues=totalAmountSeries(channels,dates,frequency),hasAmountSeries=amountOverlay&&amountValues.some(value=>value!==null);
+    const amountByPeriod=new Map(dates.map((date,index)=>[periodKey(date,frequency),amountValues[index]]));
     const traces=[{x:dates,y:series.congestion,type:'scatter',mode:'lines',name:'大盘拥挤度',
-      line:{color:'#66aaf0',width:2},connectgaps:false,hovertemplate:'拥挤度：%{y:.2%}<extra></extra>'}];
+      ...(hasAmountSeries?{customdata:amountValues}:{}),line:{color:'#66aaf0',width:2},connectgaps:false,
+      hovertemplate:'拥挤度：%{y:.2%}'+(hasAmountSeries?'<br>市场成交总额：%{customdata:.2f} 亿元':'')+'<extra></extra>'}];
     const pointName=el('index').selectedOptions[0]?.textContent||'指数';
-    if(overlay.available&&pointRows.some(row=>row.close!==null)) {
+    const hasPointSeries=overlay.available&&pointRows.some(row=>row.close!==null);
+    if(hasPointSeries) {
       traces.push({x:series.pointDates,y:series.points,type:'scatter',mode:'lines',name:pointName,yaxis:'y2',
-        line:{color:'#f4d35e',width:1.8},connectgaps:false,hovertemplate:pointName+'：%{y:.2f} 点<extra></extra>'});
+        line:{color:'#f4d35e',width:1.8},connectgaps:false,
+        hovertemplate:pointName+'：%{y:.2f} 点<extra></extra>'});
     }
-    Plotly.react(el('chart'),traces,{paper_bgcolor:'#1a2429',plot_bgcolor:'#1a2429',font:{color:'#edf4f4'},
-      uirevision:JSON.stringify([el('index').value,el('range').value,frequency]),
-      margin:{l:65,r:85,t:20,b:76},hovermode:'x unified',legend:{orientation:'h',x:0.5,xanchor:'center',y:-0.2},
-      xaxis:{type:'date',gridcolor:'#30434d',tickformat:'%Y-%m',hoverformat:'%Y-%m-%d',range:[lower||series.firstCongestion||dates[0]||upper,upper]},
-      yaxis:{title:{text:'拥挤度（%）'},tickformat:'.0%',gridcolor:'#30434d'},
-      yaxis2:{title:{text:'指数点位'},overlaying:'y',side:'right',showgrid:false,tickfont:{color:'#f4d35e'}},
-      shapes:levels.flatMap((value,i)=>!Number.isFinite(value)?[]:[{type:'line',xref:'paper',yref:'y',x0:0,x1:1,y0:value,y1:value,line:{color:colors[i],dash:'dash',width:1.5}}]),
+    if(hasAmountSeries)traces.push({x:dates,y:amountValues,type:'bar',name:'全A成交额',xaxis:'x2',yaxis:'y3',
+      marker:{color:'#c792ea'},opacity:.62,hovertemplate:'市场成交总额：%{y:.2f} 亿元<extra></extra>'});
+    el('amount').setAttribute('aria-pressed',String(amountOverlay));
+    el('amount-note').hidden=!amountOverlay;
+    el('amount-note').textContent=amountOverlay?(hasAmountSeries?'全A成交额按亿元显示；日频显示当日值，周／月频显示区间内有效日成交额合计，缺值不补。':'当前区间暂无有效全A成交额。'):'';
+    el('chart').setAttribute('aria-label',hasAmountSeries?'大盘拥挤度、指数点位与全A成交额走势':'大盘拥挤度与所选宽基指数双轴趋势图');
+    const axes={},mainYaxis={title:{text:'拥挤度（%）'},tickformat:'.0%',gridcolor:'#30434d'};
+    if(hasPointSeries)axes.yaxis2={title:{text:'指数点位',font:{color:'#f4d35e'}},overlaying:'y',side:'right',showgrid:false,tickfont:{color:'#f4d35e'},rangemode:'tozero'};
+    if(hasAmountSeries) {
+      axes.xaxis2={type:'date',matches:'x',anchor:'y3',gridcolor:'#30434d',tickformat:'%Y-%m',hoverformat:'%Y-%m-%d'};
+      axes.yaxis3={domain:[0,.2],anchor:'x2',title:{text:'成交额（亿元）',font:{color:'#c792ea'}},side:'right',showgrid:false,tickfont:{color:'#c792ea'},rangemode:'tozero'};
+      mainYaxis.domain=[.3,1];
+    }
+    const thresholdShapes=levels.flatMap((value,i)=>!Number.isFinite(value)?[]:[{type:'line',xref:'paper',yref:'y',x0:0,x1:1,y0:value,y1:value,line:{color:colors[i],dash:'dash',width:1.5}}]);
+    const chart=el('chart');
+    chart._congestionBaseShapes=thresholdShapes;
+    const renderPromise=Plotly.react(chart,traces,{paper_bgcolor:'#1a2429',plot_bgcolor:'#1a2429',font:{color:'#edf4f4'},
+      uirevision:JSON.stringify([el('index').value,el('range').value,frequency,amountOverlay]),
+      margin:{l:65,r:hasPointSeries?110:75,t:20,b:hasAmountSeries?68:76},hovermode:'x unified',barmode:'overlay',legend:{orientation:'h',x:0.5,xanchor:'center',y:-0.2},
+      xaxis:{type:'date',gridcolor:'#30434d',tickformat:'%Y-%m',hoverformat:'%Y-%m-%d',range:[lower||series.firstCongestion||dates[0]||upper,upper],...(hasAmountSeries?{anchor:'y',showticklabels:false,showline:false}:{})},
+      yaxis:mainYaxis,
+      ...axes,
+      shapes:thresholdShapes,
       annotations:!series.firstCongestion?[{text:'暂无本地区间数据，请先获取历史',xref:'paper',yref:'paper',x:0.5,y:0.5,showarrow:false,font:{color:'#9aadb3'}}]:[]
     },{responsive:true,displaylogo:false});
+    renderPromise.then(()=>{
+      if(!chart._congestionCrosshairBound) {
+        chart._congestionCrosshairBound=true;
+        chart.on('plotly_hover',event=>{
+          clearTimeout(crosshairTimer);
+          const hoveredDate=event?.points?.find(point=>point.x!==undefined)?.x;
+          if(hoveredDate===undefined)return;
+          const line={type:'line',xref:'x',yref:'paper',x0:hoveredDate,x1:hoveredDate,y0:0,y1:1,layer:'above',line:{color:'#9aadb3',width:1,dash:'dot'}};
+          Plotly.relayout(chart,{shapes:[...(chart._congestionBaseShapes||[]),line]});
+        });
+        chart.on('plotly_unhover',()=>{
+          clearTimeout(crosshairTimer);
+          crosshairTimer=setTimeout(()=>Plotly.relayout(chart,{shapes:chart._congestionBaseShapes||[]}),60);
+        });
+      }
+    });
     const providers={csindex:'中证指数',sina:'新浪',sws:'申万宏源',legu:'乐咕乐股'};
     const basis={unspecified:'来源未标识收益口径',price:'价格指数',total_return:'全收益指数',net_return:'净收益指数',congestion_close:'拥挤度采集附带的收盘价'};
     el('points').textContent=overlay.available?`点位：${providers[overlay.provider]||overlay.provider} · ${overlay.frequency==='daily'?'日频':'月频'} · ${basis[overlay.return_type]||overlay.return_type} · ${overlay.first_date}—${overlay.last_date}${pointRows.some(r=>r.close!==null)?'':'；本区间暂无点位'}`:'该指数暂无本地点位数据，可通过现有指数采集入口补充。';
@@ -191,6 +243,7 @@
   el('range').onchange=draw;el('index').onchange=load;
   el('frequency').onchange=draw;
   el('benchmark').onchange=draw;
+  el('amount').onclick=()=>{amountOverlay=!amountOverlay;draw();};
   for(const id of ['enabled','time'])el(id).onchange=()=>{settingsDirty=true;};
   el('save').onclick=async()=>{
     try{await api('/api/indices/congestion/schedule',{enabled:el('enabled').checked,local_time:el('time').value});settingsDirty=false;await load();}

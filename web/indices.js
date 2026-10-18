@@ -4,6 +4,7 @@ const providers={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源'},
 const seriesNames={'history.rolling':'历史滚动 PE',dashboard:'每日板块估值','indicator.total_shares':'近期估值（总股本）','indicator.calculation_shares':'近期估值（计算用股本）','analysis.daily':'行业估值日报','pe.ordinary':'PE（普通）','pe.equal':'PE（等权）','pe.median':'PE（中位数）','pb.ordinary':'PB（普通）','pb.equal':'PB（等权）','pb.median':'PB（中位数）'};
 const methods={source_disclosed:'来源披露口径，详细权重待核对',ordinary:'普通',equal:'等权',median:'中位数'},periods={source_disclosed:'来源披露，未另行推定',rolling:'滚动','static / rolling':'静态及滚动',pending:'待核对','LYR / TTM (source field labels)':'静态及TTM（按来源字段标识）'},shares={pending:'待核对',total_shares:'总股本',calculation_shares:'计算用股本'};
 let crowdingData=null;
+let industryCrowdingRequest=0,industryCrowdingController,industryCrowdingData=null,industryCrowdingSortDate=null;
 let data,history=[],selectedSummary,views={},metricFamily='pe',timer,historyRevision=0,historyController,pointOverlay=false,pointData,pointCode,pointController,shownIndexCode;
 const chartCache=new Map();let chartCacheBytes=0;
 function clearChartCache(){chartCache.clear();chartCacheBytes=0;}
@@ -149,6 +150,51 @@ function drawCrowding(){
   Plotly.react('chart',traces,{paper_bgcolor:'#1a2429',plot_bgcolor:'#1a2429',font:{color:'#edf4f4'},uirevision:JSON.stringify([el('code').value,'crowding',years,frequency]),margin:{l:65,r:pointOverlay?85:25,t:20,b:76},hovermode:'x unified',legend:{orientation:'h',x:.5,xanchor:'center',y:-.2},xaxis:{type:'date',gridcolor:'#30434d',tickformat:'%Y-%m',hoverformat:'%Y-%m-%d',range:[lower,upper]},yaxis:{title:{text:'拥挤度（%）'},ticksuffix:'%',gridcolor:'#30434d'},yaxis2:{title:{text:'指数点位'},overlaying:'y',side:'right',showgrid:false,tickfont:{color:'#f4d35e'}},shapes:levels.flatMap((value,i)=>!Number.isFinite(value)?[]:[{type:'line',xref:'paper',yref:'y',x0:0,x1:1,y0:value,y1:value,line:{color:colors[i],dash:'dash',width:1.5}}]),annotations:stats.count?[]:[{text:'所选区间暂无本地拥挤度数据',xref:'paper',yref:'paper',x:.5,y:.5,showarrow:false}]},{responsive:true,displaylogo:false});
 }
 
+function industryCrowdingToday(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+function industryCrowdingStart(days){const end=industryCrowdingToday(),start=new Date(end+'T00:00:00Z');start.setUTCDate(start.getUTCDate()-Number(days)+1);return start.toISOString().slice(0,10);}
+async function loadIndustryCrowding(){
+  const request=++industryCrowdingRequest;industryCrowdingController?.abort();industryCrowdingController=new AbortController();
+  const level=el('industry-crowding-level').value,days=el('industry-crowding-range').value,start=industryCrowdingStart(days),end=industryCrowdingToday();
+  el('industry-crowding-status').textContent='正在读取本地行业行情…';
+  try{
+    const query=new URLSearchParams({level,start,end}),response=await fetch('/api/indices/industry-crowding?'+query,{cache:'no-store',signal:industryCrowdingController.signal}),result=await response.json();
+    if(!response.ok)throw Error(result.error||'读取失败');if(request!==industryCrowdingRequest)return;
+    if(data&&result.revision!==data.revision){clearChartCache();await load(true);if(request===industryCrowdingRequest)await loadIndustryCrowding();return;}
+    industryCrowdingData=result;if(!result.dates.includes(industryCrowdingSortDate))industryCrowdingSortDate=result.dates[0]||null;drawIndustryCrowding();
+  }catch(error){if(error.name!=='AbortError'&&request===industryCrowdingRequest){industryCrowdingData=null;el('industry-crowding-status').textContent='行业拥挤度读取失败：'+error.message;el('industry-crowding-head-row').replaceChildren();el('industry-crowding-body').replaceChildren();}}
+}
+function industryHeatColor(percentile){
+  const stops=[[0,[39,89,92]],[30,[64,121,122]],[50,[70,87,90]],[70,[151,81,90]],[100,[216,60,80]]];
+  const value=Math.max(0,Math.min(100,percentile));let left=stops[0],right=stops.at(-1);
+  for(let index=1;index<stops.length;index++){if(value<=stops[index][0]){left=stops[index-1];right=stops[index];break;}}
+  const ratio=(value-left[0])/(right[0]-left[0]),rgb=left[1].map((part,index)=>Math.round(part+(right[1][index]-part)*ratio));return `rgb(${rgb.join(' ')})`;
+}
+function drawIndustryCrowding(){
+  if(!industryCrowdingData)return;
+  const dates=industryCrowdingData.dates||[],industries=industryCrowdingData.industries||[],days=el('industry-crowding-range').value,level=el('industry-crowding-level').value;
+  if(!dates.includes(industryCrowdingSortDate))industryCrowdingSortDate=dates[0]||null;
+  const valueAt=(row,day)=>row.values.find(value=>value.date===day),sortDate=industryCrowdingSortDate;
+  const sorted=[...industries].sort((a,b)=>{
+    const av=sortDate?valueAt(a,sortDate)?.congestion:null,bv=sortDate?valueAt(b,sortDate)?.congestion:null;
+    if(av==null&&bv==null)return a.name.localeCompare(b.name,'zh-CN');if(av==null)return 1;if(bv==null)return -1;return bv-av;
+  });
+  el('industry-crowding-status').textContent=dates.length?`申万${level==='1'?'一级':'二级'} · 最近 ${days} 天 · ${dates.length} 个有效交易日。按拥挤度降序，点击日期切换排序。`:`申万${level==='1'?'一级':'二级'}在所选日期范围内暂无有效拥挤度数据。`;
+  const header=document.createElement('tr'),first=document.createElement('th');first.className='industry-sticky';first.scope='col';first.textContent='行业 / 拥挤度';header.append(first);
+  dates.forEach((day,index)=>{const th=document.createElement('th');th.scope='col';const button=document.createElement('button');button.type='button';button.className='industry-date-sort';button.textContent=day.slice(5).replace('-','/');button.title=`按 ${day} 的拥挤度降序排序`;button.setAttribute('aria-label',button.title);button.setAttribute('aria-pressed',String(day===sortDate));button.onclick=()=>{industryCrowdingSortDate=day;drawIndustryCrowding();};th.append(button);header.append(th);});
+  el('industry-crowding-head-row').replaceChildren(header);
+  el('industry-crowding-body').replaceChildren(...sorted.map((row,index)=>{
+    const tr=document.createElement('tr');if(index<5)tr.className='industry-top-five';
+    const label=document.createElement('th');label.className='industry-sticky';label.scope='row';const jump=document.createElement('button');jump.type='button';jump.title=`在估值与分位查看${row.name}拥挤度`;
+    const name=document.createElement('span');name.className='industry-name';name.textContent=row.name;const rank=document.createElement('span');rank.className='industry-rank';rank.textContent=index<5?`TOP ${index+1}`:`${String(index+1).padStart(2,'0')}`;jump.append(name,rank);
+    jump.onclick=()=>{el('kind').value='industry';renderParents();const parent=row.industry_level===1?row.index_code:(row.navigation_parent_index_code||row.parent_index_code||'');el('parent').value=parent;options('industry-second',[['','全部二级行业'],...data.catalog.filter(item=>item.index_type==='industry'&&item.industry_level===2&&parentOf(item)===parent).map(item=>[item.index_code,item.name])],row.industry_level===2?row.index_code:'');metricFamily='crowding';renderCodes();el('valuation-panel').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});};
+    label.append(jump);tr.append(label);
+    dates.forEach(day=>{const td=document.createElement('td'),value=valueAt(row,day),congestion=value?.congestion,percentile=value?.turnover_percentile;
+      if(congestion==null){td.className='industry-empty';td.textContent='—';td.title=`${row.name} · ${day} · 无有效拥挤度`;}else{td.textContent=`${Number(congestion).toFixed(2)}%`;const amountText=value?.amount==null?'成交额暂无有效值':`成交额 ${(Number(value.amount)/100000000).toFixed(2)} 亿元`;if(percentile!=null){td.style.backgroundColor=industryHeatColor(percentile);td.title=`${row.name} · ${day} · 拥挤度 ${Number(congestion).toFixed(2)}% · ${amountText} · 换手率历史分位 ${Number(percentile).toFixed(1)}%`;}else{td.className='industry-empty';td.title=`${row.name} · ${day} · 拥挤度 ${Number(congestion).toFixed(2)}% · ${amountText} · 换手率历史分位缺少有效值`;}}
+      tr.append(td);
+    });return tr;
+  }));
+}
+
 async function load(refreshChoices=true){try{const status=await api('/api/indices/status');if(!refreshChoices&&data&&status.operations.some(operation=>operation.status==='running')){data.operations=status.operations;data.cooldowns=status.cooldowns;renderStatus();return;}const changed=!data||data.revision!==status.revision;if(refreshChoices||changed){const catalog=await api('/api/indices/catalog');if(!data||catalog.revision!==data.revision)clearChartCache();data={...catalog,...status,revision:catalog.revision};renderStatus();renderParents();renderCodes();}else{Object.assign(data,status);renderStatus();}}catch(error){el('progress').textContent=error.message;}}
 // Refresh versions when returning to a tab; status polling never reads all history.
 document.addEventListener('visibilitychange',()=>{clearTimeout(timer);timer=null;if(!document.hidden)load(false);});
@@ -159,7 +205,8 @@ async function collect(mode){try{await api('/api/indices/collect',{mode});notify
 el('full').onclick=()=>collect('full');el('incremental').onclick=()=>collect('incremental');el('review').onclick=()=>collect('review');el('audit').onclick=()=>collect('audit');el('cancel').onclick=async()=>{try{await api('/api/indices/cancel',{});el('progress').textContent='已请求停止，等待当前请求返回后保存进度';}catch(error){el('progress').textContent=error.message;}};el('point-overlay').onclick=()=>{pointOverlay=!pointOverlay;if(metricFamily==='crowding'){draw();return;}el('point-overlay').setAttribute('aria-pressed',String(pointOverlay));if(pointOverlay&&(!pointData||pointCode!==el('code').value))loadPointOverlay(el('code').value);else draw();};
 el('progress-toggle').onclick=()=>{const details=el('progress-details'),expanded=details.hidden;details.hidden=!expanded;el('progress-toggle').setAttribute('aria-expanded',String(expanded));el('progress-toggle').textContent=expanded?'收起进度':'查看进度';};
 el('kind').onchange=renderCodes;el('parent').onchange=()=>{el('industry-second').value='';renderCodes();};el('industry-second').onchange=renderCodes;el('code').onchange=()=>{const selected=data.catalog.find(row=>row.index_code===el('code').value);renderMetricButtons();renderSeries(true);updateSelectedIndex(selected);};el('series').onchange=loadHistory;for(const id of ['range','benchmark','frequency'])el(id).onchange=draw;el('metric').onchange=draw;
+el('industry-crowding-level').onchange=loadIndustryCrowding;el('industry-crowding-range').onchange=loadIndustryCrowding;
 const stock=new URLSearchParams(location.search).get('stock');for(const link of document.querySelectorAll('[data-view]')){const params=new URLSearchParams({tab:link.dataset.view});if(stock&&/^(?:sh|sz|bj)?\d{6}$/i.test(stock))params.set('code',stock);link.href='/?'+params;}
 api('/api/stock-groups').then(library=>window.initStockPicker({stock_library:library,code:stock||''})).catch(error=>{el('stock-picker-message').textContent='股票列表读取失败：'+error.message;});
-load();
+load();loadIndustryCrowding();
 })();
