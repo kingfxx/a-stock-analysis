@@ -179,7 +179,10 @@ function drawIndustryCrowding(){
     if(av==null&&bv==null)return a.name.localeCompare(b.name,'zh-CN');if(av==null)return 1;if(bv==null)return -1;return bv-av;
   });
   el('industry-crowding-status').textContent=dates.length?`申万${level==='1'?'一级':'二级'} · 最近 ${days} 天 · ${dates.length} 个有效交易日。按拥挤度降序，点击日期切换排序。`:`申万${level==='1'?'一级':'二级'}在所选日期范围内暂无有效拥挤度数据。`;
-  const header=document.createElement('tr'),first=document.createElement('th');first.className='industry-sticky';first.scope='col';first.textContent='行业 / 拥挤度';header.append(first);
+  const header=document.createElement('tr'),first=document.createElement('th');first.className='industry-sticky';first.scope='col';
+  const firstContent=document.createElement('div');firstContent.className='industry-header-content';const firstLabel=document.createElement('span');firstLabel.textContent='行业 / 拥挤度';
+  const currentButton=document.createElement('button');currentButton.id='industry-crowding-current';currentButton.className='industry-current-button';currentButton.type='button';currentButton.textContent='当期';currentButton.disabled=!dates.length;currentButton.title='回到最新有效交易日并按当天拥挤度排序';currentButton.setAttribute('aria-label',currentButton.title);currentButton.onclick=()=>{const scroller=el('industry-crowding-scroll'),reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;industryCrowdingSortDate=dates[0]||null;drawIndustryCrowding();requestAnimationFrame(()=>{scroller.scrollTo({left:0,behavior:reducedMotion?'auto':'smooth'});if(reducedMotion)scroller.scrollLeft=0;});};
+  firstContent.append(firstLabel,currentButton);first.append(firstContent);header.append(first);
   dates.forEach((day,index)=>{const th=document.createElement('th');th.scope='col';const button=document.createElement('button');button.type='button';button.className='industry-date-sort';button.textContent=day.slice(5).replace('-','/');button.title=`按 ${day} 的拥挤度降序排序`;button.setAttribute('aria-label',button.title);button.setAttribute('aria-pressed',String(day===sortDate));button.onclick=()=>{industryCrowdingSortDate=day;drawIndustryCrowding();};th.append(button);header.append(th);});
   el('industry-crowding-head-row').replaceChildren(header);
   el('industry-crowding-body').replaceChildren(...sorted.map((row,index)=>{

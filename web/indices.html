@@ -49,7 +49,7 @@ __RESEARCH_SIDEBAR__
 <div class="controls"><label>行业层级<select id="industry-crowding-level"><option value="1">申万一级</option><option value="2">申万二级</option></select></label><label>日期范围<select id="industry-crowding-range"><option value="30" selected>最近 30 天</option><option value="60">最近 60 天</option><option value="90">最近 90 天</option></select></label></div></div>
 <div class="industry-crowding-legend"><span>换手率历史分位</span><span>低 &lt;30 冷清</span><span>中 30–70 正常</span><span>高 &gt;70 过热</span><i aria-hidden="true"></i><small>点击日期标题按当天拥挤度排序 · 最新日期在左</small></div>
 <p id="industry-crowding-status" class="muted" role="status" aria-live="polite">正在读取行业行情…</p>
-<div class="industry-crowding-scroll" role="region" aria-label="申万行业拥挤度与换手率历史分位，可横向和纵向滚动" tabindex="0"><table><thead id="industry-crowding-head-row"></thead><tbody id="industry-crowding-body"></tbody></table></div>
+<div id="industry-crowding-scroll" class="industry-crowding-scroll" role="region" aria-label="申万行业拥挤度与换手率历史分位，可横向和纵向滚动" tabindex="0"><table><thead id="industry-crowding-head-row"></thead><tbody id="industry-crowding-body"></tbody></table></div>
 </section>
 <div class="congestion-footer"><details class="congestion-settings"><summary>更新设置</summary><p id="congestion-status" role="status" aria-live="polite"></p><p id="congestion-check" class="muted"></p>
 <div class="controls"><label class="congestion-switch"><input id="congestion-enabled" type="checkbox">每天检查 HTML 更新</label><label>北京时间<input id="congestion-time" type="time" value="18:00"></label><button id="congestion-save" type="button">保存每日检查设置</button></div>
