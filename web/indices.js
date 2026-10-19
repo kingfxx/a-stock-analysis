@@ -5,7 +5,7 @@ const seriesNames={'history.rolling':'历史滚动 PE',dashboard:'每日板块�
 const methods={source_disclosed:'来源披露口径，详细权重待核对',ordinary:'普通',equal:'等权',median:'中位数'},periods={source_disclosed:'来源披露，未另行推定',rolling:'滚动','static / rolling':'静态及滚动',pending:'待核对','LYR / TTM (source field labels)':'静态及TTM（按来源字段标识）'},shares={pending:'待核对',total_shares:'总股本',calculation_shares:'计算用股本'};
 let crowdingData=null;
 let industryCrowdingRequest=0,industryCrowdingController,industryCrowdingData=null,industryCrowdingSortDate=null;
-let data,history=[],selectedSummary,views={},metricFamily='pe',timer,historyRevision=0,historyController,pointOverlay=false,pointData,pointCode,pointController,shownIndexCode;
+let data,history=[],selectedSummary,views={},metricFamily='pe',timer,cooldownTimer,historyRevision=0,historyController,pointOverlay=false,pointData,pointCode,pointController,shownIndexCode;
 const chartCache=new Map();let chartCacheBytes=0;
 function clearChartCache(){chartCache.clear();chartCacheBytes=0;}
 function rememberChart(key,text){const size=new TextEncoder().encode(text).length;if(size>8*1024*1024)return;chartCache.set(key,{text,size});chartCacheBytes+=size;while(chartCache.size>6||chartCacheBytes>8*1024*1024){const first=chartCache.keys().next().value;chartCacheBytes-=chartCache.get(first).size;chartCache.delete(first);}}
@@ -41,7 +41,9 @@ let result={};try{if(operation)result=JSON.parse(operation.result_json)||{};}cat
 el('progress').textContent=!operation?'尚未执行指数采集':operation.status==='running'?'指数采集中':operation.status==='complete'?'指数采集已完成':operation.status==='cancelled'?'指数采集已停止，已完成分段保留':'指数采集未全部完成，请查看进度摘要';
 renderWorkProgress(operation,result);
 el('progress-toggle').textContent=el('progress-details').hidden?'查看进度':'收起进度';
-el('cooldowns').textContent=data.cooldowns.map(row=>`${providers[row.source_system]||row.source_system}：${row.reason}，冷却截止（北京时间）${window.DashboardTime.format(row.cooldown_until,'未记录')}`).join('；');
+const activeCooldowns=data.cooldowns.filter(row=>Date.parse(row.cooldown_until)>Date.now());
+el('cooldowns').textContent=activeCooldowns.map(row=>`${providers[row.source_system]||row.source_system}：${row.reason}，冷却截止（北京时间）${window.DashboardTime.format(row.cooldown_until,'未记录')}`).join('；');
+clearTimeout(cooldownTimer);cooldownTimer=null;if(activeCooldowns.length&&!document.hidden){const nextExpiry=Math.min(...activeCooldowns.map(row=>Date.parse(row.cooldown_until)));cooldownTimer=setTimeout(()=>load(false),Math.min(2147483647,Math.max(0,nextExpiry-Date.now()+50)));}
 clearTimeout(timer);timer=null;if(running&&!document.hidden)timer=setTimeout(()=>load(false),5000);}
 const parentOf=row=>row.navigation_parent_index_code||row.parent_index_code;
 function renderParents(){options('parent',data.catalog.filter(row=>row.index_type==='industry'&&row.industry_level===1).map(row=>[row.index_code,row.name]),el('parent').value);}

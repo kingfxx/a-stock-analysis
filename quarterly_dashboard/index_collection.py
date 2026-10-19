@@ -912,9 +912,13 @@ def run_operation(db,operation,*,collector=None):
     try:
         with instance_lock(db.path.parent/'collection_sources'/'index-operation'):
             collector.load_calendar(cached=row['mode'] in ('incremental','review'))
-            today=datetime.now(ZoneInfo('Asia/Shanghai')).date()
-            # Never query the still-open current trading day as a completed observation.
+            local_now=datetime.now(ZoneInfo('Asia/Shanghai'))
+            today=local_now.date()
+            # After market close, incremental collection may check today's data from every selected provider.
             eligible=[d for d in collector.trading_days if d<today.isoformat()]
+            if (row['mode']=='incremental' and (scope['end'] is None or scope['end']>=today.isoformat())
+                    and local_now.hour>=15 and today.isoformat() in collector.trading_days):
+                eligible.append(today.isoformat())
             if not eligible:
                 raise ValueError('交易日历没有已完成交易日')
             end=min(scope['end'] or max(eligible),max(eligible))

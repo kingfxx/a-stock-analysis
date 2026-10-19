@@ -6,6 +6,7 @@ import json
 import sqlite3
 import threading
 import uuid
+from datetime import datetime, timezone
 
 from .index_definitions import METRICS
 from .index_repository import index_valuation_views, read_indices
@@ -51,7 +52,9 @@ class IndexReadService:
             revision = self._revision()
             with self.db.connection() as conn:
                 operations = [dict(r) for r in conn.execute('SELECT status,result_json,error FROM index_collection_operations ORDER BY started_at DESC LIMIT 1')]
-                cooldowns = [dict(r) for r in conn.execute('SELECT source_system,reason,cooldown_until FROM collection_provider_state WHERE cooldown_until IS NOT NULL')]
+                now = datetime.now(timezone.utc)
+                cooldowns = [dict(r) for r in conn.execute('SELECT source_system,reason,cooldown_until FROM collection_provider_state WHERE cooldown_until IS NOT NULL')
+                             if datetime.fromisoformat(r['cooldown_until']).astimezone(timezone.utc) > now]
             return encode(dict(revision=revision, operations=operations, cooldowns=cooldowns))
 
     def catalog(self):
