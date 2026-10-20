@@ -330,7 +330,7 @@ def test_browser_metric_first_defaults_and_filtered_choices(index_server):
             chart_requests=[]
             page.on('request',lambda request:chart_requests.append(request.url) if '/api/indices/chart?' in request.url else None)
             page.goto(base+'/indices',wait_until='networkidle')
-            assert page.locator('#metric-tabs button').all_text_contents()==['PE(TTM)','PB']
+            assert page.locator('#metric-tabs button').all_text_contents()==['PE(TTM)','PB','拥挤度','股债利差']
             assert page.locator('#series').input_value()=='csindex|history.rolling|v1'
             assert all('pb.' not in v for v in page.locator('#series option').evaluate_all('(nodes)=>nodes.map(n=>n.value)'))
             page.locator('[data-metric-family="pb"]').click()
@@ -347,7 +347,7 @@ def test_browser_metric_first_defaults_and_filtered_choices(index_server):
             assert page.locator('#series').input_value()=='csindex|history.rolling|v1'
             page.locator('#kind').select_option('industry')
             page.wait_for_function("document.getElementById('current').textContent==='12.00 倍'")
-            assert page.locator('#metric-tabs button').all_text_contents()==['PE(TTM)','PB','股息率']
+            assert page.locator('#metric-tabs button').all_text_contents()==['PE(TTM)','PB','股息率','拥挤度']
             assert not page.locator('#series-control').is_visible()
             assert page.locator('#industry-source').is_visible()
             assert '尚待核实' in page.locator('#comparison').inner_text()

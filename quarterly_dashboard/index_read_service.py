@@ -3,6 +3,7 @@ from collections import OrderedDict
 from bisect import bisect_left
 from datetime import date
 import json
+import math
 import sqlite3
 import threading
 import uuid
@@ -39,13 +40,14 @@ class IndexReadService:
             self.metadata = None
 
     def _revision(self):
-        version = (self.watcher.execute("SELECT revision FROM index_read_revisions WHERE scope='indices'").fetchone()[0], date.today().isoformat())
+        bond_revision = tuple(self.watcher.execute('SELECT max(id),max(updated_at) FROM sovereign_yield_observations').fetchone())
+        version = (bond_revision, self.watcher.execute("SELECT revision FROM index_read_revisions WHERE scope='indices'").fetchone()[0], date.today().isoformat())
         if version != self.version:
             self.version = version
             self.metadata = None
             self.cache.clear()
             self.cache_bytes = 0
-        return f'{self.epoch}:{version[0]}:{version[1]}'
+        return f'{self.epoch}:{version}'
 
     def status(self):
         with self.lock:
@@ -122,6 +124,36 @@ class IndexReadService:
                     _,evicted=self.cache.popitem(last=False)
                     self.cache_bytes-=len(evicted)
             return body
+
+    def equity_bond_spread(self, code):
+        """Same-date earnings yield less China 10Y; never carry yields forward."""
+        with self.lock:
+            revision = self._revision()
+            with self.db.connection() as conn:
+                identity = conn.execute(
+                    "SELECT s.id FROM index_valuation_series s JOIN index_catalog c USING(index_code) "
+                    "WHERE s.index_code=? AND c.index_type='broad' AND s.provider='csindex' "
+                    "AND s.series_key='history.rolling' AND s.definition_version='v1' "
+                    "AND s.frequency='daily'", (code,)).fetchone()
+                if identity is None:
+                    raise ValueError('股债利差仅支持有中证历史滚动 PE 的宽基指数')
+                facts = conn.execute(
+                    'SELECT p.observation_date,p.pe_rolling,b.china_10y FROM index_valuation_observations p '
+                    'LEFT JOIN sovereign_yield_observations b ON b.observation_date=p.observation_date '
+                    "AND b.is_latest=1 AND b.definition_version='v1' "
+                    'WHERE p.series_id=? AND p.is_latest=1 ORDER BY p.observation_date', (identity['id'],)).fetchall()
+            rows = []
+            for fact in facts:
+                pe, bond = fact['pe_rolling'], fact['china_10y']
+                bond = float(bond) if bond is not None else None
+                value = (100 / pe - bond if pe is not None and math.isfinite(pe) and pe > 0
+                         and bond is not None and math.isfinite(bond) else None)
+                rows.append(dict(observation_date=fact['observation_date'],pe_rolling=pe,
+                                 china_10y=bond,spread=value))
+            valid = [row for row in rows if row['spread'] is not None]
+            return encode(dict(revision=revision,available=bool(valid),rows=rows,observations=len(valid),
+                               first_date=valid[0]['observation_date'] if valid else None,
+                               last_date=valid[-1]['observation_date'] if valid else None))
 
     def industry_crowding(self, level, start, end):
         try:

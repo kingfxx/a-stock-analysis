@@ -50,3 +50,25 @@ def test_dcf_assets_served():
         assert status == 200
         assert headers['Content-Type'].startswith(content_type)
         assert body
+
+
+def test_wacc_route_reads_local_yield_without_network(monkeypatch):
+    import requests
+    from test_bond_yields import collect_year, response, payload, raw_row
+    db=Database(server.DATABASE_PATH);db.initialize()
+    db.ensure_instrument('600887','伊利股份')
+    collect_year(db,[response(payload([raw_row('2026-10-05',EMM00166466='1.678')]))])
+    def forbidden(*args,**kwargs):raise AssertionError('WACC must use local data only')
+    monkeypatch.setattr(requests.Session,'request',forbidden)
+    monkeypatch.setattr(FundamentalService,'update',forbidden)
+    monkeypatch.setattr(PriceService,'ensure',forbidden)
+    status,_,body=request('/api/dcf/wacc?code=600887&years=5')
+    assert status==200
+    rf=json.loads(body)['parameters']['rf']
+    assert rf['value']==1.678 and rf['as_of_date']=='2026-10-05'
+    assert rf['status']=='observed' and rf['source_id']
+    with db.connection(write=True) as conn:
+        conn.execute('DELETE FROM sovereign_yield_observations')
+    status,_,body=request('/api/dcf/wacc?code=600887&years=5')
+    assert status==200
+    assert json.loads(body)['parameters']['rf']['value'] is None

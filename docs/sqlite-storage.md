@@ -1,6 +1,6 @@
 # SQLite 存储、数据更新与备份
 
-当前结构版本为v38。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
+当前结构版本为v39。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
 
 v37仅扩展既有`index_price_observations`，新增volume、amount、change_points、change_pct、turnover_rate、amount_ratio、constituent_count、mean_price、float_market_cap和mean_float_market_cap十个可空字段，另增field_lineage_json字段级来源/估算JSON，不新增业务表。中证/申万原series及行情行就地升级v2，保留ID及OHLC，不保留v1行情副本；Legu/Sina继续v1。每个series_id/observation_date物理唯一，历史修订就地更新，version只作计数；不建立独立derived行情。估算字段标记及父依赖同行存储，官方值优先；仅补算保留原source/batch/obtained_at，computed_at在估算JSON中，updated_at是真实写入时间；缺依赖保持NULL或撤回。单位、字段映射、缺值和派生估算规则见[指数行情字段映射](index-data-collection.md#field-mapping)。v38后逻辑来源/时间语义保持，物理来源/时间格式见下节。
 
@@ -261,6 +261,66 @@ Schema v33 新增三张巨潮公告日期元数据表。`metadata_only` 请求�
 本次新表含索引88,465,408字节（约84.4MiB），公共响应归档20,555,653字节（约19.6MiB，包含中断复用副本）；这是本次实测，不是永久容量上限。47期原文双哈希/22字段回放、SQLite完整性及外键校验通过，旧市值/来源/价格逐行哈希与采集前备份一致。
 
 字段、恢复及运行说明见[全市场交易日快照](data-sources/market-trade-snapshot.md)；[完整验收](../data/verification/reports/market-trade-snapshot-history-20261013.json)、[旧表完整性复核](../data/verification/reports/market-trade-snapshot-legacy-integrity-20261014.json)。
+
+### 2.11 中美国债收益率（v39）
+
+`sovereign_yield_observations`是中美国债数据的唯一业务事实表，归类为「宏观数据」，共21列；每行保存一个观察日、一个定义版本的一次完整数值修订。实际来源为东方财富`RPTA_WEB_TREASURYYIELD`，采集dataset为`bond_zh_us_rate`。来源原文、请求参数、批次和初始化清单复用公共采集表，不另建国债来源表或任务表。
+
+#### 字段字典
+
+下表按物理表列顺序列出全部字段。「可空」表示允许SQL NULL；12个数值字段使用TEXT保存规范十进制数值，保留来源数值精度，去掉无意义的末尾零，不经二进制浮点转换、不缩放。原始JSON字面格式以归档原文为准。
+
+| 字段 | SQLite类型 | 可空 | 来源字段／写入依据 | 含义、单位及约束 |
+|---|---|---|---|---|
+| `id` | INTEGER | 主键 | SQLite分配 | 物理事实行ID；每次真实修订使用新ID |
+| `observation_date` | TEXT | 否 | `SOLAR_DATE` | 来源观察日，规范为`YYYY-MM-DD`；不是取得时间、写入时间或GDP报告期 |
+| `definition_version` | TEXT | 否 | 采集定义版本 | 当前为`v1`；与观察日共同区分逻辑事实身份，不同定义不混读 |
+| `china_2y` | TEXT | 是 | `EMM00588704` | 中国2年期国债收益率，百分数（`1.65`表示1.65%） |
+| `china_5y` | TEXT | 是 | `EMM00166462` | 中国5年期国债收益率，百分数 |
+| `china_10y` | TEXT | 是 | `EMM00166466` | 中国10年期国债收益率，百分数 |
+| `china_30y` | TEXT | 是 | `EMM00166469` | 中国30年期国债收益率，百分数 |
+| `china_10y_2y_spread` | TEXT | 是 | `EMM01276014` | 中国10年期减2年期收益率利差，百分点；保存来源披露值，不另用两个期限重算 |
+| `china_gdp_yoy` | TEXT | 是 | `EMM00000024` | 来源标注的中国GDP年增率，百分数；按返回观察日保存，不推定为每日发布或自行补出报告期 |
+| `us_2y` | TEXT | 是 | `EMG00001306` | 美国2年期国债收益率，百分数 |
+| `us_5y` | TEXT | 是 | `EMG00001308` | 美国5年期国债收益率，百分数 |
+| `us_10y` | TEXT | 是 | `EMG00001310` | 美国10年期国债收益率，百分数 |
+| `us_30y` | TEXT | 是 | `EMG00001312` | 美国30年期国债收益率，百分数 |
+| `us_10y_2y_spread` | TEXT | 是 | `EMG01339436` | 美国10年期减2年期收益率利差，百分点；保存来源披露值，不另行重算 |
+| `us_gdp_yoy` | TEXT | 是 | `EMG00159635` | 来源标注的美国GDP年增率，百分数；不另行推断同比／年化口径或报告期 |
+| `content_hash` | TEXT | 否 | 规范观察日及12项数值 | 上述内容JSON的SHA256，64字符十六进制文本；不包含ID、修订号、来源引用和写入时间，用于识别数值变化，不是原始响应文件哈希 |
+| `version` | INTEGER | 否 | 同日、同定义的前一修订号加1 | 首版为1，必须大于0；旧修订保留 |
+| `is_latest` | INTEGER | 否 | 发布事务维护 | 只能为0或1；1为同日、同定义当前版本，0为历史版本 |
+| `batch_id` | INTEGER | 否 | `collection_batches.id` | 形成此事实版本的发布批次；外键引用公共批次 |
+| `source_id` | INTEGER | 否 | `collection_sources.id` | 形成此版本的原始分页响应；与`batch_id`组成复合外键，保证来源属于同一批次 |
+| `updated_at` | TEXT | 否 | 发布事实时的实际UTC时间 | 带时区的ISO时间；只在新增事实／修订时写入，不因重复检查刷新旧行时间 |
+
+#### 主外键、索引与读取
+
+- 主键为`id`；唯一约束`(observation_date, definition_version, version)`防止修订号重复。
+- 部分唯一索引`sovereign_yield_latest`约束`(observation_date, definition_version) WHERE is_latest=1`，保证每个日期、定义最多一个当前版本。
+- 范围索引`sovereign_yield_dates`为`(observation_date DESC, is_latest)`。日常读取筛选`is_latest=1`及适用的`definition_version`，按观察日查询；历史审计保留全部修订。
+- `batch_id → collection_batches.id`；`(source_id, batch_id) → collection_sources(id, batch_id)`。提供方`eastmoney`、dataset、原始文件路径、双哈希和真实取得时间通过来源／批次读取，不在事实行重复存储。
+
+```sql
+SELECT f.observation_date, f.china_10y, f.us_10y, f.version,
+       f.updated_at, s.obtained_at, s.source_system, s.dataset
+FROM sovereign_yield_observations AS f
+JOIN collection_sources AS s ON s.id = f.source_id AND s.batch_id = f.batch_id
+WHERE f.is_latest = 1 AND f.definition_version = 'v1'
+ORDER BY f.observation_date DESC;
+```
+
+数值列读取结果仍为文本；需要数值计算时使用十进制解析，不按文本进行数值排序或直接用浮点转换替代无损读取。
+
+#### 修订、缺值与时间口径
+
+相同日期和定义的12项数值未变化时，不新增版本、不改原来源或`updated_at`；新的检查证据仍保留在公共来源／批次中。数值变化（包括NULL补为有效值）在同一事务将旧版`is_latest`改为0并插入新版。任一已有非空字段变空时，整条候选暂不替代旧事实，候选日期／字段／source登记在批次结果；之后优先复查并记录解决批次及来源，不把旧字段拼入新响应。
+
+有效零和负值保留；来源null或空字符串记为NULL，不能当作零，也不使用前值、插值、另一国家或另一来源补齐。同一观察日的中美字段可以分别缺失。非数值、非有限数或必需来源字段缺失属于校验失败，不能作为有效空值发布。
+
+来源取得时间为`collection_sources.obtained_at`，事实写入时间为`updated_at`；维护页取两者的真实最大时间。观察日不代替更新时间；空表显示暂无数据，缺少可用时间时显示未记录。重复检查时间及逐字段首末非空日见公共批次结果，不能通过事实行更新时间推断最近一次检查。
+
+年度闭区间分页执行、初始化清单、近期检查新鲜度及逐字段覆盖均保存在公共采集批次。GDP字段仅记实际非空观察，不套日度收益率的发布频率；尚无可靠中美发布日历，因此`coverage_status=unknown`不代表逐日完整，日历间隔也不能直接认定漏采。采集和恢复入口及限制见[指数页国债收益率采集](index-data-collection.md#中美国债收益率采集)。表结构和数值规则分别以[v39迁移](../quarterly_dashboard/migrations/039_sovereign_yields.sql)及[采集实现](../quarterly_dashboard/bond_yields.py)为准。
 
 ## 3. 更新、缓存与价格一致性
 

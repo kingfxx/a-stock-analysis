@@ -1221,9 +1221,17 @@ class Handler(BaseHTTPRequestHandler):
                     if set(command)-{'mode','providers','start','end','datasets'}:
                         raise ValueError('指数采集参数无效')
                     if 'datasets' in command:
-                        if command['datasets']!=['market_congestion'] or command.get('providers',['legu'])!=['legu'] or 'start' in command or 'end' in command:
-                            raise ValueError('拥挤度任务范围无效')
-                        operation=market_congestion.start(db,command.get('mode','incremental'))
+                        if command['datasets']==['market_congestion']:
+                            if command.get('providers',['legu'])!=['legu'] or 'start' in command or 'end' in command:
+                                raise ValueError('拥挤度任务范围无效')
+                            operation=market_congestion.start(db,command.get('mode','incremental'))
+                        elif command['datasets']==['bond_zh_us_rate']:
+                            if 'start' in command or 'end' in command:
+                                raise ValueError('国债收益率由本地水位决定范围')
+                            operation=start_operation(db,command.get('mode','incremental'),
+                                command.get('providers',['csindex','legu','sws']),datasets=command['datasets'])
+                        else:
+                            raise ValueError('指数采集数据集无效')
                     else:
                         operation=start_operation(db,command.get('mode','incremental'),command.get('providers',['csindex','legu','sws']),command.get('start'),command.get('end'))
                     Thread(target=run_operation,args=(db,operation),daemon=True).start()
@@ -1293,7 +1301,7 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
                 self._ai_reply({'error':str(exc)},400)
             return
-        if parsed.path in {'/api/indices/catalog','/api/indices/status','/api/indices/chart','/api/indices/price','/api/indices/crowding','/api/indices/industry-crowding'}:
+        if parsed.path in {'/api/indices/catalog','/api/indices/status','/api/indices/chart','/api/indices/price','/api/indices/crowding','/api/indices/industry-crowding','/api/indices/equity-bond-spread'}:
             try:
                 with _SERVICE_LOCK:
                     if not hasattr(self.server, 'index_reader'):
@@ -1308,6 +1316,8 @@ class Handler(BaseHTTPRequestHandler):
                     body = reader.price_overlay(query.get('code',[None])[0])
                 elif parsed.path.endswith('/industry-crowding'):
                     body = reader.industry_crowding(query.get('level',[None])[0],query.get('start',[None])[0],query.get('end',[None])[0])
+                elif parsed.path.endswith('/equity-bond-spread'):
+                    body = reader.equity_bond_spread(query.get('code',[None])[0])
                 elif parsed.path.endswith('/crowding'):
                     body = reader.price_overlay(query.get('code',[None])[0],field='amount_ratio')
                 else:

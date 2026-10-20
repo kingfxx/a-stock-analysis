@@ -83,6 +83,7 @@ def test_browser_crowding_switch_statistics_gaps_and_valuation(db):
                 page.wait_for_function("document.getElementById('current').textContent==='20.00%'")
                 assert '66.7%' in page.locator('#basis').inner_text()
                 basis=page.locator('#basis').inner_text()
+                page.locator('#frequency').select_option('day')
                 assert page.locator('#chart').evaluate('n=>n.data[0].y')==[0,10,None,20]
                 page.locator('#frequency').select_option('month')
                 assert page.locator('#basis').inner_text()==basis

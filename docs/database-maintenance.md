@@ -1,5 +1,9 @@
 # 后台维护页
 
+## v39 中美国债收益率
+
+`sovereign_yield_observations`归类为「宏观数据」，用途为中美国债期限收益率、利差和GDP年增率的日度来源修订。维护页更新时间取事实`updated_at`与`collection_sources.obtained_at`两者最大值；观察日期不是更新时间。无事实或来源取得时间缺失时不从`observation_date`补推，显示未记录。字段及精度见[SQLite v39存储说明](sqlite-storage.md#211-中美国债收益率v39)。
+
 Schema v35 将 `financial_reports.raw_json` 的历史行及新写入改为逐条无损压缩 BLOB，分类仍为「个股数据」，用途增加压缩说明；表名、索引和列不变。更新时间仍取原 `obtained_at`，迁移不刷新时间；空表或缺时间沿用原显示。维护页统计压缩后的物理页，迁移释放的页可在空间整理后回收为文件空间；整理前应备份并排除活动任务。备份/恢复保留 BLOB，完整性检查校验解压长度、完整流、内嵌 SHA256 和原 content_hash。详见[财务 JSON 压缩](financial-json-storage.md)。
 
 Schema v34的 `business_segment_versions`、`business_segment_items` 登记为「个股数据」。版本表时间读取形成该版本的来源页最后一个实际 `obtained_at`，明细通过 `version_id` 关联该时间；重复检查不改写旧版本时间，最新检查见 `sync_state.checked_at`。空表或关联时间缺失显示「未记录」，不从报告期推断。两表纳入未关注股票「个股财务与行情数据」清理：先删明细、再按版本ID倒序删除修订链；研究引用主营构成哈希时整套版本及明细保留。具体口径见[个股主营构成](stock-collection.md#个股主营构成)。

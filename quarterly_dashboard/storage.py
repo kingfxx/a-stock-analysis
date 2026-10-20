@@ -49,7 +49,7 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (34, "034_business_segments.sql"),
               (35, "035_financial_json_compression.sql"),
               (36, "036_market_congestion.sql"), (37, "037_index_price_market_fields.sql"),
-              (38, "038_compact_index_prices.sql"))
+              (38, "038_compact_index_prices.sql"), (39, "039_sovereign_yields.sql"))
 
 
 class StorageError(RuntimeError):

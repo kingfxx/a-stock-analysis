@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from quarterly_dashboard.dcf import (calculate_beta, calculate_debt_cost, calculate_effective_tax,
-                                     sum_interest_bearing_debt, parse_sina_gov_bond_yields, calculate_dcf, calculate_growth_dcf, discount_cash_flows,
+                                     sum_interest_bearing_debt, read_risk_free_rate, calculate_dcf, calculate_growth_dcf, discount_cash_flows,
                                      forecast_standard, forecast_three_stage, estimate_wacc,
                                      read_dcf, _growth_recommendation)
 from quarterly_dashboard.fundamental_service import SOURCE
@@ -160,32 +160,45 @@ def test_beta_marks_short_history_unavailable():
     assert result['value'] is None and result['status']=='unavailable'
 
 
-def test_sina_bond_parser_uses_latest_close_not_later_than_asof():
-    rows=[{'date':'2025-01-02','close':1.678},{'date':'2025-01-03','close':1.7},
-          {'date':'2025-01-01','close':None}]
-    result=parse_sina_gov_bond_yields(rows,'2025-01-02')
-    assert result['value']==1.678 and result['as_of_date']=='2025-01-02'
-    assert result['status']=='observed'
-    assert result['stale'] is False
+def test_local_risk_free_latest_valid_before_asof_and_revision(tmp_path,monkeypatch):
+    from test_bond_yields import collect_year, response, payload, raw_row
+    import requests
+    def forbidden(*args,**kwargs):raise AssertionError('WACC must not request provider data')
+    monkeypatch.setattr(requests.Session,'request',forbidden)
+    db=Database(tmp_path/'rf.sqlite3');db.initialize()
+    collect_year(db,[response(payload([
+        raw_row('2026-10-07',EMM00166466='1.7'),
+        raw_row('2026-10-06',EMM00166466=None),
+        raw_row('2026-10-05',EMM00166466='1.678'),
+    ]))])
+    result=read_risk_free_rate(db,'2026-10-06')
+    assert result['value']==1.678 and result['as_of_date']=='2026-10-05'
+    assert result['status']=='observed' and not result['stale']
+    assert 'sovereign_yield_observations.china_10y' in result['source']
+    assert result['source_id'] and result['batch_id'] and result['observation_id']
+    collect_year(db,[response(payload([raw_row('2026-10-05',EMM00166466='1.5')]))])
+    updated=read_risk_free_rate(db,'2026-10-06')
+    assert updated['value']==1.5 and updated['version']==2
+    assert updated['observation_id']!=result['observation_id']
+    assert read_risk_free_rate(db,'2026-10-07')['value']==1.7
+    assert read_risk_free_rate(db,'2026-10-15')['stale']
+    assert read_risk_free_rate(db,'2026-10-01')['value'] is None
 
 
-def test_sina_bond_parser_reports_missing_history_without_fabricating_yield():
-    result=parse_sina_gov_bond_yields([{'date':'2025-01-03','close':1.7}], '2025-01-02')
-    assert result['value'] is None and result['status']=='unavailable'
+@pytest.mark.parametrize('value',[0,-0.25])
+def test_local_risk_free_preserves_zero_and_negative(tmp_path,value):
+    from test_bond_yields import collect_year, response, payload, raw_row
+    db=Database(tmp_path/'rf.sqlite3');db.initialize()
+    collect_year(db,[response(payload([raw_row('2026-10-05',EMM00166466=value)]))])
+    assert read_risk_free_rate(db,'2026-10-06')['value']==value
 
 
-def test_risk_free_rate_caches_successful_akshare_result_in_memory(monkeypatch):
-    from quarterly_dashboard import dcf
-    dcf._RISK_FREE_CACHE.clear()
-    calls=[]
-    monkeypatch.setattr(dcf,'_call_akshare_gov_bond_history',lambda: calls.append(1) or [
-        {'date':'2025-01-02','close':1.678}])
-    first=dcf.fetch_risk_free_rate('2025-01-02')
-    second=dcf.fetch_risk_free_rate('2025-01-02')
-    assert first['value']==second['value']==1.678
-    assert len(calls)==1
-    assert first['source'].startswith('AkShare bond_gb_zh_sina')
-    dcf._RISK_FREE_CACHE.clear()
+def test_local_risk_free_empty_invalid_and_no_future_values(tmp_path):
+    db=Database(tmp_path/'rf.sqlite3');db.initialize()
+    for as_of in ['2026-10-06','invalid',None]:
+        result=read_risk_free_rate(db,as_of)
+        assert result['value'] is None and result['status']=='unavailable'
+        assert result['reason']
 
 
 def test_interest_bearing_debt_sum_reports_partial_fields_without_zero_filling():
@@ -205,7 +218,6 @@ def test_interest_bearing_debt_sum_reports_partial_fields_without_zero_filling()
 def test_auto_wacc_uses_annual_interest_tax_latest_interim_debt_and_same_day_market_cap(facts,monkeypatch):
     import json
     from quarterly_dashboard import dcf
-    monkeypatch.setattr(dcf,'fetch_risk_free_rate',lambda as_of:dict(value=None,status='unavailable'))
     six=('SHORTTERMBORR','SHORTTERMBDSPAYA','DUENONCLIAB','LONGBORR','BDSPAYA','LEASELIAB')
     def balance(values): return raw('fzb',list(zip(six,six,values)))
     identity=facts.ensure_instrument('600519','测试企业')

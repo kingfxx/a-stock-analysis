@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 from calendar import monthrange
 from concurrent.futures import ThreadPoolExecutor,as_completed
+from contextlib import nullcontext
 from copy import deepcopy
 from datetime import date, datetime, timedelta
 from html.parser import HTMLParser
@@ -319,9 +320,9 @@ class OperationProgress:
             progress=result['work_progress'];current=progress.get('current')
             if current and current.get('provider')==provider:
                 current['message']=str(message)[:300]
-                task=next((item for item in progress.get('tasks',{}).values()
-                    if item.get('provider')==provider and item.get('status')=='running'),None)
-                if task:task['message']=str(message)[:300]
+            task=next((item for item in progress.get('tasks',{}).values()
+                if item.get('provider')==provider and item.get('status')=='running'),None)
+            if task:task['message']=str(message)[:300]
         self.update(mutate)
 
 
@@ -862,9 +863,14 @@ def _operation_message(status, mode, valuation_batches, derived_result):
     return message
 
 
-def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None,end=None):
-    if mode not in ('full','incremental','backfill','audit','review') or not isinstance(providers,(list,tuple)) or not providers or not set(providers)<= {'csindex','legu','sws'}:
+def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None,end=None,datasets=None):
+    valid_datasets=datasets is not None and isinstance(datasets,(list,tuple)) and bool(datasets) and not (set(datasets)-{'bond_zh_us_rate'})
+    if mode not in ('full','incremental','backfill','audit','review') or not isinstance(providers,(list,tuple)) or (not providers and not valid_datasets) or not set(providers)<= {'csindex','legu','sws'}:
         raise ValueError('指数采集模式／来源无效')
+    if datasets is not None and not valid_datasets:
+        raise ValueError('指数采集数据集无效')
+    if datasets is not None and (mode!='incremental' or start is not None or end is not None):
+        raise ValueError('国债收益率附加任务仅支持近期增量模式，由本地水位决定范围')
     if start:
         day(start)
     if end:
@@ -876,11 +882,21 @@ def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None
         if conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone():
             raise ValueError('已有指数任务正在运行，请先等待或取消')
         conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at) VALUES(?,?,?,'running',?)",
-            (operation,mode,encoded(dict(providers=list(dict.fromkeys(providers)),start=start,end=end)),utc_now()))
+            (operation,mode,encoded(dict(providers=list(dict.fromkeys(providers)),start=start,end=end,
+                                         datasets=list(dict.fromkeys(datasets or ())))),utc_now()))
     return operation
 
 
 def run_operation(db,operation,*,collector=None):
+    with db.connection() as conn:
+        scope=json.loads(conn.execute('SELECT scope_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
+    if scope.get('dataset')=='market_congestion':
+        from .market_congestion import run
+        return run(db,operation)
+    with instance_lock(db.path.parent/'collection_sources'/'index-operation'):
+        return _run_operation_locked(db,operation,collector=collector)
+
+def _run_operation_locked(db,operation,*,collector=None):
     with db.connection() as conn:
         scope=json.loads(conn.execute('SELECT scope_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
     if scope.get('dataset')=='market_congestion':
@@ -900,17 +916,57 @@ def run_operation(db,operation,*,collector=None):
     with db.connection() as conn:
         row=dict(conn.execute('SELECT * FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone())
     scope=json.loads(row['scope_json'])
+    if not scope.get('providers') and scope.get('datasets')==['bond_zh_us_rate']:
+        return _run_bond_only_operation(db,operation,row)
     injected_collector=collector is not None
     collector=collector or IndexCollector(db,operation,progress=progress)
     try:collector.task_progress=tracker
     except (AttributeError,TypeError):pass
     errors={}
+    bond_result={}
+    bond_task_id=(tracker.register('eastmoney','bond_zh_us_rate','中美国债收益率')
+                  if 'bond_zh_us_rate' in scope.get('datasets',[]) else None)
     derived_result={'status':'pending','facts':0,'network_requests':0}
     dependency_result={'status':'pending','network_requests':0}
     derive_through=None
     status='complete'
+    def run_bond(http):
+        status='complete';errors={};bond_result={}
+        tracker.transition(bond_task_id,'running','检查初始化、增量水位及近期14日')
+        try:
+            from .bond_yields import collect as collect_bond_yields
+            def bond_cancelled():
+                with db.connection() as conn:
+                    item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                return not item or bool(item[0])
+            bond_result=collect_bond_yields(db,operation,collector=http,cancelled=bond_cancelled,
+                progress=lambda message:tracker.update_message('eastmoney',message))
+            tracker.transition(bond_task_id,'success',bond_result.get('status','complete'))
+            if bond_result.get('status')=='partial':
+                status='failed';errors['bond_zh_us_rate']='部分日期存在尚未核实的字段撤回；保留旧事实'
+            elif bond_result.get('status')=='empty':
+                status='failed'
+                errors['bond_zh_us_rate']='来源返回空区间；未将空响应当作年度覆盖'
+        except Cancelled as exc:
+            tracker.transition(bond_task_id,'cancelled','已停止，已完成年度分段保留')
+            status='cancelled';errors['bond_zh_us_rate']=str(exc)
+        except Exception as exc:
+            tracker.transition(bond_task_id,'failed',str(exc))
+            status='failed';errors['bond_zh_us_rate']=str(exc)
+        return status,bond_result,errors
+    bond_pool=None;bond_future=None;bond_http=None
+    if bond_task_id is not None and not injected_collector:
+        from .collection import RequestCollector
+        def bond_cancelled():
+            with db.connection() as conn:
+                item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+            return not item or bool(item[0])
+        bond_http=RequestCollector(db,cancelled=bond_cancelled,
+            progress=lambda message:tracker.update_message('eastmoney',message))
+        bond_pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='index-bond')
+        bond_future=bond_pool.submit(run_bond,bond_http)
     try:
-        with instance_lock(db.path.parent/'collection_sources'/'index-operation'):
+        with nullcontext():
             collector.load_calendar(cached=row['mode'] in ('incremental','review'))
             local_now=datetime.now(ZoneInfo('Asia/Shanghai'))
             today=local_now.date()
@@ -1042,6 +1098,20 @@ def run_operation(db,operation,*,collector=None):
     except Exception as exc:
         status='failed'
         errors['operation']=str(exc)
+    if bond_future is not None or (bond_task_id is not None and status!='cancelled'):
+        try:
+            bond_status,bond_result,bond_errors=(bond_future.result() if bond_future is not None
+                                               else run_bond(collector.http))
+            errors.update(bond_errors)
+            if bond_status=='cancelled' or (status!='cancelled' and bond_status=='failed'):
+                status=bond_status
+        finally:
+            if bond_pool is not None:
+                bond_pool.shutdown(wait=True)
+                collector.http.requests+=bond_http.requests
+                collector.http.retries+=bond_http.retries
+                collector.http.halted.update(bond_http.halted)
+                bond_http.session.close()
     tracker.finish(status)
     with db.connection(write=True) as conn:
         current=conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
@@ -1053,11 +1123,50 @@ def run_operation(db,operation,*,collector=None):
         conn.execute('UPDATE index_collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
             (status,utc_now(),encoded(dict(message=_operation_message(status,row['mode'],valuation_batches,derived_result),
                 providers=progress_result.get('providers',{}),work_progress=progress_result.get('work_progress'),
-                batches=totals,errors=errors,derived=derived_result,dependency=dependency_result,**collector.http.report())),
+                batches=totals,errors=errors,bond_yields=bond_result,derived=derived_result,dependency=dependency_result,**collector.http.report())),
              encoded(errors) if errors else None,operation))
     report=db.path.parent/'verification'/'reports'/('index-collection-'+operation+'.json')
     with db.connection() as conn:
         payload=dict(conn.execute('SELECT * FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone())
+    atomic_write(report,encoded(payload).encode())
+    return payload
+
+
+def _run_bond_only_operation(db,operation,row):
+    tracker=OperationProgress(db,operation);errors={};status='complete'
+    from .collection import RequestCollector
+    from .bond_yields import collect as collect_bond_yields
+    def cancelled():
+        with db.connection() as conn:
+            item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+        return not item or bool(item[0])
+    collector=RequestCollector(db,cancelled=cancelled,progress=lambda message:tracker.update_message('eastmoney',message))
+    task=tracker.register('eastmoney','bond_zh_us_rate','中美国债收益率')
+    tracker.transition(task,'running','检查初始化、增量水位及近期14日')
+    try:
+        result=collect_bond_yields(db,operation,collector=collector,cancelled=cancelled,
+            progress=lambda message:tracker.update_message('eastmoney',message))
+        if result.get('status') in ('partial','empty'):
+            status='failed';errors['bond_zh_us_rate']='部分或空区间未满足覆盖验证；保留已发布分段'
+        tracker.transition(task,'success',result.get('status','complete'))
+    except Cancelled as exc:
+        result={};status='cancelled';errors['bond_zh_us_rate']=str(exc)
+        tracker.transition(task,'cancelled','已停止，已完成年度分段保留')
+    except Exception as exc:
+        result={};status='failed';errors['bond_zh_us_rate']=str(exc)
+        tracker.transition(task,'failed',str(exc))
+    tracker.finish(status)
+    with db.connection(write=True) as conn:
+        current=conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+        progress_result=json.loads(current[0]) if current and current[0] else {}
+        totals=[dict(r) for r in conn.execute('SELECT status,coverage_status,count(*) AS batches FROM collection_batches WHERE operation_id=? GROUP BY status,coverage_status',(operation,))]
+        conn.execute('UPDATE index_collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
+            (status,utc_now(),encoded(dict(message='国债收益率采集'+('完成' if status=='complete' else '未完成'),
+                providers=progress_result.get('providers',{}),work_progress=progress_result.get('work_progress'),
+                batches=totals,errors=errors,bond_yields=result,**collector.report())),
+             encoded(errors) if errors else None,operation))
+    report=db.path.parent/'verification'/'reports'/('index-collection-'+operation+'.json')
+    with db.connection() as conn:payload=dict(conn.execute('SELECT * FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone())
     atomic_write(report,encoded(payload).encode())
     return payload
 

@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import json
 import math
-import threading
-from datetime import date, datetime
+from datetime import date
 from statistics import median, pstdev
 
 from .core import build_period_rows, view_rows
@@ -197,7 +196,7 @@ def build_auto_wacc(db, code, *, years=5, as_of=None):
     if years not in (2, 3, 5):
         raise ValueError('Beta窗口仅支持2、3或5年')
     params = {}
-    params['rf'] = fetch_risk_free_rate(as_of)
+    params['rf'] = read_risk_free_rate(db, as_of)
     params['erp'] = dict(value=6.0,source='模型假设',as_of_date=None,method='可配置情景，默认6%；另提供5%和7%',status='assumption',scenarios=[5,6,7])
     identity=None
     with db.connection() as conn:
@@ -297,84 +296,31 @@ def build_auto_wacc(db, code, *, years=5, as_of=None):
         as_of_date=as_of,warnings=warnings)
 
 
-_RISK_FREE_CACHE = {}
-_RISK_FREE_CACHE_LOCK = threading.Lock()
-
-
-def parse_sina_gov_bond_yields(rows, as_of):
-    """Select the latest Sina 10Y government-bond close no later than valuation date."""
-    if hasattr(rows, 'to_dict'):
-        rows=rows.to_dict(orient='records')
-    candidates=[]
-    end=date.fromisoformat(as_of)
-    for row in rows or []:
-        raw_day=row.get('date')
-        if raw_day is None: continue
-        if isinstance(raw_day,datetime): raw_day=raw_day.date()
-        if hasattr(raw_day,'isoformat') and not isinstance(raw_day,str): raw_day=raw_day.isoformat()
-        day=str(raw_day)[:10]
-        try: observed=date.fromisoformat(day)
-        except ValueError: continue
-        value=_finite(row.get('close'))
-        if observed<=end and value is not None and -5<=value<=20:
-            candidates.append((observed,value))
-    if not candidates:
-        return dict(value=None,source='AkShare bond_gb_zh_sina / 新浪财经',as_of_date=None,
-            method='读取中国10年期国债日度收益率收盘值，选择不晚于估值日的最近数据',
-            status='unavailable',reason='AkShare返回数据中没有可用的估值日或以前10年期国债收盘收益率')
-    observed,value=max(candidates,key=lambda item:item[0])
-    return dict(value=value,source='AkShare bond_gb_zh_sina / 新浪财经',as_of_date=observed.isoformat(),
-        method='symbol=中国10年期国债；取不晚于估值基准日的最近一条close（收益率%，不是价格）',
-        status='observed',stale=(end-observed).days>7)
-
-
-def _call_akshare_gov_bond_history():
-    import akshare as ak
-    # AkShare's Sina adapter calls requests.get directly and therefore bypasses
-    # create_data_session(), including its opt-in-only system proxy policy.
-    # Replace only the requests module reference used by that adapter while it
-    # runs, so the request is direct by default without changing other callers.
-    import importlib
-    from .network import create_data_session
-
-    endpoint = importlib.import_module(ak.bond_gb_zh_sina.__module__)
-    original_requests = endpoint.requests
-    session = create_data_session()
-
-    class _DirectRequests:
-        def __getattr__(self, name):
-            return getattr(original_requests, name)
-
-        def get(self, *args, **kwargs):
-            return session.get(*args, **kwargs)
-
+def read_risk_free_rate(db, as_of):
+    """Read the latest valid China 10Y revision on or before the valuation date."""
+    evidence=dict(value=None,source='本地 sovereign_yield_observations.china_10y / 东方财富',
+        as_of_date=None,method='读取 v1 最新修订；取不晚于估值基准日的最近有效中国10年期国债收益率（%）',
+        status='unavailable')
     try:
-        endpoint.requests = _DirectRequests()
-        return ak.bond_gb_zh_sina(symbol='中国10年期国债')
-    finally:
-        endpoint.requests = original_requests
-        session.close()
-
-
-def fetch_risk_free_rate(as_of):
-    """Fetch from AkShare on demand and cache successful results in memory per valuation date."""
-    try:
-        date.fromisoformat(as_of)
+        end=date.fromisoformat(as_of)
     except (TypeError,ValueError):
-        return dict(value=None,source='AkShare bond_gb_zh_sina / 新浪财经',as_of_date=None,
-            method='读取中国10年期国债日度收益率收盘值',status='unavailable',reason='估值基准日格式无效')
-    with _RISK_FREE_CACHE_LOCK:
-        cached=_RISK_FREE_CACHE.get(as_of)
-        if cached is not None: return dict(cached)
-        try:
-            result=parse_sina_gov_bond_yields(_call_akshare_gov_bond_history(),as_of)
-        except Exception as exc:
-            result=dict(value=None,source='AkShare bond_gb_zh_sina / 新浪财经',as_of_date=None,
-                method='按估值基准日读取10年期国债历史收益率；失败时不回退固定值',status='unavailable',
-                reason=f'AkShare数据暂不可用：{type(exc).__name__}')
-        if result.get('value') is not None:
-            _RISK_FREE_CACHE[as_of]=dict(result)
-        return result
+        return dict(evidence,reason='估值基准日格式无效')
+    with db.connection() as conn:
+        rows=conn.execute(
+            'SELECT observation_date,china_10y,id,source_id,batch_id,version,updated_at '
+            "FROM sovereign_yield_observations WHERE is_latest=1 AND definition_version='v1' "
+            'AND china_10y IS NOT NULL AND observation_date<=? ORDER BY observation_date DESC',
+            (end.isoformat(),))
+        for row in rows:
+            value=_finite(row['china_10y'])
+            if value is None:
+                continue
+            observed=date.fromisoformat(row['observation_date'])
+            return dict(evidence,value=value,as_of_date=observed.isoformat(),status='observed',
+                stale=(end-observed).days>7,observation_id=row['id'],source_id=row['source_id'],
+                batch_id=row['batch_id'],version=row['version'],updated_at=row['updated_at'],
+                definition_version='v1')
+    return dict(evidence,reason='本地数据库没有不晚于估值基准日的有效中国10年期国债收益率，请先更新国债数据或手工填写')
 
 
 DEBT_FIELDS=('SHORTTERMBORR','SHORTTERMBDSPAYA','DUENONCLIAB','LONGBORR','BDSPAYA','LEASELIAB')
