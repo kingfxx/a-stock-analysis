@@ -799,7 +799,8 @@ def load_chart_data(code: str, section: str, refresh: bool = False, *, price_ver
                     try:
                         announcement = AnnouncementService(fundamentals.db).update(
                             code, data["reports"], refresh=refresh, full=full,
-                            allow_initial=bool(refresh or full))
+                            # First financial sync also bootstraps announcement history for a new stock.
+                            allow_initial=True)
                     except (ProviderBlocked, ValueError, KeyError, TypeError, OSError,
                             requests.RequestException, StorageError, sqlite3.DatabaseError) as exc:
                         try:
