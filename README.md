@@ -63,6 +63,7 @@ HTTPS 证书验证保持启用；代理地址应按实际环境设置。
 |---|---|
 | [企业经营趋势指标说明](docs/enterprise-trend-metrics.md) | 第一个 tab 的 18 项对照指标、估值及筹码：含义、公式、来源、周期、缺值与限制 |
 | [财务分析说明](docs/financial-analysis.md) | 第二个 tab 的三表分析、来源展开和金融企业口径 |
+| [股息率预测计算器](docs/dividend-forecast.md) | 当前及未来两财年的利润、分红、三情景、FCF覆盖与目标股息率参考买入价 |
 | [财务四表数据字典](docs/financial-data-dictionary.md)／[CSV 清单](docs/financial-data-dictionary.csv) | 新浪原始科目、字段码、口径及覆盖统计 |
 | [设计文档](docs/architecture-design.md) | 代码职责、加载、同步、缓存及备份流程 |
 | [SQLite 存储说明](docs/sqlite-storage.md) | 表结构、迁移、同步和维护命令 |

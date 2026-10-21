@@ -30,6 +30,7 @@ from .business_segment_service import BusinessSegmentService
 from .disclosure_dates import is_earnings_notice
 from .statements import read_statements
 from .dcf import read_dcf, build_auto_wacc
+from .dividend_forecast import read_dividend_forecast
 from .industry_service import IndustryService
 from .maintenance import MaintenanceService
 from .index_collection import start_operation, run_operation, cancel_operation, recover_operations
@@ -1423,7 +1424,8 @@ class Handler(BaseHTTPRequestHandler):
             content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/datetime.js", "/research-layout.css", "/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
                              "/financial-statements.js", "/financial-statements.css", "/business-segments.js", "/business-segments.css", "/business-segment-aliases.js", "/business-segment-names.js", "/industry.js", "/industry.css",
-                             "/maintenance.js", "/maintenance.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css"}:
+                             "/maintenance.js", "/maintenance.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css",
+                             "/dividend-forecast.js", "/dividend-forecast.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
@@ -1471,6 +1473,18 @@ class Handler(BaseHTTPRequestHandler):
                 status,data=503,{'error':str(exc)}
             body=json.dumps(data,ensure_ascii=False,allow_nan=False).encode('utf-8')
             content_type='application/json; charset=utf-8'
+        elif parsed.path == "/api/dividend-forecast":
+            query = parse_qs(parsed.query)
+            try:
+                if 'as_of' in query or 'as_of_date' in query:
+                    raise ValueError('预测仅支持当前时点，不支持历史回测')
+                data = read_dividend_forecast(Database(DATABASE_PATH), query.get('code', ['601919'])[0])
+            except (ValueError, TypeError) as exc:
+                status, data = 400, {'error': str(exc)}
+            except (OSError, StorageError, sqlite3.DatabaseError) as exc:
+                status, data = 503, {'error': str(exc)}
+            body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode('utf-8')
+            content_type = 'application/json; charset=utf-8'
         elif parsed.path == "/api/dcf":
             query = parse_qs(parsed.query)
             try:

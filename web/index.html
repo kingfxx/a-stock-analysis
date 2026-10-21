@@ -189,6 +189,9 @@
     .chip-region > .sub { margin-bottom:18px; line-height:1.6; }
     .chip-panel + .chip-panel { margin-top:18px; }
     .chip-panel h3 { margin:0 0 6px; font-size:21px; }
+    .chip-controls { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-items:end; width:560px; max-width:100%; min-width:0; }
+    .chip-controls label { display:flex; flex-direction:column; gap:8px; min-width:0; font-size:13px; }
+    .chip-controls select { width:100%; min-width:0; box-sizing:border-box; padding:8px 9px; font-size:14px; }
     .chip-chart { height:390px; }
     .chip-summary { padding:18px 27px 12px; color:var(--ink); font-size:14px; line-height:1.7; }
     .chip-table-wrap { max-width:100%; overflow-x:auto; margin:0 27px 14px; border:1px solid #304049; border-radius:6px; }
@@ -205,7 +208,8 @@
     .chip-data-table .chip-positive { color:#f09a75; }
     .chip-data-table .chip-negative { color:#72c9b3; }
     .chip-panel .note { padding-bottom:14px; }
-    @media(max-width:800px) { .chip-chart{height:340px} .chip-summary{padding:16px 15px 10px} .chip-table-wrap{margin:0 15px 14px} .chip-panel .valuation-controls{width:100%} }
+    @media(max-width:800px) { .chip-chart{height:340px} .chip-summary{padding:16px 15px 10px} .chip-table-wrap{margin:0 15px 14px} .chip-controls{width:100%} }
+    @media(max-width:520px) { .chip-controls{grid-template-columns:1fr} }
     .error,.warning { border-radius:8px; margin-bottom:15px; padding:12px 16px; font-size:14px; }
     .error { background:#442729; color:#ffe2df; }
     .warning { background:#4a3c22; color:#ffe5a1; }
@@ -459,6 +463,10 @@
     <p id="valuation-negative-note" class="note valuation-negative-note" role="status" aria-live="polite"></p>
     <div id="valuation-chart" role="img" aria-label="估值走势与历史基准参考线"></div>
     <p id="valuation-note" class="note valuation-note"></p>
+    <details id="dividend-forecast" hidden>
+      <summary>未来三年股息率预测计算器</summary>
+      <div id="dividend-forecast-body"><p class="note">正在读取本地预测依据…</p></div>
+    </details>
     </div>
   </section>
   <section class="chip-region" aria-label="筹码评估">
@@ -468,10 +476,10 @@
     <section class="panel chip-panel" aria-label="股东人数与股价趋势">
       <div class="panel-head">
         <div><h3>股东人数与股价</h3><p>按实际统计频率采样 · 青色为股东人数，黄色为所选口径股价</p></div>
-        <div class="valuation-controls"><label for="shareholders-range">时间范围</label>
-          <select id="shareholders-range"><option value="all">全部时间</option><option value="10">最近 10 年</option><option value="5">最近 5 年</option></select>
-          <label for="shareholders-series">人数来源</label><select id="shareholders-series"></select>
-          <label for="shareholders-adjustment">股价口径</label><select id="shareholders-adjustment"><option value="qfq">前复权</option><option value="raw">不复权</option></select>
+        <div class="chip-controls"><label for="shareholders-range">时间范围
+          <select id="shareholders-range"><option value="all">全部时间</option><option value="10">最近 10 年</option><option value="5">最近 5 年</option></select></label>
+          <label for="shareholders-series">人数来源<select id="shareholders-series"></select></label>
+          <label for="shareholders-adjustment">股价口径<select id="shareholders-adjustment"><option value="qfq">前复权</option><option value="raw">不复权</option></select></label>
         </div>
       </div>
       <div id="shareholders-summary" class="chip-summary">等待股东人数数据…</div>
@@ -489,11 +497,11 @@
     <section class="panel chip-panel" aria-label="融资与股价趋势">
       <div class="panel-head">
         <div><h3 id="financing-title">融资与股价 · 最近 1 年</h3><p id="financing-description">按交易日展示 · 绿色为融资指标，黄色为所选口径股价</p></div>
-        <div class="valuation-controls"><label for="financing-range">时间范围</label>
-          <select id="financing-range"><option value="1" selected>1年</option><option value="3">3年</option><option value="5">5年</option></select>
-          <label for="financing-metric">融资指标</label>
-          <select id="financing-metric"><option value="margin_balance">融资余额</option><option value="total_balance">融资融券余额</option><option value="net_buy">融资净买入</option></select>
-          <label for="financing-adjustment">股价口径</label><select id="financing-adjustment"><option value="qfq">前复权</option><option value="raw">不复权</option></select>
+        <div class="chip-controls"><label for="financing-range">时间范围
+          <select id="financing-range"><option value="1" selected>1年</option><option value="3">3年</option><option value="5">5年</option></select></label>
+          <label for="financing-metric">融资指标
+          <select id="financing-metric"><option value="margin_balance">融资余额</option><option value="total_balance">融资融券余额</option><option value="net_buy">融资净买入</option></select></label>
+          <label for="financing-adjustment">股价口径<select id="financing-adjustment"><option value="qfq">前复权</option><option value="raw">不复权</option></select></label>
         </div>
       </div>
       <div id="financing-summary" class="chip-summary">等待融资数据…</div>
@@ -516,6 +524,8 @@
 <script src="/stock-picker.js"></script>
 <link rel="stylesheet" href="/dcf.css?v=20261015-growth">
 <script src="/dcf.js?v=20261015-growth"></script>
+<link rel="stylesheet" href="/dividend-forecast.css?v=4-uniform-payout">
+<script src="/dividend-forecast.js?v=4-uniform-payout"></script>
 <link rel="stylesheet" href="/ai-checklist.css?v=20261014-announcement-date-fit">
 <script src="/business-judgment.js"></script>
 <script src="/ai-checklist.js?v=20261014-announcement-date-fit"></script>
@@ -970,6 +980,7 @@
   const formattedValuation = value => value == null ? '—' : Number(value).toFixed(2) + (valuationMetric === 'dividend_yield' ? '%' : ' 倍');
   const automaticValuationFrequency = years => Number(years) <= 3 ? 'day' : Number(years) <= 5 ? 'week' : 'month';
   function renderValuation() {
+    window.dispatchEvent(new CustomEvent('dividend-forecast-context', {detail:{code:state.code, metric:valuationMetric}}));
     const years = valuationRange.value;
     const view = state.valuation?.views?.[years]?.[valuationMetric];
     const frequency = valuationFrequency.value === 'auto'
@@ -1358,6 +1369,7 @@
         applyFinancial(data);
       }
       sectionStatus(section, data.warnings?.length ? '更新未全部完成，已显示可用数据，请留意提示。' : '');
+      window.dispatchEvent(new CustomEvent('dividend-forecast-facts', {detail:{code:requestCode}}));
       return true;
     } catch (exception) {
       if (state.code !== requestCode) return false;

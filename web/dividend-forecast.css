@@ -1,0 +1,38 @@
+#dividend-forecast{margin-top:26px;border:1px solid #3a505b;border-radius:10px;padding:18px;background:#17242b;color:#e4eeee}
+#dividend-forecast[hidden]{display:none}
+#dividend-forecast summary{cursor:pointer;font-size:17px;font-weight:600;color:#bde9dc;line-height:1.6}
+#dividend-forecast details{margin:16px 0}
+#dividend-forecast details summary{font-size:14px;color:#aec5cf}
+#dividend-forecast h3{font-size:17px;margin:28px 0 12px}
+#dividend-forecast h4{font-size:15px;margin:20px 0 8px}
+#dividend-forecast .df-intro{font-size:14px;color:#a8c9be}
+#dividend-forecast .df-note{color:#a9bec6;font-size:13px;line-height:1.8;overflow-wrap:anywhere}
+#df-status{color:#e4be83;font-size:13px;line-height:1.8}
+#dividend-forecast .df-actions{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+#dividend-forecast .df-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:14px;margin:14px 0}
+#dividend-forecast label{display:flex;flex-direction:column;gap:7px;font-size:13px;color:#bbccd1}
+#dividend-forecast input,#dividend-forecast select{box-sizing:border-box;min-width:0;width:100%;border:1px solid #435e69;border-radius:5px;background:#1d3038;color:#edf5f6;padding:9px;font:inherit}
+#dividend-forecast input::placeholder{color:#8ca5ae;opacity:1}
+#dividend-forecast .df-auto-input{border-color:#427763;color:#b9e4cf}
+#dividend-forecast .df-manual-input{border-color:#b39760;color:#f0d5a4}
+#dividend-forecast .df-input-source{display:block;white-space:normal;font-size:11px;color:#a2b8bd;line-height:1.5;margin-top:5px;max-width:220px}
+#dividend-forecast input:focus,#dividend-forecast select:focus,#dividend-forecast button:focus-visible{outline:2px solid #79cbb4;outline-offset:2px}
+#dividend-forecast button{border:1px solid #4a6c73;border-radius:5px;background:#29434a;color:#dcefee;padding:9px 13px;cursor:pointer}
+#dividend-forecast input[type=checkbox]{width:18px;height:18px;accent-color:#7bc9ae}
+#dividend-forecast .df-check{flex-direction:row;align-items:center;align-self:end;min-height:38px}
+#dividend-forecast .df-scroll{width:100%;overflow-x:auto;margin:12px 0}
+#dividend-forecast table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap;text-align:right}
+#dividend-forecast th,#dividend-forecast td{border-bottom:1px solid #304751;padding:10px 12px;vertical-align:top}
+#dividend-forecast th{background:#20343d;color:#aec9d2;font-weight:500}
+#dividend-forecast td:first-child,#dividend-forecast th:first-child{text-align:left}
+#dividend-forecast table input{min-width:115px;max-width:220px}
+#dividend-forecast table input[type=text]{min-width:190px}
+#dividend-forecast table input[type=checkbox]{min-width:18px}
+#dividend-forecast table select{min-width:85px}
+#dividend-forecast .df-scenario{min-width:0;border:1px solid #38505b;border-radius:8px;margin:20px 0;padding:16px}
+#dividend-forecast legend{padding:0 10px;color:#9dd6c3;font-weight:600}
+#dividend-forecast .df-total{border-left:3px solid #70bfa8;padding:9px 12px;background:#20362f;color:#c1e7d7;font-size:14px;line-height:1.7}
+#dividend-forecast pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;font-size:12px;background:#132129;padding:12px}
+#df-target{font-size:17px;color:#b5e2cf;line-height:1.7}
+#df-sustainability{font-size:14px;line-height:1.8;overflow-wrap:anywhere}
+@media(max-width:640px){#dividend-forecast{padding:12px}#dividend-forecast .df-grid{grid-template-columns:1fr}#dividend-forecast .df-scenario{padding:10px}}

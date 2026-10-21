@@ -1,0 +1,12 @@
+{
+  "years": [2026, 2027, 2028],
+  "cases": [
+    {"name":"stable", "price":10, "parameters":{"mode":"C","base_profit":10000000000,"rows":[{"growth_rate":0,"payout_ratio":0.5,"shares":10000000000},{"growth_rate":0,"payout_ratio":0.5,"shares":10000000000},{"growth_rate":0,"payout_ratio":0.5,"shares":10000000000}]}},
+    {"name":"growth_and_share_changes", "price":10, "parameters":{"mode":"C","base_profit":100,"rows":[{"growth_rate":0.1,"payout_ratio":0.5,"shares":100},{"growth_rate":0.2,"payout_ratio":0.6,"shares":200},{"growth_rate":-0.1,"payout_ratio":1.5,"shares":180}]}},
+    {"name":"loss_cash_override", "price":8, "parameters":{"mode":"A","base_profit":100,"first_profit":-10,"rows":[{"growth_rate":0,"payout_ratio":0.5,"shares":100},{"growth_rate":0,"cash":2,"shares":100},{"growth_rate":0,"profit":100,"payout_ratio":1.5,"shares":100}]}},
+    {"name":"zero_price_and_shares", "price":0, "parameters":{"mode":"B","first_profit":100,"rows":[{"payout_ratio":0.5,"shares":0},{"growth_rate":0,"payout_ratio":0.5,"shares":100},{"growth_rate":0,"payout_ratio":-0.1,"shares":100}]}},
+    {"name":"profit_override_propagates", "price":20, "parameters":{"mode":"C","base_profit":100,"rows":[{"growth_rate":0.1,"profit":200,"payout_ratio":0.5,"shares":100},{"growth_rate":0.2,"cash":0,"shares":80},{"growth_rate":-1,"cash":3,"shares":80}]}},
+    {"name":"missing_not_zero", "price":null, "parameters":{"mode":"C","base_profit":null,"rows":[{"growth_rate":0,"shares":100},{"growth_rate":0,"shares":100},{"growth_rate":0,"shares":100}]}},
+    {"name":"overflow", "price":10, "parameters":{"mode":"C","base_profit":1e308,"rows":[{"growth_rate":10,"payout_ratio":0.5,"shares":1},{"growth_rate":0,"profit":1e308,"cash":1e308,"shares":1e-300},{"growth_rate":0,"cash":-1,"shares":1}]}}
+  ]
+}
