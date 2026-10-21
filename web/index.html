@@ -1037,10 +1037,22 @@
     const xs = rows.map(row => alignToTradeDay && row.qfq_close_date ? row.qfq_close_date : row.date);
     const ys = rows.map(row => row[valuationMetric]);
     const first = xs[0], last = xs.at(-1);
+    const pointDetails = rows.map((row, index) => {
+      const observationDate = row[isYield ? 'dividend_yield_date' : `${valuationMetric}_date`] || row.date;
+      const cash = row.cash_dividend_per_share_365;
+      const cashText = cash == null || !Number.isFinite(Number(cash)) ? '数据缺失' : `${Number(cash).toFixed(2)} 元/股`;
+      const rawClose = row.raw_close;
+      const rawCloseText = rawClose == null || !Number.isFinite(Number(rawClose)) ? '数据缺失' : `${Number(rawClose).toFixed(2)} 元/股`;
+      return [observationDate, row.period_complete === false ? '（本周期未完结）' : '', cashText,
+        rawCloseText,
+        observationDate !== xs[index] ? `<br>实际观察日：${observationDate}` : ''];
+    });
     const traces = [{type:'scatter',mode:'lines+markers',name:valuationNames[valuationMetric],
-      x:xs,y:ys,customdata:rows.map(row => row.period_complete === false ? '（本周期未完结）' : ''),connectgaps:false,fill:'tozeroy',fillcolor:'rgba(84,151,220,0.11)',
+      x:xs,y:ys,customdata:pointDetails,connectgaps:false,fill:'tozeroy',fillcolor:'rgba(84,151,220,0.11)',
       line:{color:'#69a9ed',width:2.8},marker:{color:'#69a9ed',size:5},
-      hovertemplate:valuationNames[valuationMetric] + '：%{y:.2f}' + (isYield ? '%' : ' 倍') + '%{customdata}<extra></extra>'}];
+      hovertemplate:valuationNames[valuationMetric] + '：%{y:.2f}' + (isYield ? '%' : ' 倍') +
+        '%{customdata[4]}' + (isYield ? '<br>过去365天税前每股现金分红合计：%{customdata[2]}<br>不复权股价：%{customdata[3]}' : '') +
+        '%{customdata[1]}<extra></extra>'}];
     const referenceLines = useStddev
       ? [['high','上限 · 均值 +1σ',highColor],['median','均值','#f4b560'],['low','下限 · 均值 −1σ',lowColor]]
       : [['high',isYield ? '高息 · 80%' : '高位 · 80%',highColor],['median','中值 · 50%','#f4b560'],['low',isYield ? '低息 · 20%' : '低位 · 20%',lowColor]];

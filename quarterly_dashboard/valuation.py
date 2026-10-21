@@ -203,6 +203,15 @@ def fetch_dividend_events(code: str, session: requests.Session) -> list[dict]:
     return sorted(events, key=lambda event: event["date"])
 
 
+def cash_dividend_per_share_365(events: list[dict], observation_date: str) -> float:
+    """Sum implemented pre-tax cash dividends per share in (date - 365 days, date]."""
+    end = date.fromisoformat(observation_date)
+    start = end - timedelta(days=365)
+    return sum(float(event["per_share"]) for event in events
+               if event.get("date") and start < date.fromisoformat(event["date"]) <= end
+               and event.get("per_share") is not None)
+
+
 def monthly_dividend_yields(raw_prices: list[dict], events: list[dict]) -> list[dict]:
     """Trailing 365-day paid dividends / actual unadjusted month close, in percent."""
     last_price = {}
@@ -217,10 +226,9 @@ def monthly_dividend_yields(raw_prices: list[dict], events: list[dict]) -> list[
         if close is None:
             continue
         end = date.fromisoformat(price["date"])
-        start = end - timedelta(days=365)
-        cash = sum(event["per_share"] for event in events
-                   if start < date.fromisoformat(event["date"]) <= end)
-        result.append({"date": price["date"], "value": cash / close * 100})
+        cash = cash_dividend_per_share_365(events, end.isoformat())
+        result.append({"date": price["date"], "value": cash / close * 100, "raw_close": close,
+                       "cash_dividend_per_share_365": cash})
     return result
 
 
@@ -236,7 +244,8 @@ def daily_dividend_yield_observations(raw_prices: list[dict], events: list[dict]
         day = date.fromisoformat(price["date"])
         start = day - timedelta(days=365)
         cash = sum(amount for ex_date, amount in paid if start < ex_date <= day)
-        result.append({"date": day.isoformat(), "dividend_yield": cash / close * 100})
+        result.append({"date": day.isoformat(), "dividend_yield": cash / close * 100, "raw_close": close,
+                       "cash_dividend_per_share_365": cash})
     return result
 
 
@@ -262,6 +271,8 @@ def merge_dividend_yields(rows: list[dict], yields: list[dict]) -> list[dict]:
         row["date"] = max(row["date"], point["date"])
         row["dividend_yield"] = point["value"]
         row["dividend_yield_date"] = point["date"]
+        row["raw_close"] = point.get("raw_close")
+        row["cash_dividend_per_share_365"] = point.get("cash_dividend_per_share_365")
     return [by_month[month] for month in sorted(by_month)]
 
 
@@ -427,7 +438,8 @@ def aggregate_valuation_rows(rows, frequency, *, as_of=None):
             period_end = (month_start.replace(year=month_start.year + 1, month=1)
                           if month_start.month == 12 else month_start.replace(month=month_start.month + 1)) - timedelta(days=1)
         aggregated = {"date": latest, "period_complete": period_end < end or frequency != "day" and period_end == end}
-        for metric in ("pe", "pb", "ps", "dividend_yield", "qfq_close"):
+        for metric in ("pe", "pb", "ps", "dividend_yield", "qfq_close", "raw_close",
+                       "cash_dividend_per_share_365"):
             selected = next((row for row in reversed(items) if row.get(metric) is not None), None)
             if selected:
                 aggregated[metric] = selected[metric]

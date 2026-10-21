@@ -59,6 +59,7 @@ from .sources import (fetch_cash_flow_reports, fetch_financial_reports,
                       fetch_stock_name, normalize_code, normalize_report_dates)
 from .valuation import (fetch_dividend_events, fetch_industry_snapshot, fetch_valuation_series,
                         merge_adjusted_prices, merge_dividend_yields, monthly_valuation, valuation_summary,
+                        aggregate_valuation_rows, cash_dividend_per_share_365,
                         daily_dividend_yield_observations, monthly_dividend_yields,
                         valuation_summary_observations)
 
@@ -595,12 +596,29 @@ def _p4_valuation_payload(data, *, raw=None, qfq=None, events=None):
                 views[str(years)][metric] = valuation_summary(rows, metric, years, data.get("industry", {}))
         daily_yield_rows = daily_dividend_yield_observations(raw, events) if raw else None
         yield_summary = valuation_summary(rows, "dividend_yield", years, data.get("industry", {}),
-                                          sample_rows=daily_yield_rows)
-        sample_frequency = "day" if daily_yield_rows is not None else "month"
+                                          sample_rows=daily_yield_rows or None)
+        sample_frequency = "day" if daily_yield_rows else "month"
         yield_summary["sample_frequency"] = sample_frequency
         yield_summary["percentile_frequency"] = sample_frequency
-        yield_summary["rows_by_frequency"] = {frequency: yield_summary["rows"] for frequency in ("day", "week", "month")}
+        chart_rows = daily_yield_rows if daily_yield_rows else [
+            row for row in rows if row.get("dividend_yield") is not None
+        ]
+        for row in chart_rows:
+            if row.get("cash_dividend_per_share_365") is None:
+                observation_date = row.get("dividend_yield_date") or row["date"]
+                row["cash_dividend_per_share_365"] = cash_dividend_per_share_365(events, observation_date)
+        end = date.today()
+        try:
+            start = end.replace(year=end.year - years)
+        except ValueError:
+            start = end.replace(year=end.year - years, day=28)
+        chart_rows = [row for row in chart_rows if start.isoformat() <= row["date"] <= end.isoformat()]
+        yield_summary["rows_by_frequency"] = {
+            frequency: aggregate_valuation_rows(chart_rows, frequency, as_of=end.isoformat())
+            for frequency in ("day", "week", "month")
+        }
         yield_summary["frequency"] = {3: "day", 5: "week", 10: "month"}[years]
+        yield_summary["rows"] = yield_summary["rows_by_frequency"][yield_summary["frequency"]]
         views[str(years)]["dividend_yield"] = yield_summary
     if raw or qfq:
         def price_period(day, frequency):
@@ -620,10 +638,9 @@ def _p4_valuation_payload(data, *, raw=None, qfq=None, events=None):
                     for row in items:
                         point = dict(row)
                         period = price_period(row["date"], frequency)
-                        if metric != "dividend_yield":
-                            trade_day = last_trades[frequency].get(period)
-                            point["qfq_close"] = qfq_by_day.get(trade_day)
-                            point["qfq_close_date"] = trade_day if point["qfq_close"] is not None else None
+                        trade_day = last_trades[frequency].get(period)
+                        point["qfq_close"] = qfq_by_day.get(trade_day)
+                        point["qfq_close_date"] = trade_day if point["qfq_close"] is not None else None
                         if trading_dates:
                             point["qfq_no_trades"] = period not in trading_periods[frequency]
                         projected.append(point)
