@@ -720,8 +720,13 @@ class RequestCollector:
                     healthy=False
                     try:
                         payload=response.json() if expect=='json' else None
-                        healthy=healthy_response(response) if healthy_response else (isinstance(payload,dict) and isinstance(payload.get('data'),(list,dict))
-                            and str(payload.get('code','200')) in ('0','200') and payload.get('success') is not False) if expect=='json' else ('_csrf' in text if expect=='html' else len(response.content)>0)
+                        if healthy_response:
+                            healthy=healthy_response(response)
+                        elif expect=='json':
+                            healthy=(isinstance(payload,dict) and isinstance(payload.get('data'),(list,dict))
+                                and str(payload.get('code','200')) in ('0','200') and payload.get('success') is not False)
+                        else:
+                            healthy='_csrf' in text if expect=='html' else len(response.content)>0
                     except ValueError:
                         pass
                     if healthy is RECOVERY_PENDING and recovery_token:

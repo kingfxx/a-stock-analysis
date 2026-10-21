@@ -21,6 +21,8 @@ def test_three_year_controls_scenarios_storage_and_switching():
                  history=[dict(year=y) for y in range(2021,2027)],sustainability=dict(financial_company=False,period=None,cash=None,debt=None,net_cash=None,missing_debt=[]),warnings=[])
     html='<button data-valuation-metric="dividend_yield" class="active">股息率</button><script id="payload" type="application/json">{"code":"601919"}</script><details id="dividend-forecast" hidden><summary>未来三年股息率预测计算器</summary><div id="dividend-forecast-body"></div></details><script src="/dividend-forecast.js"></script><link rel="stylesheet" href="/dividend-forecast.css">'
     requests=[]
+    consensus=dict(code='601919',years=[2026,2027,2028],rows=[dict(year=2026,profit=12345678900,institutions=8),dict(year=2027,profit=14000000000,institutions=7),dict(year=2028,profit=None,institutions=None)],source='同花顺机构净利润预测均值',obtained_at='2026-10-22T00:00:58.429086+08:00',warnings=['预测缺失年份留空'])
+    consensus_fail=False
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
@@ -30,7 +32,9 @@ def test_three_year_controls_scenarios_storage_and_switching():
             def route(r):
                 url=r.request.url
                 requests.append(url)
-                if '/api/dividend-forecast' in url:
+                if '/api/institution-forecast' in url:
+                    r.fulfill(status=503 if consensus_fail else 200,json={'error':'来源不可用'} if consensus_fail else consensus)
+                elif '/api/dividend-forecast' in url:
                     data=copy.deepcopy(payload)
                     if '600900' in url:data.update(code='600900',name='合成稳定企业')
                     r.fulfill(json=data)
@@ -177,6 +181,50 @@ def test_three_year_controls_scenarios_storage_and_switching():
             with page.expect_response('**/api/dividend-forecast?code=601919'):
                 page.evaluate("window.dispatchEvent(new CustomEvent('dividend-forecast-context',{detail:{code:'601919',metric:'dividend_yield'}}))")
             assert field('neutral',1,'growth_rate').input_value()=='12'
+            # Consensus is explicitly loaded, replaces all three years without
+            # overwriting saved manual inputs, and never enters browser storage.
+            assert not any('/api/institution-forecast' in r for r in requests)
+            page.locator('#df-reset').click()
+            field('neutral',0,'profit').fill('200')
+            mode=page.locator('[data-s="neutral"][data-config="mode"]')
+            with page.expect_response('**/api/institution-forecast?code=601919'):
+                mode.select_option('D')
+            page.wait_for_function("document.querySelector('#df-consensus-status').textContent.includes('取得时间')")
+            assert '2026-10-22 00:00:58（北京时间）' in page.locator('#df-consensus-status').inner_text()
+            assert '.429086' not in page.locator('#df-consensus-status').inner_text()
+            assert page.locator('#df-consensus-status a').get_attribute('href')=='https://stockpage.10jqka.com.cn/601919/worth/#forecastdetail'
+            assert field('neutral',0,'profit').input_value()=='123.46'
+            assert field('neutral',1,'profit').input_value()=='140'
+            assert field('neutral',2,'profit').input_value()==''
+            assert field('neutral',0,'growth_rate').is_disabled()
+            assert field('neutral',0,'profit').is_disabled()
+            assert '8家机构' in field('neutral',0,'profit').locator('..').inner_text()
+            assert result('neutral',0,4)=='61.73'
+            uniform.fill('60')
+            assert result('neutral',0,4)=='74.07'
+            stored_text=page.evaluate("localStorage.getItem('dividend-forecast:v1:601919:2026')")
+            assert '12345678900' not in stored_text and 'institutions' not in stored_text
+            assert json.loads(stored_text)['parameters']['scenarios']['neutral']['rows'][0]['profit']==2e10
+            mode.select_option('C')
+            assert field('neutral',0,'profit').input_value()=='200'
+            consensus_fail=True
+            with page.expect_response('**/api/institution-forecast?code=601919'):
+                mode.select_option('D')
+            page.wait_for_function("document.querySelector('#df-consensus-status').textContent.includes('读取失败')")
+            assert field('neutral',0,'profit').input_value()==''
+            consensus_fail=False
+            with page.expect_response('**/api/institution-forecast?code=601919'):
+                page.locator('#df-consensus-reload').click()
+            page.wait_for_function("document.querySelector('#df-consensus-status').textContent.includes('取得时间')")
+            count=len([r for r in requests if '/api/institution-forecast' in r])
+            page.reload()
+            page.locator('#df-price').wait_for(state='attached')
+            page.locator('#dividend-forecast > summary').click()
+            assert mode.input_value()=='A'
+            assert len([r for r in requests if '/api/institution-forecast' in r])==count
+            page.locator('#df-events').locator('..').locator('summary').click()
+            page.locator('[data-event="event1"][data-edit="note"]').fill('合成特别分红依据')
+            page.locator('[data-event="event1"][data-edit="kind"]').select_option('special')
             # A new forecast year resets rates, retaining only matching event notes.
             payload['years']=[2027,2028,2029]
             payload['as_of_date']='2027-01-01'

@@ -1,4 +1,4 @@
-/* Saved facts only. Rates are decimal fractions; amounts are CNY yuan. */
+/* Local facts plus explicitly requested, memory-only consensus. Rates are decimal fractions; amounts are CNY yuan. */
 (() => {
   'use strict';
   const finite = value => !['number','string'].includes(typeof value) || typeof value==='string'&&!value.trim() || !Number.isFinite(Number(value)) ? null : Number(value);
@@ -123,6 +123,7 @@
     const root=document.getElementById('dividend-forecast'),body=document.getElementById('dividend-forecast-body');
     if(!root||!body)return;
     let code=JSON.parse(document.getElementById('payload').textContent).code,payload=null,state=null,controller=null,serial=0,timer=null,storageError=false,loadedAt=null,savedAt=null,dirty=false,loadingCode=null;
+    let consensus=null,consensusError='',consensusLoading=false,consensusController=null,consensusSerial=0;
     const el=id=>root.querySelector('#df-'+id);
     const key=()=>`dividend-forecast:v1:${code}:${payload.years[0]}`;
     const defaults=()=>({layout_version:2,window:3,method:'median',payoutMode:'auto',exclude:false,edits:{},confirmations:{},factors:{pessimistic:{},optimistic:{}},scenarios:Object.fromEntries(scenarioKeys.map(s=>[s,{mode:'A',rows:[{},{},{}]}])),targetScenario:'neutral',targetYear:0,targetRate:4});
@@ -164,7 +165,7 @@
       state=fresh;
     }
     function persist() {
-      try {savedAt=new Date().toISOString();localStorage.setItem(key(),JSON.stringify({version:1,saved_at:savedAt,parameters:state}));}
+      try {savedAt=new Date().toISOString();localStorage.setItem(key(),JSON.stringify({version:1,saved_at:savedAt,parameters:{...state,scenarios:{...state.scenarios,neutral:{...state.scenarios.neutral,mode:state.scenarios.neutral.mode==='D'?'A':state.scenarios.neutral.mode}}}}));}
       catch {storageError=true;}
     }
     function history() {return build_history(payload.reports,payload.events,payload.years[0],state.edits,state.confirmations,state.exclude);}
@@ -183,7 +184,8 @@
       const first=basis.value!==null&&adjustment!==null&&adjustment>=-1&&remaining!==null?finite((basis.value+remaining)*(1+adjustment)):null;
       const ratio=ratioDefault(hist);
       return {basis,mode,base_profit:base,first_profit:first,
-        rows:configured.rows.map(r=>({growth_rate:0,payout_ratio:ratio,shares:payload.market.shares,...r,
+        rows:configured.rows.map((r,i)=>({growth_rate:0,payout_ratio:ratio,shares:payload.market.shares,...r,
+          ...(mode==='D'?{profit:consensus?.rows.find(v=>v.year===payload.years[i])?.profit??null}:{}),
           ...(has(configured,'uniform_payout_ratio')?{payout_ratio:configured.uniform_payout_ratio}:{})}))};
     }
     function input(attrs,value,placeholder='',type='number') {
@@ -207,7 +209,7 @@
         <p id="df-status" role="status" aria-live="polite"></p>
         <div class="df-actions"><button type="button" id="df-reload">重读本地依据</button><button type="button" id="df-reset">恢复默认</button></div>
         <p class="df-note">${esc(payload.name)} ${esc(code)} · 基准日 ${esc(payload.as_of_date)} · 归属财年税前口径<br>
-        股价：${num(m.price)} 元（${esc(m.price_date||'未记录')}，${m.price_source?.includes('腾讯')?'腾讯未复权收盘价':m.price!==null?'本地交易日快照未复权收盘价':'缺失'}）；总股本：${amount(m.shares)} 亿股（${esc(m.shares_date||'未记录')}）。<br>本计算器仅读本地资料，不自动采集。手动参数与原始财务事实分离。</p>
+        股价：${num(m.price)} 元（${esc(m.price_date||'未记录')}，${m.price_source?.includes('腾讯')?'腾讯未复权收盘价':m.price!==null?'本地交易日快照未复权收盘价':'缺失'}）；总股本：${amount(m.shares)} 亿股（${esc(m.shares_date||'未记录')}）。<br>A/B/C读取本地资料；选择机构预期时联网读取同花顺，预测仅用于当前页面，不保存。手动参数与原始财务事实分离。</p>
         <details><summary>查看事实来源与计算证据</summary><pre id="df-evidence"></pre></details>
         <h3>历史参考</h3><p class="df-note">金额单位亿元；DPS为各事件原始税前每股金额之和，股本变化前后未复权，不直接与当前股本DPS比较。现金分红按所属财年汇总；覆盖未核实时仅为已知部分参考。</p>
         <div id="df-history"></div>
@@ -221,12 +223,12 @@
         </div><p id="df-ratio-source" class="df-note"></p>
         <p class="df-note">只需调整中性参数，悲观与乐观按下方系数自动联动。绿色为自动值，金色为手动调整，清空并移开恢复自动。中性三个年度参数自动生成，后两年增长率默认0%持平，可逐年修改。编辑A/B当年增长率会切换中性模式到C。手动利润优先于增长率，手动现金金额优先于分红率。</p>
         ${['neutral'].map(s=>`<fieldset class="df-scenario" data-scenario="${s}"><legend>中性主参数 · 自动生成，可调整</legend><div class="df-grid">
-          <label>利润模式<select data-s="${s}" data-config="mode"><option value="A">A 当年累计＋剩余预测</option><option value="B">B 历史正常化</option><option value="C">C 三年增长率</option></select></label>
+          <label>利润模式<select data-s="${s}" data-config="mode"><option value="A">A 当年累计＋剩余预测</option><option value="B">B 历史正常化</option><option value="C">C 三年增长率</option><option value="D">D 机构预期</option></select></label>
           <label>C模式上年全年基准（亿元）${input(`data-s="${s}" data-config="base" data-scale="100000000"`,has(state.scenarios[s],'base')?state.scenarios[s].base/1e8:null,'留空用上年实际')}</label>
           <label>A/B全年利润调整（%）${input(`data-s="${s}" data-config="adjustment" data-scale="0.01"`,has(state.scenarios[s],'adjustment')?state.scenarios[s].adjustment*100:null,'默认0')}</label>
           <label>A/B正常化金额调整（亿元）${input(`data-s="${s}" data-config="remaining" data-scale="100000000"`,has(state.scenarios[s],'remaining')?state.scenarios[s].remaining/1e8:null,'默认0')}</label>
           <label>未来三年统一分红率（%）${input(`id="df-uniform-payout" data-s="${s}" data-config="uniform_payout_ratio" data-scale="0.01" aria-label="未来三年统一分红率"`,has(state.scenarios[s],'uniform_payout_ratio')?state.scenarios[s].uniform_payout_ratio*100:null,'留空恢复原逐年设置')}</label>
-          </div><p id="df-basis-${s}" class="df-note"></p>
+          </div><p id="df-consensus-status" class="df-note" role="status"></p><button type="button" id="df-consensus-reload" hidden>重新读取机构预期</button><p id="df-basis-${s}" class="df-note"></p>
           ${table(['预测财年','利润增长率 %','预测归母利润 亿元','分红率 %','预测现金分红 亿元','总股本 亿股'],payload.years.map((y,i)=>[
             `${y}E`,...['growth_rate','profit','payout_ratio','cash','shares'].map(field=>{
               const scale={growth_rate:.01,profit:1e8,payout_ratio:.01,cash:1e8,shares:1e8}[field],r=state.scenarios[s].rows[i];
@@ -262,9 +264,10 @@
           `<input aria-label="${h.year}不分红" type="checkbox" data-year="${h.year}" data-confirm="zero" ${c.zero?'checked':''}>`,
           input(`data-year="${h.year}" data-confirm="note" aria-label="${h.year}完整性依据"`,c.note,'公告/财报及核对说明','text')];
       }));
-      el('reset').onclick=()=>{state=defaults();persist();scaffold();};
+      el('reset').onclick=()=>{consensusController?.abort();consensusSerial++;consensus=null;consensusLoading=false;consensusError='';state=defaults();persist();scaffold();};
       el('reset-factors').onclick=()=>{state.factors={pessimistic:{},optimistic:{}};persist();render();};
       el('reload').onclick=()=>load(true);
+      el('consensus-reload').onclick=()=>loadConsensus();
       render(refreshed?'本地依据已更新；保留手动参数，请核对适用性。':'');
     }
     function render(message='',editing=null) {
@@ -284,8 +287,10 @@
         results[s]=calculate_scenario(payload.years,params,price);
         const basis=params.basis;
         el('basis-'+s).textContent=`${params.mode==='C'?'C模式基准为上年全年利润 '+amount(params.base_profit)+'亿元。':basis.reason+'；当年自动利润 '+amount(params.first_profit)+'亿元。'} ${basis.samples.length?'历史样本（亿元）：'+basis.samples.map(amount).join('、')+'；年份 '+basis.periods.join('、')+'。':''} ${basis.realized!==null?'当年已实现 '+amount(basis.realized)+'亿元。':''} 悲观/乐观仅为历史分位假设。${basis.samples.some(v=>v!==null&&v<0)?'样本存在负值，请核对周期性及正常化。':''}`;
+        if(params.mode==='D')el('basis-'+s).textContent='逐年采用同花顺机构净利润预测均值；增长率由预测利润反推。缺失年份不递推，悲观/乐观继续按情景系数计算。';
         for(const [field,value,source] of [['base',params.base_profit,'上年实际归母利润'],['adjustment',has(config,'adjustment')?config.adjustment:0,'默认不调整'],['remaining',has(config,'remaining')?config.remaining:0,'默认不调整']]) {
-          showValue(root.querySelector(`[data-s="${s}"][data-config="${field}"]`),value,has(config,field),source,editing);
+          const node=root.querySelector(`[data-s="${s}"][data-config="${field}"]`);
+          showValue(node,value,has(config,field),source,editing);node.disabled=params.mode==='D';
         }
         const uniform=has(config,'uniform_payout_ratio'),uniformNode=el('uniform-payout');
         if(uniformNode!==editing)uniformNode.value=uniform&&finite(config.uniform_payout_ratio)!==null?String(config.uniform_payout_ratio*100):'';
@@ -293,14 +298,15 @@
         uniformNode.nextElementSibling.textContent='统一设置三年，留空恢复默认';
         root.querySelectorAll(`[data-s="${s}"][data-field]`).forEach(node=>{
           const i=Number(node.dataset.i),f=node.dataset.field;
-          const result=results[s].rows[i],manual=has(config.rows[i],f);
-          const automatic={profit:result.profit,cash:result.cash,growth_rate:i===0&&params.mode!=='C'||has(config.rows[i],'profit')?result.growth_rate:0,
+          const result=results[s].rows[i],institutional=params.mode==='D'&&['profit','growth_rate'].includes(f),manual=!institutional&&has(config.rows[i],f);
+          const automatic={profit:result.profit,cash:result.cash,growth_rate:params.mode==='D'||i===0&&params.mode!=='C'||has(config.rows[i],'profit')?result.growth_rate:0,
             payout_ratio:has(config.rows[i],'cash')?result.payout_ratio:ratio,shares:payload.market.shares};
           const source={profit:i===0?'利润模型计算':'上年有效利润逐年递推',cash:'有效利润×分红率',growth_rate:i===0&&params.mode!=='C'?'由全年利润反推同比':'增长假设；默认0%',
             payout_ratio:has(config.rows[i],'cash')?'按手动现金金额反推':`${ratioWindow}年累计分红/累计利润`,shares:'沿用本地总股数，默认不变'};
+          if(institutional)source[f]=f==='profit'?`同花顺净利润均值 · ${consensus?.rows[i]?.institutions??'—'}家机构`:'机构预测利润反推同比';
           const unified=uniform&&f==='payout_ratio';
           showValue(node,unified?params.rows[i].payout_ratio:manual?config.rows[i][f]:automatic[f],manual||unified,source[f],editing);
-          node.disabled=unified;
+          node.disabled=unified||institutional;
           if(unified)node.nextElementSibling.textContent='三年统一设置 · 清空上方后可逐年调整';
           if((manual||unified)&&(f==='growth_rate'&&has(config.rows[i],'profit')||f==='payout_ratio'&&has(config.rows[i],'cash')))node.nextElementSibling.textContent+='；'+(f==='growth_rate'?'利润调整优先，有效同比 '+pct(result.growth_rate):'现金金额优先，有效分红率 '+pct(result.payout_ratio));
         });
@@ -312,6 +318,16 @@
           const field=node.dataset.factor,manual=has(state.factors[s],field);
           showValue(node,effectiveFactors[s][field],manual,field==='profit_factor'?factorDefaults[s].source:'默认1倍，沿用中性',editing);
         });
+      }
+      const inConsensus=state.scenarios.neutral.mode==='D';
+      el('consensus-reload').hidden=!inConsensus;el('consensus-reload').disabled=consensusLoading;
+      const obtained=new Date(consensus?.obtained_at),obtainedText=Number.isNaN(obtained.getTime())?'未记录':obtained.toLocaleString('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+      el('consensus-status').textContent=!inConsensus?'':consensusLoading?'正在读取同花顺机构预期…':consensusError?'机构预期读取失败：'+consensusError:consensus?`${consensus.source} · 取得时间 ${obtainedText}（北京时间） · 三年预测仅保留在当前页面内存，不写入数据库或浏览器存储。${(consensus.warnings||[]).join('；')}`:'请选择重新读取机构预期';
+      if(inConsensus&&consensus&&!consensusLoading&&!consensusError) {
+        const link=document.createElement('a');
+        link.href=`https://stockpage.10jqka.com.cn/${encodeURIComponent(code)}/worth/#forecastdetail`;
+        link.textContent='查看同花顺预测页面';link.target='_blank';link.rel='noopener noreferrer';
+        el('consensus-status').append(' · ',link);
       }
       el('factor-source').textContent=['pessimistic','optimistic'].map(s=>`${names[s]}利润系数 ${num(effectiveFactors[s].profit_factor,4)} 倍；${has(state.factors[s],'profit_factor')?'手动调整':factorDefaults[s].source}`).join('。')+'。中性参数变化后，两个情景的全部年度结果自动重新计算。';
       root.querySelectorAll('[data-edit="cash"]').forEach(node=>{
@@ -358,11 +374,32 @@
         else set(state,field);
       }
       persist();render('',node);
+      if(d.config==='mode') {
+        if(value==='D') {if(!consensusLoading)loadConsensus();}
+        else {consensusController?.abort();consensusSerial++;consensusLoading=false;consensus=null;consensusError='';render();}
+      }
     }
     body.addEventListener('input',changed);
     body.addEventListener('focusout',event=>{if(event.target.type==='number'&&payload&&state)render();});
     // Select/checkbox change is needed for keyboard and browser automation as well.
     body.addEventListener('change',event=>{if(event.target.tagName==='SELECT'||event.target.type==='checkbox')changed(event);});
+    async function loadConsensus() {
+      consensusController?.abort();consensusController=new AbortController();
+      const request=++consensusSerial,requestedCode=code,year=payload.years[0];
+      consensus=null;consensusError='';consensusLoading=true;render();
+      try {
+        const response=await fetch('/api/institution-forecast?'+new URLSearchParams({code:requestedCode}),{signal:consensusController.signal,cache:'no-store'});
+        const data=await response.json();
+        if(request!==consensusSerial||requestedCode!==code||year!==payload.years[0]||state.scenarios.neutral.mode!=='D')return;
+        if(!response.ok)throw new Error(data.error||'同花顺暂不可用');
+        if(data.code!==code||JSON.stringify(data.years)!==JSON.stringify(payload.years)||!Array.isArray(data.rows)||data.rows.length!==3||data.rows.some((r,i)=>r.year!==payload.years[i]))throw new Error('机构预期股票或年度不匹配');
+        consensus=data;
+      } catch(error) {
+        if(error.name!=='AbortError'&&request===consensusSerial)consensusError=error.message;
+      } finally {
+        if(request===consensusSerial){consensusLoading=false;render();}
+      }
+    }
     async function load(refresh=false) {
       if(root.hidden)return;
       if(payload&&!refresh&&!dirty)return;
@@ -376,7 +413,7 @@
         if(!response.ok)throw new Error(data.error||'本地预测资料读取失败');
         if(data.code!==code)throw new Error('返回股票不匹配');
         const previousYear=payload?.years[0];payload=data;dirty=false;loadedAt=new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'});
-        if(previousYear!==undefined&&previousYear!==data.years[0])state=null;
+        if(previousYear!==undefined&&previousYear!==data.years[0]){state=null;consensusController?.abort();consensusSerial++;consensus=null;consensusLoading=false;consensusError='';}
         scaffold(refresh);
       } catch(error) {
         if(error.name==='AbortError'||request!==serial)return;
@@ -385,7 +422,7 @@
       } finally {if(request===serial)loadingCode=null;}
     }
     function context(detail) {
-      if(detail.code!==code) {controller?.abort();serial++;payload=null;state=null;savedAt=null;dirty=false;loadingCode=null;code=detail.code;body.innerHTML='<p class="df-note">正在读取本地预测依据…</p>';}
+      if(detail.code!==code) {consensusController?.abort();consensusSerial++;consensus=null;consensusLoading=false;consensusError='';controller?.abort();serial++;payload=null;state=null;savedAt=null;dirty=false;loadingCode=null;code=detail.code;body.innerHTML='<p class="df-note">正在读取本地预测依据…</p>';}
       root.hidden=detail.metric!=='dividend_yield';
       if(!root.hidden)load();
     }

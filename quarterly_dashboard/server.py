@@ -31,6 +31,7 @@ from .disclosure_dates import is_earnings_notice
 from .statements import read_statements
 from .dcf import read_dcf, build_auto_wacc
 from .dividend_forecast import read_dividend_forecast
+from .institution_forecast import fetch_institution_forecast
 from .industry_service import IndustryService
 from .maintenance import MaintenanceService
 from .index_collection import start_operation, run_operation, cancel_operation, recover_operations
@@ -1473,6 +1474,16 @@ class Handler(BaseHTTPRequestHandler):
                 status,data=503,{'error':str(exc)}
             body=json.dumps(data,ensure_ascii=False,allow_nan=False).encode('utf-8')
             content_type='application/json; charset=utf-8'
+        elif parsed.path == "/api/institution-forecast":
+            query = parse_qs(parsed.query)
+            try:
+                data = fetch_institution_forecast(Database(DATABASE_PATH), query.get('code', [''])[0])
+            except (ValueError, TypeError) as exc:
+                status, data = 400, {'error': str(exc)}
+            except Exception as exc:
+                status, data = 503, {'error': '机构预期读取失败：' + str(exc)}
+            body = json.dumps(data, ensure_ascii=False, allow_nan=False).encode('utf-8')
+            content_type = 'application/json; charset=utf-8'
         elif parsed.path == "/api/dividend-forecast":
             query = parse_qs(parsed.query)
             try:
