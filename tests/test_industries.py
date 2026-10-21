@@ -57,6 +57,22 @@ def test_missing_zero_quarter_ttm_and_same_cohort():
     assert r['revenue'] is None and r['revenue_known']==0 and r['revenue_count']==1
 
 
+def test_market_scope_and_explicit_stock_navigation(service):
+    service.import_bundle(fixture_bundle())
+    market=service.read(code='300750',industry='all',level=1,mode='ytd',period='2025-06-30')
+    assert market['selected']['code']=='all' and market['selected']['name']=='全市场'
+    assert {c['code'] for c in market['companies']}=={'300750','000001','000002'}
+    assert market['series'][-1]['revenue_known']==53
+    assert not market['child_ranking']
+    other=service.read(code='000002',industry='all',level=1,mode='ytd',period='2025-06-30')
+    assert other['companies']==market['companies'] and other['series']==market['series']
+    stock=service.read(code='300750',industry='stock',mode='ytd',period='2025-06-30')
+    assert stock['selected']['code']=='630701'
+    assert {c['code'] for c in stock['companies']}=={'300750','000001'}
+    missing=service.read(code='999999',industry='stock',mode='ytd',period='2025-06-30')
+    assert missing['selected']['code']=='all'
+
+
 def test_gross_margin_periods_weighting_and_missing():
     facts={('a',p):{'operating_revenue':r,'operating_cost':c}
            for p,r,c in [('2024-06-30',100,80),('2024-12-31',240,180),

@@ -334,10 +334,12 @@
     let selectedMetric=metricButtons.find(item=>item.classList.contains('active'));
     function setExpanded(expanded) {
       panel.hidden=!expanded;
+      document.getElementById('valuation-standard').hidden=expanded;
       button.setAttribute('aria-expanded',String(expanded));
       button.classList.toggle('active',expanded);
       metricButtons.forEach(item=>item.classList.toggle('active',!expanded&&item===selectedMetric));
       if(expanded) {load();if(payload&&!stale)render();}
+      else window.dispatchEvent(new Event('resize'));
     }
     metricButtons.forEach(item=>item.addEventListener('click',()=>{
       selectedMetric=item;

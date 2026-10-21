@@ -625,6 +625,9 @@ class IndustryService:
     def market_history(self, industry, catalog, summaries=None):
         belongs = {}
         for leaf in catalog:
+            if industry == 'all':
+                belongs[leaf] = leaf != 'all'
+                continue
             node = leaf
             while node and node != industry:
                 node = catalog[node]['parent_code']
@@ -772,6 +775,9 @@ class IndustryService:
         if data is None:
             return {'empty':True,'catalog':[],'notes':NOTES,'status':self.status()}
         bycode = {r['code']:r for r in data['catalog']}
+        bycode['all'] = {'code':'all','name':'全市场','level':0,'parent_code':None}
+        if industry == 'stock':
+            industry = next((m['industry_code'] for m in data['members'] if m['stock_code']==code),None) or 'all'
         if industry and industry not in bycode or parent and parent not in bycode:
             raise ValueError('行业代码无效')
         paths = {}
@@ -783,6 +789,7 @@ class IndustryService:
                 node = bycode.get(node['parent_code'])
             paths[m['stock_code']] = path
         groups = {r['code']:[s for s,path in paths.items() if r['code'] in path] for r in data['catalog']}
+        groups['all'] = list(paths)
         periods = [p for p in data['periods'] if mode != 'annual' or p.endswith('12-31')]
         if period and period not in periods:
             raise ValueError('该报告期没有行业数据')
@@ -821,14 +828,14 @@ class IndustryService:
                      "WHERE a.instrument_id=i.id AND a.status='succeeded' ORDER BY a.created_at DESC,a.id DESC LIMIT 1)")]
         saved = [{**r,'path':[bycode[c] for c in paths.get(r['code'],[])],
                   'metrics':aggregate([r['code']],facts,period,mode) if period else None}
-                 for r in saved if selected in paths.get(r['code'],[])]
+                 for r in saved if (selected == 'all' and r['code'] in paths) or selected in paths.get(r['code'],[])]
         market = {}
         if selected:
             for r in data['caps']:
                 node = bycode.get(r['industry_code']);lineage=[]
                 while node:
                     lineage.append(node['code']);node=bycode.get(node['parent_code'])
-                if selected not in lineage:
+                if selected != 'all' and selected not in lineage:
                     continue
                 key=(r['trade_date'],r['import_id'])
                 out=market.setdefault(key,{'trade_date':r['trade_date'],'import_id':r['import_id'],
@@ -878,7 +885,7 @@ class IndustryService:
                        'pb_price_date':company_prices.get(m['stock_code'],{}).get('pb_price_date'),
                        'metrics':aggregate([m['stock_code']],facts,period,mode) if period else None,
                        **company_caps.get(m['stock_code'],{})}
-                     for m in data['members'] if selected in paths.get(m['stock_code'],[])]
+                     for m in data['members'] if selected == 'all' or selected in paths.get(m['stock_code'],[])]
         provenance = reader.provenance(facts,code,period) if code and period else {}
         return {'empty':False,'import_id':data['import']['id'],'obtained_at':data['financial_times'].get(period),
                 'membership_obtained_at':data['membership_obtained_at'],'financial_source':'market_financial_industry',

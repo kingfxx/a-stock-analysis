@@ -349,7 +349,7 @@ def test_browser_metric_first_defaults_and_filtered_choices(index_server):
             page.wait_for_function("document.getElementById('current').textContent==='12.00 倍'")
             assert page.locator('#metric-tabs button').all_text_contents()==['PE(TTM)','PB','股息率','拥挤度']
             assert not page.locator('#series-control').is_visible()
-            assert page.locator('#industry-source').is_visible()
+            assert page.locator('#industry-source').count()==0
             assert '尚待核实' in page.locator('#comparison').inner_text()
             assert page.locator('#metric').input_value()=='pe_source'
             page.locator('[data-metric-family="pb"]').click()

@@ -147,7 +147,8 @@
     .valuation-current small { display:block; color:#afc2c9; font-size:12px; }
     .valuation-current strong { display:block; color:#fff; font-size:34px; line-height:1.25; font-variant-numeric:tabular-nums; }
     .valuation-current span { color:var(--muted); font-size:12px; }
-    .valuation-position { display:inline-block; margin:9px 0 6px; padding:3px 9px; border-radius:5px; color:#afc2c9; background:#30434d; font-size:16px; font-weight:650; }
+    .valuation-position { display:inline-block; margin:0 0 8px; padding:3px 9px; border-radius:5px; color:#afc2c9; background:#30434d; font-size:20px; font-weight:650; }
+    #valuation-standard[hidden] { display:none!important; }
     .valuation-position[data-tone="extreme-low"] { color:#70f0ad; background:rgba(46,204,113,.24); }
     .valuation-position[data-tone="low"] { color:#86d7be; background:rgba(106,201,170,.16); }
     .valuation-position[data-tone="slightly-low"] { color:#a5cedb; background:rgba(113,173,194,.10); }
@@ -405,11 +406,12 @@
           <option value="month">月</option>
         </select>
         <button id="valuation-price-overlay" class="valuation-overlay" type="button" aria-pressed="false">叠加前复权股价</button>
+        <button id="valuation-industry-jump" class="industry-navigation" type="button">前往行业内公司</button>
       </div>
     </div>
+    <div id="valuation-standard">
     <div class="valuation-overview">
       <div class="valuation-current">
-        <small id="valuation-current-label">当前市盈率 PE(TTM)</small>
         <div id="valuation-position" class="valuation-position" aria-live="polite">待判断</div>
         <strong id="valuation-current">—</strong>
         <small id="valuation-position-basis" class="valuation-position-basis">暂无有效分位</small>
@@ -429,6 +431,7 @@
     <p id="valuation-negative-note" class="note valuation-negative-note" role="status" aria-live="polite"></p>
     <div id="valuation-chart" role="img" aria-label="估值走势与历史基准参考线"></div>
     <p id="valuation-note" class="note valuation-note"></p>
+    </div>
   </section>
   <section class="chip-region" aria-label="筹码评估">
     <h2>筹码评估</h2>
@@ -950,7 +953,6 @@
       ? {high:view?.stddev_high, median:view?.mean, low:view?.stddev_low}
       : {high:view?.high, median:view?.median, low:view?.low};
     const current = view?.current;
-    document.getElementById('valuation-current-label').textContent = '最近观察 · ' + valuationNames[valuationMetric];
     document.getElementById('valuation-current').textContent = formattedValuation(current);
     document.getElementById('valuation-current-date').textContent = view?.current_date || '暂无有效观察';
     document.getElementById('valuation-high').textContent = formattedValuation(levels.high);

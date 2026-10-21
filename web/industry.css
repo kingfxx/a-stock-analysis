@@ -1,4 +1,7 @@
 #industry-panel[hidden]{display:none!important}
+.sw-company-pagination{display:flex;align-items:center;gap:10px;margin-left:auto}
+.sw-company-pagination[hidden]{display:none!important}
+.sw-company-pagination button{padding:5px 10px;font-size:12px}
 .industry-filter-details{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);max-height:calc(100dvh - 260px);overflow:auto;scrollbar-color:#526c78 #182227}
 .industry-filter-details[hidden]{display:none}
 .industry-filter-details>summary{cursor:pointer;color:var(--cyan);font-size:13px;list-style:none}

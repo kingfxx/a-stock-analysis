@@ -9,6 +9,9 @@ const isDailyMetric=()=>metricFamily==='crowding'||isSpread();
 function hasRollingPE(code){return data.coverage.some(row=>row.index_code===code&&row.provider==='csindex'&&row.series_key==='history.rolling'&&row.definition_version==='v1'&&row.frequency==='daily'&&row.pe_rolling_count>0);}
 let industryCrowdingRequest=0,industryCrowdingController,industryCrowdingData=null,industryCrowdingSortDate=null;
 let data,history=[],selectedSummary,views={},metricFamily='pe',timer,cooldownTimer,historyRevision=0,historyController,pointOverlay=false,pointData,pointCode,pointController,shownIndexCode;
+const indexSelectionKey='investment-index-selection-v1';
+let pendingIndexSelection=null;
+try{pendingIndexSelection=JSON.parse(sessionStorage.getItem(indexSelectionKey));}catch{}
 const chartCache=new Map();let chartCacheBytes=0;
 function clearChartCache(){chartCache.clear();chartCacheBytes=0;}
 function rememberChart(key,text){const size=new TextEncoder().encode(text).length;if(size>8*1024*1024)return;chartCache.set(key,{text,size});chartCacheBytes+=size;while(chartCache.size>6||chartCacheBytes>8*1024*1024){const first=chartCache.keys().next().value;chartCacheBytes-=chartCache.get(first).size;chartCache.delete(first);}}
@@ -50,19 +53,21 @@ clearTimeout(cooldownTimer);cooldownTimer=null;if(activeCooldowns.length&&!docum
 clearTimeout(timer);timer=null;if(running&&!document.hidden)timer=setTimeout(()=>load(false),5000);}
 const parentOf=row=>row.navigation_parent_index_code||row.parent_index_code;
 function renderParents(){options('parent',data.catalog.filter(row=>row.index_type==='industry'&&row.industry_level===1).map(row=>[row.index_code,row.name]),el('parent').value);}
-function updateSelectedIndex(selected){const code=selected?.index_code;el('current-index-name').textContent=selected?.name||'暂无指数';el('current-index-code').textContent=code||'—';if(shownIndexCode===code)return;shownIndexCode=code;pointController?.abort();pointController=null;pointData=null;pointCode=null;el('point-overlay-note').hidden=!pointOverlay;if(pointOverlay&&code&&metricFamily!=='crowding')loadPointOverlay(code);}
+function updateSelectedIndex(selected){if(selected){try{sessionStorage.setItem(indexSelectionKey,JSON.stringify({kind:selected.index_type,code:selected.index_code}));}catch{}}const jump=el('industry-companies'),industry=el('kind').value==='industry';jump.hidden=!industry;jump.disabled=!selected?.navigation_taxonomy_code;jump.title=jump.disabled?'当前行业尚未匹配申万行业分类':`查看${selected.name}的行业内公司`;const code=selected?.index_code;el('current-index-name').textContent=selected?.name||'暂无指数';el('current-index-code').textContent=code||'—';if(shownIndexCode===code)return;shownIndexCode=code;pointController?.abort();pointController=null;pointData=null;pointCode=null;el('point-overlay-note').hidden=!pointOverlay;if(pointOverlay&&code&&metricFamily!=='crowding')loadPointOverlay(code);}
 function renderCodes(){
+const restored=pendingIndexSelection&&data.catalog.find(row=>row.index_code===pendingIndexSelection.code&&row.index_type===pendingIndexSelection.kind&&['broad','industry','strategy'].includes(row.index_type));pendingIndexSelection=null;
+if(restored){el('kind').value=restored.index_type;if(restored.index_type==='industry')el('parent').value=restored.industry_level===1?restored.index_code:parentOf(restored);}
 if(el('kind').value!=='broad'&&isSpread())metricFamily='pe';
-const industry=el('kind').value==='industry',old=el('code').value;
+const industry=el('kind').value==='industry',old=restored?.index_code||el('code').value;
 el('parent-control').hidden=!industry;el('second-control').hidden=!industry;el('code-control').hidden=industry;
 const choices=data.catalog.filter(row=>row.index_type===el('kind').value&&(!isSpread()||el('kind').value!=='broad'||hasRollingPE(row.index_code))).map(row=>[row.index_code,row.name]);
 const preferred=choices.some(([code])=>code===old)?old:el('kind').value==='broad'?'cn:000300':'';
 options('code',choices,preferred);
-if(industry){const parent=el('parent').value;options('industry-second',[['','全部二级行业'],...data.catalog.filter(row=>row.index_type==='industry'&&row.industry_level===2&&parentOf(row)===parent).map(row=>[row.index_code,row.name])],el('industry-second').value);el('code').value=el('industry-second').value||parent;}
+if(industry){const parent=el('parent').value;options('industry-second',[['','全部二级行业'],...data.catalog.filter(row=>row.index_type==='industry'&&row.industry_level===2&&parentOf(row)===parent).map(row=>[row.index_code,row.name])],restored?.industry_level===2?restored.index_code:el('industry-second').value);el('code').value=el('industry-second').value||parent;}
 const selected=data.catalog.find(row=>row.index_code===el('code').value);el('current-index-name').textContent=selected?.name||'暂无指数';el('current-index-code').textContent=selected?.index_code||'—';renderMetricButtons();renderSeries(old!==el('code').value);updateSelectedIndex(selected);}
 function renderSeries(reset=false){
 const industry=el('kind').value==='industry',old=reset?'':el('series').value;
-el('series-control').hidden=industry||isDailyMetric();el('industry-source').hidden=!industry||isDailyMetric();
+el('series-control').hidden=industry||isDailyMetric();
 const preferred=metricFamily==='pb'?'legu|pb.ordinary':metricFamily==='pe'?'csindex|history.rolling':'';
 const rows=data.coverage.filter(row=>row.index_code===el('code').value&&(!industry||row.provider==='sws'&&row.series_key==='analysis.daily')&&fieldFor(row)&&row[fieldFor(row)+'_count']>0);
 const rank=row=>`${row.provider}|${row.series_key}`===preferred?0:row.series_key.endsWith('.ordinary')?1:row.series_key==='dashboard'?3:2;
@@ -224,6 +229,7 @@ el('progress-toggle').onclick=()=>{const details=el('progress-details'),expanded
 el('kind').onchange=renderCodes;el('parent').onchange=()=>{el('industry-second').value='';renderCodes();};el('industry-second').onchange=renderCodes;el('code').onchange=()=>{const selected=data.catalog.find(row=>row.index_code===el('code').value);renderMetricButtons();renderSeries(true);updateSelectedIndex(selected);};el('series').onchange=loadHistory;for(const id of ['range','benchmark','frequency'])el(id).onchange=draw;el('metric').onchange=draw;
 el('industry-crowding-level').onchange=loadIndustryCrowding;el('industry-crowding-range').onchange=loadIndustryCrowding;
 const stock=new URLSearchParams(location.search).get('stock');for(const link of document.querySelectorAll('[data-view]')){const params=new URLSearchParams({tab:link.dataset.view});if(stock&&/^(?:sh|sz|bj)?\d{6}$/i.test(stock))params.set('code',stock);link.href='/?'+params;}
+el('industry-companies').onclick=()=>{const selected=data.catalog.find(row=>row.index_code===el('code').value);if(!selected?.navigation_taxonomy_code)return;const params=new URLSearchParams({tab:'industry',industry:selected.navigation_taxonomy_code,level:String(selected.industry_level),industry_view:'companies'});if(stock&&/^(?:sh|sz|bj)?\d{6}$/i.test(stock))params.set('code',stock);location.assign('/?'+params);};
 api('/api/stock-groups').then(library=>window.initStockPicker({stock_library:library,code:stock||''})).catch(error=>{el('stock-picker-message').textContent='股票列表读取失败：'+error.message;});
 load();loadIndustryCrowding();
 })();

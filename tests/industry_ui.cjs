@@ -1,5 +1,5 @@
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),assert=require('node:assert/strict');
-const context={window:{DashboardTime:require('../web/datetime.js')}};
+const context={window:{DashboardTime:require('../web/datetime.js')},URLSearchParams};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../web/industry.js'),'utf8'),context);
 const display=context.window.industryMarketDisplay;
 assert.match(display([]).note,/尚无已发布市值汇总/);

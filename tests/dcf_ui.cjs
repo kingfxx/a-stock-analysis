@@ -83,20 +83,23 @@ async function domTest(data,failFirst=false,autoData=null){
   let panel,requests=0;const plots=[];
   const Plotly={react(target,data,layout){plots.push({target,data,layout});target.plot={data,layout};},purge(target){delete target.plot;}};
   button.closest=()=>host;
-  const document={readyState:'complete',createElement(){return new Element();},getElementById(id){return id==='dcf-toggle'?button:{textContent:JSON.stringify({code:'600519'})};}};
+  const standard=new Element();
+  const document={readyState:'complete',createElement(){return new Element();},getElementById(id){return id==='dcf-toggle'?button:id==='valuation-standard'?standard:{textContent:JSON.stringify({code:'600519'})};}};
   const window=new Element();
+  window.dispatchEvent=()=>{};
   window.DashboardTime=require('../web/datetime.js');
-  vm.runInNewContext(fs.readFileSync(file,'utf8'),{window,document,Plotly,URLSearchParams,fetch:async url=>{
+  vm.runInNewContext(fs.readFileSync(file,'utf8'),{window,document,Plotly,URLSearchParams,Event,fetch:async url=>{
     if(url.startsWith('/api/dcf/wacc?'))return {ok:true,json:async()=>autoData};
     requests++;assert.equal(url,'/api/dcf?code=600519');return {ok:!(failFirst&&requests===1),status:503,json:async()=>data};
   }});
   assert.equal(requests,0,'page mount must not request facts');
   button.fire('click');await new Promise(resolve=>setImmediate(resolve));
   assert.equal(requests,1);assert.equal(panel.hidden,false);
-  return {panel,button,window,metrics,plots,getRequests:()=>requests};
+  assert.equal(standard.hidden,true,'DCF replaces the ordinary valuation content');
+  return {panel,button,window,metrics,plots,standard,getRequests:()=>requests};
 }
 (async()=>{
-  const {panel,button,window,metrics,getRequests}=await domTest(fixture);
+  const {panel,button,window,metrics,standard,getRequests}=await domTest(fixture);
   const get=id=>panel.querySelector('#dcf-'+id);
   assert.equal(get('base').value,'1');assert.equal(get('base').disabled,true);
   assert.equal(panel.querySelector('#dcf-growth-reference').textContent,'增长率参考：26.67%');
@@ -111,6 +114,7 @@ async function domTest(data,failFirst=false,autoData=null){
   for(const metric of metrics){
     metric.fire('click');
     assert.equal(panel.hidden,true);assert.equal(button.attrs['aria-expanded'],'false');
+    assert.equal(standard.hidden,false);
     assert.equal(button.classList.contains('active'),false);
     assert.deepEqual(metrics.map(item=>item.classList.contains('active')),metrics.map(item=>item===metric));
     button.fire('click');
