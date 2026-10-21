@@ -8,15 +8,15 @@ const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
 const metricCode = page.slice(page.indexOf('  const metrics = {'), page.indexOf('  let selectedPeriod ='));
 const renderCode = page.slice(page.indexOf('  function label(row)'), page.indexOf('  seriesControls.forEach(series => {'));
 
-for (const period of ['quarter', 'year', 'ttm']) {
+for (const period of ['quarter', 'ytd', 'year', 'ttm']) {
   for (const kind of ['bar', 'line']) {
-    for (const key of ['profit', 'cash_dividend', 'qfq_price', 'market_cap', 'profit_growth', 'gross_margin', 'roic']) {
+    for (const key of ['profit', 'cash_dividend', 'qfq_price', 'market_cap', 'profit_growth', 'gross_margin', 'roic', 'period_end_market_cap']) {
       const elements = new Map();
       const makeElement = () => ({textContent:'',className:'',hidden:false,children:[],append(...nodes){this.children.push(...nodes);},replaceChildren(...nodes){this.children=nodes;}});
       const context = {
         state: {views: {[period]: [{period:'2025-12-31', publish_date:'2026-04-30',
           publish_date_source:'cninfo_original',publish_date_status:'matched_original',latest_revision_on:'2026-05-08',publish_date_reason:'唯一明确原始正式报告',
-          profit:100e8, cash_dividend:10e8, dividend_payout_ratio:10, qfq_price:20, market_cap:500e8,
+          profit:100e8, period_end_market_cap:450e8, cash_dividend:10e8, dividend_payout_ratio:10, qfq_price:20, market_cap:500e8,
           profit_growth:20, gross_margin:30, roic:17.28, cash_dividend_details:'2025-12-31 → 2026-06-05',
           yoy: {profit:'同比 +20.00%', cash_dividend:'同比 +10.00%（仅已实施口径）'}}]}},
         selectedPeriod: period, comparisonRange: {value:'all'},
@@ -33,9 +33,16 @@ for (const period of ['quarter', 'year', 'ttm']) {
       const trace = context.traces[0];
       const hover = trace.hovertemplate.replace(/%\{customdata\[(\d+)\]\}/g,
         (_, index) => trace.customdata[0][index]);
-      if (key === 'profit') assert.match(hover, /亿元；同比 \+20\.00%/);
+      if (period === 'ytd' && !['qfq_price','market_cap','period_end_market_cap'].includes(key)) {
+        assert.doesNotMatch(hover, /环比/);
+        assert.doesNotMatch(elements.get('trend-history-body').innerHTML, /环比/);
+      } else {
+        assert.match(hover, /环比/);
+        assert.match(elements.get('trend-history-body').innerHTML, /环比/);
+      }
+      if (key === 'profit') assert.match(hover, /同比 —（缺少比较期）/);
       else if (key === 'cash_dividend') {
-        assert.match(hover, /亿元；同比 \+10\.00%（仅已实施口径）/);
+        assert.match(hover, /同比 —（缺少比较期）/);
         assert.match(hover, /2025-12-31 → 2026-06-05/);
       } else assert.doesNotMatch(hover, /；同比/);
       assert.doesNotMatch(hover, /日期来源：|核验状态：|唯一明确原始正式报告/);
@@ -124,7 +131,7 @@ for (const period of ['quarter', 'year', 'ttm']) {
   assert.ok(context.traces.slice(2).filter(trace => trace.hovertemplate.includes('%{customdata[10]}')).length === 1);
   const qfqHover = context.traces[2].hovertemplate.replace(/%\{customdata\[(\d+)\]\}/g,
     (_, index) => context.traces[2].customdata[1][index]);
-  assert.match(qfqHover, /同比 20\.00%/);
-  assert.match(qfqHover, /环比 20\.00%/);
+  assert.match(qfqHover.replace(/<[^>]*>/g, ''), /同比 20\.0%/);
+  assert.match(qfqHover.replace(/<[^>]*>/g, ''), /环比 20\.0%/);
 }
-console.log('42 chart hover combinations passed');
+console.log('Chart hover combinations passed (including YTD financial / market comparison rules)');

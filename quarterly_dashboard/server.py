@@ -550,7 +550,7 @@ def _financial_payload(data: dict) -> dict:
                              data.get("dividend_events") or None,
                              period_end_prices=prices.get("raw_period_end"))
     return {"code": data["code"], "name": data.get("name"), "updated_at": data.get("updated_at"),
-            "views": {name: view_rows(rows, name) for name in ("quarter", "year", "ttm")},
+            "views": {name: view_rows(rows, name) for name in ("quarter", "ytd", "year", "ttm")},
             "warnings": data.get("warnings", []), "needs_dividends": _needs_dividends(data),
             "announcement_sync": data.get("announcement_sync", {}),
             "business_segment_sync": data.get("business_segment_sync", {})}

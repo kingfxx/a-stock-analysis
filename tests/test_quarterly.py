@@ -186,3 +186,50 @@ def test_long_trading_gap_keeps_last_close_as_separate_reference():
     assert [r["qfq_price_reference"] for r in rows] == [1.386, 1.386]
     assert [r["market_cap_reference"] for r in rows] == [1163, 1163]
     assert disclosure_reference_snapshots(reports, raw_daily[:1]) == []
+
+
+def test_ytd_uses_reported_values_without_requiring_prior_quarters():
+    reports = [
+        {"period": "2024-06-30", "revenue_ytd": 200, "profit_ytd": 20},
+        {"period": "2025-03-31", "revenue_ytd": 100, "profit_ytd": 5},
+        {"period": "2025-06-30", "revenue_ytd": 300, "profit_ytd": 30,
+         "adjusted_profit_ytd": 0, "operating_cost_ytd": 180, "net_profit_ytd": 45,
+         "operating_cash_flow_ytd": -10, "capex_ytd": 20, "main_business_cash_flow_ytd": 280,
+         "total_equity": 500, "shares": 10, "publish_date": "2025-08-01"},
+        {"period": "2025-12-31", "revenue_ytd": 700, "profit_ytd": None},
+    ]
+    dividends = [{"report_period": "2025-03-31", "date": "2025-05-01", "per_share": 1, "total_shares": 10},
+                {"report_period": "2025-06-30", "date": "2025-09-01", "per_share": 2, "total_shares": 10}]
+    prices = [{"publish_date": "2025-08-01", "date": "2025-08-01", "close": 12}]
+    rows = build_period_rows(reports, prices, prices, dividend_events=dividends)
+    ytd = view_rows(rows, 'ytd')
+    assert [r['revenue'] for r in ytd] == [200, 100, 300, 700]
+    q2 = ytd[2]
+    assert q2['profit'] == 30
+    assert q2['revenue_growth'] == 50
+    assert q2['profit_growth'] == 50
+    assert q2['yoy']['revenue'] == '同比 +50.00%'
+    assert q2['adjusted_profit'] == 0
+    assert q2['operating_cash_flow'] == -10
+    assert q2['free_cash_flow'] == -30
+    assert q2['main_business_cash_flow'] == 280
+    assert q2['capex'] == 20
+    assert q2['gross_margin'] == 40
+    assert q2['net_margin'] == 15
+    assert q2['net_assets'] == 500
+    assert q2['cash_dividend'] == 30
+    assert ytd[-1]['profit'] is None
+    assert view_rows(rows, 'quarter')[-1]['revenue'] is None
+    assert ytd[-1]['revenue'] == view_rows(rows, 'year')[-1]['revenue']
+    quarter = view_rows(rows, 'quarter')[2]
+    for field in ('qfq_price', 'market_cap', 'period_end_market_cap', 'roe', 'roic'):
+        assert q2[field] == quarter[field]
+
+
+def test_financial_payload_includes_ytd_view():
+    from quarterly_dashboard.server import _financial_payload, REPORT_DATE_BASIS
+    payload = _financial_payload({"code": "600000", "report_date_basis": REPORT_DATE_BASIS,
+                                  "reports": [{"period": "2025-06-30", "profit_ytd": 123}]})
+    assert set(payload['views']) == {'quarter', 'ytd', 'year', 'ttm'}
+    assert payload['views']['ytd'][0]['profit'] == 123
+    assert payload['views']['quarter'][0]['profit'] is None

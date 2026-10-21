@@ -269,13 +269,13 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
 
 
 def view_rows(rows: list[dict], period: str) -> list[dict]:
-    if period not in {"quarter", "ttm", "year"}:
+    if period not in {"quarter", "ytd", "ttm", "year"}:
         raise ValueError(f"unsupported period: {period}")
     result = []
     for row in rows:
         if period == "year" and row["period"][5:7] != "12":
             continue
-        suffix = {"quarter": "quarter", "ttm": "ttm", "year": "ytd"}[period]
+        suffix = {"quarter": "quarter", "ytd": "ytd", "ttm": "ttm", "year": "ytd"}[period]
         result.append({**row, "revenue": row.get(f"revenue_{suffix}"),
                        "profit": row.get(f"profit_{suffix}"),
                        "adjusted_profit": row.get(f"adjusted_profit_{suffix}"),

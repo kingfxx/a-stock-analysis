@@ -12,7 +12,7 @@ function checkAxes(rows, keys, period = 'quarter', range = 'all', kinds = ['bar'
     state:{views:{[period]:rows}}, selectedPeriod:period, comparisonRange:{value:range},
     seriesControls:keys.map((key, index) => ({label:'ABC'[index], color:'#38c4dc',
       kind:kinds[index], control:{value:key}})), modeOf:series => series.kind,
-    note:{}, document:{getElementById:() => ({classList:{toggle() {}}, textContent:''})},
+    note:{}, document:{getElementById:() => ({classList:{toggle() {}}, textContent:'',replaceChildren(){}})},
     Plotly:{react:(id, traces, layout) => { context.traces = traces; context.layout = layout; }}
   };
   vm.createContext(context);
@@ -53,7 +53,7 @@ const combinations = [
   [[null, null, null], [null, null, null]],
   [[-5, 50, 100], [-300e8, -100e8, -200e8]],
 ];
-for (const period of ['quarter', 'year', 'ttm']) {
+for (const period of ['quarter', 'ytd', 'year', 'ttm']) {
   for (const range of ['all', '5', '10']) {
     for (const [roic, profit] of combinations) {
       const rows = roic.map((value, i) => ({period:`${new Date().getFullYear() - 2 + i}-12-31`,
