@@ -10,7 +10,7 @@ from pathlib import Path
 from .network import create_data_session
 from .sources import (PROFIT_KEYS, fetch_financial_report_page, normalize_code,
                       normalize_report_dates, parse_cash_flow_reports,
-                      parse_financial_reports)
+                      parse_financial_reports, parse_adjusted_profit_reports)
 from .storage import Database, SyncKey, SyncResult, utc_now
 from .stock_collection import begin_stock_batch, routed_stock_requests
 from .disclosure_dates import apply_disclosure_dates
@@ -108,13 +108,17 @@ class FundamentalService:
         if not instrument:
             return {"code": code, "name": None, "reports": [], "warnings": []}
         rows = {kind: self.db.financial_reports(instrument["id"], SOURCE, kind)
-                for kind in STATEMENT_TYPES}
+                for kind in REPORT_TYPES}
         def payload(kind):
             return {"result": {"data": {"report_list": {
                 row["period"].replace("-", ""): json.loads(row["raw_json"])
                 for row in rows[kind]}}}}
         if rows["lrb"]:
             reports = parse_financial_reports(payload("lrb"), payload("fzb"))
+            adjusted_profit = parse_adjusted_profit_reports(rows["gjzb"])
+            for report in reports:
+                if adjusted_profit.get(report["period"]) is not None:
+                    report["adjusted_profit_ytd"] = adjusted_profit[report["period"]]
             if rows["llb"]:
                 cash = parse_cash_flow_reports(payload("llb"))
                 reports = [{**report, **cash.get(report["period"], {})} for report in reports]

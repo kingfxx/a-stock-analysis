@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import json
 import re
 from decimal import Decimal
 from datetime import date, timedelta
@@ -17,6 +18,7 @@ PROFIT_KEYS = (
     "归属于母公司所有者的净利润", "归属于母公司的净利润",
     "归属于母公司股东的净利润", "归属于上市公司股东的净利润",
 )
+ADJUSTED_PROFIT_KEYS = ("扣除非经常性损益后的归属于母公司所有者的净利润", "扣除非经常性损益后的归属于母公司股东的净利润", "扣非归母净利润")
 SHARE_KEYS = ("实收资本(或股本)", "实收资本（或股本）", "股本")
 EQUITY_KEYS = ("归属于母公司股东权益合计", "归属于母公司股东的权益", "归属于母公司所有者权益合计")
 TOTAL_EQUITY_KEYS = ("所有者权益(或股东权益)合计", "所有者权益（或股东权益）合计",
@@ -132,6 +134,7 @@ def parse_financial_reports(income_payload: dict, balance_payload: dict) -> list
             "publish_date": _date(record.get("publish_date")),
             "revenue_ytd": _first(fields, ("营业收入", "营业总收入")),
             "profit_ytd": _first(fields, PROFIT_KEYS),
+            "adjusted_profit_ytd": _first(fields, ADJUSTED_PROFIT_KEYS),
             "operating_cost_ytd": _first(fields, ("营业成本",)),
             "net_profit_ytd": _first(fields, ("净利润",)),
             "profit_before_tax_ytd": _first(fields, ("利润总额",)),
@@ -148,6 +151,22 @@ def parse_financial_reports(income_payload: dict, balance_payload: dict) -> list
     if not output:
         raise ValueError("新浪利润表报告期无法解析")
     return normalize_report_dates(sorted(output, key=lambda row: row["period"]))
+
+
+def parse_adjusted_profit_reports(records: list[dict]) -> dict[str, float]:
+    """Read applicable adjusted parent profit from Sina's gjzb NPCUT field."""
+    values = {}
+    for record in records:
+        raw = record.get("raw_json")
+        if not raw:
+            continue
+        payload = json.loads(raw)
+        items = payload.get("data", []) if isinstance(payload, dict) else []
+        value = next((_number(item.get("item_value")) for item in items
+                      if item.get("item_field") == "NPCUT" and _number(item.get("item_value")) is not None), None)
+        if value is not None:
+            values[record["period"]] = value
+    return values
 
 
 def parse_cash_flow_reports(payload: dict) -> dict[str, dict]:

@@ -106,17 +106,21 @@
     .trend-history-scroll { position:relative; isolation:isolate; max-width:calc(100% - 54px); margin:0 27px; overflow:auto; border:1px solid var(--line); border-radius:10px; scrollbar-color:#526c78 #182227; }
     .trend-history-scroll:focus-visible { outline:2px solid var(--cyan); outline-offset:3px; }
     .trend-history-table { border-collapse:separate; border-spacing:0; width:max-content; min-width:100%; table-layout:fixed; font-variant-numeric:tabular-nums; }
-    .trend-history-table th,.trend-history-table td { min-width:125px; padding:12px 14px; text-align:right; border-right:1px solid #29373e; border-bottom:1px solid #2b3a42; white-space:nowrap; }
+    .trend-history-table th,.trend-history-table td { min-width:108px; padding:6px 8px; text-align:right; vertical-align:top; border-right:1px solid #29373e; border-bottom:1px solid #2b3a42; white-space:nowrap; }
     .trend-history-table thead th { background:#202e35; color:#b9cbd4; font-size:12px; font-weight:500; }
-    .trend-history-table th:first-child { position:sticky; left:0; z-index:3; width:180px; min-width:180px; max-width:180px; text-align:left; background:#202c33; box-shadow:4px 0 8px #10161920; }
+    .trend-history-table th:first-child { position:sticky; left:0; z-index:3; width:170px; min-width:170px; max-width:170px; text-align:left; background:#202c33; box-shadow:4px 0 8px #10161920; }
     .trend-history-table thead th:first-child { z-index:4; }
     .trend-history-table tbody th { font-size:13px; font-weight:500; }
-    .trend-history-table tbody th span { display:block; margin-top:6px; color:var(--muted); font-size:11px; font-weight:400; }
-    .trend-history-table td strong { display:block; font-size:16px; font-weight:500; letter-spacing:-.02em; }
-    .trend-history-change { margin-top:5px; font-size:12px; color:var(--muted); }
+    .trend-history-table tbody th .trend-history-metric-name { height:17px; line-height:17px; }
+    .trend-history-table td strong { display:block; height:20px; font-size:14px; font-weight:500; line-height:20px; letter-spacing:-.02em; }
+    .trend-history-change { margin-top:4px; font-size:10px; color:var(--muted); display:flex; align-items:center; justify-content:flex-end; gap:4px; line-height:1.2; white-space:nowrap; }
+    .trend-history-row-labels { margin-top:4px; color:var(--muted); font-size:10px; font-weight:400; line-height:1.2; white-space:nowrap; }
+    .trend-history-separator { color:var(--muted); }
     .trend-history-change small { margin-right:6px; color:var(--muted); }
     .trend-history-change.positive { color:#f09a75; }
     .trend-history-change.negative { color:#72c9b3; }
+    .trend-history-change .positive { color:#f09a75; }
+    .trend-history-change .negative { color:#72c9b3; }
     .trend-history-table .trend-history-latest { background:#223740; }
     .trend-history-table thead .trend-history-latest { color:#81d8eb; }
     .trend-history-table thead small { display:block; margin-top:5px; color:var(--cyan); font-size:10px; }
@@ -268,6 +272,8 @@
         <select id="bar-metric" aria-label="指标 A">
           <option value="revenue">营业收入</option>
           <option value="profit" selected>归母净利润</option>
+          <option value="adjusted_profit">归母扣非净利润</option>
+          <option value="net_assets">净资产（所有者权益合计）</option>
           <option value="revenue_growth">营收同比增长率</option>
           <option value="profit_growth">归母净利润同比增长率</option>
           <option value="roe">ROE（TTM 估算）</option>
@@ -294,6 +300,8 @@
         <select id="bar-metric-2" aria-label="指标 B">
           <option value="revenue" selected>营业收入</option>
           <option value="profit">归母净利润</option>
+          <option value="adjusted_profit">归母扣非净利润</option>
+          <option value="net_assets">净资产（所有者权益合计）</option>
           <option value="revenue_growth">营收同比增长率</option>
           <option value="profit_growth">归母净利润同比增长率</option>
           <option value="roe">ROE（TTM 估算）</option>
@@ -319,6 +327,8 @@
         </div></div>
         <select id="line-metric" aria-label="指标 C">
           <option value="profit">归母净利润</option>
+          <option value="adjusted_profit">归母扣非净利润</option>
+          <option value="net_assets">净资产（所有者权益合计）</option>
           <option value="revenue">营业收入</option>
           <option value="revenue_growth">营收同比增长率</option>
           <option value="profit_growth">归母净利润同比增长率</option>
@@ -497,7 +507,7 @@
 <script src="/business-segment-aliases.js?v=20261016-names"></script>
 <script src="/business-segment-names.js?v=20261016-names"></script>
 <script src="/business-segments.js?v=20261016-region-chart-restored-v1"></script>
-<link rel="stylesheet" href="/industry.css?v=20261016-business-sidebar-v3">
+<link rel="stylesheet" href="/industry.css?v=20261021-desktop-filter-grid">
 <script src="/industry.js?v=20261016-sidebar-filters"></script>
 <link rel="stylesheet" href="/maintenance.css?v=20261007-compact-confirm">
 <script src="/stock-cleanup.js?v=20261007-no-cleanup-backup"></script>
@@ -574,6 +584,8 @@
   const metrics = {
     revenue: {name:'营业收入', unit:'亿元', scale:1e8},
     profit: {name:'归母净利润', unit:'亿元', scale:1e8},
+    adjusted_profit: {name:'归母扣非净利润', unit:'亿元', scale:1e8},
+    net_assets: {name:'净资产（所有者权益合计）', unit:'亿元', scale:1e8},
     revenue_growth: {name:'营收同比增长率', unit:'%', scale:1},
     profit_growth: {name:'归母净利润同比增长率', unit:'%', scale:1},
     roe: {name:'ROE（TTM 估算）', unit:'%', scale:1},
@@ -683,13 +695,20 @@
       const current = row[key];
       if (current == null || previous == null) return labelText + ' —（缺少比较期）';
       if (previous <= 0) return labelText + ' —（基期非正，不计算百分比）';
-      return labelText + ' ' + ((current / previous - 1) * 100).toFixed(2) + '%';
+      return labelText + ' ' + ((current / previous - 1) * 100).toFixed(1) + '%';
+    };
+    const comparisonHoverText = (row, key, months, labelText) => {
+      const text = comparisonText(row, key, months, labelText);
+      const match = text.match(/^(同比|环比)\s+([+-]?\d+(?:\.\d+)?%)(.*)$/);
+      if (!match) return `<span style="color:#aab9bf">${text}</span>`;
+      const value = Number(match[2].replace('%', ''));
+      const color = value > 0 ? '#f09a75' : value < 0 ? '#72c9b3' : '#aab9bf';
+      return `${match[1]} <span style="color:${color}">${match[2]}</span>${match[3]}`;
     };
     const periodOffsets = {yoy:12,qoq:selectedPeriod === 'year' ? 12 : 3};
-    const hover = (metric, key, showFinanceDates, showMarketDate, hasYoy) => metric.name + '：%{y:,.2f} ' + metric.unit +
-      (hasYoy && !hasMarketComparisons(key) ? '；%{customdata[8]}' : '') +
+    const hover = (metric, key, showFinanceDates, showMarketDate) => metric.name + '：%{y:,.2f} ' + metric.unit +
+      '<br>%{customdata[8]}　%{customdata[9]}' +
       (metric === metrics.cash_dividend && selectedPeriod === 'year' ? '<br>%{customdata[6]}' : '') +
-      (hasMarketComparisons(key) ? '<br>%{customdata[8]}<br>%{customdata[9]}' : '') +
       (metric === metrics.cash_dividend ? '<br>归属报告期 → 实际除权日：%{customdata[5]}' : '') +
       (metric === metrics.period_end_market_cap ? '<br>季末日期：%{customdata[1]}' :
         showFinanceDates ? '<br>报告期：%{customdata[1]}<br>披露日：%{customdata[2]}' :
@@ -703,7 +722,6 @@
     const marketDateSeries = active.filter(series => isPriceOrCap(series.key));
     for (const series of active) {
       const metric = series.metric;
-      const hasYoy = rows.some(row => row.yoy?.[series.key] != null);
       const showFinanceDates = financeSeries.at(-1)?.key === series.key;
       const showMarketDate = marketDateSeries.at(-1)?.key === series.key;
       const seriesCustom = custom.map((item, index) => {
@@ -713,9 +731,8 @@
           : row.profit == null || row.cash_dividend == null ? '分红率：—（数据缺失）'
           : row.profit <= 0 ? '分红率：—（归母净利润非正）' : '分红率：—（数据缺失）';
         return [...item, payout, row.period_end_price_date || '无价格',
-          hasMarketComparisons(series.key) ? comparisonText(row, series.key, periodOffsets.yoy, '同比')
-            : row.yoy?.[series.key] || '同比 —（缺少上年同期）',
-          hasMarketComparisons(series.key) ? comparisonText(row, series.key, periodOffsets.qoq, '环比') : '',
+          comparisonHoverText(row, series.key, periodOffsets.yoy, '同比'),
+          comparisonHoverText(row, series.key, periodOffsets.qoq, '环比'),
           (() => {
             const priceDate = row.price_date;
             const qfqDate = row.qfq_price_date;
@@ -730,13 +747,13 @@
       if (series.kind === 'bar') {
         traces.push({type:'bar', name:series.label + ' 柱形 · ' + metric.name, x:xs, y:series.values,
           yaxis:series.axis, width, offset, customdata:seriesCustom,
-          marker:{color:series.color}, hovertemplate:hover(metric, series.key, showFinanceDates, showMarketDate, hasYoy)});
+          marker:{color:series.color}, hovertemplate:hover(metric, series.key, showFinanceDates, showMarketDate)});
         barIndex++;
       } else {
         traces.push({type:'scatter', mode:'lines+markers', name:series.label + ' 折线 · ' + metric.name,
           x:xs, y:series.values, yaxis:series.axis, customdata:seriesCustom, connectgaps:false,
           line:{color:series.color,width:3}, marker:{size:5,color:series.color},
-          hovertemplate:hover(metric, series.key, showFinanceDates, showMarketDate, hasYoy)});
+          hovertemplate:hover(metric, series.key, showFinanceDates, showMarketDate)});
       }
       if (!metric.referenceKey) continue;
       const references = rows.map(row => row[metric.referenceKey] == null ? null : row[metric.referenceKey] / metric.scale);
@@ -856,26 +873,24 @@
     const historyFooter = document.getElementById('trend-history-footer');
     const historyRows = [...rows].reverse();
     const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-    historyHead.innerHTML = `<tr><th scope="col">指标 / 单位</th>${historyRows.map((row,index) => `<th scope="col" class="${index===0?'trend-history-latest':''}">${escapeHtml(label(row))}${index===0?'<small>最新一期</small>':''}</th>`).join('')}</tr>`;
-    historyBody.innerHTML = active.length ? active.map(series => `<tr><th scope="row">${escapeHtml(series.metric.name)}<span>${escapeHtml(series.metric.unit)}${series.key==='period_end_market_cap'?' · 季末快照':''}</span></th>${historyRows.map((row,index) => {
+    historyHead.innerHTML = `<tr><th scope="col">指标 / 单位（金额：亿元）</th>${historyRows.map((row,index) => `<th scope="col" class="${index===0?'trend-history-latest':''}">${escapeHtml(label(row))}${index===0?'<small>最新一期</small>':''}</th>`).join('')}</tr>`;
+    historyBody.innerHTML = active.length ? active.map(series => `<tr><th scope="row"><div class="trend-history-metric-name">${escapeHtml(series.metric.name)}${series.key==='period_end_market_cap'?' · 季末快照':''}</div><div class="trend-history-row-labels">同比 / 环比</div></th>${historyRows.map((row,index) => {
       const value=row[series.key], scaled=value==null?null:value/series.metric.scale;
       const formatted=scaled==null?'—':scaled.toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
-      const changes=[];
-      if (hasMarketComparisons(series.key)) {
-        changes.push(comparisonText(row,series.key,periodOffsets.yoy,'同比'));
-        changes.push(comparisonText(row,series.key,periodOffsets.qoq,'环比'));
-      } else if (row.yoy?.[series.key]) changes.push(row.yoy[series.key]);
+      const changes=[comparisonText(row,series.key,periodOffsets.yoy,'同比'),
+        comparisonText(row,series.key,periodOffsets.qoq,'环比')];
       const changeHtml=changes.map(change=>{
-        const match=change.match(/(?:同比|环比)\s+([+-]?\d+(?:\.\d+)?%)/);
+        const display=change.replace(/^(同比|环比)\s*/, '');
+        const match=display.match(/^([+-]?\d+(?:\.\d+)?%)/);
         const tone=match?(Number(match[1].replace('%',''))>0?'positive':Number(match[1].replace('%',''))<0?'negative':''):'';
-        return `<div class="trend-history-change ${tone}">${escapeHtml(change)}</div>`;
-      }).join('');
-      return `<td class="${index===0?'trend-history-latest':''}" title="${escapeHtml(series.metric.name+' · '+row.period+(series.metric.dateKey&&row[series.metric.dateKey]?' · 交易日 '+row[series.metric.dateKey]:''))}"><strong>${formatted}</strong>${changeHtml}</td>`;
+        return `<span class="${tone}" title="${escapeHtml(change+' · '+series.metric.name+' · '+row.period)}">${escapeHtml(display)}</span>`;
+      }).join('<span class="trend-history-separator">/</span>');
+      return `<td class="${index===0?'trend-history-latest':''}" title="${escapeHtml(series.metric.name+' · '+row.period+(series.metric.dateKey&&row[series.metric.dateKey]?' · 交易日 '+row[series.metric.dateKey]:''))}"><strong>${formatted}</strong><div class="trend-history-change">${changeHtml}</div></td>`;
     }).join('')}</tr>`).join('') : `<tr><th scope="row">历史数据</th><td colspan="${Math.max(1,historyRows.length)}" style="text-align:left;color:var(--muted)">请选择柱形或折线以显示指标。</td></tr>`;
     const historyUnit=active.length?active.map(series=>series.metric.unit).filter((unit,index,units)=>units.indexOf(unit)===index).join('、'):'所选指标单位';
     const historyPeriodLabel={quarter:'单季度',year:'年度',ttm:'TTM'}[selectedPeriod] || selectedPeriod;
-    document.getElementById('trend-history-caption').textContent=`口径：${historyPeriodLabel} · ${historyUnit} · 同比见指标下方；市值及股价另显示环比 · 时间由新到旧`;
-    historyFooter.textContent=active.length?'按当前财务周期与时间范围展示；市场指标的同比和环比按相同周期点位比较，缺少比较值时显示缺失原因。':'';
+    document.getElementById('trend-history-caption').textContent=`口径：${historyPeriodLabel} · ${historyUnit} · 同比／环比并排 · 时间由新到旧`;
+    historyFooter.textContent=active.length?'各报告期单元格在同一行并列显示同比和环比；缺少比较期或基期非正时显示原因。':'';
   }
   seriesControls.forEach(series => {
     series.control.addEventListener('change', () => { saveSelections(); render(); });

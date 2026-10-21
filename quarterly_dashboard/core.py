@@ -165,6 +165,7 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             **report,
             "revenue_quarter": quarter_value("revenue_ytd"),
             "profit_quarter": quarter_value("profit_ytd"),
+            "adjusted_profit_quarter": quarter_value("adjusted_profit_ytd"),
             "operating_cost_quarter": quarter_value("operating_cost_ytd"),
             "net_profit_quarter": quarter_value("net_profit_ytd"),
             "operating_cash_flow_quarter": cash_quarter,
@@ -174,6 +175,7 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             "free_cash_flow_ytd": cash_ytd - capex_ytd if cash_ytd is not None and capex_ytd is not None else None,
             "revenue_ttm": None,
             "profit_ttm": None,
+            "adjusted_profit_ttm": None,
             "operating_cost_ttm": None,
             "net_profit_ttm": None,
             "capex_ttm": None,
@@ -238,7 +240,7 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             ttm_events = [event for item in chain
                           for event in dividends_by_period.get(item["period"], [])]
             row["cash_dividend_ttm"], row["cash_dividend_details_ttm"] = dividend_values(ttm_events)
-            for field in (("revenue", "profit", "operating_cost", "net_profit", "capex",
+            for field in (("revenue", "profit", "adjusted_profit", "operating_cost", "net_profit", "capex",
                            "operating_cash_flow", "main_business_cash_flow", "free_cash_flow") + ROIC_PROFIT_FIELDS):
                 values = [item[f"{field}_quarter"] for item in chain]
                 if all(value is not None for value in values):
@@ -276,6 +278,8 @@ def view_rows(rows: list[dict], period: str) -> list[dict]:
         suffix = {"quarter": "quarter", "ttm": "ttm", "year": "ytd"}[period]
         result.append({**row, "revenue": row.get(f"revenue_{suffix}"),
                        "profit": row.get(f"profit_{suffix}"),
+                       "adjusted_profit": row.get(f"adjusted_profit_{suffix}"),
+                       "net_assets": row.get("total_equity"),
                        "roic": row.get("roic_ytd" if period == "year" else "roic_ttm"),
                        "cash_dividend": row.get(f"cash_dividend_{suffix}"),
                        "cash_dividend_details": row.get(f"cash_dividend_details_{suffix}"),
