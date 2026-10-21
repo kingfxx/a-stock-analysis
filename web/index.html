@@ -142,10 +142,23 @@
     .mini h3 { margin:0 0 9px; font-size:14px; color:#d8e6e9; }
     .mini p { margin:0; color:var(--muted); font-size:13px; line-height:1.75; }
     .valuation-panel { margin-top:18px; }
-    .valuation-controls { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
-    .valuation-controls .period { flex-shrink:0; }
-    .valuation-overlay { border:1px solid #4b616d; background:#26343c; color:var(--ink); font-size:13px; padding:10px 12px; font-weight:500; white-space:nowrap; }
-    .valuation-overlay[aria-pressed="true"] { border-color:var(--yellow); color:var(--yellow); background:#3a3528; }
+    .valuation-panel .panel-head { display:grid; grid-template-columns:minmax(0,1fr); gap:5px; align-items:stretch; }
+    .valuation-caption-row,.valuation-controls { display:grid; grid-template-columns:445px 150px 170px 130px 178px; gap:12px; align-items:center; }
+    .valuation-caption-row p { margin:0; }
+    .valuation-caption-row label { display:block; margin:0; font-size:13px; white-space:nowrap; }
+    .valuation-controls { align-items:center; }
+    .valuation-navigation-row { flex:1 0 100%; display:flex; justify-content:flex-start; }
+    .valuation-controls .period { justify-self:start; }
+    .valuation-controls .period button { padding:8px 7px; font-size:15px; }
+    .valuation-controls > select { width:100%; min-width:0; padding:8px 9px; font-size:14px; }
+    .valuation-overlay { justify-self:start; width:max-content; border:1px solid #49616b; background:#202a30; color:var(--ink); font-size:inherit; padding:9px 12px; font-weight:400; white-space:nowrap; }
+    .valuation-overlay[aria-pressed="true"] { border-color:#d4ad57; color:#f4d35e; background:#3a3629; }
+    @media(max-width:1200px) {
+      .valuation-caption-row { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+      .valuation-caption-row p { grid-column:1/-1; }
+      .valuation-controls { grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+      .valuation-controls .period,.valuation-controls .valuation-overlay { grid-column:1/-1; justify-self:start; }
+    }
     .valuation-overview { display:grid; grid-template-columns:210px minmax(0,1fr); gap:22px; padding:22px 27px 5px; }
     .valuation-current { padding:18px 20px; background:#24343d; border:1px solid #3d5966; border-radius:10px; }
     .valuation-current small { display:block; color:#afc2c9; font-size:12px; }
@@ -387,7 +400,13 @@
     <div class="panel-head">
       <div>
         <h2>估值与分位</h2>
+      </div>
+      <div class="valuation-caption-row">
         <p>估值走势 · 与所选区间历史分布及当前同行业均值对照</p>
+        <label for="valuation-range">时间范围</label>
+        <label for="valuation-benchmark">比较基准</label>
+        <label for="valuation-frequency">展示频率</label>
+        <span aria-hidden="true"></span>
       </div>
       <div class="valuation-controls">
         <div class="period" role="group" aria-label="估值指标">
@@ -397,18 +416,15 @@
           <button type="button" data-valuation-metric="dividend_yield">股息率</button>
           <button type="button" id="dcf-toggle" aria-expanded="false" aria-controls="dcf-panel">DCF 估值</button>
         </div>
-        <label for="valuation-range">时间范围</label>
         <select id="valuation-range" aria-label="估值时间范围">
           <option value="10" selected>最近 10 年</option>
           <option value="5">最近 5 年</option>
           <option value="3">最近 3 年</option>
         </select>
-        <label for="valuation-benchmark">比较基准</label>
         <select id="valuation-benchmark" aria-label="估值比较基准">
           <option value="percentile" selected>历史分位</option>
           <option value="stddev">均值 ±1 标准差</option>
         </select>
-        <label for="valuation-frequency">展示频率</label>
         <select id="valuation-frequency" aria-label="估值展示频率">
           <option value="auto" selected>自动</option>
           <option value="day">日</option>
@@ -416,6 +432,8 @@
           <option value="month">月</option>
         </select>
         <button id="valuation-price-overlay" class="valuation-overlay" type="button" aria-pressed="false">叠加前复权股价</button>
+      </div>
+      <div class="valuation-navigation-row">
         <button id="valuation-industry-jump" class="industry-navigation" type="button">前往行业内公司</button>
       </div>
     </div>
