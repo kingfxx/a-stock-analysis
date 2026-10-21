@@ -102,7 +102,57 @@ def test_old_sina_periods_do_not_force_repeated_decade_scan(tmp_path):
     assert svc.sources.calls[-1][0]=='2023-04-10'
     with db.connection() as conn:
         older=conn.execute("SELECT status,reason FROM report_disclosure_dates WHERE period='2007-12-31' AND is_current=1").fetchone()
-    assert older['status']=='pending' and '十年范围' in older['reason']
+    assert older is None  # Do not manufacture missing decisions outside coverage.
+
+
+def test_old_cached_pending_dates_do_not_trigger_warning(tmp_path):
+    db,svc,reports=setup(tmp_path)
+    svc.update('601919',reports,allow_initial=True)
+    with db.connection(write=True) as conn:
+        conn.execute("UPDATE report_disclosure_dates SET period='2007-12-31',status='pending',first_published_on=NULL,reason='报告期早于本次可查询十年范围，未核验'")
+    result=svc.read('601919')
+    assert result['dates']['2007-12-31']['status']=='pending'
+    assert result['warnings']==[]
+
+
+def test_unchanged_tail_preserves_historical_missing_without_rechecking(tmp_path,monkeypatch):
+    import quarterly_dashboard.announcement_service as module
+    db,svc,reports=setup(tmp_path)
+    reports.append({'period':'2021-12-31'})
+    first=svc.update('601919',reports,allow_initial=True)
+    missing=first['dates']['2021-12-31']
+    assert missing['status']=='missing'
+    assert any('2021-12-31' in x for x in first['warnings'])
+    original_choose=module.choose
+    checked=[]
+    def spy(reports,*args,**kwargs):
+        checked.extend(r['period'] for r in reports)
+        return original_choose(reports,*args,**kwargs)
+    monkeypatch.setattr(module,'choose',spy)
+    result=svc.update('601919',reports,refresh=True)
+    assert checked==[]
+    assert result['dates']['2021-12-31']==missing
+    svc.update('601919',reports,refresh=True,full=True)
+    assert set(checked)=={'2021-12-31','2022-12-31'}
+
+
+def test_older_financial_period_does_not_expand_incremental_network_range(tmp_path):
+    _,svc,reports=setup(tmp_path)
+    svc.update('601919',reports,allow_initial=True)
+    reports.append({'period':'2018-12-31'})
+    svc.update('601919',reports,refresh=True)
+    assert svc.sources.calls[-1][0]=='2023-04-10'
+    svc.update('601919',reports,refresh=True,full=True)
+    assert svc.sources.calls[-1][0]=='2018-12-31'
+
+
+def test_new_report_period_uses_previously_covered_catalog(tmp_path):
+    _,svc,reports=setup(tmp_path)
+    svc.update('601919',reports,allow_initial=True)
+    reports.append({'period':'2023-12-31'})
+    result=svc.update('601919',reports,refresh=True)
+    assert result['dates']['2023-12-31']['status']=='missing'
+    assert any('2023-12-31' in x for x in result['warnings'])
 
 
 def test_success_is_idempotent_and_automatic_read_respects_24h_cache(tmp_path):

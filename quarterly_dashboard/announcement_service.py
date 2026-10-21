@@ -52,7 +52,13 @@ class AnnouncementService:
               'has_data':bool(state and state['succeeded_at'])}
         if failed_is_newer: sync['status']='failed'
         warnings=[]
-        if any(x['status'] in ('pending','missing') for x in dates.values()): warnings.append('部分报告期尚无可确认的原始正式公告日期')
+        today=datetime.now(ZoneInfo('Asia/Shanghai')).date()
+        unresolved=sorted(period for period,x in dates.items()
+                          if _ten_year_floor(today).isoformat()<=period<=today.isoformat()
+                          and x['status'] in ('pending','missing'))
+        if unresolved:
+            shown='、'.join(unresolved[:6])+('等' if len(unresolved)>6 else '')
+            warnings.append(f'近十年内{len(unresolved)}个报告期待确认原始正式公告日期：{shown}')
         if sync['status']=='failed': warnings.append('最近一次巨潮公告日期检查失败，保留上次已验证结果')
         return {'dates':dates,'sync':sync,'warnings':warnings}
 
@@ -65,13 +71,15 @@ class AnnouncementService:
         today=datetime.now(ZoneInfo('Asia/Shanghai')).date(); now=today.isoformat()
         decade_floor=_ten_year_floor(today)
         floor=min(today,max(date.fromisoformat(start),decade_floor)) if start else min(today,max(date.fromisoformat(periods[0]),decade_floor))
-        target_floor=floor
         with self.db.connection() as conn:
             instrument=conn.execute('SELECT id FROM instruments WHERE code=?',(code,)).fetchone()
             if not instrument: return self.read(code)
             identity=conn.execute('SELECT * FROM stock_announcement_identities WHERE instrument_id=?',(instrument['id'],)).fetchone()
             state=conn.execute("SELECT s.checked_at,s.coverage_start,s.coverage_end,r.methodology_version FROM sync_state s LEFT JOIN sync_runs r ON r.id=s.last_success_run_id WHERE s.instrument_id=? AND s.dataset=? AND s.source=? AND s.adjustment='raw'",(instrument['id'],'announcements',sync_source)).fetchone()
             profile_covered=bool(state and state['methodology_version']==f'metadata-only-v1:{profile}:{RULE_VERSION}')
+            existing_periods={row['period'] for row in conn.execute(
+                'SELECT period FROM report_disclosure_dates WHERE instrument_id=? AND is_current=1',
+                (instrument['id'],))}
             latest_published=None
             if profile_covered:
                 # Only validated source scopes contained in this category set may
@@ -85,13 +93,10 @@ class AnnouncementService:
                         latest_published=max(latest_published,published) if latest_published else published
             failed=conn.execute("SELECT finished_at FROM collection_batches WHERE domain='stock' AND dataset='stock.announcements' AND status='failed' AND scope_json LIKE ? AND scope_json LIKE ? ORDER BY id DESC LIMIT 1",(f'%"code":"{code}"%',f'%"category_profile":"{profile}"%')).fetchone()
         if not identity and not allow_initial: return self.read(code,categories)
-        if not refresh and not full and profile_covered and state and state['checked_at'] and (not state['coverage_start'] or target_floor>=date.fromisoformat(state['coverage_start'])) and datetime.fromisoformat(state['checked_at'])>datetime.now(timezone.utc)-timedelta(hours=24): return self.read(code,categories)
+        if not refresh and not full and start is None and profile_covered and state and state['checked_at'] and datetime.fromisoformat(state['checked_at'])>datetime.now(timezone.utc)-timedelta(hours=24): return self.read(code,categories)
         if not refresh and not full and failed and datetime.fromisoformat(failed['finished_at'])>datetime.now(timezone.utc)-timedelta(minutes=10): return self.read(code,categories)
-        if not profile_covered:
-            floor=target_floor
-        elif start is None and state and state['coverage_end']:
-            expanded=min(today,max(date.fromisoformat(periods[0]),decade_floor))
-            floor=expanded if state['coverage_start'] and target_floor<date.fromisoformat(state['coverage_start']) else min(today,max(latest_published or date.fromisoformat(state['coverage_end']),expanded))
+        if profile_covered and start is None and state and state['coverage_end']:
+            floor=min(today,max(latest_published or date.fromisoformat(state['coverage_end']),decade_floor))
         if full:
             floor=min(today,max(date.fromisoformat(start) if start else date.fromisoformat(periods[0]),decade_floor))
         run=self.db.start_sync(SyncKey(instrument['id'],'announcements',sync_source),parser_version=RULE_VERSION,
@@ -120,15 +125,29 @@ class AnnouncementService:
                     'revision_marker':row['revision_marker'],'date_conflict':bool(row['date_conflict']),
                     '_previously_validated':True})
             merged={x['announcement_id']:x for x in known}
+            changed_periods=set()
             for item in all_items:
                 previous=merged.get(item['announcement_id'])
                 fresh={k:v for k,v in item.items() if not k.startswith('_')}
                 if previous and all(fresh.get(k,False if k=='date_conflict' else None)==v for k,v in previous.items() if not k.startswith('_')):
                     fresh['_previously_validated']=True
+                else:
+                    changed_periods.update(fresh.get('periods',[]))
+                    if previous: changed_periods.update(previous.get('periods',[]))
                 merged[item['announcement_id']]=fresh
-            decision_reports=[{**r,'_query_complete':floor<=date.fromisoformat(self._period(r['period'])),
-                               '_out_of_scope':date.fromisoformat(self._period(r['period']))<floor}
-                              for r in reports if self._period(r['period'])<=now]
+            # Tail requests reuse previous decisions. Only new/changed evidence,
+            # new covered report periods, or an explicit audit need evaluation.
+            coverage_floor=min(floor,date.fromisoformat(state['coverage_start'])) if profile_covered and state['coverage_start'] else floor
+            audit=full or start is not None or not profile_covered
+            decision_reports=[]
+            for report in reports:
+                period=self._period(report['period'])
+                covered=max(floor if audit else coverage_floor,decade_floor).isoformat()<=period<=now
+                if period>now or not (period in changed_periods or covered and (audit or period not in existing_periods)):
+                    continue
+                decision_reports.append({**report,'period':period,
+                    '_query_complete':coverage_floor.isoformat()<=period,
+                    '_out_of_scope':period<decade_floor.isoformat()})
             decisions=choose(decision_reports,list(merged.values()),complete=True)
             stamp=utc_now()
             prepared=[]
