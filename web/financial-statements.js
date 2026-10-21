@@ -17,6 +17,9 @@
     const lines = {
       '其他营业损益（净额）':['其他营业损益','（净额）'],
       '营业外收支等净额':['营业外收支','等净额'],
+      '少数股东损益归属':['少数股东','损益归属'],
+      '非经常性损益净影响':['非经常性损益','净影响'],
+      '扣非归母净利润':['扣非归母','净利润'],
       '营业净支出及损益':['营业净支出','及损益'],
       '其他净利润调整':['其他净利润','调整'],
       '期初现金及等价物':['期初现金及','现金等价物'],
@@ -552,9 +555,14 @@
       }:{shapes:[],annotations:[]};
       plot('fs-chart',[{type:'waterfall',x:rows.map(x=>x.label),y:rows.map(x=>x.value/divisor),measure:rows.map(x=>x.measure),
         text:rows.map(x=>amount({...x,unit:'元'},el('fs-unit').value)),textposition:'outside',cliponaxis:false,
-        customdata:rows.map(x=>esc(amount({value:x.value,unit:'元'},el('fs-unit').value))+'<br>'+esc(shareText(x.value,
+        customdata:rows.map(x=>{
+          const detail=[x.detail?.formula?'计算口径：'+x.detail.formula:'',x.detail?.note||'',
+            x.detail?.source&&x.detail?.field?`来源字段：${x.detail.source}.${x.detail.item_source||''}.${x.detail.field}（${x.detail.method||'直接取数'}）`: '']
+            .filter(Boolean).map(esc).join('<br>');
+          return esc(amount({value:x.value,unit:'元'},el('fs-unit').value))+'<br>'+esc(shareText(x.value,
           kind==='llb'?data.values.cash_start.value:data.values[data.financial_company?'revenue':'total_revenue'].value,
-          kind==='llb'?'期初现金及等价物':data.financial_company?'营业收入':'营业总收入'))),
+          kind==='llb'?'期初现金及等价物':data.financial_company?'营业收入':'营业总收入'))+(detail?'<br>'+detail:'');
+        }),
         hovertemplate:'%{x}<br>%{customdata}<extra></extra>',
         connector:{line:{color:'#68818b',dash:'dot'}},increasing:{marker:{color:'#64c6b0'}},decreasing:{marker:{color:'#d99183'}},totals:{marker:{color:'#38a9c0'}}}],
         {...cashReference,xaxis:{type:'category',tickmode:'array',tickvals:rows.map(x=>x.label),ticktext:rows.map(x=>waterfallLabel(x.label)),
@@ -789,7 +797,11 @@
       };
       const metricHTML = key => {
         const x=metricItem(key,data.values),old=metricItem(key,data.baseline_values);
-        return `<span class="fs-label">${esc(x.label)}</span><strong>${esc(amount(x,unit).replace(/元$/,''))}</strong><small>比较期：${esc(amount(old,unit).replace(/元$/,''))}${x.reason?'<br>'+esc(x.reason):''}</small>`;
+        const comparisons=data.card_comparisons?.[key]||{};
+        const growth=(label,value)=>`<span><i>${label}</i><b class="${value===null||value===undefined?'':value>=0?'fs-growth-up':'fs-growth-down'}">${value===null||value===undefined?'—':`${value>0?'+':''}${value.toFixed(1)}%`}</b></span>`;
+        const isRoe=key==='roe';
+        const compareTitle=isRoe?'同比按同一报告期披露的加权ROE比较；ROE不差分为单季度环比。':kind==='fzb'?'同比、环比按报告期末余额比较。':'同比按相同期间窗口比较；环比按本期单季度与上季度单季度比较。';
+        return `<span class="fs-label">${esc(x.label)}</span><strong>${esc(amount(x,unit).replace(/元$/,''))}</strong><small>比较期：${esc(amount(old,unit).replace(/元$/,''))}${x.reason?'<br>'+esc(x.reason):''}</small><div class="fs-card-growth" title="${esc(compareTitle)}">${growth('同比',comparisons.yoy)}${growth('环比',comparisons.qoq)}</div>`;
       };
       el('fs-metrics').innerHTML=metricKeys.map(key=>{
         const extra=kind==='fzb'?{assets:'equity',leverage:'debt_ratio',liabilities:'debt'}[key]:kind==='lrb'?{gross_margin:'parent_net_margin',parent_profit:'roe'}[key]:null;
@@ -797,13 +809,16 @@
         const details=`<details class="fs-source fs-card-source"><summary>说明</summary>${keys.map(k=>sourceBodyHTML(metricItem(k,data.values),metricItem(k,data.baseline_values),unit,k,{kind,mode:data.mode})).join('')}</details>`;
         return `<div class="fs-metric${extra?' fs-metric-pair':''}"><div class="fs-metric-main">${metricHTML(key)}</div>${extra?`<div class="fs-metric-extra">${metricHTML(extra)}</div>`:''}${details}</div>`;
       }).join('');
-      const titles={fzb:'资产放在哪里，资金从哪里来',lrb:'从收入到合并净利润',llb:'现金为什么增加或减少'};
+      const profitTitle=data.values.deducted_profit?.value!==null&&data.values.deducted_profit?.value!==undefined&&
+        data.values.parent_profit?.value!==null&&data.values.parent_profit?.value!==undefined?'从收入到扣非归母净利润':
+        data.values.parent_profit?.value!==null&&data.values.parent_profit?.value!==undefined?'从收入到归母净利润':'从收入到合并净利润';
+      const titles={fzb:'资产放在哪里，资金从哪里来',lrb:profitTitle,llb:'现金为什么增加或减少'};
       el('fs-chart-title').textContent=titles[kind];
       const cashChange=kind==='llb'?cashChangeText(data.values.cash_start.value,data.values.cash_end.value,unit):'';
       el('fs-cash-change').hidden=!cashChange;
       el('fs-cash-change').textContent=cashChange;
       el('fs-chart-note').textContent=kind==='fzb'?'蓝色为资产，橙色为负债，绿色为权益。资产占总资产，负债占总负债，权益占股东权益。分项可能含母子科目，不直接加总；待补项目不绘制为零。':kind==='lrb'?
-        '按报告总额展示利润形成；其他营业损益净额为营业利润减营业总收入加营业总成本，展开明细查看各项收益及减值。':'期初现金及等价物＋三类活动净现金流＋汇率影响＝期末现金及等价物。货币资金与现金及等价物分别展示。';
+        '少数股东损益取 MINYSHARRIGH，扣非归母净利润取 NPCUT；缺失值不补零。':'期初现金及等价物＋三类活动净现金流＋汇率影响＝期末现金及现金等价物。货币资金与现金及现金等价物分别展示。';
       el('fs-secondary-title').textContent=kind==='fzb'?'资产 = 负债 + 权益':kind==='lrb'?(data.financial_company?'金融业务关键收入与费用':'成本与费用占营业收入比例'):'三类活动的现金流入与流出';
       el('fs-secondary-note').textContent=kind==='fzb'?(data.financial_company?'金融企业按资产、负债与权益总额展示，不套用工业企业流动结构。':'流动与非流动结构；资产和负债＋权益使用同一金额坐标。'):kind==='lrb'?'对照同一期间窗口；财务费用保留原始正负号，不重复加入利息费用子项目。':'同时展示流入与流出小计，避免净额掩盖现金进出规模；负值保留来源符号。';
       if(active){if(kind==='fzb')balanceChart(section);else{drawWaterfall(data.charts[kind],titles[kind]);secondaryFlows(section);if(kind==='lrb'&&!data.financial_company)expenseChart(section);}}

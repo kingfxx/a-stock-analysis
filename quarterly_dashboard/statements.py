@@ -60,7 +60,7 @@ ALIASES = {'PERPROFIT':('OPERPROFIT',), 'INCOTAXEXPE':('INCOTAX',),
            'FINALCASHBALA':('CASHEQUFINBALA',), 'RIGHAGGR':('TOTSHAREQUI',)}
 LABELS = dict(zip(FIELDS, ('资产总额','负债总额','合并股东权益','货币资金','应收账款','存货','商誉',
                          '营业收入','营业总收入','营业成本','营业总成本','营业利润','利润总额','所得税费用',
-                         '合并净利润','归母净利润','少数股东损益','扣非归母净利润（来源口径）',
+                         '合并净利润','归母净利润','少数股东损益','扣非归母净利润',
                          '经营净现金流','投资净现金流','筹资净现金流','汇率影响','现金净增加额',
                          '期初现金及等价物','期末现金及等价物','Capex（资本支出）','销售收现',
                          '销售费用','管理费用','研发费用','财务费用')))
@@ -69,6 +69,21 @@ LABELS = dict(zip(FIELDS, ('资产总额','负债总额','合并股东权益','�
 def previous_quarter(period):
     year, month = int(period[:4]), int(period[5:7])
     return f'{year}-{ {6:"03-31", 9:"06-30", 12:"09-30"}[month]}' if month != 3 else None
+
+
+def previous_report_period(period):
+    year, month = int(period[:4]), int(period[5:7])
+    if month == 3:
+        return f'{year-1}-12-31'
+    return f'{year}-{ {6:"03-31", 9:"06-30", 12:"09-30"}[month]}'
+
+
+def comparison_pct(current, previous):
+    current_value = current.get('value') if current else None
+    previous_value = previous.get('value') if previous else None
+    if current_value is None or previous_value is None or previous_value <= 0:
+        return None
+    return (current_value / previous_value - 1) * 100
 
 
 def compatible(a, b):
@@ -408,6 +423,35 @@ def waterfall(values, financial, period):
                ('所得税费用',delta('所得税费用',['tax'],lambda t:-t,'−所得税费用'),'relative'),
                ('其他净利润调整',delta('其他净利润调整',['net_profit','pretax','tax'],lambda n,p,t:n-p+t,'净利润 − 利润总额 ＋ 所得税费用'),'relative'),
                ('合并净利润',values['net_profit'],'absolute')]
+    bridge = (
+        ('parent_profit', '少数股东损益归属', '归母净利润',
+         '归母净利润 − 合并净利润'),
+        ('deducted_profit', '非经常性损益净影响', '扣非归母净利润',
+         '扣非归母净利润 − 归母净利润'),
+    )
+    previous_key = 'net_profit'
+    for key, adjustment_label, total_label, formula in bridge:
+        start, end = values[previous_key], values[key]
+        if start['value'] is not None and end['value'] is not None:
+            if key == 'parent_profit':
+                reported = values['minority_profit']
+                if reported['value'] is not None:
+                    adjustment = calculated(adjustment_label, [reported], '−利润表字段 MINYSHARRIGH',
+                                            lambda minority: -minority, period)
+                    adjustment.update(source=reported.get('source'), item_source=reported.get('item_source'),
+                                      field=reported.get('field'), method='直接取数并取反')
+                    reconciliation = start['value'] + adjustment['value'] - end['value']
+                    if abs(reconciliation) > max(1, abs(end['value']) * 1e-8):
+                        adjustment['note'] = f'与归母净利润勾稽差额：{reconciliation:,.2f} 元'
+                else:
+                    adjustment = None
+            else:
+                adjustment = calculated(adjustment_label, [start, end], formula,
+                                        lambda before, after: after - before, period)
+            if adjustment:
+                profit.append((adjustment_label, adjustment, 'relative'))
+            profit.append((total_label, end, 'absolute'))
+        previous_key = key
     cash = [(label,values[key],measure) for label,key,measure in (
         ('期初现金及等价物','cash_start','absolute'),('经营净现金流','cfo','relative'),
         ('投资净现金流','cfi','relative'),('筹资净现金流','cff','relative'),
@@ -450,8 +494,32 @@ def read_statements(db, code, *, period=None, mode='ytd', comparison='yoy'):
         previous_quarter(period) or f'{year-1}-12-31')
     values = summarize(reports,period,mode,financial)
     old_values = summarize(reports,baseline,mode,financial)
+    balance_keys = {'assets','equity','liabilities','cash','debt','debt_ratio','leverage'}
+    card_keys = {'assets','equity','leverage','liabilities','cash','debt','debt_ratio',
+                 'revenue','net_profit','parent_profit','deducted_profit','gross_margin',
+                 'parent_net_margin','roe','cfo','cfi','cff','cash_increase','cash_profit',
+                 'capex','cash_after_capex'}
+    year_ago = f'{int(period[:4])-1}{period[4:]}'
+    yoy_values = summarize(reports,year_ago,mode,financial)
+    current_balance_values = summarize(reports,period,'ytd',financial)
+    yoy_balance_values = summarize(reports,year_ago,'ytd',financial)
+    prior_period = previous_report_period(period)
+    qoq_current = summarize(reports,period,'quarter',financial)
+    qoq_previous = summarize(reports,prior_period,'quarter',financial)
+    qoq_balance_previous = summarize(reports,prior_period,'ytd',financial)
+    card_comparisons = {}
+    for key in card_keys:
+        yoy_current = current_balance_values if key in balance_keys else values
+        yoy_base = yoy_balance_values if key in balance_keys else yoy_values
+        qoq_current_values = current_balance_values if key in balance_keys else qoq_current
+        qoq_previous_values = qoq_balance_previous if key in balance_keys else qoq_previous
+        card_comparisons[key] = {
+            'yoy': comparison_pct(yoy_current.get(key),yoy_base.get(key)),
+            'qoq': None if key == 'roe' else comparison_pct(qoq_current_values.get(key),qoq_previous_values.get(key)),
+        }
     charts = waterfall(values,financial,period)
-    result.update(baseline=baseline, values=values, baseline_values=old_values, charts=charts)
+    result.update(baseline=baseline, values=values, baseline_values=old_values,
+                  card_comparisons=card_comparisons, charts=charts)
     for kind in ('fzb','lrb','llb'):
         # Flows always compare the same period window; year-end applies only to balances.
         compare_period = baseline if comparison != 'year_end' or kind == 'fzb' else f'{year-1}{period[4:]}'

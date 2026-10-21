@@ -21,6 +21,7 @@
 .fs-metric{padding:17px 19px;border:1px solid var(--line);border-radius:8px;background:#172026;min-width:0}
 .fs-metric .fs-label{font-size:13px;color:var(--muted)}.fs-metric strong{display:block;margin:10px 0 7px;font-size:20px;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .fs-metric small{font-size:12px;color:var(--muted);line-height:1.7}.fs-source{font-size:12px;color:var(--muted);line-height:1.7;overflow-wrap:anywhere}.fs-source summary{cursor:pointer;color:#8bcbd5}.fs-source p{margin:6px 0}.fs-source ul{margin:5px 0;padding-left:18px}
+.fs-card-growth{display:flex;flex-direction:column;gap:1px;align-items:flex-start;margin-top:3px;font-size:12px;line-height:1.55;font-variant-numeric:tabular-nums;white-space:nowrap}.fs-card-growth span{display:inline-flex;gap:5px;align-items:baseline}.fs-card-growth i{font-style:normal;color:var(--muted)}.fs-card-growth b{font-weight:500}.fs-growth-up{color:#f0a179}.fs-growth-down{color:#75c8b4}
 .fs-panel{margin:16px 0;padding:22px 24px}.fs-panel h3{font-size:18px;margin:0 0 8px}.fs-panel>p{color:var(--muted);font-size:13px;line-height:1.8;margin:0 0 12px}
 #fs-cash-change{color:var(--yellow);font-size:15px;font-weight:600}#fs-cash-change[hidden]{display:none!important}
 .fs-chart{height:420px;min-width:0}.fs-secondary{height:320px}.fs-chart-empty{padding:35px 20px;color:var(--muted);line-height:1.9}.fs-chart-scroll{overflow:auto}
