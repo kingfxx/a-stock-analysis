@@ -771,3 +771,43 @@ def test_empty_shareholder_source_checks_incrementally_after_initial_check(db, t
     service.update("600887", "shareholders", refresh=True)
     assert all(b["start_date"] is None for b in calls[:2])
     assert all(b["start_date"] is not None for b in calls[2:])
+
+
+def test_shareholder_increment_accepts_notice_dates_through_next_week(db, tmp_path):
+    today = date(2026, 10, 22)
+    incremental = [False]
+    calls = []
+    def fetch(code, section, source, **bounds):
+        calls.append((source, bounds))
+        field = "NOTICE_DATE" if "F10" in source else "HOLD_NOTICE_DATE"
+        total = "F10" in source
+        def row(stat_date, notice_date, count):
+            value = holder(stat_date, count, total=total)
+            value.pop("NOTICE_DATE")
+            value[field] = notice_date
+            return value
+        rows = ([row("2026-06-30", "2026-08-21", 323674)] if not incremental[0] else [
+            row("2026-09-30", "2026-10-23", 256705),
+            row("2026-10-01", "2026-10-29", 256000),
+            row("2026-10-02", "2026-10-30", 255000)])
+        class Session:
+            def get(self, url, params, **kwargs):
+                if incremental[0]:
+                    assert params["sortColumns"] == field
+                    assert f"({field}<='2026-10-29')" in params["filter"]
+                selected = [r for r in rows if (not bounds["start_date"] or r[field] >= bounds["start_date"])
+                            and r[field if incremental[0] else "END_DATE"] <= bounds["end_date"]]
+                return Response({"success": True, "result": {"count": len(selected), "pages": 1, "data": selected}})
+        return _fetch_chip_report(code, section, Session(), source, **bounds)
+    service = ChipService(db, tmp_path, fetcher=fetch)
+    service.update("600887", "shareholders", today=today)
+    assert all(bounds["end_date"] == today.isoformat() for _, bounds in calls)
+    incremental[0] = True
+    result = service.update("600887", "shareholders", refresh=True, today=today)
+    assert not result["warnings"]
+    assert all(bounds["end_date"] == "2026-10-29" for _, bounds in calls[-2:])
+    with db.connection() as conn:
+        latest = [tuple(r) for r in conn.execute("SELECT stat_date,announced_on,holders FROM shareholder_observations "
+                                                "WHERE stat_date>'2026-06-30' ORDER BY source,stat_date")]
+        assert latest == [("2026-09-30", "2026-10-23", 256705), ("2026-10-01", "2026-10-29", 256000)] * 2
+        assert {r[0] for r in conn.execute("SELECT requested_end FROM sync_runs WHERE trigger_reason='incremental'")} == {"2026-10-29"}

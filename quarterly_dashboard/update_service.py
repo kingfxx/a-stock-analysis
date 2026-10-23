@@ -302,7 +302,8 @@ class ChipService:
                     start = None if complete else (checked.date() - timedelta(days=30)).isoformat()
                     if not complete:
                         bounds["date_field"] = "NOTICE_DATE" if source.endswith("RPT_F10_EH_HOLDERNUM") else "HOLD_NOTICE_DATE"
-                end = today.isoformat()
+                # Providers may publish a holder record before its labelled notice date.
+                end = (today + timedelta(days=7) if section == "shareholders" and not complete else today).isoformat()
                 run = self.db.start_sync(key, parser_version="eastmoney-facts-v1", methodology_version="source-fields-v1",
                                          trigger_reason="full_audit" if complete else "incremental",
                                          requested_start=start, requested_end=end)
