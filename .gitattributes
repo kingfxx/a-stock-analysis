@@ -1,0 +1,3 @@
+# Preserve vendored distribution bytes for notes/manifest.json on every platform.
+# Upstream trailing whitespace is intentional and included in the checksums.
+web/vendor/notes/* -text whitespace=-blank-at-eol

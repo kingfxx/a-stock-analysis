@@ -9,6 +9,7 @@ import shutil
 import time
 import sqlite3
 import secrets
+import subprocess
 import webbrowser
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -54,6 +55,8 @@ from .checklist_validation import prompt as checklist_prompt, validate_output as
 from .company_report_service import CompanyReportService
 from .research_reports import list_reports, resolve_report
 from .valuation_transport import compact_valuation
+from .investment_notes import InvestmentNotes, NoteConflict, MAX_DOCUMENT
+from .note_snapshots import catalog as note_catalog
 from .ai_provider import ChatGPTProvider, ProviderError
 from .chips import (CHIP_BASIS, chip_payload, chip_rows, fetch_chip_records, missing_chip_history,
                     shareholder_price_snapshots)
@@ -100,12 +103,13 @@ def research_sidebar(page: str) -> str:
         ("trend", "企业经营趋势", "trend-panel"),
         ("business", "主营构成", "business-panel"),
         ("statements", "财务分析", "statements-panel"),
+        ("notes", "投资笔记", "notes-panel"),
         ("industry", "行业内对比", "industry-panel"),
         ("maintenance", "后台维护", "maintenance-panel"),
     )
     if page == "indices":
         items = [f'<a class="nav-link" data-view="{key}" href="/?tab={key}">{label}</a>' for key, label, _ in views]
-        items.insert(4, '<a class="nav-link" href="/indices" aria-current="page">指数分析</a>')
+        items.insert(5, '<a class="nav-link" href="/indices" aria-current="page">指数分析</a>')
         nav_role = ""
         filters = ""
         entity = ("当前指数", "current-index-name", "current-index-code", "指数分析", "当前指数、股票选择和研究视图")
@@ -114,7 +118,7 @@ def research_sidebar(page: str) -> str:
         for index, (key, label, panel) in enumerate(views):
             tabindex = '' if index == 0 else ' tabindex="-1"'
             items.append(f'<button id="{key}-tab" type="button" role="tab" aria-selected="{str(index == 0).lower()}" aria-controls="{panel}"{tabindex}>{label}</button>')
-        items.insert(4, '<a id="indices-link" class="nav-link" href="/indices">指数分析</a>')
+        items.insert(5, '<a id="indices-link" class="nav-link" href="/indices">指数分析</a>')
         nav_role = 'role="tablist"'
         filters = '''<details id="industry-filter-details" class="industry-filter-details" hidden><summary>行业筛选</summary><div class="industry-filter-body"></div></details>
   <details id="statement-filter-details" class="industry-filter-details statement-filter-details" open hidden><summary>财务筛选</summary><div class="statement-filter-body"></div></details>
@@ -995,6 +999,73 @@ def business_service():
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _notes_service(self):
+        with _SERVICE_LOCK:
+            if not hasattr(self.server, 'investment_notes'):
+                self.server.investment_notes = InvestmentNotes(Path(DATABASE_PATH).parent)
+        return self.server.investment_notes
+
+    def _notes_request(self, parsed, *, write=False):
+        try:
+            self._ai_host()
+            service = self._notes_service()
+            query = parse_qs(parsed.query)
+            path = parsed.path
+            if write:
+                self._maintenance_auth()
+                size = int(self.headers.get('Content-Length', '0'))
+                if self.headers.get_content_type() != 'application/json' or not 0 < size <= MAX_DOCUMENT * 4:
+                    raise ValueError('笔记请求格式或大小无效')
+                command = json.loads(self.rfile.read(size).decode('utf-8'))
+                if not isinstance(command, dict):
+                    raise ValueError('笔记请求须为对象')
+                if 'code' in command and not isinstance(command['code'], str):
+                    raise ValueError('股票代码须为字符串')
+                if path == '/api/notes/document':
+                    data = service.save(command)
+                elif path == '/api/notes/snapshot':
+                    data = note_catalog(Database(DATABASE_PATH), command, CACHE, VALUATION_CACHE, CHIP_CACHE)
+                elif path == '/api/notes/settings/check':
+                    data = {'directory': str(service.check_directory(command.get('directory', '')))}
+                elif path == '/api/notes/settings/choose':
+                    data = service.choose_directory()
+                elif path == '/api/notes/settings/preview':
+                    data = service.preview_directory(command)
+                elif path == '/api/notes/settings/apply':
+                    data = service.apply_directory(command)
+                elif path == '/api/notes/associate':
+                    data = service.associate(command)
+                elif path == '/api/notes/recovery':
+                    data = service.recover_copy(command)
+                else:
+                    self.send_error(404); return
+            elif path == '/api/notes/settings':
+                data = {**service.settings(), 'session_token': LOCAL_SESSION_TOKEN}
+            elif path == '/api/notes':
+                data = {'items': service.listing(), 'directory_version': service.directory_version()}
+            elif path == '/api/notes/document':
+                data = service.read(query.get('code', [''])[0], query.get('name', [''])[0])
+            elif path == '/api/notes/history':
+                code = query.get('code', [''])[0]
+                data = (service.historical(code, query['id'][0]) if 'id' in query
+                        else {'items': service.history(code)})
+            elif path == '/api/notes/resource':
+                body, mime = service.resource(query.get('path', [''])[0])
+                self.send_response(200)
+                self.send_header('Content-Type', mime)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                self.send_header('Content-Security-Policy', "default-src 'none'; sandbox")
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers(); self.wfile.write(body); return
+            else:
+                self.send_error(404); return
+            self._ai_reply(data)
+        except NoteConflict as exc:
+            self._ai_reply({'error': str(exc), 'conflict': True, 'current': exc.current}, 409)
+        except (ValueError, TypeError, KeyError, UnicodeError, OSError, StorageError, sqlite3.DatabaseError, subprocess.TimeoutExpired) as exc:
+            self._ai_reply({'error': str(exc)}, 400)
+
     def _maintenance_auth(self):
         self._ai_host()
         allowed={f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'}
@@ -1074,6 +1145,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):self._dispatch('POST')
     def do_GET(self):self._dispatch('GET')
+    def do_PUT(self):
+        if urlparse(self.path).path != '/api/notes/document':
+            self.send_error(405); return
+        self._dispatch('POST')
 
     def log_message(self, format, *args):
         # OAuth callbacks contain codes; never log their URL or query parameters.
@@ -1204,6 +1279,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_POST(self):
         path = urlparse(self.path).path
+        if path.startswith('/api/notes/'):
+            self._notes_request(urlparse(self.path), write=True); return
         if path in {'/api/maintenance/compact','/api/maintenance/stock-cleanup/preview','/api/maintenance/stock-cleanup/execute'}:
             self._cleanup_post(path);return
         if path in {'/api/maintenance/restore/upload','/api/maintenance/restore/preview','/api/maintenance/restore/confirm','/api/maintenance/restore/cancel'}:
@@ -1278,6 +1355,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == '/api/notes' or parsed.path.startswith('/api/notes/'):
+            self._notes_request(parsed); return
+        if parsed.path.startswith('/vendor/notes/'):
+            filename = parsed.path.removeprefix('/vendor/notes/')
+            if filename not in {'codemirror.js', 'markdown-mode.js', 'markdown-it.js', 'footnote.js', 'purify.js', 'codemirror.css'}:
+                self.send_error(404); return
+            body = (ROOT / 'web' / 'vendor' / 'notes' / filename).read_bytes()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/css' if filename.endswith('.css') else 'text/javascript')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers(); self.wfile.write(body); return
         if parsed.path == '/api/business-segments':
             query = parse_qs(parsed.query)
             try:
@@ -1425,7 +1514,7 @@ class Handler(BaseHTTPRequestHandler):
             content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/datetime.js", "/research-layout.css", "/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
                              "/financial-statements.js", "/financial-statements.css", "/business-segments.js", "/business-segments.css", "/business-segment-aliases.js", "/business-segment-names.js", "/industry.js", "/industry.css",
-                             "/maintenance.js", "/maintenance.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css",
+                             "/maintenance.js", "/maintenance.css", "/investment-notes.js", "/investment-notes.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css",
                              "/dividend-forecast.js", "/dividend-forecast.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"

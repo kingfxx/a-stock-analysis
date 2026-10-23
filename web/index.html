@@ -522,6 +522,7 @@
   </div>
   <section id="business-panel" role="tabpanel" aria-labelledby="business-tab" hidden></section>
   <section id="statements-panel" role="tabpanel" aria-labelledby="statements-tab" hidden></section>
+  <section id="notes-panel" role="tabpanel" aria-labelledby="notes-tab" hidden></section>
   <section id="industry-panel" role="tabpanel" aria-labelledby="industry-tab" hidden></section>
   <section id="maintenance-panel" role="tabpanel" aria-labelledby="maintenance-tab" hidden></section>
   </div>
@@ -548,6 +549,14 @@
 <link rel="stylesheet" href="/maintenance.css?v=20261007-compact-confirm">
 <script src="/stock-cleanup.js?v=20261007-no-cleanup-backup"></script>
   <script src="/maintenance.js?v=20261007-compact-confirm"></script>
+<link rel="stylesheet" href="/vendor/notes/codemirror.css">
+<link rel="stylesheet" href="/investment-notes.css?v=20261023-1">
+<script src="/vendor/notes/codemirror.js"></script>
+<script src="/vendor/notes/markdown-mode.js"></script>
+<script src="/vendor/notes/markdown-it.js"></script>
+<script src="/vendor/notes/footnote.js"></script>
+<script src="/vendor/notes/purify.js"></script>
+<script src="/investment-notes.js?v=20261023-1"></script>
 <script>
 (() => {
   function expandValuationPayload(data) {
@@ -575,6 +584,7 @@
   window.initBusinessSegments(state);
   window.initIndustry(state);
   window.initMaintenance();
+  window.initInvestmentNotes(state);
   const selectionsKey = 'investment-dashboard-selections-v1';
   let savedSelections = {};
   try { savedSelections = JSON.parse(sessionStorage.getItem(selectionsKey)) || {}; }
@@ -1479,7 +1489,13 @@
   });
   if (typeof Plotly !== 'undefined') { render(); renderValuation(); }
   if (typeof Plotly !== 'undefined') { renderChips('shareholders'); renderChips('financing'); }
-  loadDashboard(Boolean(state.refresh_requested));
+  let notesDeferredDashboard = !document.getElementById('notes-panel').hidden;
+  if (!notesDeferredDashboard) loadDashboard(Boolean(state.refresh_requested));
+  window.addEventListener('research-tab-changed', event => {
+    if (notesDeferredDashboard && ['trend','business','statements'].includes(event.detail.tab)) {
+      notesDeferredDashboard = false; loadDashboard(false);
+    }
+  });
 })();
 </script>
 </body>
