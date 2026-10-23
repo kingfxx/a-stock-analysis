@@ -32,7 +32,8 @@
       tx.oncomplete=()=>resolve(request.result);tx.onerror=()=>reject(tx.error);
     });
   }
-  window.initInvestmentNotes = state => {
+  window.initInvestmentNotes = (state,options={}) => {
+    const isIndex=options.kind==='index',chartId=isIndex?'chart':'valuation-chart';
     const main=el('notes-panel');
     main.innerHTML=`<div class="notes-head"><div><h2>投资笔记</h2><p>把当时的想法留给以后复盘</p></div><div class="notes-actions"><button type="button" id="notes-current">当前股票</button><button type="button" id="notes-all">全部笔记</button></div></div><div id="notes-main-host"></div>`;
     const quick=document.createElement('dialog');quick.className='notes-dialog';quick.id='notes-quick';
@@ -52,9 +53,9 @@
     let timelineDoc=null,timelineEntries=[],timelineBusy=false,timelineError='';
     const chartNotes=document.createElement('div');chartNotes.className='notes-chart-links';chartNotes.id='valuation-note-links';
     chartNotes.innerHTML='<span id="valuation-notes-status" role="status"></span><details><summary id="valuation-notes-summary">图内笔记</summary><div id="valuation-notes-list" class="notes-list"></div></details>';
-    el('valuation-note').before(chartNotes);
+    if(isIndex)el(chartId).after(chartNotes);else el('valuation-note').before(chartNotes);
     const overlayActions=document.createElement('div');overlayActions.className='valuation-overlay-actions';
-    const priceOverlay=el('valuation-price-overlay');priceOverlay.before(overlayActions);overlayActions.append(priceOverlay);
+    const priceOverlay=el(isIndex?'point-overlay':'valuation-price-overlay');priceOverlay.before(overlayActions);overlayActions.append(priceOverlay);
     const notesToggle=document.createElement('button');notesToggle.type='button';notesToggle.id='valuation-notes-toggle';notesToggle.className='valuation-overlay';notesToggle.textContent='显示笔记';notesToggle.setAttribute('aria-pressed','true');notesToggle.setAttribute('aria-controls','valuation-chart valuation-note-links');overlayActions.append(notesToggle);
     const entryPicker=document.createElement('dialog');entryPicker.className='notes-dialog';entryPicker.id='notes-chart-entries';entryPicker.setAttribute('aria-label','选择笔记条目');document.body.append(entryPicker);
     function headingsOf(full){
@@ -116,7 +117,7 @@
       el('valuation-notes-status').textContent=timelineError||(!timelineDoc?'正在读取笔记…':entries.length?'点击图中笔记标记查看条目':'当前图表区间暂无日期笔记');
       const showNotes=notesToggle.getAttribute('aria-pressed')==='true';chartNotes.hidden=!showNotes;
       if(!showNotes)return [];
-      const width=Math.max(160,(el('valuation-chart').clientWidth||600)-160),start=Date.parse(first),span=Math.max(86400000,Date.parse(last)-start),lanes=[-Infinity,-Infinity,-Infinity];
+      const width=Math.max(160,(el(chartId).clientWidth||600)-160),start=Date.parse(first),span=Math.max(86400000,Date.parse(last)-start),lanes=[-Infinity,-Infinity,-Infinity];
       return [...new Set(entries.map(entry=>entry.date))].sort().flatMap(date=>{
         const items=entries.filter(entry=>entry.date===date);
         const x=(Date.parse(date)-start)/span*width,lane=lanes.findIndex(end=>x-end>38);
@@ -128,8 +129,8 @@
     }
     notesToggle.onclick=()=>{notesToggle.setAttribute('aria-pressed',String(notesToggle.getAttribute('aria-pressed')!=='true'));timelineChanged();};
     let timelineWidth=0;
-    const timelineResize=new ResizeObserver(()=>{const width=el('valuation-chart').clientWidth;if(width&&width!==timelineWidth){timelineWidth=width;timelineChanged();}});
-    timelineResize.observe(el('valuation-chart'));
+    const timelineResize=new ResizeObserver(()=>{const width=el(chartId).clientWidth;if(width&&width!==timelineWidth){timelineWidth=width;timelineChanged();}});
+    timelineResize.observe(el(chartId));
     const outlineButton=document.createElement('button');outlineButton.type='button';outlineButton.id='notes-outline';outlineButton.textContent='大纲';outlineButton.setAttribute('aria-expanded','false');outlineButton.setAttribute('aria-controls','notes-toc');el('notes-preview-button').after(outlineButton);
     el('notes-toc').hidden=true;
     outlineButton.onclick=()=>{outlineOpen=!outlineOpen;outlineButton.setAttribute('aria-expanded',String(outlineOpen));updateToc();};
@@ -176,7 +177,9 @@
     }
     function showDocument(ctx){
       active=ctx;muting=true;editor.setValue(ctx.content);editor.clearHistory();if(ctx.cursor)editor.setCursor(ctx.cursor);muting=false;editor.setOption('readOnly',false);
-      el('notes-company').textContent=`${ctx.name||ctx.code} · ${ctx.code}`;el('notes-filename').textContent=ctx.file;
+      el('notes-company').textContent=`${ctx.name||ctx.code} · ${ctx.code.replace(/^index:/,'')}`;el('notes-filename').textContent=ctx.file;
+      const differentKind=ctx.code.startsWith('index:')!==isIndex;
+      el('notes-insert').disabled=differentKind;el('notes-insert').title=differentKind?'请在对应的指数或个股页面插入该类数据':'';
       conflictUI();showStatus();updateToc();if(preview)renderPreview();requestAnimationFrame(()=>editor.refresh());
     }
     function conflictUI(){
@@ -274,7 +277,7 @@
         conflictUI();if(ctx.conflict)showStatus();
       }catch(error){status('文件检查失败：'+error.message,true);}
     }
-    setInterval(()=>{checkExternal();if(!el('trend-panel').hidden&&!quick.open)refreshTimeline();},3000);
+    setInterval(()=>{checkExternal();if(!document.hidden&&(isIndex?main.hidden:!el('trend-panel').hidden)&&!quick.open)refreshTimeline();},3000);
     window.addEventListener('focus',()=>{checkExternal();refreshTimeline();});
     window.addEventListener('beforeunload',event=>{if([...contexts.values()].some(c=>changed(c)||c.saving||c.draftPending||c.conflict)){event.preventDefault();event.returnValue='';}});
     document.addEventListener('visibilitychange',()=>{if(document.hidden)flush(active);else checkExternal();});
@@ -302,46 +305,68 @@
     let backdropPress=false;
     quick.addEventListener('pointerdown',event=>{backdropPress=outsideQuick(event);});
     quick.addEventListener('click',event=>{const dismiss=backdropPress&&outsideQuick(event);backdropPress=false;if(dismiss)closeQuick();});
-    el('notes-full').onclick=async()=>{if(await closeQuick())el('notes-tab').click();};
+    el('notes-full').onclick=async()=>{if(await closeQuick()){if(isIndex)showIndexNotes(true);else el('notes-tab').click();}};
     el('notes-current').onclick=()=>openDocument();
 
-    const browser=document.createElement('dialog');browser.className='notes-dialog';document.body.append(browser);
+    const browser=document.createElement('dialog');browser.className='notes-dialog';browser.id='notes-browser';browser.searchSequence=0;document.body.append(browser);
+    browser.addEventListener('close',()=>browser.searchSequence++);
     el('notes-all').onclick=async()=>{
-      browser.innerHTML='<div class="notes-head"><h3>全部笔记</h3><button type="button" data-close>关闭</button></div><input id="notes-search" aria-label="搜索笔记" placeholder="搜索股票、文件名或正文"><div class="notes-list" id="notes-browser-list"></div>';
+      browser.innerHTML='<div class="notes-head"><h3>全部笔记</h3><button type="button" data-close>关闭</button></div><div class="notes-browser-tabs" role="tablist" aria-label="笔记类型"><button type="button" id="notes-browser-stock-tab" role="tab" aria-controls="notes-browser-list">个股</button><button type="button" id="notes-browser-index-tab" role="tab" aria-controls="notes-browser-list">指数</button></div><input id="notes-search" aria-label="搜索笔记" placeholder="搜索名称、代码、文件名或正文"><div class="notes-list" id="notes-browser-list" role="tabpanel"></div>';
       browser.querySelector('[data-close]').onclick=()=>browser.close();browser.showModal();
+      const opening=++browser.searchSequence;let category=active?.code.startsWith('index:')?'index':'stock';
+      const tabs=[el('notes-browser-stock-tab'),el('notes-browser-index-tab')];
+      function selectCategory(value){category=value;tabs.forEach((tab,index)=>{const selected=(index===1)===(value==='index');tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected?0:-1;});el('notes-browser-list').setAttribute('aria-labelledby','notes-browser-'+value+'-tab');}
+      selectCategory(category);
       try{
         const data=await api('/api/notes');
+        if(opening!==browser.searchSequence||!browser.open)return;
         const render=async()=>{
           const query=el('notes-search').value.trim().toLowerCase(),target=el('notes-browser-list');target.replaceChildren();
           const request=++browser.searchSequence;
           for(const row of data.items){
-            if(!row.code)continue;
+            if(!row.code||row.code.startsWith('index:')!==(category==='index'))continue;
             let match=[row.code,row.title,row.file].join(' ').toLowerCase().includes(query);
             if(query&&!match){try{const doc=await api('/api/notes/document?'+new URLSearchParams({code:row.code}));match=doc.content.toLowerCase().includes(query);}catch{}}
             if(request!==browser.searchSequence)return;
             if(match){const button=document.createElement('button');button.innerHTML=`${esc(row.title||row.code)}<small>${esc(row.file)}</small>`;button.onclick=async()=>{if(await openDocument(row.code,row.title)){browser.close();}};target.append(button);}
           }
-          if(!target.children.length)target.textContent='没有匹配的笔记。未关联文件可在后台维护中关联股票。';
-        };browser.searchSequence=0;el('notes-search').oninput=render;render();
+          if(!target.children.length)target.textContent=query?`没有匹配的${category==='index'?'指数':'个股'}笔记。`:`暂无${category==='index'?'指数':'个股'}笔记。`;
+        };el('notes-search').oninput=render;
+        tabs.forEach((tab,index)=>{tab.onclick=()=>{selectCategory(index===1?'index':'stock');render();};tab.onkeydown=event=>{const direction={ArrowLeft:-1,ArrowRight:1,Home:-index,End:1-index}[event.key];if(direction===undefined)return;event.preventDefault();const next=tabs[(index+direction+tabs.length)%tabs.length];next.click();next.focus();};});render();
       }catch(error){el('notes-browser-list').textContent=error.message;}
     };
     const picker=document.createElement('dialog');picker.className='notes-dialog';document.body.append(picker);
     let pickSequence=0;
     async function insertData(context={}){
       if(!active||loading)return;const ctx=active;
+      if(ctx.code.startsWith('index:')!==isIndex){status('请在对应的指数或个股页面插入该类数据',true);return;}
+      if(isIndex){if(ctx.code!==state.code){status('请先在指数页选择该指数，再插入数据',true);return;}context={...options.snapshotContext(),...context};}
       const cursor=editor.getCursor();
-      picker.innerHTML=`<div class="notes-head"><h3>插入已有本地数据</h3><button type="button" id="notes-pick-close">关闭</button></div><div class="notes-filter"><label>数据<select id="notes-pick-group"><option value="valuation">估值与分位</option><option value="financial">经营趋势</option><option value="chips">股东与融资</option><option value="business">主营构成</option><option value="statements">财务三表</option></select></label><label>周期<select id="notes-pick-mode"><option value="quarter">单季度</option><option value="ytd">当年累计</option><option value="year">年度</option><option value="ttm">TTM</option></select></label><label>日期／报告期<select id="notes-pick-period"><option value="">最新已有</option></select></label><label>历史区间<select id="notes-pick-years"><option value="10">近10年</option><option value="5">近5年</option><option value="3">近3年</option></select></label><label>数据日期<input id="notes-pick-date" type="date" max="${localDate()}"></label><label>维度<select id="notes-pick-dimension"><option value="2">产品</option><option value="1">行业</option><option value="3">地区</option></select></label><label>报表<select id="notes-pick-statement"><option value="lrb">利润表</option><option value="fzb">资产负债表</option><option value="llb">现金流量表</option></select></label><label>筹码<select id="notes-pick-kind"><option value="holders">股东户数</option><option value="financing">融资</option></select></label></div><p id="notes-pick-status" role="status"></p><input id="notes-pick-search" aria-label="筛选指标" placeholder="筛选指标或主营项目"><div id="notes-pick-list" class="notes-snapshot-list"></div><div class="notes-filter"><label>插入形式<select id="notes-pick-format"><option value="inline">单项文字</option><option value="table">数据表</option></select></label><label>插入位置<select id="notes-pick-position"><option value="cursor">当前光标</option><option value="new">新日期记录</option></select></label><label id="notes-pick-basis-option" hidden><input id="notes-pick-basis" type="checkbox">插入口径</label></div><pre id="notes-pick-preview" class="notes-snapshot-preview"></pre><div class="notes-actions"><button type="button" id="notes-pick-confirm" disabled>插入笔记</button></div>`;
+      picker.innerHTML=`<div class="notes-head"><h3>插入已有本地数据</h3><button type="button" id="notes-pick-close">关闭</button></div><div class="notes-filter"><label>数据<select id="notes-pick-group"><option value="valuation">估值与分位</option><option value="financial">经营趋势</option><option value="chips">股东与融资</option><option value="business">主营构成</option><option value="statements">财务三表</option></select></label><label id="notes-pick-index-source-label" hidden>指数口径<select id="notes-pick-index-source"></select></label><label>周期<select id="notes-pick-mode"><option value="quarter">单季度</option><option value="ytd">当年累计</option><option value="year">年度</option><option value="ttm">TTM</option></select></label><label>日期／报告期<select id="notes-pick-period"><option value="">最新已有</option></select></label><label>历史区间<select id="notes-pick-years"><option value="10">近10年</option><option value="5">近5年</option><option value="3">近3年</option></select></label><label>数据日期<input id="notes-pick-date" type="date" max="${localDate()}"></label><label>维度<select id="notes-pick-dimension"><option value="2">产品</option><option value="1">行业</option><option value="3">地区</option></select></label><label>报表<select id="notes-pick-statement"><option value="lrb">利润表</option><option value="fzb">资产负债表</option><option value="llb">现金流量表</option></select></label><label>筹码<select id="notes-pick-kind"><option value="holders">股东户数</option><option value="financing">融资</option></select></label></div><p id="notes-pick-status" role="status"></p><input id="notes-pick-search" aria-label="筛选指标" placeholder="筛选指标或主营项目"><div id="notes-pick-list" class="notes-snapshot-list"></div><div class="notes-filter"><label>插入形式<select id="notes-pick-format"><option value="inline">单项文字</option><option value="table">数据表</option></select></label><label>插入位置<select id="notes-pick-position"><option value="cursor">当前光标</option><option value="new">新日期记录</option></select></label><label id="notes-pick-basis-option" hidden><input id="notes-pick-basis" type="checkbox">插入口径</label></div><pre id="notes-pick-preview" class="notes-snapshot-preview"></pre><div class="notes-actions"><button type="button" id="notes-pick-confirm" disabled>插入笔记</button></div>`;
+      if(isIndex)el('notes-pick-group').innerHTML='<option value="index_valuation">指数估值与点位</option><option value="index_crowding">指数拥挤度</option>'+ (state.code.startsWith('index:cn:')?'<option value="index_spread">股债利差</option>':'');
+      if(isIndex)el('notes-pick-index-source').innerHTML=(context.sources||[]).map(source=>`<option value="${esc(source.value)}">${esc(source.label)}</option>`).join('');
       el('notes-pick-close').onclick=()=>{pickSequence++;picker.close();};picker.showModal();
       const assign=(id,value)=>{if(value&&[...el(id).options].some(o=>o.value===String(value)))el(id).value=value;};
-      assign('notes-pick-group',context.group);assign('notes-pick-mode',context.mode);assign('notes-pick-years',context.years);assign('notes-pick-dimension',context.dimension);assign('notes-pick-statement',context.statement);assign('notes-pick-kind',context.kind);
+      assign('notes-pick-index-source',[context.provider,context.series,context.definition].join('|'));assign('notes-pick-group',context.group);assign('notes-pick-mode',context.mode);assign('notes-pick-years',context.years);assign('notes-pick-dimension',context.dimension);assign('notes-pick-statement',context.statement);assign('notes-pick-kind',context.kind);
       if(!ctx.content.trim()||!ctx.cursor)el('notes-pick-position').value='new';
       let snapshot=null,selected=new Set();
       const cell=x=>String(x).replace(/[|\r\n]/g,' ');
       const itemValue=row=>row.value+(row.position?`（${row.position.marker} ${row.position.label}）`:'');
+      function compactTableRows(rows){
+        const selectedRows=new Map(rows.map(row=>[row.id,row])),pairs=new Map();
+        rows.forEach(row=>{const percentile=selectedRows.get(row.id+'_percentile');if(percentile&&percentile.date===row.date&&percentile.source===row.source)pairs.set(row.id,percentile);});
+        return rows.flatMap(row=>{
+          if(row.id.endsWith('_percentile')&&pairs.has(row.id.slice(0,-11)))return [];
+          const percentile=pairs.get(row.id);
+          if(!percentile)return [{...row,value:itemValue(row)}];
+          const suffix=percentile.label.startsWith(row.label)?percentile.label.slice(row.label.length):percentile.label;
+          return [{...row,label:row.label+'/'+suffix,value:itemValue(row)+'/'+itemValue(percentile),basis:[...new Set([row.basis,percentile.basis].filter(Boolean))].join(' / ')}];
+        });
+      }
       function fragment(){
         const rows=(snapshot?.items||[]).filter(r=>selected.has(r.id));if(!rows.length)return '';
         const table=el('notes-pick-format').value==='table',basis=el('notes-pick-basis').checked;
-        const text=table?'\n\n| 指标 | 数值 | 日期／报告期 |'+(basis?' 口径 |':'')+'\n|---|---:|---|'+(basis?'---|':'')+'\n'+rows.map(r=>`| ${cell(r.label)} | ${cell(itemValue(r))} | ${cell(r.date)} |${basis?` ${cell(r.basis)} |`:''}`).join('\n')+'\n':rows.map(r=>`${r.label} ${itemValue(r)}${/Q\d/.test(r.label)?`（${r.basis}）`:''}`).join('；');
+        const text=table?'\n\n| 指标 | 数值 | 日期／报告期 |'+(basis?' 口径 |':'')+'\n|---|---:|---|'+(basis?'---|':'')+'\n'+compactTableRows(rows).map(r=>`| ${cell(r.label)} | ${cell(r.value)} | ${cell(r.date)} |${basis?` ${cell(r.basis)} |`:''}`).join('\n')+'\n':rows.map(r=>`${r.label} ${itemValue(r)}${/Q\d/.test(r.label)?`（${r.basis}）`:''}`).join('；');
         return text;
       }
       function update(){el('notes-pick-basis-option').hidden=el('notes-pick-format').value!=='table';const content=fragment();el('notes-pick-preview').textContent=content||'请选择需要插入的数据。';el('notes-pick-confirm').disabled=!content;}
@@ -352,27 +377,28 @@
       async function load(keepPeriod=false){
         const sequence=++pickSequence,group=el('notes-pick-group').value;
         selected.clear();snapshot=null;update();el('notes-pick-list').replaceChildren();el('notes-pick-status').textContent='正在读取本地数据…';
-        for(const [id,visible] of Object.entries({'notes-pick-mode':['financial','statements'].includes(group),'notes-pick-period':group!=='valuation','notes-pick-years':group==='valuation','notes-pick-date':group==='valuation','notes-pick-dimension':group==='business','notes-pick-statement':group==='statements','notes-pick-kind':group==='chips'}))el(id).closest('label').hidden=!visible;
+        for(const [id,visible] of Object.entries({'notes-pick-index-source':isIndex&&group==='index_valuation','notes-pick-mode':['financial','statements'].includes(group),'notes-pick-period':!isIndex&&group!=='valuation','notes-pick-years':isIndex||group==='valuation','notes-pick-date':isIndex||group==='valuation','notes-pick-dimension':group==='business','notes-pick-statement':group==='statements','notes-pick-kind':group==='chips'}))el(id).closest('label').hidden=!visible;
         try{
           const request={code:ctx.code,group,mode:el('notes-pick-mode').value,years:el('notes-pick-years').value,dimension:el('notes-pick-dimension').value,statement:el('notes-pick-statement').value,kind:el('notes-pick-kind').value,comparison:context.comparison||'yoy'};
           if(group==='statements'&&!['quarter','ytd'].includes(request.mode)){request.mode='ytd';el('notes-pick-mode').value='ytd';}
-          if(group==='valuation'&&el('notes-pick-date').value)request.as_of=el('notes-pick-date').value;
+          if(isIndex){const [provider,series,definition]=el('notes-pick-index-source').value.split('|');Object.assign(request,{provider,series,definition});}
+          if((isIndex||group==='valuation')&&el('notes-pick-date').value)request.as_of=el('notes-pick-date').value;
           if(keepPeriod&&el('notes-pick-period').value)request.period=el('notes-pick-period').value;
           else if(context.period){request.period=context.period;context.period=null;}
           const fresh=await api('/api/notes/snapshot',request);
           if(sequence!==pickSequence||ctx!==active)return;
           snapshot=fresh;
-          if(group==='valuation'){
+          if(isIndex||group==='valuation'){
             el('notes-pick-date').value=fresh.as_of||'';
             el('notes-pick-date').min=fresh.available_dates?.[0]||'';
           }
           el('notes-pick-period').innerHTML='<option value="">最新已有</option>'+(snapshot.periods||[]).map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');assign('notes-pick-period',request.period);
-          el('notes-pick-status').textContent=`${snapshot.name} · ${ctx.code} · 只读取已保存资料，插入后固定为当时快照。${group==='business'?'主营项目使用来源原始名称。':''}${group==='valuation'?`数据日期 ${fresh.as_of}；历史分位截至该日计算，使用当前保存版本。${fresh.has_date_data?'':'所选日期暂无有效本地数据，请选择其他日期。'}`:''}`;
+          el('notes-pick-status').textContent=`${snapshot.name} · ${ctx.code.replace(/^index:/,'')} · 只读取已保存资料，插入后固定为当时快照。${group==='business'?'主营项目使用来源原始名称。':''}${isIndex||group==='valuation'?`数据日期 ${fresh.as_of}；历史分位截至该日计算，使用当前保存版本。${fresh.has_date_data?'':'所选日期暂无有效本地数据，请选择其他日期。'}`:''}`;
           renderRows();update();
         }catch(error){if(sequence===pickSequence){el('notes-pick-status').textContent=error.message;}}
       }
       ['group','mode','years','dimension','statement','kind'].forEach(k=>el('notes-pick-'+k).onchange=()=>load());el('notes-pick-period').onchange=()=>load(true);
-      el('notes-pick-date').onchange=()=>load();
+      el('notes-pick-date').onchange=()=>load();el('notes-pick-index-source').onchange=()=>load();
       el('notes-pick-search').oninput=renderRows;el('notes-pick-format').onchange=update;el('notes-pick-basis').onchange=update;
       el('notes-pick-confirm').onclick=()=>{
         if(ctx!==active||ctx.code!==snapshot?.code){el('notes-pick-status').textContent='股票上下文已变化，请重新选择。';return;}
@@ -392,11 +418,12 @@
     const statementContext=()=>({period:value('fs-period'),mode:value('fs-mode'),comparison:value('fs-comparison'),statement:document.querySelector('[data-statement][aria-selected=true]')?.dataset.statement});
     const floating=document.createElement('div');floating.id='notes-floating';floating.className='notes-floating-actions';floating.setAttribute('role','group');floating.setAttribute('aria-label','投资笔记快捷操作');
     floating.innerHTML='<button type="button" id="notes-floating-write">记一笔</button><button type="button" id="notes-floating-insert">插入笔记</button>';document.body.append(floating);
-    const currentView=()=>document.querySelector('.research-tabs [aria-selected="true"]')?.id.replace(/-tab$/,'');
-    const shell=el('trend-panel').closest('.shell');
+    const currentView=()=>isIndex?(main.hidden?'index':'notes'):document.querySelector('.research-tabs [aria-selected="true"]')?.id.replace(/-tab$/,'');
+    const shell=(isIndex?main:el('trend-panel')).closest('.shell');
     function currentModule(){
       const view=currentView();let candidates=[];
-      if(view==='trend')candidates=[
+      if(view==='index'&&state.code)candidates=[{target:el('valuation-panel'),key:'index',label:'指数数据',context:options.snapshotContext}];
+      else if(view==='trend')candidates=[
         {target:document.querySelector('#trend-panel .comparison-panel'),key:'financial',label:'经营趋势',context:()=>({group:'financial',mode:document.querySelector('[data-period].active')?.dataset.period})},
         {target:document.querySelector('#trend-panel .valuation-panel'),key:'valuation',label:'估值与分位',context:()=>({group:'valuation',years:value('valuation-range')})},
         {target:el('shareholders-chart')?.closest('section.panel'),key:'shareholders',label:'股东户数',context:()=>({group:'chips',kind:'holders'})},
@@ -415,7 +442,7 @@
       return modules.sort((a,b)=>visibleHeight(b)-visibleHeight(a)||distance(a)-distance(b))[0];
     }
     function updateFloating(){
-      const enabled=['trend','business','statements'].includes(currentView());
+      const enabled=['index','trend','business','statements'].includes(currentView());
       const hadGutter=shell.classList.contains('notes-dock-active');shell.classList.toggle('notes-dock-active',enabled);
       if(hadGutter!==enabled)requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));
       const module=enabled?currentModule():null;
@@ -436,11 +463,23 @@
     });
     overlayObserver.observe(document.body,{subtree:true,attributes:true,attributeFilter:['hidden','open']});
     window.addEventListener('scroll',scheduleDock,{passive:true});window.addEventListener('resize',scheduleDock);
-    const dockObserver=new ResizeObserver(scheduleDock);['trend','business','statements'].forEach(key=>dockObserver.observe(el(key+'-panel')));
+    const dockObserver=new ResizeObserver(scheduleDock);(isIndex?['valuation']:['trend','business','statements']).forEach(key=>dockObserver.observe(el(key+'-panel')));
     el('notes-floating-write').onclick=()=>openQuick({},false);
     el('notes-floating-insert').onclick=()=>{
       const module=currentModule();if(module)openQuick(module.context(),true);
     };
+    const indexSections=isIndex?[...main.parentElement.children].filter(node=>node.tagName==='SECTION'&&node!==main):[];
+    const sectionHidden=new Map(indexSections.map(node=>[node,node.hidden]));
+    function showIndexNotes(show){
+      indexSections.forEach(node=>{node.hidden=show||sectionHidden.get(node);});main.hidden=!show;
+      if(show){if(!active)openDocument();else{editor.refresh();checkExternal();}}else flush(active);
+      updateFloating();window.dispatchEvent(new Event('resize'));
+    }
+    if(isIndex){
+      el('notes-current').textContent='当前指数';
+      const notesLink=document.querySelector('[data-view="notes"]');notesLink.onclick=event=>{event.preventDefault();showIndexNotes(true);};
+      document.querySelector('.research-tabs a[aria-current="page"]').onclick=event=>{event.preventDefault();showIndexNotes(false);};
+    }
     quick.addEventListener('close',updateFloating);updateFloating();
     window.addEventListener('research-tab-changed',event=>{
       if(event.detail.tab==='notes'){
@@ -450,7 +489,7 @@
       if(event.detail.tab==='trend')refreshTimeline();
       updateFloating();
     });
-    window.investmentNotes={valuationAnnotations,openTimelineDate,flush:async()=>{for(const ctx of contexts.values())if(!await flush(ctx))return false;return true;},reload:()=>{contexts.clear();active=null;timelineDoc=null;timelineEntries=[];refreshTimeline();return main.hidden&&!quick.open?Promise.resolve():openDocument();}};
+    window.investmentNotes={valuationAnnotations,openTimelineDate,selectionChanged:async()=>{if(active&&active.code!==state.code){if(!await flush(active))return false;active=null;}timelineDoc=null;timelineEntries=[];if(state.code)refreshTimeline();updateFloating();return true;},flush:async()=>{for(const ctx of contexts.values())if(!await flush(ctx))return false;return true;},reload:()=>{contexts.clear();active=null;timelineDoc=null;timelineEntries=[];refreshTimeline();return main.hidden&&!quick.open?Promise.resolve():openDocument();}};
     setupSettings();if(!main.hidden)openDocument();else refreshTimeline();
   };
 

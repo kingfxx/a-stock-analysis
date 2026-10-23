@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>指数分析</title><link rel="stylesheet" href="/indices.css"><link rel="stylesheet" href="/financial-statements.css"><link rel="stylesheet" href="/research-layout.css?v=20261017-shared-sidebar-v1"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>指数分析</title><link rel="stylesheet" href="/indices.css"><link rel="stylesheet" href="/financial-statements.css"><link rel="stylesheet" href="/research-layout.css?v=20261017-shared-sidebar-v1"><link rel="stylesheet" href="/vendor/notes/codemirror.css"><link rel="stylesheet" href="/investment-notes.css"></head>
 <body><main class="shell">
 __RESEARCH_SIDEBAR__
 <div class="workspace-content">
@@ -57,4 +57,4 @@ __RESEARCH_SIDEBAR__
 <p class="muted">首次获取历史与近期数据；以后只读取网页表格并写入数据库。后台运行时每日检查，页面浏览不触发采集。</p></details>
 <details id="congestion-explanation"><summary>说明与近期数据</summary><p class="muted">统计按所选范围内每个有效交易日取一个样本，包含有效零值；缺值不补。分位为低于当前值的日样本占比；基准为20%/50%/80%线性插值分位，或均值±总体标准差。判断始终按历史分位；图表缩放和展示频率不改变统计。</p><p id="congestion-coverage"></p><p id="congestion-points" class="muted"></p><p id="congestion-amount-note" class="muted" hidden></p><p id="congestion-gaps"></p><p id="congestion-conflicts"></p><p class="muted">图中按日期展示拥挤度，重叠日期优先使用网页表格的有效值；底层仍独立保存 API、网页和自算来源及修订。自算值仅填空，原始缺值保留；未补齐日期不连线。周／月按每周期最后一个已记录日期取当日值，缺值留空，不用前日值代替；指数只有月频时保留实际观察日，在对应周期按同日比较。网页日更仅保留请求记录，无响应文件。</p><div class="scroll"><table><thead><tr><th>日期</th><th>拥挤度</th><th>来源收盘价</th><th>前5%成交额（亿元）</th><th>全A成交额（亿元）</th></tr></thead><tbody id="congestion-recent"></tbody></table></div></details>
 </div></section>
-</div></main><script src="/datetime.js"></script><script src="/plotly.min.js"></script><script src="/stock-picker.js"></script><script src="/congestion.js"></script><script src="/indices.js"></script></body></html>
+<section id="notes-panel" hidden></section></div></main><script src="/datetime.js"></script><script src="/plotly.min.js"></script><script src="/stock-picker.js"></script><script src="/congestion.js"></script><script src="/vendor/notes/codemirror.js"></script><script src="/vendor/notes/markdown-mode.js"></script><script src="/vendor/notes/markdown-it.js"></script><script src="/vendor/notes/footnote.js"></script><script src="/vendor/notes/purify.js"></script><script src="/investment-notes.js"></script><script src="/indices.js"></script></body></html>

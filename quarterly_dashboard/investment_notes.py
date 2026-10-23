@@ -38,8 +38,18 @@ def atomic_write(path, content):
             os.unlink(name)
 
 
+def note_code(code):
+    if isinstance(code, str) and code.startswith('index:'):
+        if not re.fullmatch(r'index:(?:cn|sw):\d{6}', code):
+            raise ValueError('指数笔记须使用 index:cn:六位代码 或 index:sw:六位代码')
+        return code
+    return normalize_code(code)
+
+
 def stock_key(code):
-    code = normalize_code(code)
+    code = note_code(code)
+    if code.startswith('index:'):
+        return code.replace(':', '_', 1).replace(':', '')
     exchange = 'sh' if code.startswith(('5', '6', '9')) else 'bj' if code.startswith(('4', '8')) else 'sz'
     return exchange + code
 
@@ -83,6 +93,9 @@ class InvestmentNotes:
 
     @staticmethod
     def identity(path, text):
+        index = re.match(r'^index_(cn|sw)(\d{6})_', path.name)
+        if index:
+            return f'index:{index[1]}:{index[2]}'
         header = re.match(r'\A\ufeff?---\r?\n(.*?)\r?\n---(?:\r?\n|$)', text, re.S)
         if header:
             field = re.search(r'^stock_code:\s*[\"\']?((?:sh|sz|bj)?\d{6})[\"\']?\s*$', header[1], re.M)
@@ -111,14 +124,14 @@ class InvestmentNotes:
         return result
 
     def _path(self, code, name=''):
-        code = normalize_code(code)
+        code = note_code(code)
         root = self.root()
         matches = [item for item in self.listing(root) if item.get('code') == code]
         if len(matches) > 1:
             raise ValueError('同一股票有多份笔记，请先在存储目录整理重复文件')
         if matches:
             return self.safe(root, matches[0]['file'])
-        label = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', str(name)).strip(' .')[:50] or code
+        label = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', str(name)).strip(' .')[:50] or code.replace(':', '')
         return self.safe(root, f'{stock_key(code)}_{label}.md')
 
     def read(self, code, name=''):
@@ -127,13 +140,13 @@ class InvestmentNotes:
             content = path.read_bytes() if path.exists() else None
             if content is not None and len(content) > MAX_DOCUMENT:
                 raise ValueError('笔记超过 2 MiB，请在外部编辑器查看')
-            return {'code': normalize_code(code), 'file': path.name, 'exists': content is not None,
+            return {'code': note_code(code), 'file': path.name, 'exists': content is not None,
                     'content': content.decode('utf-8-sig') if content is not None else '',
                     'version': digest(content) if content is not None else None,
                     'directory_version': self.directory_version()}
 
     def save(self, command):
-        code = normalize_code(command.get('code', ''))
+        code = note_code(command.get('code', ''))
         text = command.get('content')
         if not isinstance(text, str) or len(text.encode('utf-8')) > MAX_DOCUMENT:
             raise ValueError('笔记须为 UTF-8 文本，最大 2 MiB')
@@ -162,7 +175,7 @@ class InvestmentNotes:
 
     def associate(self, command):
         with self.lock:
-            code = normalize_code(command.get('code', ''))
+            code = note_code(command.get('code', ''))
             name = command.get('file', '')
             if Path(name).name != name or not name.endswith('.md'):
                 raise ValueError('请选择目录根部的 Markdown 文件')

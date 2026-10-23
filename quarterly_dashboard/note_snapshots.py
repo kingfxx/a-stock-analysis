@@ -58,6 +58,9 @@ def percentile_position(value, metric):
 
 
 def catalog(db, command, cache, valuation_cache, chip_cache):
+    if str(command.get('code', '')).startswith('index:'):
+        from .index_note_snapshots import catalog as index_catalog
+        return index_catalog(db, command)
     code = normalize_code(command.get('code', ''))
     group = command.get('group', 'valuation')
     result = {'code': code, 'group': group, 'items': [], 'periods': [],
