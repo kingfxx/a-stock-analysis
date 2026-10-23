@@ -11,6 +11,7 @@ let industryCrowdingRequest=0,industryCrowdingController,industryCrowdingData=nu
 let data,history=[],selectedSummary,views={},metricFamily='pe',timer,cooldownTimer,historyRevision=0,historyController,pointOverlay=false,pointData,pointCode,pointController,shownIndexCode;
 const indexSelectionKey='investment-index-selection-v1';
 let pendingIndexSelection=null;
+let pendingIndexNavigation=new URLSearchParams(location.search).get('index');
 try{pendingIndexSelection=JSON.parse(sessionStorage.getItem(indexSelectionKey));}catch{}
 const chartCache=new Map();let chartCacheBytes=0;
 function clearChartCache(){chartCache.clear();chartCacheBytes=0;}
@@ -55,7 +56,9 @@ const parentOf=row=>row.navigation_parent_index_code||row.parent_index_code;
 function renderParents(){options('parent',data.catalog.filter(row=>row.index_type==='industry'&&row.industry_level===1).map(row=>[row.index_code,row.name]),el('parent').value);}
 function updateSelectedIndex(selected){if(selected){try{sessionStorage.setItem(indexSelectionKey,JSON.stringify({kind:selected.index_type,code:selected.index_code}));}catch{}}const jump=el('industry-companies'),industry=el('kind').value==='industry';jump.hidden=!industry;jump.disabled=!selected?.navigation_taxonomy_code;jump.title=jump.disabled?'当前行业尚未匹配申万行业分类':`查看${selected.name}的行业内公司`;const code=selected?.index_code;el('current-index-name').textContent=selected?.name||'暂无指数';el('current-index-code').textContent=code||'—';if(shownIndexCode===code)return;shownIndexCode=code;pointController?.abort();pointController=null;pointData=null;pointCode=null;el('point-overlay-note').hidden=!pointOverlay;if(pointOverlay&&code&&metricFamily!=='crowding')loadPointOverlay(code);}
 function renderCodes(){
-const restored=pendingIndexSelection&&data.catalog.find(row=>row.index_code===pendingIndexSelection.code&&row.index_type===pendingIndexSelection.kind&&['broad','industry','strategy'].includes(row.index_type));pendingIndexSelection=null;
+const requested=pendingIndexNavigation&&data.catalog.find(row=>row.index_code===pendingIndexNavigation&&row.index_type==='industry');pendingIndexNavigation=null;
+const restored=requested||(pendingIndexSelection&&data.catalog.find(row=>row.index_code===pendingIndexSelection.code&&row.index_type===pendingIndexSelection.kind&&['broad','industry','strategy'].includes(row.index_type)));pendingIndexSelection=null;
+if(requested){const url=new URL(location.href);url.searchParams.delete('index');window.history.replaceState(null,'',url);}
 if(restored){el('kind').value=restored.index_type;if(restored.index_type==='industry')el('parent').value=restored.industry_level===1?restored.index_code:parentOf(restored);}
 if(el('kind').value!=='broad'&&isSpread())metricFamily='pe';
 const industry=el('kind').value==='industry',old=restored?.index_code||el('code').value;

@@ -1,4 +1,8 @@
 #industry-panel[hidden]{display:none!important}
+.sw-company-context-wrap{min-width:0}
+.sw-company-context-heading{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.sw-company-context-heading .industry-navigation{font-size:13px;padding:6px 0}
+.sw-company-context-heading .industry-navigation[hidden]{display:none!important}
 .sw-company-pagination{display:flex;align-items:center;gap:10px;margin-left:auto}
 .sw-company-pagination[hidden]{display:none!important}
 .sw-company-pagination button{padding:5px 10px;font-size:12px}

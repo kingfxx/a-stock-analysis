@@ -1,6 +1,6 @@
 # 决策
 
-- 按最新反馈去掉跳转图标；指数、个股入口共用 research-layout.css 中的 industry-navigation 按钮样式，青色实底、深色文字。
+- 按最新反馈去掉跳转图标；指数、个股入口共用 research-layout.css 中的 industry-navigation 按钮样式，用户选定的 A 样式：青色纯文字、无边框无底色，悬停下划线。
 - 使用 catalog 的 navigation_taxonomy_code，不把指数代码当作行业分类代码，也不在前端猜测映射。未匹配时禁用并说明原因。
 - 入口参数 tab=industry、industry、level、industry_view=companies；合法 stock 参数转为 code，保留个股上下文。
 - 行业数据首次渲染后激活公司标签，并定位到标签栏；仅执行一次，不干扰后续筛选。
@@ -12,3 +12,7 @@
 - 指数选择独立保存至 sessionStorage 的 investment-index-selection-v1，仅存 kind／code。在目录首次加载后校验恢复；行业父子关系从现有 catalog 读取，不保存冗余关系。无记忆、失效代码或损坏 JSON 不阻塞页面，沿用沪深300默认。
 - 行业指数筛选栏移除固定的「数据来源：申万宏源」文字，宽基／策略原估值口径选择保留，底层来源记录不变。
 - 个股普通估值内容由 valuation-standard 容器统一管理显隐，DCF 展开隐藏整块，防止异步估值刷新或局部 display 样式让旧指标重新露出。切回时发出 resize 以恢复图表尺寸。移除重复指标提示，状态字号统一 20px；不改指标公式或阈值。
+- 反向入口复用 industry-navigation 纯文字入口，字号 13px 放在公司列表行业名称右侧。点击时只读指数目录，按 navigation_taxonomy_code 和层级核对唯一映射；三级使用本地父二级，不猜指数代码。全市场隐藏，无唯一映射时原页提示。
+- 指数页一次性 index 参数优先于会话记忆，恢复后移除该参数并保留 stock 与估值区锚点，避免后续刷新覆盖用户的新选择。
+
+- 最新入口文案：指数页使用「行业详细」，个股估值区使用「行业内对比」，行业公司列表反向入口仍为「行业估值」。
