@@ -1035,8 +1035,6 @@ class Handler(BaseHTTPRequestHandler):
                     data = service.apply_directory(command)
                 elif path == '/api/notes/associate':
                     data = service.associate(command)
-                elif path == '/api/notes/recovery':
-                    data = service.recover_copy(command)
                 else:
                     self.send_error(404); return
             elif path == '/api/notes/settings':
@@ -1045,10 +1043,6 @@ class Handler(BaseHTTPRequestHandler):
                 data = {'items': service.listing(), 'directory_version': service.directory_version()}
             elif path == '/api/notes/document':
                 data = service.read(query.get('code', [''])[0], query.get('name', [''])[0])
-            elif path == '/api/notes/history':
-                code = query.get('code', [''])[0]
-                data = (service.historical(code, query['id'][0]) if 'id' in query
-                        else {'items': service.history(code)})
             elif path == '/api/notes/resource':
                 body, mime = service.resource(query.get('path', [''])[0])
                 self.send_response(200)

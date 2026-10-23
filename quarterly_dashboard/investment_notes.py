@@ -132,23 +132,6 @@ class InvestmentNotes:
                     'version': digest(content) if content is not None else None,
                     'directory_version': self.directory_version()}
 
-    def _protect(self, code, content, *, conflict=False):
-        root = self.root()
-        folder = self.safe(root, f'.history/{stock_key(code)}')
-        folder.mkdir(parents=True, exist_ok=True)
-        if conflict:
-            destination = self.safe(root, f'.history/{stock_key(code)}/conflict-{time.time_ns()}-{digest(content)[:12]}.md')
-            atomic_write(destination, content)
-            return
-        latest = self.safe(root, f'.history/{stock_key(code)}/latest.md')
-        atomic_write(latest, content)
-        versions = sorted(folder.glob('v-*.md'), key=lambda p: p.stat().st_mtime)
-        if not versions or time.time() - versions[-1].stat().st_mtime >= 300:
-            target = self.safe(root, f'.history/{stock_key(code)}/v-{time.time_ns()}-{digest(content)[:12]}.md')
-            atomic_write(target, content)
-            for old in versions[:-49]:
-                self.safe(root, old.relative_to(root)).unlink()
-
     def save(self, command):
         code = normalize_code(command.get('code', ''))
         text = command.get('content')
@@ -161,7 +144,6 @@ class InvestmentNotes:
                 raise NoteConflict('存储目录已经变化，请重新载入')
             current = self.read(code, command.get('name', ''))
             if current['version'] != command['version']:
-                self._protect(code, text.encode('utf-8'), conflict=True)
                 raise NoteConflict('文件已在其他地方修改，请比较后选择保留内容', current)
             path = self.safe(self.root(), current['file'])
             if self.identity(path, text) != code:
@@ -171,39 +153,12 @@ class InvestmentNotes:
                 raise NoteConflict('保存前发现外部修改，请重新比较', self.read(code))
             if before == text.encode('utf-8'):
                 return current
-            if before is not None:
-                self._protect(code, before)
-            # Recheck after protection IO; external editors do not share our lock.
+            # External editors do not share our lock; recheck before replacement.
             actual = path.read_bytes() if path.exists() else None
             if actual != before:
-                self._protect(code, text.encode('utf-8'), conflict=True)
                 raise NoteConflict('保存期间发现外部修改，请重新比较', self.read(code))
             atomic_write(path, text.encode('utf-8'))
             return self.read(code)
-
-    def history(self, code):
-        folder = self.safe(self.root(), f'.history/{stock_key(code)}')
-        if not folder.exists():
-            return []
-        return [{'id': p.name, 'updated_at': p.stat().st_mtime, 'bytes': p.stat().st_size}
-                for p in sorted(folder.glob('*.md'), key=lambda p: p.stat().st_mtime, reverse=True)
-                if self.safe(self.root(), p.relative_to(self.root()))]
-
-    def historical(self, code, identity):
-        if not re.fullmatch(r'(?:latest|(?:v|conflict)-\d+-[0-9a-f]{12})\.md', identity):
-            raise ValueError('历史版本不存在')
-        path = self.safe(self.root(), f'.history/{stock_key(code)}/{identity}')
-        return {'content': path.read_text(encoding='utf-8')}
-
-    def recover_copy(self, command):
-        text = command.get('content')
-        if not isinstance(text, str) or len(text.encode()) > MAX_DOCUMENT:
-            raise ValueError('恢复副本大小无效')
-        with self.lock:
-            if command.get('directory_version') != self.directory_version():
-                raise NoteConflict('目录已变化，请先导出草稿')
-            self._protect(command.get('code', ''), text.encode(), conflict=True)
-        return {'protected': True}
 
     def associate(self, command):
         with self.lock:
@@ -222,7 +177,6 @@ class InvestmentNotes:
                 raise NoteConflict('文件已变化，请重新扫描')
             if text.startswith('---\n') or text.startswith('---\r\n'):
                 raise ValueError('文件已有元信息，请在外部编辑器添加 stock_code 字段后重新扫描')
-            self._protect(code, before, conflict=True)
             atomic_write(path, f'---\nstock_code: "{code}"\n---\n\n{text}'.encode())
             return self.read(code)
 

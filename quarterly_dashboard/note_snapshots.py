@@ -1,5 +1,5 @@
 """Note insertions from saved facts only; never call update/ensure/load_stock."""
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 import math
 
@@ -12,6 +12,7 @@ from .update_service import ChipService, FINANCING_SOURCE
 from .business_segment_service import BusinessSegmentService
 from .statements import read_statements
 from .core import build_period_rows, view_rows
+from .valuation import daily_dividend_yield_observations, valuation_summary, valuation_summary_observations
 
 FINANCIAL = {
     'revenue': ('营业收入', '亿元', 1e8, 'lrb.BIZINCO/BIZTOTINCO'),
@@ -42,6 +43,18 @@ def number(value, unit, scale=1):
     if not valid(value):
         return '暂无数据'
     return f'{value / scale:,.2f}{unit}'
+
+
+def percentile_position(value, metric):
+    """Same seven percentile bands and yield color direction as the valuation card."""
+    if not valid(value) or not 0 <= value <= 100:
+        return {}
+    rank = (0 if value <= 5 else 1 if value <= 20 else 2 if value < 40 else
+            3 if value <= 60 else 4 if value < 80 else 5 if value < 95 else 6)
+    is_yield = metric == 'dividend_yield'
+    labels = ['极低', '低息' if is_yield else '低位', '偏低', '中值', '偏高', '高息' if is_yield else '高位', '极高']
+    markers = ['🟢', '🟢', '🔵', '🟡', '🟠', '🔴', '🔴']
+    return {'position': {'label': labels[rank], 'marker': markers[6-rank if is_yield else rank]}}
 
 
 def catalog(db, command, cache, valuation_cache, chip_cache):
@@ -78,8 +91,7 @@ def catalog(db, command, cache, valuation_cache, chip_cache):
                       f'本地资料更新时间 {fundamentals.get("updated_at") or "未记录"}；读取当前保存的修订版本，非历史实时回测')
             add(key, f'{short} {label}', row.get(key), period, basis, source, unit, scale)
     elif group == 'valuation':
-        # Reuse the page's pure projections, not its fetching routes.
-        from .server import _p4_valuation_payload
+        # Reuse pure valuation formulas, anchored to the requested observation day.
         years = int(command.get('years', 10))
         if years not in (3, 5, 10):
             raise ValueError('历史区间无效')
@@ -88,22 +100,53 @@ def catalog(db, command, cache, valuation_cache, chip_cache):
         events = DividendService(db, cache).read(code)
         saved = ValuationService(db, valuation_cache).read(code, fundamentals.get('reports', []))
         result['valuation_updated_on'] = saved.get('updated_on')
-        projected = _p4_valuation_payload(saved, raw=raw, events=events)
-        summaries = projected.get('views', {}).get(str(years), {})
+        today = datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
+        requested = command.get('as_of')
+        if requested is not None:
+            try:
+                if not isinstance(requested, str) or date.fromisoformat(requested).isoformat() != requested or requested > today:
+                    raise ValueError
+            except (ValueError, TypeError):
+                raise ValueError('数据日期须为有效的 YYYY-MM-DD，且不能晚于今天') from None
+        observations = saved.get('observation_rows', [])
+        legacy = saved.get('rows', [])
+        yield_rows = daily_dividend_yield_observations(raw, events)
+        metric_rows = {}
+        for metric in ('pe', 'pb', 'dividend_yield'):
+            rows = yield_rows if metric == 'dividend_yield' and yield_rows else observations if metric != 'dividend_yield' and observations else legacy
+            # Legacy monthly rows can hold different real observation dates per metric.
+            metric_rows[metric] = [{**row, 'date': row.get(metric + '_date') or row['date']} for row in rows]
+        dates = {row['date'] for metric, rows in metric_rows.items() for row in rows
+                 if row['date'] <= today and valid(row.get(metric))
+                 and (row[metric] >= 0 if metric == 'dividend_yield' else row[metric] > 0)}
+        dates.update(row['date'] for row in raw if row['date'] <= today and valid(row.get('close')) and row['close'] > 0)
+        result['available_dates'] = sorted(dates)
+        selected_day = requested or (max(dates) if dates else today)
+        result['as_of'] = selected_day
+        result['has_date_data'] = selected_day in dates
         for key, label, unit in [('pe', 'PE（TTM）', '倍'), ('pb', 'PB', '倍'), ('dividend_yield', '股息率', '%')]:
-            summary = summaries.get(key, {})
-            day = summary.get('current_date')
+            rows = metric_rows[key]
+            if key != 'dividend_yield' and observations:
+                summary = valuation_summary_observations(rows, key, years, {}, as_of=selected_day,
+                                                        trading_dates=[row['date'] for row in raw])
+            else:
+                summary = valuation_summary(rows, key, years, {}, as_of=selected_day)
+            exact = summary.get('current_date') == selected_day
             source = ('本地 valuation_observations／估值缓存，页面纯计算投影；'
                       '股息率使用页面已有现金分红及价格口径；'
-                      f'估值更新日 {saved.get("updated_on") or "未记录"}')
-            add(key, label, summary.get('current'), day, '与企业经营趋势页同口径', source, unit)
-            frequency = summary.get('percentile_frequency') or summary.get('sample_frequency') or 'month'
+                      f'估值更新日 {saved.get("updated_on") or "未记录"}；按当前保存资料计算，非历史留存快照')
+            basis = '与企业经营趋势页同口径' if exact else '所选日期缺少有效本地数据，不沿用其他日期'
+            add(key, label, summary.get('current') if exact else None, selected_day, basis, source, unit)
+            frequency = summary.get('percentile_frequency') or ('day' if key == 'dividend_yield' and yield_rows else 'month')
             frequency = {'day': '日频观测', 'week': '周频观测', 'month': '月频观测'}.get(frequency, frequency)
-            add(key + '_percentile', f'{label}近{years}年历史分位', summary.get('percentile'), day,
-                f'近{years}年，采样 {frequency}；低于当前值的有效历史样本占比，0.8即0.8%；'
-                f'样本数 {summary.get("sample_count", summary.get("count", "未记录"))}；{summary.get("sparse_hint") or ""}', source, '%')
-        last = raw[-1] if raw else {}
-        add('price', '收盘价', last.get('close'), last.get('date'), '未复权', '本地 raw_daily_prices，腾讯原始日K', '元/股')
+            add(key + '_percentile', f'{label}近{years}年历史分位', summary.get('percentile') if exact else None, selected_day,
+                f'截至{selected_day}近{years}年，采样 {frequency}；低于所选日值的有效历史样本占比，0.8即0.8%；'
+                f'样本数 {summary.get("sample_count", summary.get("count", "未记录"))}；{summary.get("sparse_hint") or ""}', source, '%',
+                **percentile_position(summary.get('percentile') if exact else None, key))
+        price = next((row for row in raw if row['date'] == selected_day), {})
+        close = price.get('close')
+        add('price', '收盘价', close if valid(close) and close > 0 else None, selected_day,
+            '未复权；只取所选日期', '本地 raw_daily_prices，腾讯原始日K', '元/股')
     elif group == 'chips':
         service = ChipService(db, chip_cache)
         holder_data = service.cached(code, 'shareholders')

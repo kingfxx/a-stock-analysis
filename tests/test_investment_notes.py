@@ -26,7 +26,7 @@ def test_portable_unicode_note_read_has_no_side_effect_and_empty_is_valid(tmp_pa
     assert result['exists'] and result['file'] == 'sz300750_宁德时代.md'
     assert (notes.root() / result['file']).read_text(encoding='utf-8') == result['content']
     assert save(notes, '')['content'] == ''
-    assert notes.historical('300750', 'latest.md')['content'].startswith('# 宁德时代')
+    assert not (notes.root() / '.history').exists()
 
 
 def test_external_change_with_same_mtime_and_size_is_not_overwritten(tmp_path):
@@ -40,8 +40,19 @@ def test_external_change_with_same_mtime_and_size_is_not_overwritten(tmp_path):
         save(notes, 'CCCC', base=base)
     assert conflict.value.current['content'] == 'BBBB'
     assert path.read_text() == 'BBBB'
-    copies = [x for x in notes.history('300750') if x['id'].startswith('conflict-')]
-    assert notes.historical('300750', copies[0]['id'])['content'] == 'CCCC'
+    assert not (notes.root() / '.history').exists()
+
+
+def test_existing_history_is_preserved_but_never_updated(tmp_path):
+    notes = InvestmentNotes(tmp_path)
+    folder = notes.root() / '.history' / 'sz300750'; folder.mkdir(parents=True)
+    legacy = folder / 'latest.md'; legacy.write_bytes(b'legacy history')
+    base = save(notes, 'one')
+    save(notes, 'two', base=base)
+    with pytest.raises(NoteConflict):
+        save(notes, 'stale', base=base)
+    assert legacy.read_bytes() == b'legacy history'
+    assert list(folder.iterdir()) == [legacy]
 
 
 def test_stale_tab_and_deleted_file_require_explicit_resolution(tmp_path):
@@ -134,8 +145,6 @@ def test_external_markdown_association_and_resource_boundary(tmp_path):
         with pytest.raises(ValueError):
             notes.resource(unsafe)
     with pytest.raises(ValueError):
-        notes.historical('300750', '../../file.md')
-    with pytest.raises(ValueError):
         save(notes, '---\nstock_code: "600887"\n---\nwrong stock', base=result)
 
 
@@ -164,6 +173,10 @@ def test_http_notes_session_auth_conflict_and_no_database_writes(tmp_path, monke
         assert error.value.code == 409
         assert not server.DATABASE_PATH.exists()
         assert request('/api/notes')['items'][0]['code'] == '300750'
+        for path, body in [('/api/notes/history?code=300750', None), ('/api/notes/recovery', {'code': '300750', 'content': 'draft'})]:
+            with pytest.raises(HTTPError) as removed:
+                request(path, body, settings['session_token'])
+            assert removed.value.code == 404
     finally:
         httpd.shutdown(); httpd.server_close(); thread.join(timeout=5)
 
@@ -181,9 +194,23 @@ def test_notes_in_real_browser(tmp_path, monkeypatch):
     reports = [{'period': p, 'profit_ytd': v * 1e8, 'revenue_ytd': v * 10e8}
                for p, v in [('2025-03-31', 10), ('2025-06-30', 30), ('2026-03-31', 20), ('2026-06-30', 40)]]
     monkeypatch.setattr(note_snapshots.FundamentalService, 'read', lambda *a: {'reports': reports, 'name': '测试企业'})
+    monkeypatch.setattr(note_snapshots.ValuationService, 'read', lambda *a: {'observation_rows': [
+        {'date': '2026-09-01', 'pe': 20, 'pb': 2}, {'date': '2026-10-19', 'pe': 18, 'pb': 1.8},
+        {'date': '2026-10-23', 'pe': 16, 'pb': 1.6}]})
+    monkeypatch.setattr(note_snapshots.PriceService, 'read', lambda *a: [
+        {'date': '2026-09-01', 'close': 100}, {'date': '2026-10-19', 'close': 50},
+        {'date': '2026-10-23', 'close': 200}])
     def page(code, refresh):
+        valuation_rows = [{'date': day, 'pe': pe, 'pb': pe / 10, 'ps': pe / 5, 'dividend_yield': 3,
+                           'qfq_close': 100 + pe, 'qfq_close_date': day}
+                          for day, pe in [('2026-09-01', 20), ('2026-10-19', 18), ('2026-10-23', 16)]]
+        valuation_views = {str(year): {metric: {'rows_by_frequency': {frequency: valuation_rows
+                           for frequency in ('day', 'week', 'month')}, 'count': 3, 'current': 16,
+                           'current_date': '2026-10-23', 'percentile': 20}
+                           for metric in ('pe', 'pb', 'ps', 'dividend_yield')} for year in (1, 3, 5, 10)}
         payload = {'code': code, 'name': '测试企业', 'views': {}, 'warnings': [], 'valuation': {'views': {}},
                    'loading': {}, 'price_version': 0, 'price_needs_update': False, 'cached_stocks': []}
+        payload['valuation']['views'] = valuation_views
         return (server.TEMPLATE.replace('__RESEARCH_SIDEBAR__', server.research_sidebar('stock'))
                 .replace('__PAYLOAD__', json.dumps(payload, ensure_ascii=False)).replace('__CODE__', code).replace('__ERROR__', ''))
     monkeypatch.setattr(server, 'render_page', page)

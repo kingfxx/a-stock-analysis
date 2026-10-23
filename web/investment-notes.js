@@ -39,12 +39,97 @@
     quick.innerHTML='<div class="notes-head"><h2>记一笔</h2><div class="notes-actions"><button type="button" id="notes-full">打开完整笔记</button><button type="button" id="notes-close">关闭</button></div></div><div id="notes-quick-host"></div>';
     document.body.append(quick);
     const workspace=document.createElement('section');workspace.className='panel notes-workspace';
-    workspace.innerHTML=`<div class="notes-head"><strong id="notes-company"></strong><span id="notes-filename" class="notes-location"></span></div><div class="notes-tools"><button type="button" id="notes-new">新增记录</button><button type="button" id="notes-insert">插入数据</button><button type="button" id="notes-edit" aria-pressed="true">编辑</button><button type="button" id="notes-preview-button" aria-pressed="false">预览</button><button type="button" id="notes-bold">加粗</button><button type="button" id="notes-list-format">列表</button><button type="button" id="notes-undo">撤销</button><button type="button" id="notes-redo">重做</button><button type="button" id="notes-export">导出</button><button type="button" id="notes-history">历史版本</button><button type="button" id="notes-retry" hidden>重试保存</button><span id="notes-status" class="notes-status" role="status" aria-live="polite">尚未读取</span></div><nav class="notes-toc" id="notes-toc" aria-label="笔记日期目录"></nav><div id="notes-conflict" class="notes-conflict" hidden><h3>文件有外部修改</h3><p id="notes-conflict-message"></p><div class="notes-conflict-grid"><label>本地草稿（可在正文编辑后再比较）<textarea id="notes-local-copy" readonly></textarea></label><label>磁盘版本<textarea id="notes-disk-copy" readonly></textarea></label></div><div class="notes-actions"><button type="button" id="notes-use-disk">采用磁盘版本</button><button type="button" id="notes-use-local">采用当前编辑内容</button><button type="button" id="notes-copy-draft">导出草稿</button></div></div><div id="notes-editor-host"><textarea id="notes-source" aria-label="投资笔记 Markdown 正文"></textarea></div><article class="notes-preview" id="notes-rendered" hidden></article>`;
+    workspace.innerHTML=`<div class="notes-head"><strong id="notes-company"></strong><span id="notes-filename" class="notes-location"></span></div><div class="notes-tools"><button type="button" id="notes-new">新增记录</button><button type="button" id="notes-insert">插入数据</button><button type="button" id="notes-edit" aria-pressed="true">编辑</button><button type="button" id="notes-preview-button" aria-pressed="false">预览</button><button type="button" id="notes-bold">加粗</button><button type="button" id="notes-list-format">列表</button><button type="button" id="notes-undo">撤销</button><button type="button" id="notes-redo">重做</button><button type="button" id="notes-export">导出</button><button type="button" id="notes-retry" hidden>重试保存</button><span id="notes-status" class="notes-status" role="status" aria-live="polite">尚未读取</span></div><nav class="notes-toc" id="notes-toc" aria-label="笔记日期目录"></nav><div id="notes-conflict" class="notes-conflict" hidden><h3>文件有外部修改</h3><p id="notes-conflict-message"></p><div class="notes-conflict-grid"><label>本地草稿（可在正文编辑后再比较）<textarea id="notes-local-copy" readonly></textarea></label><label>磁盘版本<textarea id="notes-disk-copy" readonly></textarea></label></div><div class="notes-actions"><button type="button" id="notes-use-disk">采用磁盘版本</button><button type="button" id="notes-use-local">采用当前编辑内容</button><button type="button" id="notes-copy-draft">导出草稿</button></div></div><div id="notes-editor-host"><textarea id="notes-source" aria-label="投资笔记 Markdown 正文"></textarea></div><article class="notes-preview" id="notes-rendered" hidden></article>`;
     el('notes-main-host').append(workspace);
+    const noteBody=document.createElement('div');noteBody.className='notes-body';
+    const noteContent=document.createElement('div');noteContent.className='notes-content';
+    noteContent.append(el('notes-editor-host'),el('notes-rendered'));noteBody.append(noteContent,el('notes-toc'));workspace.append(noteBody);
+    el('notes-toc').setAttribute('aria-label','文档大纲');
     const editor=CodeMirror.fromTextArea(el('notes-source'),{mode:'markdown',lineWrapping:true,indentUnit:2,tabSize:2,readOnly:true,extraKeys:{'Ctrl-S':()=>flush(active),'Cmd-S':()=>flush(active)}});
     editor.getWrapperElement().setAttribute('aria-label','投资笔记 Markdown 编辑器');
     const md=window.markdownit({html:false,linkify:false,breaks:true}).use(window.markdownitFootnote);
-    const contexts=new Map();let active=null,loadSequence=0,muting=false,preview=false,saveTimer,loading=false,outlineOpen=false;
+    const contexts=new Map();let active=null,loadSequence=0,muting=false,preview=false,loading=false,outlineOpen=false;
+    let timelineDoc=null,timelineEntries=[],timelineBusy=false,timelineError='';
+    const chartNotes=document.createElement('div');chartNotes.className='notes-chart-links';chartNotes.id='valuation-note-links';
+    chartNotes.innerHTML='<span id="valuation-notes-status" role="status"></span><details><summary id="valuation-notes-summary">图内笔记</summary><div id="valuation-notes-list" class="notes-list"></div></details>';
+    el('valuation-note').before(chartNotes);
+    const overlayActions=document.createElement('div');overlayActions.className='valuation-overlay-actions';
+    const priceOverlay=el('valuation-price-overlay');priceOverlay.before(overlayActions);overlayActions.append(priceOverlay);
+    const notesToggle=document.createElement('button');notesToggle.type='button';notesToggle.id='valuation-notes-toggle';notesToggle.className='valuation-overlay';notesToggle.textContent='显示笔记';notesToggle.setAttribute('aria-pressed','true');notesToggle.setAttribute('aria-controls','valuation-chart valuation-note-links');overlayActions.append(notesToggle);
+    const entryPicker=document.createElement('dialog');entryPicker.className='notes-dialog';entryPicker.id='notes-chart-entries';entryPicker.setAttribute('aria-label','选择笔记条目');document.body.append(entryPicker);
+    function headingsOf(full){
+      const body=stripHeader(full),offset=full.slice(0,full.length-body.length).split('\n').length-1;
+      const tokens=md.parse(body,{}),headings=[];
+      tokens.forEach((token,i)=>{
+        if(token.type!=='heading_open'||!token.map)return;
+        const inline=tokens[i+1],label=inline?.children?.map(t=>['text','code_inline','image'].includes(t.type)?t.content:t.type==='softbreak'?' ':'').join('')||inline?.content||'无标题';
+        headings.push({label,line:token.map[0]+offset,index:headings.length,level:Number(token.tag.slice(1))});
+      });return headings;
+    }
+    function datedEntries(content){
+      const occurrences=new Map();
+      return headingsOf(content).flatMap(heading=>{
+        const match=/(?:^|[^\d])(\d{4}-\d{2}-\d{2})(?!\d)/.exec(heading.label);
+        if(heading.level<2||!match)return [];
+        const date=match[1],parsed=new Date(date+'T00:00:00Z');
+        if(!Number.isFinite(+parsed)||parsed.toISOString().slice(0,10)!==date)return [];
+        const occurrence=occurrences.get(heading.label)||0;occurrences.set(heading.label,occurrence+1);
+        return [{...heading,date,occurrence}];
+      });
+    }
+    function timelineChanged(){window.dispatchEvent(new Event('investment-note-markers-changed'));}
+    function setTimeline(doc){
+      if(doc.code!==state.code)return;
+      const changedDoc=Boolean(timelineError)||!timelineDoc||timelineDoc.content!==doc.content||timelineDoc.code!==doc.code||timelineDoc.directory_version!==doc.directory_version;
+      timelineDoc=doc;timelineError='';if(changedDoc){timelineEntries=datedEntries(doc.content);timelineChanged();}
+    }
+    async function refreshTimeline(){
+      if(timelineBusy||!state.code)return;
+      timelineBusy=true;const code=state.code;
+      try{setTimeline(await api('/api/notes/document?'+new URLSearchParams({code,name:state.name||''})));}
+      catch(error){if(code===state.code){timelineError='笔记读取失败：'+error.message;timelineChanged();}}
+      finally{timelineBusy=false;}
+    }
+    async function openTimelineEntry(entry){
+      const code=state.code;
+      if(!await openDocument(code,state.name)||code!==state.code)return;
+      const latest=datedEntries(active.content);
+      const matching=latest.filter(item=>item.date===entry.date&&item.label===entry.label);
+      const target=matching[entry.occurrence];
+      if(!target){el('valuation-notes-status').textContent='该条目已变更，请重新选择笔记标记。';return;}
+      if(!quick.open){el('notes-quick-host').append(workspace);quick.showModal();}
+      setPreview(true);requestAnimationFrame(()=>jumpHeading(target));
+    }
+    function openTimelineDate(date){
+      const entries=timelineEntries.filter(entry=>entry.date===date);
+      if(entries.length===1){openTimelineEntry(entries[0]);return;}
+      if(!entries.length)return;
+      entryPicker.innerHTML='<div class="notes-head"><h3></h3><button type="button">关闭</button></div><div class="notes-list"></div>';
+      entryPicker.querySelector('h3').textContent=date+' · 选择笔记';entryPicker.querySelector('button').onclick=()=>entryPicker.close();
+      entries.forEach(entry=>{const button=document.createElement('button');button.type='button';button.textContent=entry.label;button.onclick=()=>{entryPicker.close();openTimelineEntry(entry);};entryPicker.querySelector('.notes-list').append(button);});entryPicker.showModal();
+    }
+    function valuationAnnotations(first,last){
+      const entries=timelineDoc?.code===state.code?timelineEntries.filter(entry=>first&&last&&entry.date>=first&&entry.date<=last):[];
+      const list=el('valuation-notes-list');list.replaceChildren();
+      entries.forEach(entry=>{const button=document.createElement('button');button.type='button';button.textContent=entry.label;button.onclick=()=>openTimelineEntry(entry);list.append(button);});
+      el('valuation-notes-summary').textContent=`图内笔记（${entries.length} 条）`;
+      el('valuation-notes-status').textContent=timelineError||(!timelineDoc?'正在读取笔记…':entries.length?'点击图中笔记标记查看条目':'当前图表区间暂无日期笔记');
+      const showNotes=notesToggle.getAttribute('aria-pressed')==='true';chartNotes.hidden=!showNotes;
+      if(!showNotes)return [];
+      const width=Math.max(160,(el('valuation-chart').clientWidth||600)-160),start=Date.parse(first),span=Math.max(86400000,Date.parse(last)-start),lanes=[-Infinity,-Infinity,-Infinity];
+      return [...new Set(entries.map(entry=>entry.date))].sort().flatMap(date=>{
+        const items=entries.filter(entry=>entry.date===date);
+        const x=(Date.parse(date)-start)/span*width,lane=lanes.findIndex(end=>x-end>38);
+        if(lane<0)return [];lanes[lane]=x;
+        return [{name:'investment-note:'+date,x:date,xref:'x',y:1.02,yref:'paper',yanchor:'bottom',yshift:lane*30,text:'✎'+(items.length>1?' '+items.length:''),showarrow:false,captureevents:true,
+          font:{color:'#101719',size:16},bgcolor:'#57d4e7',bordercolor:'#57d4e7',borderpad:3,
+          hovertext:esc(date)+'<br>'+items.slice(0,5).map(item=>esc(item.label.replace(date,'').trim()||'笔记')).join('<br>')+(items.length>5?'<br>…':'')+'<br>点击查看笔记',hoverlabel:{bgcolor:'#23343d',font:{color:'#edf4f4'}}}];
+      });
+    }
+    notesToggle.onclick=()=>{notesToggle.setAttribute('aria-pressed',String(notesToggle.getAttribute('aria-pressed')!=='true'));timelineChanged();};
+    let timelineWidth=0;
+    const timelineResize=new ResizeObserver(()=>{const width=el('valuation-chart').clientWidth;if(width&&width!==timelineWidth){timelineWidth=width;timelineChanged();}});
+    timelineResize.observe(el('valuation-chart'));
     const outlineButton=document.createElement('button');outlineButton.type='button';outlineButton.id='notes-outline';outlineButton.textContent='大纲';outlineButton.setAttribute('aria-expanded','false');outlineButton.setAttribute('aria-controls','notes-toc');el('notes-preview-button').after(outlineButton);
     el('notes-toc').hidden=true;
     outlineButton.onclick=()=>{outlineOpen=!outlineOpen;outlineButton.setAttribute('aria-expanded',String(outlineOpen));updateToc();};
@@ -76,19 +161,18 @@
     }
     function setPreview(value){preview=value;el('notes-editor-host').hidden=value;el('notes-rendered').hidden=!value;el('notes-edit').setAttribute('aria-pressed',String(!value));el('notes-preview-button').setAttribute('aria-pressed',String(value));if(value)renderPreview();else{editor.refresh();editor.focus();}}
     function updateToc(){
-      const toc=el('notes-toc');toc.hidden=!outlineOpen;if(!outlineOpen)return;toc.replaceChildren();
-      const full=editor.getValue(),body=stripHeader(full),offset=full.slice(0,full.length-body.length).split('\n').length-1;
-      const tokens=md.parse(body,{});let index=0;
-      tokens.forEach((token,i)=>{
-        if(token.type!=='heading_open'||!token.map)return;
-        const inline=tokens[i+1],label=inline?.children?.map(t=>['text','code_inline','image'].includes(t.type)?t.content:t.type==='softbreak'?' ':'').join('')||inline?.content||'无标题';
-        const headingIndex=index++,line=token.map[0]+offset,button=document.createElement('button');button.type='button';button.textContent=label;button.style.paddingLeft=(12+(Number(token.tag.slice(1))-1)*16)+'px';
-        button.onclick=()=>{
-          if(preview){const heading=el('notes-heading-'+headingIndex);if(heading){heading.scrollIntoView({block:'start',behavior:'instant'});heading.tabIndex=-1;heading.focus({preventScroll:true});}}
-          else{const pos={line,ch:0};editor.setCursor(pos);editor.scrollIntoView(pos,80);editor.focus();}
-        };toc.append(button);
+      const toc=el('notes-toc');toc.hidden=!outlineOpen;noteBody.classList.toggle('has-outline',outlineOpen);requestAnimationFrame(()=>editor.refresh());if(!outlineOpen)return;toc.replaceChildren();
+      const title=document.createElement('strong');title.className='notes-toc-title';title.textContent='大纲';toc.append(title);
+      const headings=headingsOf(editor.getValue());
+      headings.forEach(heading=>{
+        const button=document.createElement('button');button.type='button';button.textContent=heading.label;button.style.paddingLeft=(12+(heading.level-1)*16)+'px';
+        button.onclick=()=>jumpHeading(heading);toc.append(button);
       });
-      if(!index)toc.textContent='文档暂无标题，可用 #、## 等 Markdown 标题组织记录。';
+      if(!headings.length)toc.textContent='文档暂无标题，可用 #、## 等 Markdown 标题组织记录。';
+    }
+    function jumpHeading(heading){
+      if(preview){const target=el('notes-heading-'+heading.index);if(target){target.scrollIntoView({block:'start',behavior:'instant'});target.tabIndex=-1;target.focus({preventScroll:true});}}
+      else{const pos={line:heading.line,ch:0};editor.setCursor(pos);editor.scrollIntoView(pos,80);editor.focus();}
     }
     function showDocument(ctx){
       active=ctx;muting=true;editor.setValue(ctx.content);editor.clearHistory();if(ctx.cursor)editor.setCursor(ctx.cursor);muting=false;editor.setOption('readOnly',false);
@@ -103,15 +187,22 @@
       const canResolve=ctx.remote&&ctx.remote.directory_version===ctx.directory_version;
       el('notes-use-disk').disabled=!canResolve;el('notes-use-local').disabled=!canResolve;
     }
-    async function flush(ctx){
-      clearTimeout(saveTimer);
+    function scheduleSave(ctx,reset=true){
+      if(!ctx)return;
+      if(reset||ctx.conflict||!changed(ctx)){clearTimeout(ctx.saveTimer);ctx.saveTimer=null;}
+      if(ctx.conflict||!changed(ctx)||ctx.saveTimer)return;
+      ctx.saveTimer=setTimeout(()=>{ctx.saveTimer=null;flush(ctx,false);},30000);
+    }
+    async function flush(ctx,drain=true){
+      if(ctx){clearTimeout(ctx.saveTimer);ctx.saveTimer=null;}
       if(!ctx||!changed(ctx)||ctx.conflict)return !ctx?.conflict;
-      if(ctx.saving){await ctx.saving;if(ctx.failed)return false;return changed(ctx)&&!ctx.conflict?flush(ctx):!ctx.conflict;}
+      if(ctx.saving){const revision=ctx.editRevision;await ctx.saving;if(ctx.failed)return false;if(!drain&&ctx.editRevision!==revision){scheduleSave(ctx,false);return !ctx.conflict;}return changed(ctx)&&!ctx.conflict?flush(ctx,drain):!ctx.conflict;}
       const text=ctx.content;
       ctx.saving=(async()=>{
         try{
           const saved=await api('/api/notes/document',{code:ctx.code,name:ctx.name,content:text,version:ctx.version,directory_version:ctx.directory_version},'PUT');
           ctx.version=saved.version;ctx.file=saved.file;ctx.exists=true;ctx.saved=text;
+          setTimeline({...ctx,content:text});
           if(!changed(ctx)){await draft('delete',ctx.key).catch(()=>{});}else await remember(ctx);
           if(ctx===active)el('notes-filename').textContent=ctx.file;
           ctx.failed=false;
@@ -123,7 +214,7 @@
         }
       })();showStatus(ctx);await ctx.saving;ctx.saving=null;
       if(ctx.failed)return false;
-      if(changed(ctx))return flush(ctx);
+      if(changed(ctx)){if(drain)return flush(ctx);scheduleSave(ctx,false);}
       showStatus(ctx);return true;
     }
     async function openDocument(code=state.code,name=state.name){
@@ -132,6 +223,7 @@
       try{
         const doc=await api('/api/notes/document?'+new URLSearchParams({code,name:name||''}));
         if(sequence!==loadSequence)return false;
+        setTimeline(doc);
         const key=keyOf(doc);let ctx=contexts.get(key);
         if(!ctx){
           ctx={...doc,name,content:doc.content,saved:doc.content,key};
@@ -144,15 +236,14 @@
           else if(!doc.exists&&ctx.exists){ctx.remote=doc;ctx.conflict=true;ctx.conflictMessage='笔记被外部删除或改名，请先核对存储目录；不会自动重建旧文件。';}
           else Object.assign(ctx,doc,{saved:doc.content});
         }
-        showDocument(ctx);if(changed(ctx)&&!ctx.conflict)saveTimer=setTimeout(()=>flush(ctx),800);
+        showDocument(ctx);scheduleSave(ctx);
         return true;
       }catch(error){status('读取失败：'+error.message,true);return false;}
       finally{if(sequence===loadSequence){loading=false;editor.setOption('readOnly',!active);}}
     }
     editor.on('change',()=>{
       if(muting||!active)return;
-      const ctx=active;ctx.content=editor.getValue();ctx.failed=false;remember(ctx);showStatus();conflictUI();updateToc();clearTimeout(saveTimer);
-      if(!ctx.conflict)saveTimer=setTimeout(()=>flush(ctx),800);
+      const ctx=active;ctx.content=editor.getValue();ctx.editRevision=(ctx.editRevision||0)+1;ctx.failed=false;remember(ctx);showStatus();conflictUI();updateToc();scheduleSave(ctx);
     });
     editor.on('cursorActivity',()=>{if(!muting&&active)active.cursor=editor.getCursor();});
     function newRecord(){
@@ -183,15 +274,17 @@
         conflictUI();if(ctx.conflict)showStatus();
       }catch(error){status('文件检查失败：'+error.message,true);}
     }
-    setInterval(checkExternal,3000);window.addEventListener('focus',checkExternal);
+    setInterval(()=>{checkExternal();if(!el('trend-panel').hidden&&!quick.open)refreshTimeline();},3000);
+    window.addEventListener('focus',()=>{checkExternal();refreshTimeline();});
     window.addEventListener('beforeunload',event=>{if([...contexts.values()].some(c=>changed(c)||c.saving||c.draftPending||c.conflict)){event.preventDefault();event.returnValue='';}});
     document.addEventListener('visibilitychange',()=>{if(document.hidden)flush(active);else checkExternal();});
     el('notes-use-disk').onclick=async()=>{
       const ctx=active;if(!ctx?.remote)return;
+      if(!confirm('采用磁盘版本会放弃当前未保存内容。如需保留，请先导出草稿。'))return;
       try{
-        await api('/api/notes/recovery',{code:ctx.code,content:ctx.content,directory_version:ctx.directory_version});
+        clearTimeout(ctx.saveTimer);ctx.saveTimer=null;
         Object.assign(ctx,ctx.remote,{saved:ctx.remote.content,conflict:false,remote:null});await draft('delete',ctx.key).catch(()=>{});showDocument(ctx);
-      }catch(error){status('保留草稿副本失败：'+error.message,true);}
+      }catch(error){status('读取磁盘版本失败：'+error.message,true);}
     };
     el('notes-use-local').onclick=()=>{
       const ctx=active;if(!ctx?.remote)return;ctx.version=ctx.remote.version;ctx.saved=ctx.remote.content;ctx.conflict=false;ctx.remote=null;ctx.failed=false;conflictUI();flush(ctx);
@@ -203,9 +296,13 @@
     el('notes-list-format').onclick=()=>{if(!active||loading)return;setPreview(false);editor.replaceSelection('- '+editor.getSelection());};
     el('notes-undo').onclick=()=>editor.undo();el('notes-redo').onclick=()=>editor.redo();
     el('notes-export').onclick=()=>active&&download(active.content,active.file);
-    async function closeQuick(){await flush(active);quick.close();el('notes-main-host').append(workspace);}
+    async function closeQuick(){if(!await flush(active))return false;quick.close();el('notes-main-host').append(workspace);return true;}
     el('notes-close').onclick=closeQuick;quick.addEventListener('cancel',event=>{event.preventDefault();closeQuick();});
-    el('notes-full').onclick=async()=>{await closeQuick();el('notes-tab').click();};
+    const outsideQuick=event=>{const rect=quick.getBoundingClientRect();return event.target===quick&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom);};
+    let backdropPress=false;
+    quick.addEventListener('pointerdown',event=>{backdropPress=outsideQuick(event);});
+    quick.addEventListener('click',event=>{const dismiss=backdropPress&&outsideQuick(event);backdropPress=false;if(dismiss)closeQuick();});
+    el('notes-full').onclick=async()=>{if(await closeQuick())el('notes-tab').click();};
     el('notes-current').onclick=()=>openDocument();
 
     const browser=document.createElement('dialog');browser.className='notes-dialog';document.body.append(browser);
@@ -228,65 +325,55 @@
         };browser.searchSequence=0;el('notes-search').oninput=render;render();
       }catch(error){el('notes-browser-list').textContent=error.message;}
     };
-    el('notes-history').onclick=async()=>{
-      if(!active)return;const ctx=active;
-      browser.innerHTML='<div class="notes-head"><h3>历史版本</h3><button type="button" data-close>关闭</button></div><p>加载到编辑器后会自动保存；当前版本会先保留。冲突副本不自动清理。</p><div class="notes-list" id="notes-browser-list"></div>';
-      browser.querySelector('[data-close]').onclick=()=>browser.close();browser.showModal();
-      try{const data=await api('/api/notes/history?'+new URLSearchParams({code:ctx.code}));
-        for(const row of data.items){const button=document.createElement('button');button.textContent=row.id+' · '+new Date(row.updated_at*1000).toLocaleString('zh-CN');button.onclick=async()=>{
-          try{const old=await api('/api/notes/history?'+new URLSearchParams({code:ctx.code,id:row.id}));
-            if(ctx!==active)return;
-            const box=document.createElement('textarea');box.value=old.content;box.style.cssText='width:100%;height:35vh';
-            const restore=document.createElement('button');restore.textContent='将此版本加载到编辑器';restore.onclick=()=>{editor.setValue(old.content);browser.close();setPreview(false);};
-            el('notes-browser-list').replaceChildren(box,restore);
-          }catch(error){status(error.message,true);}
-        };el('notes-browser-list').append(button);}
-        if(!data.items.length)el('notes-browser-list').textContent='暂无历史版本。';
-      }catch(error){el('notes-browser-list').textContent=error.message;}
-    };
-
     const picker=document.createElement('dialog');picker.className='notes-dialog';document.body.append(picker);
     let pickSequence=0;
     async function insertData(context={}){
       if(!active||loading)return;const ctx=active;
       const cursor=editor.getCursor();
-      picker.innerHTML=`<div class="notes-head"><h3>插入已有本地数据</h3><button type="button" id="notes-pick-close">关闭</button></div><div class="notes-filter"><label>数据<select id="notes-pick-group"><option value="valuation">估值与分位</option><option value="financial">经营趋势</option><option value="chips">股东与融资</option><option value="business">主营构成</option><option value="statements">财务三表</option></select></label><label>周期<select id="notes-pick-mode"><option value="quarter">单季度</option><option value="ytd">当年累计</option><option value="year">年度</option><option value="ttm">TTM</option></select></label><label>日期／报告期<select id="notes-pick-period"><option value="">最新已有</option></select></label><label>历史区间<select id="notes-pick-years"><option value="10">近10年</option><option value="5">近5年</option><option value="3">近3年</option></select></label><label>维度<select id="notes-pick-dimension"><option value="2">产品</option><option value="1">行业</option><option value="3">地区</option></select></label><label>报表<select id="notes-pick-statement"><option value="lrb">利润表</option><option value="fzb">资产负债表</option><option value="llb">现金流量表</option></select></label><label>筹码<select id="notes-pick-kind"><option value="holders">股东户数</option><option value="financing">融资</option></select></label></div><p id="notes-pick-status" role="status"></p><input id="notes-pick-search" aria-label="筛选指标" placeholder="筛选指标或主营项目"><div id="notes-pick-list" class="notes-snapshot-list"></div><div class="notes-filter"><label>插入形式<select id="notes-pick-format"><option value="inline">单项文字</option><option value="table">数据表</option></select></label><label>插入位置<select id="notes-pick-position"><option value="cursor">当前光标</option><option value="new">新日期记录</option></select></label></div><pre id="notes-pick-preview" class="notes-snapshot-preview"></pre><div class="notes-actions"><button type="button" id="notes-pick-confirm" disabled>插入笔记</button></div>`;
+      picker.innerHTML=`<div class="notes-head"><h3>插入已有本地数据</h3><button type="button" id="notes-pick-close">关闭</button></div><div class="notes-filter"><label>数据<select id="notes-pick-group"><option value="valuation">估值与分位</option><option value="financial">经营趋势</option><option value="chips">股东与融资</option><option value="business">主营构成</option><option value="statements">财务三表</option></select></label><label>周期<select id="notes-pick-mode"><option value="quarter">单季度</option><option value="ytd">当年累计</option><option value="year">年度</option><option value="ttm">TTM</option></select></label><label>日期／报告期<select id="notes-pick-period"><option value="">最新已有</option></select></label><label>历史区间<select id="notes-pick-years"><option value="10">近10年</option><option value="5">近5年</option><option value="3">近3年</option></select></label><label>数据日期<input id="notes-pick-date" type="date" max="${localDate()}"></label><label>维度<select id="notes-pick-dimension"><option value="2">产品</option><option value="1">行业</option><option value="3">地区</option></select></label><label>报表<select id="notes-pick-statement"><option value="lrb">利润表</option><option value="fzb">资产负债表</option><option value="llb">现金流量表</option></select></label><label>筹码<select id="notes-pick-kind"><option value="holders">股东户数</option><option value="financing">融资</option></select></label></div><p id="notes-pick-status" role="status"></p><input id="notes-pick-search" aria-label="筛选指标" placeholder="筛选指标或主营项目"><div id="notes-pick-list" class="notes-snapshot-list"></div><div class="notes-filter"><label>插入形式<select id="notes-pick-format"><option value="inline">单项文字</option><option value="table">数据表</option></select></label><label>插入位置<select id="notes-pick-position"><option value="cursor">当前光标</option><option value="new">新日期记录</option></select></label><label id="notes-pick-basis-option" hidden><input id="notes-pick-basis" type="checkbox">插入口径</label></div><pre id="notes-pick-preview" class="notes-snapshot-preview"></pre><div class="notes-actions"><button type="button" id="notes-pick-confirm" disabled>插入笔记</button></div>`;
       el('notes-pick-close').onclick=()=>{pickSequence++;picker.close();};picker.showModal();
       const assign=(id,value)=>{if(value&&[...el(id).options].some(o=>o.value===String(value)))el(id).value=value;};
       assign('notes-pick-group',context.group);assign('notes-pick-mode',context.mode);assign('notes-pick-years',context.years);assign('notes-pick-dimension',context.dimension);assign('notes-pick-statement',context.statement);assign('notes-pick-kind',context.kind);
       if(!ctx.content.trim()||!ctx.cursor)el('notes-pick-position').value='new';
       let snapshot=null,selected=new Set();
       const cell=x=>String(x).replace(/[|\r\n]/g,' ');
+      const itemValue=row=>row.value+(row.position?`（${row.position.marker} ${row.position.label}）`:'');
       function fragment(){
         const rows=(snapshot?.items||[]).filter(r=>selected.has(r.id));if(!rows.length)return '';
-        const table=el('notes-pick-format').value==='table';
-        const text=table?'\n\n| 指标 | 数值 | 日期／报告期 | 口径 |\n|---|---:|---|---|\n'+rows.map(r=>`| ${cell(r.label)} | ${cell(r.value)} | ${cell(r.date)} | ${cell(r.basis)} |`).join('\n')+'\n':rows.map(r=>`${r.label} ${r.value}${/Q\d/.test(r.label)?`（${r.basis}）`:''}`).join('；');
+        const table=el('notes-pick-format').value==='table',basis=el('notes-pick-basis').checked;
+        const text=table?'\n\n| 指标 | 数值 | 日期／报告期 |'+(basis?' 口径 |':'')+'\n|---|---:|---|'+(basis?'---|':'')+'\n'+rows.map(r=>`| ${cell(r.label)} | ${cell(itemValue(r))} | ${cell(r.date)} |${basis?` ${cell(r.basis)} |`:''}`).join('\n')+'\n':rows.map(r=>`${r.label} ${itemValue(r)}${/Q\d/.test(r.label)?`（${r.basis}）`:''}`).join('；');
         return text;
       }
-      function update(){const content=fragment();el('notes-pick-preview').textContent=content||'请选择需要插入的数据。';el('notes-pick-confirm').disabled=!content;}
+      function update(){el('notes-pick-basis-option').hidden=el('notes-pick-format').value!=='table';const content=fragment();el('notes-pick-preview').textContent=content||'请选择需要插入的数据。';el('notes-pick-confirm').disabled=!content;}
       function renderRows(){
-        const query=el('notes-pick-search').value.trim().toLowerCase();el('notes-pick-list').innerHTML=(snapshot?.items||[]).filter(r=>(r.label+' '+r.value).toLowerCase().includes(query)).map(r=>`<label class="notes-snapshot-row"><input type="checkbox" value="${esc(r.id)}" ${selected.has(r.id)?'checked':''}><span>${esc(r.label)}</span><strong>${esc(r.value)}</strong><small>${esc(r.date)} · ${esc(r.basis)}${r.available?'':' · 可显式插入缺失说明'}</small></label>`).join('');
+        const query=el('notes-pick-search').value.trim().toLowerCase();el('notes-pick-list').innerHTML=(snapshot?.items||[]).filter(r=>(r.label+' '+r.value).toLowerCase().includes(query)).map(r=>`<label class="notes-snapshot-row"><input type="checkbox" value="${esc(r.id)}" ${selected.has(r.id)?'checked':''}><span>${esc(r.label)}</span><strong>${esc(itemValue(r))}</strong><small>${esc(r.date)} · ${esc(r.basis)}${r.available?'':' · 可显式插入缺失说明'}</small></label>`).join('');
         el('notes-pick-list').querySelectorAll('input').forEach(input=>input.onchange=()=>{if(input.checked)selected.add(input.value);else selected.delete(input.value);update();});
       }
       async function load(keepPeriod=false){
         const sequence=++pickSequence,group=el('notes-pick-group').value;
         selected.clear();snapshot=null;update();el('notes-pick-list').replaceChildren();el('notes-pick-status').textContent='正在读取本地数据…';
-        for(const [id,visible] of Object.entries({'notes-pick-mode':['financial','statements'].includes(group),'notes-pick-period':group!=='valuation','notes-pick-years':group==='valuation','notes-pick-dimension':group==='business','notes-pick-statement':group==='statements','notes-pick-kind':group==='chips'}))el(id).closest('label').hidden=!visible;
+        for(const [id,visible] of Object.entries({'notes-pick-mode':['financial','statements'].includes(group),'notes-pick-period':group!=='valuation','notes-pick-years':group==='valuation','notes-pick-date':group==='valuation','notes-pick-dimension':group==='business','notes-pick-statement':group==='statements','notes-pick-kind':group==='chips'}))el(id).closest('label').hidden=!visible;
         try{
           const request={code:ctx.code,group,mode:el('notes-pick-mode').value,years:el('notes-pick-years').value,dimension:el('notes-pick-dimension').value,statement:el('notes-pick-statement').value,kind:el('notes-pick-kind').value,comparison:context.comparison||'yoy'};
           if(group==='statements'&&!['quarter','ytd'].includes(request.mode)){request.mode='ytd';el('notes-pick-mode').value='ytd';}
+          if(group==='valuation'&&el('notes-pick-date').value)request.as_of=el('notes-pick-date').value;
           if(keepPeriod&&el('notes-pick-period').value)request.period=el('notes-pick-period').value;
           else if(context.period){request.period=context.period;context.period=null;}
           const fresh=await api('/api/notes/snapshot',request);
           if(sequence!==pickSequence||ctx!==active)return;
           snapshot=fresh;
+          if(group==='valuation'){
+            el('notes-pick-date').value=fresh.as_of||'';
+            el('notes-pick-date').min=fresh.available_dates?.[0]||'';
+          }
           el('notes-pick-period').innerHTML='<option value="">最新已有</option>'+(snapshot.periods||[]).map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');assign('notes-pick-period',request.period);
-          el('notes-pick-status').textContent=`${snapshot.name} · ${ctx.code} · 只读取已保存资料，插入后固定为当时快照。${group==='business'?'主营项目使用来源原始名称。':''}`;
+          el('notes-pick-status').textContent=`${snapshot.name} · ${ctx.code} · 只读取已保存资料，插入后固定为当时快照。${group==='business'?'主营项目使用来源原始名称。':''}${group==='valuation'?`数据日期 ${fresh.as_of}；历史分位截至该日计算，使用当前保存版本。${fresh.has_date_data?'':'所选日期暂无有效本地数据，请选择其他日期。'}`:''}`;
           renderRows();update();
         }catch(error){if(sequence===pickSequence){el('notes-pick-status').textContent=error.message;}}
       }
       ['group','mode','years','dimension','statement','kind'].forEach(k=>el('notes-pick-'+k).onchange=()=>load());el('notes-pick-period').onchange=()=>load(true);
-      el('notes-pick-search').oninput=renderRows;el('notes-pick-format').onchange=update;
+      el('notes-pick-date').onchange=()=>load();
+      el('notes-pick-search').oninput=renderRows;el('notes-pick-format').onchange=update;el('notes-pick-basis').onchange=update;
       el('notes-pick-confirm').onclick=()=>{
         if(ctx!==active||ctx.code!==snapshot?.code){el('notes-pick-status').textContent='股票上下文已变化，请重新选择。';return;}
         const content=fragment();if(!content)return;setPreview(false);
@@ -331,7 +418,9 @@
       const enabled=['trend','business','statements'].includes(currentView());
       const hadGutter=shell.classList.contains('notes-dock-active');shell.classList.toggle('notes-dock-active',enabled);
       if(hadGutter!==enabled)requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));
-      const module=enabled?currentModule():null;floating.hidden=!module||quick.open;
+      const module=enabled?currentModule():null;
+      const announcement=el('stock-announcement-list');
+      floating.hidden=!module||Boolean(document.querySelector('dialog[open]'))||Boolean(announcement&&!announcement.hidden);
       if(!module)return;
       floating.dataset.module=module.key;floating.setAttribute('aria-label',module.label+' · 投资笔记快捷操作');
       el('notes-floating-insert').title='插入'+module.label+'数据到笔记';
@@ -342,6 +431,10 @@
     }
     let dockFrame;
     function scheduleDock(){if(!dockFrame)dockFrame=requestAnimationFrame(()=>{dockFrame=null;updateFloating();});}
+    const overlayObserver=new MutationObserver(records=>{
+      if(records.some(record=>record.target.matches('dialog,#stock-announcement-list')))updateFloating();
+    });
+    overlayObserver.observe(document.body,{subtree:true,attributes:true,attributeFilter:['hidden','open']});
     window.addEventListener('scroll',scheduleDock,{passive:true});window.addEventListener('resize',scheduleDock);
     const dockObserver=new ResizeObserver(scheduleDock);['trend','business','statements'].forEach(key=>dockObserver.observe(el(key+'-panel')));
     el('notes-floating-write').onclick=()=>openQuick({},false);
@@ -354,17 +447,18 @@
         if(quick.open){quick.close();el('notes-main-host').append(workspace);}
         if(!active)openDocument();else{editor.refresh();checkExternal();}
       }else flush(active);
+      if(event.detail.tab==='trend')refreshTimeline();
       updateFloating();
     });
-    window.investmentNotes={flush:async()=>{for(const ctx of contexts.values())if(!await flush(ctx))return false;return true;},reload:()=>{contexts.clear();active=null;return main.hidden&&!quick.open?Promise.resolve():openDocument();}};
-    setupSettings();if(!main.hidden)openDocument();
+    window.investmentNotes={valuationAnnotations,openTimelineDate,flush:async()=>{for(const ctx of contexts.values())if(!await flush(ctx))return false;return true;},reload:()=>{contexts.clear();active=null;timelineDoc=null;timelineEntries=[];refreshTimeline();return main.hidden&&!quick.open?Promise.resolve():openDocument();}};
+    setupSettings();if(!main.hidden)openDocument();else refreshTimeline();
   };
 
   function setupSettings(){
     const tabs=document.querySelector('#maintenance-panel .maintenance-tabs');if(!tabs)return;
     const button=document.createElement('button');button.type='button';button.id='maintenance-notes-tab';button.role='tab';button.setAttribute('aria-selected','false');button.setAttribute('aria-controls','maintenance-notes-panel');button.tabIndex=-1;button.textContent='投资笔记设置';tabs.append(button);
     const section=document.createElement('section');section.id='maintenance-notes-panel';section.role='tabpanel';section.setAttribute('aria-labelledby',button.id);section.hidden=true;section.className='panel notes-settings';
-    section.innerHTML=`<h3>投资笔记存储位置</h3><p>一只股票一个 Markdown 文件。目录位于后台所在电脑，可选择其他笔记软件的专用子目录。</p><p id="notes-setting-current"></p><label>存储目录<input class="notes-settings-path" id="notes-setting-path" placeholder="后台电脑上的绝对目录路径"></label><div class="notes-settings-actions"><button type="button" id="notes-setting-choose">选择文件夹</button><button type="button" id="notes-setting-check">检查目录</button><button type="button" id="notes-setting-scan">重新扫描</button></div><p><label>更换目录时<select id="notes-setting-mode"><option value="copy">复制现有笔记及附件后切换（保留原文件）</option><option value="use">使用目标目录已有笔记</option></select></label></p><div class="notes-settings-actions"><button type="button" id="notes-setting-preview">预览目录切换</button><button type="button" id="notes-setting-apply" hidden>确认应用此目录</button></div><p id="notes-setting-status" role="status"></p><pre id="notes-setting-preview-result" class="notes-settings-preview"></pre><details><summary>目录文件与股票关联</summary><div class="notes-list" id="notes-setting-files"></div></details><p>SQLite 备份不包含这些文件；完整备份请同时复制笔记目录（含附件和 .history）。</p>`;
+    section.innerHTML=`<h3>投资笔记存储位置</h3><p>一只股票一个 Markdown 文件。目录位于后台所在电脑，可选择其他笔记软件的专用子目录。</p><p id="notes-setting-current"></p><label>存储目录<input class="notes-settings-path" id="notes-setting-path" placeholder="后台电脑上的绝对目录路径"></label><div class="notes-settings-actions"><button type="button" id="notes-setting-choose">选择文件夹</button><button type="button" id="notes-setting-check">检查目录</button><button type="button" id="notes-setting-scan">重新扫描</button></div><p><label>更换目录时<select id="notes-setting-mode"><option value="copy">复制现有笔记及附件后切换（保留原文件）</option><option value="use">使用目标目录已有笔记</option></select></label></p><div class="notes-settings-actions"><button type="button" id="notes-setting-preview">预览目录切换</button><button type="button" id="notes-setting-apply" hidden>确认应用此目录</button></div><p id="notes-setting-status" role="status"></p><pre id="notes-setting-preview-result" class="notes-settings-preview"></pre><details><summary>目录文件与股票关联</summary><div class="notes-list" id="notes-setting-files"></div></details><p>SQLite 备份不包含这些文件；完整备份请同时复制笔记目录（含附件）。</p>`;
     el('maintenance-panel').append(section);
     let settings,previewToken=null,busy=false;
     const message=(text,error=false)=>{el('notes-setting-status').textContent=text;el('notes-setting-status').className=error?'notes-error':'';};
