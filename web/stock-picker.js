@@ -48,7 +48,7 @@ window.initStockPicker = function (state) {
   async function choose(code) {
     if (busy) return;
     await change({action:'visit',code});
-    window.location.href = '/?code=' + encodeURIComponent(code);
+    window.location.href = '/?code=' + encodeURIComponent(code) + '&tab=trend';
   }
   function button(text, action, disabled = false) {
     const node = document.createElement('button'); node.type = 'button'; node.textContent = text;
