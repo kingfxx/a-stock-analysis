@@ -77,8 +77,12 @@ def test_unified_note_tabs_from_both_pages(index_server, monkeypatch, tmp_path):
                 page.locator('#notes-browser-list button').click()
                 page.wait_for_function('!document.getElementById("notes-browser").open && document.getElementById("notes-company").textContent.includes("沪深300")')
                 assert '仅指数正文' in page.evaluate('document.querySelector(".CodeMirror").CodeMirror.getValue()')
+                assert page.locator('#notes-preview-button').get_attribute('aria-pressed') == 'true'
+                assert page.locator('#notes-rendered').is_visible()
+                assert not page.locator('#notes-editor-host').is_visible()
                 if kind == 'stock':
                     assert page.locator('#notes-insert').is_disabled()
+                page.locator('#notes-edit').click()
                 page.evaluate('document.querySelector(".CodeMirror").CodeMirror.replaceRange("\\n统一管理编辑。\\n",{line:4,ch:0});window.investmentNotes.flush()')
                 assert '统一管理编辑' in (notes.root()/index['file']).read_text(encoding='utf-8')
                 page.locator('#notes-all').click()
@@ -87,6 +91,8 @@ def test_unified_note_tabs_from_both_pages(index_server, monkeypatch, tmp_path):
                 page.locator('#notes-browser-list button').filter(has_text='平安银行').click()
                 page.wait_for_function('!document.getElementById("notes-browser").open && document.getElementById("notes-company").textContent.includes("平安银行")')
                 assert '仅个股正文' in page.evaluate('document.querySelector(".CodeMirror").CodeMirror.getValue()')
+                assert page.locator('#notes-preview-button').get_attribute('aria-pressed') == 'true'
+                assert page.locator('#notes-rendered').is_visible()
                 if kind == 'index':
                     assert page.locator('#notes-insert').is_disabled()
                 assert '统一管理编辑' not in (notes.root()/stock['file']).read_text(encoding='utf-8')

@@ -99,6 +99,7 @@ def test_index_notes_real_browser(index_server, tmp_path):
             assert page.locator('#notes-pick-index-source').input_value() == 'csindex|history.rolling|v1'
             page.locator('#notes-pick-list input[value=pe_rolling_percentile]').check()
             assert '🟢 极低' in page.locator('#notes-pick-preview').inner_text()
+            assert page.locator('#notes-pick-preview').inner_text().startswith('- ')
             page.locator('#notes-pick-list input[value=pe_rolling]').check()
             page.locator('#notes-pick-format').select_option('table')
             preview = page.locator('#notes-pick-preview').inner_text()

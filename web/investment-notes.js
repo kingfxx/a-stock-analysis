@@ -124,7 +124,7 @@
         if(lane<0)return [];lanes[lane]=x;
         return [{name:'investment-note:'+date,x:date,xref:'x',y:1.02,yref:'paper',yanchor:'bottom',yshift:lane*30,text:'✎'+(items.length>1?' '+items.length:''),showarrow:false,captureevents:true,
           font:{color:'#101719',size:16},bgcolor:'#57d4e7',bordercolor:'#57d4e7',borderpad:3,
-          hovertext:esc(date)+'<br>'+items.slice(0,5).map(item=>esc(item.label.replace(date,'').trim()||'笔记')).join('<br>')+(items.length>5?'<br>…':'')+'<br>点击查看笔记',hoverlabel:{bgcolor:'#23343d',font:{color:'#edf4f4'}}}];
+          hovertext:esc(date)+'<br>'+items.slice(0,5).map(item=>esc(item.label.replace(date,'').trim()||'笔记')).join('<br>')+(items.length>5?'<br>…':''),hoverlabel:{bgcolor:'#23343d',font:{color:'#edf4f4'}}}];
       });
     }
     notesToggle.onclick=()=>{notesToggle.setAttribute('aria-pressed',String(notesToggle.getAttribute('aria-pressed')!=='true'));timelineChanged();};
@@ -328,7 +328,7 @@
             let match=[row.code,row.title,row.file].join(' ').toLowerCase().includes(query);
             if(query&&!match){try{const doc=await api('/api/notes/document?'+new URLSearchParams({code:row.code}));match=doc.content.toLowerCase().includes(query);}catch{}}
             if(request!==browser.searchSequence)return;
-            if(match){const button=document.createElement('button');button.innerHTML=`${esc(row.title||row.code)}<small>${esc(row.file)}</small>`;button.onclick=async()=>{if(await openDocument(row.code,row.title)){browser.close();}};target.append(button);}
+            if(match){const button=document.createElement('button');button.innerHTML=`${esc(row.title||row.code)}<small>${esc(row.file)}</small>`;button.onclick=async()=>{if(await openDocument(row.code,row.title)){setPreview(true);browser.close();}};target.append(button);}
           }
           if(!target.children.length)target.textContent=query?`没有匹配的${category==='index'?'指数':'个股'}笔记。`:`暂无${category==='index'?'指数':'个股'}笔记。`;
         };el('notes-search').oninput=render;
@@ -366,7 +366,7 @@
       function fragment(){
         const rows=(snapshot?.items||[]).filter(r=>selected.has(r.id));if(!rows.length)return '';
         const table=el('notes-pick-format').value==='table',basis=el('notes-pick-basis').checked;
-        const text=table?'\n\n| 指标 | 数值 | 日期／报告期 |'+(basis?' 口径 |':'')+'\n|---|---:|---|'+(basis?'---|':'')+'\n'+compactTableRows(rows).map(r=>`| ${cell(r.label)} | ${cell(r.value)} | ${cell(r.date)} |${basis?` ${cell(r.basis)} |`:''}`).join('\n')+'\n':rows.map(r=>`${r.label} ${itemValue(r)}${/Q\d/.test(r.label)?`（${r.basis}）`:''}`).join('；');
+        const text=table?'\n\n| 指标 | 数值 | 日期／报告期 |'+(basis?' 口径 |':'')+'\n|---|---:|---|'+(basis?'---|':'')+'\n'+compactTableRows(rows).map(r=>`| ${cell(r.label)} | ${cell(r.value)} | ${cell(r.date)} |${basis?` ${cell(r.basis)} |`:''}`).join('\n')+'\n':'- '+rows.map(r=>`${r.label} ${itemValue(r)}${/Q\d/.test(r.label)?`（${r.basis}）`:''}`).join('；');
         return text;
       }
       function update(){el('notes-pick-basis-option').hidden=el('notes-pick-format').value!=='table';const content=fragment();el('notes-pick-preview').textContent=content||'请选择需要插入的数据。';el('notes-pick-confirm').disabled=!content;}
