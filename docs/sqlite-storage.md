@@ -1,6 +1,6 @@
 # SQLite 存储、数据更新与备份
 
-当前结构版本为v39。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
+当前结构版本为v40。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
 
 v37仅扩展既有`index_price_observations`，新增volume、amount、change_points、change_pct、turnover_rate、amount_ratio、constituent_count、mean_price、float_market_cap和mean_float_market_cap十个可空字段，另增field_lineage_json字段级来源/估算JSON，不新增业务表。中证/申万原series及行情行就地升级v2，保留ID及OHLC，不保留v1行情副本；Legu/Sina继续v1。每个series_id/observation_date物理唯一，历史修订就地更新，version只作计数；不建立独立derived行情。估算字段标记及父依赖同行存储，官方值优先；仅补算保留原source/batch/obtained_at，computed_at在估算JSON中，updated_at是真实写入时间；缺依赖保持NULL或撤回。单位、字段映射、缺值和派生估算规则见[指数行情字段映射](index-data-collection.md#field-mapping)。v38后逻辑来源/时间语义保持，物理来源/时间格式见下节。
 
@@ -525,3 +525,18 @@ python -m quarterly_dashboard.storage check --database $restorePath
 财务抓取同时独立同步 `gjzb`，沿用 `financial_reports` 表和 `financial:gjzb` 同步水位，无需结构迁移。旧库首次运行时补齐关键指标完整历史，后续与三表采用相同的 24 小时检查、近期 2 期增量及定期全量机制；手动刷新会检查四类来源。抓取失败或丢失已有有效科目时保留已存记录并返回警告，不阻断其他类型成功提交。原始 JSON 保留所有来源科目、分组、重复项、单位/显示格式及来源元信息，暂不映射至图表和 AI 指标；加权 ROE 和来源 ROIC 不替换既有估算口径。
 
 版本 33 新增 `stock_announcement_identities`（巨潮股票组织身份）、`stock_announcement_metadata`（公告筛选元数据版本）和 `report_disclosure_dates`（报告期日期判断版本）。三表保存身份/公告/判断关联及真实取得、验证时间；公告来源通过公共 `collection_sources`/`collection_batches` 追溯，sync run 记录成功检查范围。个股策略为 `metadata_only`：不保留响应正文、响应哈希、PDF 或正文片段。日期判断按规则版本和当前标记保留历史修订，人工 `report_overrides` 仍在读取末尾优先。时间展示采用各表 `obtained_at`、`updated_at`、`created_at`、`validated_at`，结果表通过 `run_id` 关联任务完成时间；没有成功检查时显示未记录。默认类别覆盖年报、半年报、一季报、三季报、业绩预告及权益分派；类别 profile 写入 sync run/batch 范围，扩展类别会重新覆盖目标范围。请求范围下限不早于上海当前日期前十个日历年，已验证覆盖水位不代表公告网站全部历史。
+
+## v40 统一采集管理
+
+`collection_schedules`保留原五列，不重写拥挤度配置。新增两张运行与配置表：
+
+|表|列／用途|时间依据|
+|---|---|---|
+|collection_schedule_rules|task_key主键且外键引用collection_schedules；rule_json日周月规则、params_json白名单参数；无原始响应|updated_at真实保存时间|
+|collection_schedule_slots|task_key+slot_key主键；status running/complete/failed/pending、operation_ref引用既有领域运行、attempts有限恢复次数、error；不复制进度或事实|started_at、finished_at、updated_at真实领取／结束／状态更新时间|
+
+运行引用可以是index operation ID或sw_update_runs:id，跨类型引用不建立伪外键；原领域历史不重写。槽位状态及operation_ref各有索引，行业action/id和指数dataset/started_at增加轻量历史查询索引。sw_update_runs新增cancel_requested（默认0）仅用于定时安全停机，未开放行业用户取消；原任务时间仍使用started_at/finished_at。
+
+两张新表在maintenance.DESCRIPTIONS登记「运行与配置」。TIME_COLUMNS自动识别上述真实字段，空表／缺时间显示暂无数据／未记录，slot_key和目标报告期不作为更新时间。公共batch通过槽位operation_ref识别真实scheduled触发；来源文件策略及数值精度不变。
+
+隔离库1000条代表性槽位实测含索引258048字节（258.048字节/行），规则仅1行分配8192字节（含主键索引，页分配下限，不作稳态行大小估计）；1000条领域记录+槽位写入约17ms，任务目录常用读取约5—7ms。机器与规模相关，实测及查询计划见[data/verification报告](../data/verification/reports/collection_management_20261025.json)。维护统计已验证新表发现、分类、用途、数量、大小、真实时间及外键。设计与限制见[统一采集管理](collection-management.md)。

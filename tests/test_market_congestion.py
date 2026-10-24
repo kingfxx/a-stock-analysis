@@ -149,8 +149,10 @@ def test_read_missing_dates_not_confused_with_channel_nulls(db):
     with pytest.raises(ValueError):m.read(db,index_code='sw:801010')
 
 
-def test_daily_schedule_restart_busy_disabled_and_cooldown(db):
-    ready(db);m.configure(db,{'enabled':True})
+def test_daily_schedule_restart_busy_disabled_and_cooldown(db,monkeypatch):
+    ready(db)
+    monkeypatch.setattr(m,'utc_now',lambda:'2026-10-17T09:00:00+00:00')
+    m.configure(db,{'enabled':True})
     now=datetime(2026,10,17,18,30,tzinfo=m.ZONE);calls=[]
     def execute(database,operation):
         calls.append(operation)
@@ -413,3 +415,24 @@ def test_browser_dual_axes_all_broad_ranges_and_read_only(live):
             assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')
             assert not calls and not external and not errors
         finally:browser.close()
+
+def test_due_slot_reuses_successful_cross_midnight_html_check(db,monkeypatch):
+    ready(db)
+    monkeypatch.setattr(m,'utc_now',lambda:'2026-10-24T08:00:00+00:00')
+    m.configure(db,{'enabled':True,'local_time':'18:00'})
+    batch,sid=seed(db,'html_recent_table')
+    finish_batch(db,batch,'complete')
+    with db.connection(write=True) as conn:
+        conn.execute('UPDATE collection_sources SET obtained_at=? WHERE id=?',('2026-10-25T00:30:00+00:00',sid))
+    result=m.scheduled_tick(db,now=datetime(2026,10,25,9,tzinfo=m.ZONE),execute=lambda *args:pytest.fail('successful due-period check should be reused'))
+    assert result['skipped']
+    with db.connection() as conn:
+        row=conn.execute('SELECT scope_json FROM index_collection_operations WHERE operation_id=?',(result['operation_id'],)).fetchone()
+        assert json.loads(row[0])['scheduled_date']=='2026-10-24'
+
+
+def test_new_daily_schedule_does_not_replay_slot_before_configuration(db,monkeypatch):
+    ready(db)
+    monkeypatch.setattr(m,'utc_now',lambda:'2026-10-25T14:00:00+00:00')
+    m.configure(db,{'enabled':True,'local_time':'18:00'})
+    assert m.scheduled_tick(db,now=datetime(2026,10,25,22,5,tzinfo=m.ZONE),execute=lambda *args:pytest.fail('save is not a run')) is None

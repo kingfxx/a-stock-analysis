@@ -27,11 +27,7 @@
     panel.innerHTML=`<div class="sw-head"><div><h2>行业内对比</h2><p>按申万行业分类，查看营收、归母利润与市值趋势，对比同行公司表现和行业排行。</p></div></div>
       <p id="sw-status" class="sw-status" role="status" aria-live="polite"></p><p id="sw-path" class="sw-path"></p>
       <p class="sw-alert" id="sw-scope">全市场行业更新独立于个股刷新；每次只处理所选报告期或季度，查看页面只读本地快照。</p>
-      <div class="sw-controls sw-updates"><label>更新报告期<select id="sw-update-period"></select></label><button type="button" id="sw-refresh-financial">更新行业财务</button>
-      <button type="button" id="sw-financial-progress-toggle" aria-expanded="false" aria-controls="sw-financial-progress" aria-label="查看行业财务进度">查看财务进度</button>
-      <label>市值季度<select id="sw-update-quarter"></select></label><button type="button" id="sw-refresh-cap">补齐季度市值</button>
-      <button type="button" id="sw-snapshot-progress-toggle" aria-expanded="false" aria-controls="sw-snapshot-progress" aria-label="查看交易快照进度">查看快照进度</button>
-      <label class="sw-toggle"><input id="sw-recheck-cap" type="checkbox">核对已有市值修订</label></div>
+      <div class="sw-controls sw-updates"><a href="/?tab=maintenance">前往采集管理</a><button type="button" id="sw-financial-progress-toggle" aria-expanded="false" aria-controls="sw-financial-progress">查看财务进度</button><button type="button" id="sw-snapshot-progress-toggle" aria-expanded="false" aria-controls="sw-snapshot-progress">查看快照进度</button></div>
       <div class="sw-progress-details" id="sw-financial-progress" hidden role="status" aria-live="polite"><p id="sw-financial-progress-text">尚无行业财务任务。</p><ul id="sw-financial-progress-list"></ul></div>
       <div class="sw-progress-details" id="sw-snapshot-progress" hidden role="status" aria-live="polite"><p id="sw-snapshot-progress-text">尚无交易快照任务。</p></div>
       <p id="sw-job-status" class="sw-status" role="status" aria-live="polite">财务仅更新指定报告期；交易快照保存季末未复权股价、股本、市值和估值。</p>
@@ -110,14 +106,6 @@
       el('sw-company-total').textContent=`${(data.companies||[]).length} 家`;
       el('sw-company-count').textContent=`匹配 ${matchingCompanies.length} 家公司 · 本页 ${companies.length} 家 · ${companySort==='listing_date'?`上市日期${companyDirection===-1?'从晚到早':'从早到晚'}`:({weighted_roe:'ROE',pe:'PE (TTM)',pb:'PB'}[companySort]||companyFields.find(([key])=>key===companySort)[1])+(companyDirection===-1?'从高到低':'从低到高')}`;
     }
-    const completed=[];const today=new Date(),todayText=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-    for(let year=today.getFullYear()-12;year<=today.getFullYear();year++)for(let q=1;q<=4;q++){
-      const month=q*3,last=new Date(year,month,0).getDate(),end=`${year}-${String(month).padStart(2,'0')}-${last}`;
-      if(end<todayText)completed.unshift({period:end,quarter:`${year}Q${q}`});
-    }
-    el('sw-update-period').innerHTML=completed.map(r=>`<option value="${r.period}">${r.period}</option>`).join('');
-    el('sw-update-quarter').innerHTML=completed.filter(r=>r.period>='2015-03-31').map(r=>`<option value="${r.quarter}">${r.quarter}</option>`).join('');
-    let updateDefaultsSet=false;
     function renderProgress(status){
       const progress=status?.result?.collection_progress;
       const financial=status?.action==='financial_period';
@@ -178,7 +166,7 @@
         if(locateCompanies&&!data.empty&&data.selected){locateCompanies=false;companyTab('companies');if(entry.has('industry')){for(const key of ['industry','level','industry_view'])entry.delete(key);window.history.replaceState(null,'','?'+entry);}requestAnimationFrame(()=>{el('sw-companies-tab').closest('.sw-company-toolbar').scrollIntoView({block:'start',behavior:'instant'});});}
         const statusResponse=await fetch('/api/industry/status',{cache:'no-store'});
         if(statusResponse.ok&&request===seq){
-          const status=await statusResponse.json();busy(status.running);
+          const status=await statusResponse.json();
           renderJobStatus(status);
           if(status.running&&!pollTimer)pollTimer=setTimeout(poll,1500);
           if(!status.running){clearTimeout(pollTimer);pollTimer=null;}
@@ -187,13 +175,10 @@
     }
     function choices(id,items,value,label){el(id).innerHTML=`<option value="">全部${label}</option>`+items.map(r=>`<option value="${esc(r.code)}">${esc(r.name)} · ${esc(r.code)}</option>`).join('');el(id).value=value||'';}
     function render(){
-      el('sw-scope').textContent='财务更新一次采集所选报告期的全 A 股（含北交所）三表摘要及业绩指标全部字段；行业展示仍使用已导入沪深公司及申万分类名单。三表摘要不等于完整财报明细。季度交易快照按固定季末交易日采集全部字段，已完成分段跳过，勾选后核对修订。任务独立于个股刷新，查看页面不采集。';
-      el('sw-refresh-financial').textContent='更新全市场财务';
-      el('sw-refresh-cap').textContent='补齐季度交易快照';
+      el('sw-scope').textContent='财务更新一次采集所选报告期的全 A 股（含北交所）三表摘要及业绩指标全部字段；行业展示仍使用已导入沪深公司及申万分类名单。三表摘要不等于完整财报明细。季度交易快照按固定季末交易日采集全部字段，已完成分段跳过；采集与修订核对统一在后台维护的采集管理执行。任务独立于个股刷新，查看页面不采集。';
       el('sw-notes').innerHTML=data.notes.map(n=>`<p>${esc(n)}</p>`).join('')+`<p>官方来源：<a href="https://www.swsresearch.com/swindex/pdf/SwClass2021/SwClassCode_2021.xls" target="_blank" rel="noopener">申万行业分类</a> · <a href="https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls" target="_blank" rel="noopener">股票分类及变更</a>；营收、利润与毛利率计算字段：东方财富 RPT_DMSK_FN_INCOME；加权 ROE：RPT_LICO_FN_CPD；总市值：东方财富全字段交易快照优先（元），缺失时读取同日旧来源。</p>`;
       [1,2,3].forEach(level=>el(`sw-rank-level-${level}`).setAttribute('aria-pressed',String(level===data.level)));
       if(data.empty){el('sw-status').textContent='尚未初始化行业分类及历史，请先导入试运行来源。';return;}
-      if(!updateDefaultsSet){el('sw-update-period').value=data.period||completed[0]?.period;updateDefaultsSet=true;}
       const map=new Map(data.catalog.map(r=>[r.code,r]));let path=[],node=data.selected?.code==='all'?null:data.selected;
       while(node){path.unshift(node);node=map.get(node.parent_code);}
       choices('sw-first',data.catalog.filter(r=>r.level===1),path[0]?.code,'一级');
@@ -360,23 +345,10 @@
     el('sw-companies').addEventListener('click',e=>{const button=e.target.closest('[data-company-sort]');if(!button)return;companyDirection=button.dataset.companySort===companySort?-companyDirection:-1;companySort=button.dataset.companySort;companyPage=0;renderCompanies();});
     async function poll(){
       try{const response=await fetch('/api/industry/status',{cache:'no-store'});const status=await response.json();if(!response.ok)throw new Error(status.error||'读取刷新状态失败');
-        renderJobStatus(status);busy(status.running);
+        renderJobStatus(status);
         if(status.running)pollTimer=setTimeout(poll,1500);else if(!status.error)await load();
-      }catch(e){el('sw-job-status').textContent=e.message;busy(false);}
+      }catch(e){el('sw-job-status').textContent=e.message;}
     }
-    function busy(value){['sw-refresh-financial','sw-refresh-cap','sw-update-period','sw-update-quarter','sw-recheck-cap'].forEach(id=>{el(id).disabled=value;});}
-    async function update(action,target,recheck=false){
-      const scope=`已导入沪深全市场名单（${data?.universe_count||'约 5000'} 家），与当前所选行业无关`;
-      const details=action==='financial_period'
-        ?`更新全市场财务？\n\n报告期：${target}\n采集范围：全 A 股（含北交所）\n内容：利润表、资产负债表、现金流量表摘要及业绩指标（含 ROE），四个接口全部字段。\n行业展示范围：${scope}\n四表校验通过后统一保存；无变化不新增财务版本，真实修订保留。`
-        :`更新全市场季度交易快照？\n\n季度：${target}\n范围：${scope}；已有季度使用固定季末成员名单。\n方式：${recheck?'重新核对该日快照及修订':'采集该日全字段快照，已完成同口径分段跳过'}。\n东方财富同一请求保存该季末交易日的未复权股价、股本、市值和估值等全部字段；完整分页校验后保存，缺失留空。`;
-      if(!window.confirm(details+'\n\n任务开始前每天最多检查一次沪深公司名单、申万分类和上市日期，新公司自动纳入；检查失败沿用旧名单并提示。已有季度市值成员保持固定。\n全市场财务最多同时采集两个接口，每个接口按页顺序处理；交易快照按页串行采集。任务可能需要数分钟。不会刷新个股或其他报告期。\n确认后开始，取消则不执行。'))return;
-      busy(true);
-      try{const response=await fetch('/api/industry/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,target,recheck})});const result=await response.json();if(!response.ok)throw new Error(result.error||'刷新失败');clearTimeout(pollTimer);poll();}
-      catch(e){el('sw-job-status').textContent=e.message;busy(false);}
-    }
-    el('sw-refresh-financial').addEventListener('click',()=>update('financial_period',el('sw-update-period').value));
-    el('sw-refresh-cap').addEventListener('click',()=>update('cap_quarter',el('sw-update-quarter').value,el('sw-recheck-cap').checked));
     el('industry-tab').addEventListener('click',()=>{if(!loaded)load();else window.dispatchEvent(new Event('resize'));});
     if(!panel.hidden)load();
   };

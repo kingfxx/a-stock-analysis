@@ -863,7 +863,7 @@ def _operation_message(status, mode, valuation_batches, derived_result):
     return message
 
 
-def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None,end=None,datasets=None):
+def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None,end=None,datasets=None,*,connection=None):
     valid_datasets=datasets is not None and isinstance(datasets,(list,tuple)) and bool(datasets) and not (set(datasets)-{'bond_zh_us_rate'})
     if mode not in ('full','incremental','backfill','audit','review') or not isinstance(providers,(list,tuple)) or (not providers and not valid_datasets) or not set(providers)<= {'csindex','legu','sws'}:
         raise ValueError('指数采集模式／来源无效')
@@ -878,7 +878,7 @@ def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None
     if start and end and start>end:
         raise ValueError('采集日期范围倒置')
     operation=uuid4().hex
-    with db.connection(write=True) as conn:
+    with (nullcontext(connection) if connection is not None else db.connection(write=True)) as conn:
         if conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone():
             raise ValueError('已有指数任务正在运行，请先等待或取消')
         conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at) VALUES(?,?,?,'running',?)",

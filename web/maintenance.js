@@ -7,8 +7,9 @@
   const date=value=>window.DashboardTime.format(value,'未记录');
   window.initMaintenance=()=>{
     const panel=document.getElementById('maintenance-panel');
-    panel.innerHTML=`<div class="maintenance-head"><div><h2>后台维护</h2><p>本地数据与股票维护</p></div><button id="maintenance-refresh" type="button">刷新本地统计</button></div>
-      <div class="maintenance-tabs" role="tablist" aria-label="后台维护分类"><button id="maintenance-database-tab" type="button" role="tab" aria-selected="true" aria-controls="maintenance-database-panel">数据库预览</button><button id="maintenance-stocks-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-stocks-panel" tabindex="-1">未关注股票管理</button></div>
+    panel.innerHTML=`<div class="maintenance-head"><div><h2>后台维护</h2><p>本地数据与股票维护</p></div><button id="maintenance-refresh" type="button">刷新采集列表</button></div>
+      <div class="maintenance-tabs" role="tablist" aria-label="后台维护分类"><button id="maintenance-collection-tab" type="button" role="tab" aria-selected="true" aria-controls="maintenance-collection-panel">采集管理</button><button id="maintenance-database-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-database-panel" tabindex="-1">数据库预览</button><button id="maintenance-stocks-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-stocks-panel" tabindex="-1">未关注股票管理</button></div>
+      <section id="maintenance-collection-panel" role="tabpanel" aria-labelledby="maintenance-collection-tab"><p id="maintenance-collection-status" role="status" aria-live="polite">切换到此页后读取本地采集状态。</p><div id="maintenance-collection-list"></div></section>
       <section id="maintenance-stocks-panel" role="tabpanel" aria-labelledby="maintenance-stocks-tab" hidden>
       <section class="panel maintenance-unfollowed"><div class="maintenance-controls"><h3>已取消关注 <span id="maintenance-unfollowed-count"></span></h3><button id="maintenance-unfollowed-refresh" type="button">刷新列表</button></div>
         <p>取消关注后保留财务数据、财报原件与研究历史，停止个股自动更新。恢复关注会重新加入“全部股票”和仍然存在的原分组；已删除的分组不会重建。</p>
@@ -16,10 +17,10 @@
         <p id="maintenance-unfollowed-status" role="status" aria-live="polite">切换到此页后读取列表。</p><div id="maintenance-unfollowed-list"></div>
       </section>
       <div id="maintenance-stock-cleanup"></div>
-      <section class="panel maintenance-restore"><h3>整理数据库空间</h3><p>清理记录后执行空间整理，将库内空闲空间归还磁盘。整理期间暂停其他请求，有运行任务时不能执行；数据库目录及临时目录需预留当前数据库大小两倍的空闲空间。整理不创建备份。</p><button id="maintenance-compact-open" type="button" disabled>整理数据库空间…</button><p id="maintenance-compact-status" role="status" aria-live="polite">整理完成后显示实际文件大小变化。</p></section>
+      <section class="panel maintenance-restore"><h3>整理数据库空间</h3><p>清理记录后执行空间整理，将库内空闲空间归还磁盘。整理期间暂停其他请求，有运行任务时不能执行；数据库目录及临时目录需预留当前数据库大小两倍的空闲空间。整理不创建备份。</p><button id="maintenance-compact-open" type="button">整理数据库空间…</button><p id="maintenance-compact-status" role="status" aria-live="polite">整理完成后显示实际文件大小变化。</p></section>
       <dialog id="maintenance-compact-dialog"><form method="dialog"><h3>确认整理数据库空间</h3><p>将整理当前日常数据库，不删除业务记录。期间暂停访问，可能需要数分钟，请等待完成。</p><div class="maintenance-dialog-actions"><button value="cancel">取消</button><button id="maintenance-compact-confirm" type="button">执行整理</button></div></form></dialog>
       </section>
-      <section id="maintenance-database-panel" role="tabpanel" aria-labelledby="maintenance-database-tab">
+      <section id="maintenance-database-panel" role="tabpanel" aria-labelledby="maintenance-database-tab" hidden>
       <p id="maintenance-status" role="status" aria-live="polite">切换到此页后读取统计。</p>
       <div id="maintenance-overview"></div>
 
@@ -33,6 +34,7 @@
       <div id="maintenance-notes" class="maintenance-notes"></div></section></section>`;
     const el=id=>document.getElementById(id);
     window.initStockCleanup(panel);
+    let storageDirty=false;
     let snapshot=null,loading=false,compactBusy=false,sort='total_bytes',direction=-1;
     let session='',preview=null,restoreBusy=false,backupLoading=null;
     let unfollowed=[],unfollowedLoaded=false,unfollowedBusy=false,unfollowedSelected=new Set();
@@ -117,9 +119,9 @@
       try{
         const result=await restoreApi('/api/maintenance/compact',{confirm:'整理'});
         el('maintenance-compact-status').textContent=`整理完成：${size(result.before_bytes)} → ${size(result.after_bytes)}，释放 ${size(result.released_bytes)}。`;
-        await load(true);
+        storageDirty=true;if(!panel.hidden&&!el('maintenance-database-panel').hidden)await load(true);
       }catch(error){el('maintenance-compact-status').textContent='整理未完成或结果待核对：'+error.message;}
-      finally{compactBusy=false;restoreControls(false);el('maintenance-compact-open').disabled=loading||!snapshot;el('maintenance-refresh').disabled=loading;}
+      finally{compactBusy=false;restoreControls(false);el('maintenance-compact-open').disabled=loading;el('maintenance-refresh').disabled=loading;}
     });
     function restoreControls(busy){
       restoreBusy=busy;el('maintenance-backup').disabled=busy;el('maintenance-backup-file').disabled=busy;
@@ -200,27 +202,140 @@
       try{
         const response=await fetch('/api/maintenance/storage'+(refresh?'?refresh=1':''),{cache:'no-store'}),data=await response.json();
         if(!response.ok)throw new Error(data.error||'读取统计失败');
-        snapshot=data;render();el('maintenance-status').textContent=`统计时间：${date(data.generated_at)} · 使用“刷新本地统计”更新`;await backups();
+        snapshot=data;storageDirty=false;render();el('maintenance-status').textContent=`统计时间：${date(data.generated_at)} · 使用“刷新本地统计”更新`;await backups();
       }catch(error){el('maintenance-status').textContent='统计未更新：'+error.message;}
-      finally{loading=false;el('maintenance-refresh').disabled=compactBusy;el('maintenance-compact-open').disabled=compactBusy||restoreBusy||!snapshot;}
+      finally{loading=false;el('maintenance-refresh').disabled=compactBusy;el('maintenance-compact-open').disabled=compactBusy||restoreBusy;}
     }
-    el('maintenance-refresh').addEventListener('click',()=>load(true));
-    window.addEventListener('stock-cleanup-complete',()=>{load(true);loadUnfollowed();});
+    el('maintenance-refresh').addEventListener('click',()=>{if(!el('maintenance-collection-panel').hidden)loadCollections();else if(!el('maintenance-database-panel').hidden)load(true);});
+    window.addEventListener('stock-cleanup-complete',()=>{storageDirty=true;unfollowedLoaded=false;if(!panel.hidden)loadActiveTab();});
     el('maintenance-search').addEventListener('input',renderRows);el('maintenance-category').addEventListener('change',renderRows);
     panel.querySelector('thead').addEventListener('click',event=>{const button=event.target.closest('[data-maintenance-sort]');if(!button)return;const key=button.dataset.maintenanceSort;direction=key===sort?-direction:(['rows','table_bytes','index_bytes','total_bytes','updated_at'].includes(key)?-1:1);sort=key;renderRows();});
-    const tabs=[el('maintenance-database-tab'),el('maintenance-stocks-tab')];
+    let collectionBusy=false,collectionTimer=null,collectionTasks=[];
+    const operationDetails=new Map();
+    const collectionVisible=()=>!panel.hidden&&!el('maintenance-collection-panel').hidden&&!document.hidden;
+    const providerNames={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富'};
+    const progressMarkup='<div class="index-progress-details" role="status" aria-live="polite"><p data-progress-summary></p><ul data-progress-sources></ul></div>';
+    const modeNames={incremental:'增量更新／原范围续跑',review:'修订核对',full:'历史初始化／恢复全量',audit:'覆盖核查',backfill:'指定范围回填'};
+    function providerMenu(task,selected,title){
+      return `<details class="collection-provider-menu" data-provider-menu><summary><span>${title}</span><strong data-provider-selection>已选 ${selected.length} / ${task.providers.length} 项</strong></summary><div class="collection-provider-options">${task.providers.map(provider=>`<label><input type="checkbox" name="provider" value="${provider}" ${selected.includes(provider)?'checked':''}>${esc(providerNames[provider]||provider)} <small>${esc(provider)}</small></label>`).join('')}</div></details>`;
+    }
+    function recentTargets(task){
+      const local=Object.fromEntries(new Intl.DateTimeFormat('en',{timeZone:'Asia/Shanghai',year:'numeric',month:'numeric'}).formatToParts(new Date()).map(part=>[part.type,part.value]));
+      const latest=Number(local.year)*4+Math.floor((Number(local.month)-1)/3)-1;
+      return Array.from({length:4},(_,offset)=>{const n=latest-offset,year=Math.floor(n/4),q=n%4+1;return task.action==='financial_period'?`${year}-${['03-31','06-30','09-30','12-31'][q-1]}`:`${year}Q${q}`;});
+    }
+    function targetPicker(task,value,kind){
+      const choices=recentTargets(task),custom=!choices.includes(value),id=`${task.task_key}-${kind}-target`;
+      return `<label>${task.action==='financial_period'?'报告期':'季度'}<select data-target-preset aria-controls="${id}">${choices.map(target=>`<option value="${target}" ${target===value?'selected':''}>${target}</option>`).join('')}<option value="custom" ${custom?'selected':''}>手动输入…</option></select></label><label class="collection-target-custom" ${custom?'':'hidden'}>手填${task.action==='financial_period'?'报告期 YYYY-MM-DD':'季度 YYYYQn'}<input id="${id}" name="target" value="${esc(value)}" required></label>`;
+    }
+    function taskForm(task){
+      const key=task.task_key,schedule=task.schedule,rule=schedule.rule;
+      const target=task.action?recentTargets(task)[0]:null;
+      return `<article class="panel collection-task" data-task="${key}"><h3>${esc(task.name)} <small>${esc(task.group)} · ${esc(task.providers.map(provider=>providerNames[provider]||provider).join(' / '))}</small></h3><div data-task-status></div>
+        ${key==='sovereign_yields'?'<p>本入口独立采集东方财富中美国债收益率。旧联合运行历史见指数采集，以下仅列国债独立运行。</p>':key==='indices'?'<p>本入口只采集所选指数来源；国债使用独立入口。所有批量采集统一在此管理。</p>':''}
+        <form data-task-run><h4>手动采集</h4><div class="collection-fields"><label>模式<select name="mode">${task.modes.map(mode=>`<option value="${mode}">${esc(modeNames[mode])}</option>`).join('')}</select></label>
+        ${task.action?targetPicker(task,target,'manual'):''}
+        ${key==='indices'?`${providerMenu(task,task.providers,'提供方')}<label>起始日（可选）<input type="date" name="start"></label><label>结束日（可选）<input type="date" name="end"></label>`:''}
+        <button type="submit">运行所选范围…</button>${task.supports_cancel?'<button type="button" data-task-cancel>请求停止</button>':'<span>暂不提供用户停止；失败后可按原范围续跑。</span>'}</div></form>
+        <details><summary>自动检查：${schedule.enabled?'已开启':'已关闭'} · 北京时间 ${esc(schedule.local_time)}</summary><form data-task-schedule>
+        <p>检查频率不等于数据频率。后台服务运行时自动检查，关闭网页不影响。服务晚启动时补做最近一次到期检查，多次漏跑合并为一次；例如18:00到期，次日09:00启动会补查前一次。首次保存启用从下一个计划时间开始，不立即采集。关闭仅阻止新调度，已运行任务继续。自动检查仅增量，财务／快照只检查所填目标。</p><div class="collection-fields">
+        <label><input name="enabled" type="checkbox" ${schedule.enabled?'checked':''}>启用自动检查</label><label>北京时间<input name="local_time" type="time" value="${esc(schedule.local_time)}" required></label>
+        <label>频率<select name="frequency">${[['daily','每日'],['weekly','每周'],['monthly','每月']].map(([value,label])=>`<option value="${value}" ${rule.frequency===value?'selected':''}>${label}</option>`).join('')}</select></label>
+        <label>星期（周规则）<select name="weekday">${['一','二','三','四','五','六','日'].map((day,index)=>`<option value="${index}" ${rule.weekday===index?'selected':''}>周${day}</option>`).join('')}</select></label>
+        <label>月检查日（短月按月末）<input name="day" type="number" min="1" max="31" value="${rule.day||1}"></label>
+        <label>月发布窗口起日（可选）<input name="window_start" type="number" min="1" max="31" value="${rule.window?.[0]||''}"></label><label>止日<input name="window_end" type="number" min="1" max="31" value="${rule.window?.[1]||''}"></label>
+        ${task.action?targetPicker(task,schedule.params.target||target,'schedule'):''}
+        ${key==='indices'?`${providerMenu(task,schedule.params.providers||task.providers,'自动检查来源')}`:''}
+        <button type="submit">保存定时设置</button></div></form></details><details><summary>进度、最近20次运行及来源证据</summary><div data-task-history></div></details></article>`;
+    }
+    function renderCollections(){
+      const list=el('maintenance-collection-list');
+      for(const task of collectionTasks){
+        let card=list.querySelector(`[data-task="${task.task_key}"]`);
+        if(!card){list.insertAdjacentHTML('beforeend',taskForm(task));card=list.lastElementChild;}
+        const previousRuns=new Set([...card.querySelectorAll('[data-run]')].map(node=>node.dataset.run));
+        const opened=new Set([...card.querySelectorAll('[data-task-history] details[open]')].map(node=>node.dataset.run));
+        const batchesOpen=Boolean(card.querySelector('[data-task-batches]')?.open);
+        if(task.history[0]&&!previousRuns.has(task.history[0].operation_ref))opened.add(task.history[0].operation_ref);
+        const latest=task.history[0],blocked=collectionTasks.some(other=>other.running&&Boolean(other.action)===Boolean(task.action));
+        card.querySelector('[data-task-status]').innerHTML=`<p><strong>${task.running?'运行中':latest?esc(({complete:'执行完成',failed:'失败',cancelled:'已停止',pending:'待恢复'})[latest.status]||latest.status):'尚无运行记录'}</strong> · 最近检查 ${esc(date(task.last_check))} · 最近执行成功 ${esc(date(task.last_success))}</p><p>最近分段覆盖：${esc(({unknown:'未知',partial:'部分',complete:'完整（仅分段）',empty:'来源为空'})[task.coverage]||task.coverage)}。${esc(task.coverage_note)}。${task.batches.length?`最近运行有 ${task.batches.length} 个分段。`:''}</p><p>自动检查${task.schedule.enabled?'已开启':'已关闭'} · 下次检查 ${esc(date(task.schedule.next_check))}</p>${task.cooldowns.filter(row=>row.cooldown_until).map(row=>`<p>来源 ${esc(row.source_system)} 冷却截止 ${esc(date(row.cooldown_until))} · ${esc(row.reason)}</p>`).join('')}${latest?.error?`<p class="collection-error">${esc(latest.error)}</p>`:''}`;
+        card.querySelector('[data-task-run] button[type=submit]').disabled=blocked;
+        const stop=card.querySelector('[data-task-cancel]');if(stop)stop.disabled=!task.running;
+        card.querySelector('[data-task-history]').innerHTML=`<p>任务数、HTTP请求数与事实行数分别见原采集器结果；未记录的计数不推算。</p>${task.history.map(run=>`<details data-run="${esc(run.operation_ref)}" ${opened.has(run.operation_ref)?'open':''}><summary>${esc(date(run.started_at))} · ${esc(run.target||run.mode)} · ${esc(run.status)}</summary><p>运行引用 <code>${esc(run.operation_ref)}</code></p>${progressMarkup}${operationDetails.has(run.operation_ref)?`<pre>${esc(operationDetails.get(run.operation_ref))}</pre>`:`<button type="button" data-operation-ref="${esc(run.operation_ref)}">读取完整运行结果</button>`}</details>`).join('')||'<p>尚无历史。</p>'}<details data-task-batches ${batchesOpen?'open':''}><summary>最近运行的公共分段（${task.batches.length}）</summary>${task.batches.map(batch=>`<p><code>batch:${batch.id}</code> · ${esc(batch.dataset)} · ${esc(batch.scope_start)}—${esc(batch.scope_end)} · 执行 ${esc(batch.status)} / 覆盖 ${esc(batch.coverage_status)}${batch.error?' · '+esc(batch.error):''} · <a href="/api/maintenance/collections/evidence?batch_id=${batch.id}" target="_blank" rel="noopener">来源元数据</a></p>`).join('')||'<p>尚无公共分段。</p>'}</details><h4>定时槽位</h4>${task.slots.map(slot=>`<p>${esc(slot.slot_key)} · ${esc(({running:'运行中',complete:'执行完成',failed:'失败',pending:'待恢复'})[slot.status]||slot.status)} · 尝试 ${slot.attempts} 次${slot.error?' · '+esc(slot.error):''}</p>`).join('')||'<p>尚无定时运行。</p>'}`;
+        for(const run of task.history){const progress=[...card.querySelectorAll('[data-task-history] [data-run]')].find(node=>node.dataset.run===run.operation_ref);window.CollectionProgress.render({summary:progress.querySelector('[data-progress-summary]'),list:progress.querySelector('[data-progress-sources]')},run,run.result);}
+      }
+    }
+    async function loadCollections(){
+      clearTimeout(collectionTimer);if(collectionBusy||!collectionVisible())return;
+      collectionBusy=true;
+      try{
+        const response=await fetch('/api/maintenance/collections',{cache:'no-store'}),data=await response.json();
+        if(!response.ok)throw Error(data.error||'读取失败');
+        collectionTasks=data.tasks;renderCollections();el('maintenance-collection-status').textContent='本地状态已更新；刷新不会启动采集或扫描数据库预览。';
+      }catch(error){el('maintenance-collection-status').textContent='采集状态未更新：'+error.message;}
+      finally{collectionBusy=false;if(collectionVisible()&&collectionTasks.some(task=>task.running))collectionTimer=setTimeout(loadCollections,3000);}
+    }
+    async function collectionPost(action,command){
+      const response=await fetch('/api/maintenance/collections/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(command)}),data=await response.json();
+      if(!response.ok)throw Error(data.error||'操作失败');return data;
+    }
+    el('maintenance-collection-list').addEventListener('change',event=>{
+      const preset=event.target.closest('[data-target-preset]');
+      if(preset){const form=preset.closest('form'),input=form.querySelector('input[name=target]'),custom=preset.value==='custom';input.closest('label').hidden=!custom;if(custom)input.focus();else input.value=preset.value;return;}
+      const menu=event.target.closest('[data-provider-menu]');if(!menu)return;
+      menu.querySelector('[data-provider-selection]').textContent=`已选 ${menu.querySelectorAll('input:checked').length} / ${menu.querySelectorAll('input').length} 项`;
+    });
+    panel.addEventListener('toggle',event=>{
+      const menu=event.target;if(!menu.matches?.('[data-provider-menu]')||!menu.open)return;
+      const options=menu.querySelector('.collection-provider-options'),box=menu.getBoundingClientRect(),below=innerHeight-box.bottom-12,above=box.top-12;
+      const upward=below<options.scrollHeight&&above>below;menu.classList.toggle('collection-provider-align-right',box.left+options.offsetWidth>innerWidth-12);menu.classList.toggle('collection-provider-above',upward);options.style.maxHeight=Math.min(260,Math.max(100,upward?above:below))+'px';
+    },true);
+    panel.addEventListener('keydown',event=>{const menu=event.target.closest('[data-provider-menu]');if(menu&&event.key==='Escape'){event.preventDefault();menu.open=false;menu.querySelector('summary').focus();}});
+    document.addEventListener('click',event=>{panel.querySelectorAll('[data-provider-menu][open]').forEach(menu=>{if(!menu.contains(event.target))menu.open=false;});});
+    el('maintenance-collection-list').addEventListener('submit',async event=>{
+      event.preventDefault();const form=event.target,card=form.closest('[data-task]'),key=card.dataset.task,values=new FormData(form),isSchedule=form.hasAttribute('data-task-schedule');
+      const params={mode:isSchedule?'incremental':values.get('mode')};
+      if(values.has('target'))params.target=values.get('target').trim();
+      if(key==='indices'){params.providers=values.getAll('provider');for(const field of ['start','end'])if(values.get(field))params[field]=values.get(field);}
+      const scopes={market_financial:`全市场财务：全A股四表，报告期 ${params.target}。`,trade_snapshot:`季度交易快照：${params.target} 的季末交易日，完整分页校验后保存。`,indices:`指数估值与行情：${(params.providers||[]).map(provider=>providerNames[provider]||provider).join('、')}；${params.start||'按本地水位及所选模式'} 至 ${params.end||'最近已完成交易日'}。本入口不附带国债采集。`,market_congestion:'大盘拥挤度：乐咕来源。首次历史初始化包含API与HTML；后续更新只检查HTML。',sovereign_yields:'中美国债收益率：东方财富，独立运行；按本地水位补采，首次从2002年至今。'};
+      const historyWarning=['full','backfill','audit'].includes(params.mode)?'历史初始化／回填或核查可能耗时较长。':'';
+      if(!isSchedule&&!confirm(`确认运行${collectionTasks.find(task=>task.task_key===key).name}？\n模式：${modeNames[params.mode]}\n${scopes[key]}\n${historyWarning}已提交分段保留，缺失不补造。`))return;
+      let command={task_key:key,params};
+      if(isSchedule){const frequency=values.get('frequency'),rule={frequency};if(frequency==='weekly')rule.weekday=Number(values.get('weekday'));if(frequency==='monthly'){rule.day=Number(values.get('day'));if(values.get('window_start')||values.get('window_end'))rule.window=[Number(values.get('window_start')),Number(values.get('window_end'))];}command={task_key:key,schedule:{enabled:values.has('enabled'),local_time:values.get('local_time'),rule,params}};}
+      const button=form.querySelector('button[type=submit]');button.disabled=true;
+      try{await collectionPost(isSchedule?'schedule':'run',command);if(isSchedule)card.querySelector('details>summary').textContent=`自动检查：${values.has('enabled')?'已开启':'已关闭'} · 北京时间 ${values.get('local_time')}`;await loadCollections();}
+      catch(error){el('maintenance-collection-status').textContent=error.message;}
+      finally{button.disabled=!isSchedule&&collectionTasks.some(other=>other.running&&Boolean(other.action)===Boolean(collectionTasks.find(task=>task.task_key===key)?.action));}
+    });
+    el('maintenance-collection-list').addEventListener('click',async event=>{
+      const detail=event.target.closest('[data-operation-ref]');
+      if(detail){
+        detail.disabled=true;
+        try{const response=await fetch('/api/maintenance/collections/operation?'+new URLSearchParams({task_key:detail.closest('[data-task]').dataset.task,operation_ref:detail.dataset.operationRef}),{cache:'no-store'}),data=await response.json();if(!response.ok)throw Error(data.error||'读取失败');operationDetails.set(detail.dataset.operationRef,JSON.stringify(data,null,2));renderCollections();}
+        catch(error){el('maintenance-collection-status').textContent=error.message;detail.disabled=false;}
+        return;
+      }
+      const button=event.target.closest('[data-task-cancel]');if(!button)return;
+      try{await collectionPost('cancel',{task_key:button.closest('[data-task]').dataset.task});await loadCollections();}catch(error){el('maintenance-collection-status').textContent=error.message;}
+    });
+    const collectionVisibility=()=>{clearTimeout(collectionTimer);if(collectionVisible())loadCollections();};
+    new MutationObserver(collectionVisibility).observe(panel,{attributes:true,attributeFilter:['hidden'],subtree:true});
+    document.addEventListener('visibilitychange',collectionVisibility);
+    const tabs=[el('maintenance-collection-tab'),el('maintenance-database-tab'),el('maintenance-stocks-tab')];
     function loadActiveTab(){
-      if(el('maintenance-stocks-panel').hidden){if(!snapshot)load();}
-      else if(!unfollowedLoaded)loadUnfollowed();
+      if(panel.hidden)return;
+      if(!el('maintenance-collection-panel').hidden)loadCollections();
+      else if(!el('maintenance-database-panel').hidden){if(!snapshot||storageDirty)load(storageDirty);}
+      else if(!el('maintenance-stocks-panel').hidden&&!unfollowedLoaded)loadUnfollowed();
     }
     tabs.forEach((tab,index)=>{
       tab.addEventListener('click',()=>{
         tabs.forEach(item=>{const active=item===tab;item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;el(item.getAttribute('aria-controls')).hidden=!active;});
-        el('maintenance-refresh').hidden=index===1;loadActiveTab();
+        el('maintenance-refresh').hidden=index===2;el('maintenance-refresh').textContent=index===0?'刷新采集列表':'刷新本地统计';loadActiveTab();
       });
       tab.addEventListener('keydown',event=>{
         if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
-        event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?1:1-index;tabs[next].focus();tabs[next].click();
+        event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:tabs.length-1))%tabs.length;tabs[next].focus();tabs[next].click();
       });
     });
     document.getElementById('maintenance-tab').addEventListener('click',loadActiveTab);

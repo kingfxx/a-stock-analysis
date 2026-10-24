@@ -109,6 +109,11 @@ def begin_batch(db, operation_id, dataset, provider, start=None, end=None, *, sc
                 frequency=None, trigger='manual', idempotency_key=None, domain='market',
                 parser_version='index-v2', definition_version='v1', universe_version=None):
     with db.connection(write=True) as conn:
+        scheduled=conn.execute("SELECT task_key,slot_key FROM collection_schedule_slots WHERE operation_ref=? AND status='running' LIMIT 1",
+                               (operation_id,)).fetchone()
+        if scheduled:
+            trigger='scheduled'
+            scope={**(scope or {}),'schedule':dict(scheduled)}
         return conn.execute('INSERT INTO collection_batches(operation_id,domain,dataset,source_system,scope_start,scope_end,'
             'scope_json,frequency,trigger_type,status,started_at,parser_version,definition_version,idempotency_key,universe_version) '
             "VALUES(?,?,?,?,?,?,?,?,?,'running',?,?,?,?,?)",

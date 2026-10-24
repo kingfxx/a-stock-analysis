@@ -6,10 +6,10 @@ __RESEARCH_SIDEBAR__
 <div class="workspace-content">
 <header><div><h1>指数分析</h1><p>宽基、申万行业与红利策略；不同来源和统计口径分别展示。</p></div></header>
 <section aria-label="采集任务"><h2>采集进度</h2><div class="controls">
-<button id="incremental" title="补指数新数据并核对国债收益率近期14日；首次国债初始化覆盖2002年至今，Eastmoney使用公共保守限速">更新近期估值</button><button id="review" title="重新核对最近10个交易日；乐咕核对最近4个月，用于检查来源修订">核对近期修订</button><button id="full">采集／恢复十年历史</button><button id="audit">轮换核对历史月份</button><button id="cancel" disabled>停止采集</button>
+<a href="/?tab=maintenance">前往采集管理</a>
 <button id="progress-toggle" type="button" aria-expanded="false" aria-controls="progress-details">查看进度</button>
 </div><p id="progress" role="status" aria-live="polite">正在读取…</p><div id="progress-details" class="index-progress-details" hidden aria-live="polite"><p id="progress-summary"></p><ul id="progress-sources"></ul></div><p id="cooldowns"></p>
-<p class="muted">中证、乐咕和申万按各自已授权策略采集；中美国债收益率使用Eastmoney公共保守策略（并发1、请求间隔至少10秒、滚动60秒最多5次）。更新按钮同时补指数新数据、检查国债收益率并核对近期14日；首次国债初始化从2002年至今，可能持续较长时间。遇拒绝访问停止并冷却，已提交分段保留。进度按独立采集任务计数，不代表已覆盖数据行数。主题指数本次不采集。</p></section>
+<p class="muted">采集启动、停止和定时设置统一在后台维护的采集管理中操作。本页只读展示进度及本地数据；进度按独立采集任务计数，不代表数据行数或覆盖完整性。</p></section>
 <section id="valuation-panel" class="valuation-panel" aria-label="指数估值与分位">
 <div class="panel-head"><h2>估值与分位</h2><p class="muted">指数估值、拥挤度与股债利差走势 · 所选区间历史分布与当前历史位置</p>
 <div class="controls index-controls">
@@ -40,7 +40,7 @@ __RESEARCH_SIDEBAR__
 <label>时间范围<select id="congestion-range"><option value="5">5 年</option><option value="10">10 年</option><option value="all">全部</option></select></label>
 <label>比较基准<select id="congestion-benchmark"><option value="percentile">历史分位</option><option value="stddev">均值 ±1 标准差</option></select></label>
 <label>展示频率<select id="congestion-frequency"><option value="auto" selected>自动</option><option value="month">月</option><option value="week">周</option><option value="day">日</option></select></label>
-<button id="congestion-full" type="button">获取／恢复历史</button><button id="congestion-update" type="button">立即更新</button><button id="congestion-cancel" type="button" disabled>停止采集</button><button id="congestion-amount" type="button" aria-pressed="false" title="在图表右侧刻度叠加全A成交额（亿元）">成交额</button>
+<button id="congestion-amount" type="button" aria-pressed="false" title="在图表右侧刻度叠加全A成交额（亿元）">成交额</button>
 </div></div>
 <div class="congestion-summary"><div class="valuation-current"><div id="congestion-position" class="valuation-position">待判断</div><strong id="congestion-current">—</strong><small id="congestion-basis">暂无有效分位</small><span id="congestion-date">尚未获取数据</span></div><div class="valuation-summary"><p id="congestion-history-summary"></p><p id="congestion-comparison" class="muted"></p></div></div>
 <div class="valuation-levels"><span><i style="background:#ed8180"></i><small id="congestion-high-label">高拥挤（80% 分位）</small><b id="congestion-high">—</b></span><span><i style="background:#f4b560"></i><small id="congestion-median-label">中值（50% 分位）</small><b id="congestion-median">—</b></span><span><i style="background:#6ac9aa"></i><small id="congestion-low-label">低拥挤（20% 分位）</small><b id="congestion-low">—</b></span></div>
@@ -52,9 +52,7 @@ __RESEARCH_SIDEBAR__
 <p id="industry-crowding-status" class="muted" role="status" aria-live="polite">正在读取行业行情…</p>
 <div id="industry-crowding-scroll" class="industry-crowding-scroll" role="region" aria-label="申万行业拥挤度与换手率历史分位，可横向和纵向滚动" tabindex="0"><table><thead id="industry-crowding-head-row"></thead><tbody id="industry-crowding-body"></tbody></table></div>
 </section>
-<div class="congestion-footer"><details class="congestion-settings"><summary>更新设置</summary><p id="congestion-status" role="status" aria-live="polite"></p><p id="congestion-check" class="muted"></p>
-<div class="controls"><label class="congestion-switch"><input id="congestion-enabled" type="checkbox">每天检查 HTML 更新</label><label>北京时间<input id="congestion-time" type="time" value="18:00"></label><button id="congestion-save" type="button">保存每日检查设置</button></div>
-<p class="muted">首次获取历史与近期数据；以后只读取网页表格并写入数据库。后台运行时每日检查，页面浏览不触发采集。</p></details>
+<div class="congestion-footer"><details class="congestion-settings"><summary>采集状态</summary><p id="congestion-status" role="status" aria-live="polite"></p><p id="congestion-check" class="muted"></p><p id="congestion-schedule" class="muted"></p><a href="/?tab=maintenance">前往采集管理</a></details>
 <details id="congestion-explanation"><summary>说明与近期数据</summary><p class="muted">统计按所选范围内每个有效交易日取一个样本，包含有效零值；缺值不补。分位为低于当前值的日样本占比；基准为20%/50%/80%线性插值分位，或均值±总体标准差。判断始终按历史分位；图表缩放和展示频率不改变统计。</p><p id="congestion-coverage"></p><p id="congestion-points" class="muted"></p><p id="congestion-amount-note" class="muted" hidden></p><p id="congestion-gaps"></p><p id="congestion-conflicts"></p><p class="muted">图中按日期展示拥挤度，重叠日期优先使用网页表格的有效值；底层仍独立保存 API、网页和自算来源及修订。自算值仅填空，原始缺值保留；未补齐日期不连线。周／月按每周期最后一个已记录日期取当日值，缺值留空，不用前日值代替；指数只有月频时保留实际观察日，在对应周期按同日比较。网页日更仅保留请求记录，无响应文件。</p><div class="scroll"><table><thead><tr><th>日期</th><th>拥挤度</th><th>来源收盘价</th><th>前5%成交额（亿元）</th><th>全A成交额（亿元）</th></tr></thead><tbody id="congestion-recent"></tbody></table></div></details>
 </div></section>
-<section id="notes-panel" hidden></section></div></main><script src="/datetime.js"></script><script src="/plotly.min.js"></script><script src="/stock-picker.js"></script><script src="/congestion.js"></script><script src="/vendor/notes/codemirror.js"></script><script src="/vendor/notes/markdown-mode.js"></script><script src="/vendor/notes/markdown-it.js"></script><script src="/vendor/notes/footnote.js"></script><script src="/vendor/notes/purify.js"></script><script src="/investment-notes.js"></script><script src="/indices.js"></script></body></html>
+<section id="notes-panel" hidden></section></div></main><link rel="stylesheet" href="/collection-progress.css"><script src="/collection-progress.js"></script><script src="/datetime.js"></script><script src="/plotly.min.js"></script><script src="/stock-picker.js"></script><script src="/congestion.js"></script><script src="/vendor/notes/codemirror.js"></script><script src="/vendor/notes/markdown-mode.js"></script><script src="/vendor/notes/markdown-it.js"></script><script src="/vendor/notes/footnote.js"></script><script src="/vendor/notes/purify.js"></script><script src="/investment-notes.js"></script><script src="/indices.js"></script></body></html>

@@ -262,7 +262,7 @@
         <label for="code">股票代码</label>
         <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
         <button type="submit">查看</button>
-        <a id="refresh" class="refresh" href="#" title="刷新当前股票；行业数据在行业内对比页面独立更新">刷新数据</a>
+        <a id="refresh" class="refresh" href="#" title="刷新当前股票；批量采集统一在后台维护的采集管理">刷新数据</a>
         <button id="full-audit" class="refresh" type="button">全量刷新</button>
       </form>
     </div>
@@ -528,7 +528,7 @@
   </div>
 </main>
 <script id="payload" type="application/json">__PAYLOAD__</script>
-<script src="/datetime.js"></script>
+<link rel="stylesheet" href="/collection-progress.css"><script src="/collection-progress.js"></script><script src="/datetime.js"></script>
 <script src="/plotly.min.js"></script>
 <script src="/stock-picker.js"></script>
 <link rel="stylesheet" href="/dcf.css?v=20261015-growth">
@@ -546,9 +546,9 @@
 <script src="/business-segments.js?v=20261016-region-chart-restored-v1"></script>
 <link rel="stylesheet" href="/industry.css?v=20261021-desktop-filter-grid">
 <script src="/industry.js?v=20261016-sidebar-filters"></script>
-<link rel="stylesheet" href="/maintenance.css?v=20261007-compact-confirm">
+<link rel="stylesheet" href="/maintenance.css?v=20261025-centralized">
 <script src="/stock-cleanup.js?v=20261007-no-cleanup-backup"></script>
-  <script src="/maintenance.js?v=20261007-compact-confirm"></script>
+  <script src="/maintenance.js?v=20261025-centralized"></script>
 <link rel="stylesheet" href="/vendor/notes/codemirror.css">
 <link rel="stylesheet" href="/investment-notes.css?v=20261023-1">
 <script src="/vendor/notes/codemirror.js"></script>

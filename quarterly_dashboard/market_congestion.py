@@ -1,5 +1,6 @@
 """Legu history initialization and HTML-only daily checks; reads never collect."""
 from __future__ import annotations
+from contextlib import nullcontext
 
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -17,6 +18,7 @@ from .collection import (Cancelled, PacingPolicy, RequestCollector, RECOVERY_PEN
                          begin_batch, digest, encoded, finish_batch, parsed_source,
                          read_source, reusable_source)
 from .storage import instance_lock, utc_now
+from .collection_schedule import latest_daily_date
 
 ZONE = ZoneInfo('Asia/Shanghai')
 TASK = 'market_congestion'
@@ -286,11 +288,11 @@ def configure(db, command):
     return dict(enabled=enabled,local_time=clock,timezone='Asia/Shanghai')
 
 
-def start(db, mode='incremental', *, scheduled_date=None):
+def start(db, mode='incremental', *, scheduled_date=None, connection=None):
     if mode not in ('full','incremental','review'):
         raise ValueError('拥挤度采集模式无效')
     operation=uuid4().hex
-    with db.connection(write=True) as conn:
+    with (nullcontext(connection) if connection is not None else db.connection(write=True)) as conn:
         if conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone():
             raise ValueError('已有指数采集任务正在运行')
         if mode!='full' and not initialized(conn):
@@ -494,13 +496,16 @@ def read(db, *, start=None, end=None, index_code='cn:000001'):
 
 def scheduled_tick(db, *, now=None, execute=run):
     now=now or local_now()
-    today=now.astimezone(ZONE).date().isoformat()
     with db.connection() as conn:
         schedule=conn.execute('SELECT * FROM collection_schedules WHERE task_key=?',(TASK,)).fetchone()
-        if not schedule or not schedule['enabled'] or now.astimezone(ZONE).strftime('%H:%M')<schedule['local_time'] or not initialized(conn):
+        if not schedule or not schedule['enabled'] or not initialized(conn):
             return None
+    due_date=latest_daily_date(now,schedule['local_time']).isoformat()
+    due_at=datetime.fromisoformat(due_date+'T'+schedule['local_time']).replace(tzinfo=ZONE)
+    if datetime.fromisoformat(schedule['updated_at'])>due_at:
+        return None  # Saving/enabling starts with a future slot, as with other tasks.
     try:
-        operation=start(db,'incremental',scheduled_date=today)
+        operation=start(db,'incremental',scheduled_date=due_date)
     except ValueError:  # Another index operation owns the slot; try when idle.
         return None
     if not operation:
@@ -508,12 +513,11 @@ def scheduled_tick(db, *, now=None, execute=run):
     with db.connection() as conn:
         blocked=conn.execute("SELECT cooldown_until,reason FROM collection_provider_state WHERE source_system='legu'").fetchone()
         manual=conn.execute("SELECT 1 FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE s.dataset=? "
-            "AND s.parse_status='complete' AND b.status='complete' AND b.trigger_type IN ('manual','scheduled','index_dependency') AND substr(datetime(s.obtained_at,'+8 hours'),1,10)=? "
-            "AND strftime('%H:%M',s.obtained_at,'+8 hours')>=? LIMIT 1",
-            (DATASETS['html_recent_table'],today,schedule['local_time'])).fetchone()
+            "AND s.parse_status='complete' AND b.status='complete' AND b.trigger_type IN ('manual','scheduled','index_dependency') AND datetime(s.obtained_at)>=datetime(?) AND datetime(s.obtained_at)<=datetime(?) LIMIT 1",
+            (DATASETS['html_recent_table'],due_at.isoformat(),now.isoformat())).fetchone()
     cooling=blocked and blocked['cooldown_until'] and datetime.fromisoformat(blocked['cooldown_until'])>now
     if cooling or manual:
-        message='本日因来源冷却跳过' if cooling else '本日已完成手动HTML检查，复用检查结果'
+        message='本次到期检查因来源冷却跳过' if cooling else '本次到期时段已完成HTML检查，复用检查结果'
         with db.connection(write=True) as conn:
             conn.execute("UPDATE index_collection_operations SET status='complete',finished_at=?,result_json=? WHERE operation_id=?",
                          (utc_now(),encoded(dict(message=message,skipped=True)),operation))

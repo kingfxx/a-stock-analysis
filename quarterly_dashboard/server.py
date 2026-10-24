@@ -39,6 +39,7 @@ from .index_collection import start_operation, run_operation, cancel_operation, 
 from .index_repository import read_indices
 from .index_read_service import IndexReadService
 from . import market_congestion
+from .collection_management import CollectionManagement, Scheduler
 from .collection import ProviderBlocked, read_source
 from .database_restore import RestoreManager, RequestGate, MAX_UPLOAD
 from .dividend_service import DividendService
@@ -1282,7 +1283,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/") or path == '/api/business-judgment' or path.startswith('/api/business-judgment/'):
             self._ai_post(path)
             return
-        if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh", "/api/indices/collect", "/api/indices/cancel", "/api/indices/congestion/schedule"}:
+        if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh", "/api/indices/collect", "/api/indices/cancel", "/api/indices/congestion/schedule", "/api/maintenance/collections/run", "/api/maintenance/collections/cancel", "/api/maintenance/collections/schedule"}:
             self.send_error(404)
             return
         status = 200
@@ -1296,7 +1297,21 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < size <= 65536:
                 raise ValueError("分组请求大小无效")
             command = json.loads(self.rfile.read(size).decode("utf-8"))
-            if path=='/api/indices/congestion/schedule':
+            if path.startswith('/api/maintenance/collections/'):
+                if not isinstance(command,dict) or set(command)-{'task_key','params','schedule'}:
+                    raise ValueError('采集管理请求无效')
+                management=CollectionManagement(Database(DATABASE_PATH),industry_service())
+                key=command.get('task_key')
+                if path.endswith('/run'):
+                    if set(command)-{'task_key','params'}:raise ValueError('运行参数无效')
+                    data=management.start(key,command.get('params',{}))
+                elif path.endswith('/cancel'):
+                    if set(command)!={'task_key'}:raise ValueError('停止参数无效')
+                    data=management.cancel(key)
+                else:
+                    if set(command)!={'task_key','schedule'}:raise ValueError('配置参数无效')
+                    data=management.configure(key,command['schedule'])
+            elif path=='/api/indices/congestion/schedule':
                 data=market_congestion.configure(Database(DATABASE_PATH),command)
             elif path in {'/api/indices/collect','/api/indices/cancel'}:
                 if not isinstance(command,dict):
@@ -1394,6 +1409,28 @@ class Handler(BaseHTTPRequestHandler):
                 self._ai_reply({'announcements': announcements})
             except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
                 self._ai_reply({'error': str(exc)}, 400)
+            return
+        if parsed.path=='/api/maintenance/collections/operation':
+            try:
+                query=parse_qs(parsed.query)
+                self._ai_reply(CollectionManagement(Database(DATABASE_PATH),industry_service()).detail(query.get('task_key',[''])[0],query.get('operation_ref',[''])[0]))
+            except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                self._ai_reply({'error':str(exc)},400)
+            return
+        if parsed.path=='/api/maintenance/collections/evidence':
+            try:
+                batch_id=int(parse_qs(parsed.query).get('batch_id',[''])[0])
+                with Database(DATABASE_PATH).connection() as conn:
+                    rows=[dict(row) for row in conn.execute('SELECT id,batch_id,source_system,dataset,request_status,parse_status,http_status,error,obtained_at,file_path,raw_sha256,stored_sha256,reused_source_id FROM collection_sources WHERE batch_id=? ORDER BY id DESC LIMIT 200',(batch_id,))]
+                self._ai_reply({'batch_id':batch_id,'sources':rows,'limit':200})
+            except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                self._ai_reply({'error':str(exc)},400)
+            return
+        if parsed.path=='/api/maintenance/collections':
+            try:
+                self._ai_reply(CollectionManagement(Database(DATABASE_PATH),industry_service()).read())
+            except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
+                self._ai_reply({'error':str(exc)},400)
             return
         if parsed.path=='/api/indices/congestion':
             try:
@@ -1508,7 +1545,7 @@ class Handler(BaseHTTPRequestHandler):
             content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/datetime.js", "/research-layout.css", "/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
                              "/financial-statements.js", "/financial-statements.css", "/business-segments.js", "/business-segments.css", "/business-segment-aliases.js", "/business-segment-names.js", "/industry.js", "/industry.css",
-                             "/maintenance.js", "/maintenance.css", "/investment-notes.js", "/investment-notes.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css",
+                             "/maintenance.js", "/maintenance.css", "/collection-progress.js", "/collection-progress.css", "/investment-notes.js", "/investment-notes.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css",
                              "/dividend-forecast.js", "/dividend-forecast.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
@@ -1690,7 +1727,7 @@ def serve(port: int = 8765, open_browser: bool = False):
             server.restore_manager=manager;server.request_gate=RequestGate()
             try:
                 _initialize_runtime(db,skip_legacy=reloaded)
-                scheduler=market_congestion.DailyScheduler(db,gate=server.request_gate)
+                scheduler=Scheduler(CollectionManagement(db,industry_service()),gate=server.request_gate)
                 scheduler.start()
                 print(f'季度分析页面：http://127.0.0.1:{port}/',flush=True)
                 if open_browser and not reloaded:webbrowser.open(f'http://127.0.0.1:{port}/')

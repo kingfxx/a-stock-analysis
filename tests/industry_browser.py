@@ -49,9 +49,8 @@ def main():
         assert f'{market_points} 个季度点' in page.locator('#sw-chart-note').inner_text()
         assert '2026Q3' in page.locator('#sw-market').inner_text()
         all_market = history or '最近一年沪深市场' in page.locator('#sw-scope').inner_text()
-        assert page.locator('#sw-refresh-financial').inner_text()==('更新试点财务' if all_market else '更新行业财务')
-        assert page.locator('#sw-refresh-cap').inner_text()==('补齐试点市值' if all_market else '补齐季度市值')
-        assert not page.locator('#sw-recheck-cap').is_checked()
+        assert page.locator('#sw-refresh-financial,#sw-refresh-cap,#sw-recheck-cap').count()==0
+        assert page.locator('#industry-panel a[href="/?tab=maintenance"]').count()==1
         before=sum('/api/industry?' in r['url'] for r in requests)
         page.evaluate("window.dispatchEvent(new CustomEvent('financial-facts-updated',{detail:{code:'300750'}}))")
         page.wait_for_timeout(250)
@@ -62,23 +61,8 @@ def main():
         assert any('/api/financial?' in r['url'] and 'refresh=1' in r['url'] for r in requests)
         assert sum('/api/industry?' in r['url'] for r in requests)==before
         assert not any('/api/industry/refresh' in r['url'] for r in requests)
-        # Capture industry button commands locally; no production task is started.
-        def mock_update(route):
-            actions.append(route.request.post_data_json)
-            route.fulfill(json={'running':True})
-        page.route('**/api/industry/refresh',mock_update)
-        page.route('**/api/industry/status',lambda route:route.fulfill(json={'running':False,'message':'模拟入口验证完成','error':None}))
-        page.select_option('#sw-update-period','2026-06-30')
-        page.locator('#sw-refresh-financial').click()
-        page.wait_for_function("!document.getElementById('sw-refresh-financial').disabled")
-        assert actions[-1]=={'action':'financial_period','target':'2026-06-30','recheck':False}
-        page.locator('#sw-refresh-cap').click()
-        page.wait_for_function("!document.getElementById('sw-refresh-cap').disabled")
-        assert actions[-1]=={'action':'cap_quarter','target':'2026Q3','recheck':False}
-        page.locator('#sw-recheck-cap').check()
-        page.locator('#sw-refresh-cap').click()
-        page.wait_for_function("!document.getElementById('sw-refresh-cap').disabled")
-        assert actions[-1]=={'action':'cap_quarter','target':'2026Q3','recheck':True}
+        # Business pages are read-only; collection UI is tested in collection management.
+        assert not actions
         page.locator('#industry-panel').screenshot(path=str(args.output/'desktop.png'))
         page.select_option('#sw-mode','quarter')
         page.wait_for_function("document.getElementById('sw-chart-note').textContent.includes('单季度')")

@@ -43,7 +43,9 @@ def compact_database(db, validate):
 
 DESCRIPTIONS={
  'market_indicator_observations':('市场指标','市场拥挤度、收盘点位和两类亿元成交额；独立来源通道、真实取得时间及修订'),
- 'collection_schedules':('运行与配置','已授权的市场指标每日检查开关、北京时间及真实配置更新时间'),
+ 'collection_schedule_rules':('运行与配置','统一采集日周月规则与白名单参数；真实配置更新时间'),
+ 'collection_schedule_slots':('运行与配置','定时槽位领取、领域运行引用、崩溃待恢复及真实执行时间'),
+ 'collection_schedules':('运行与配置','采集任务自动检查开关、北京时间及真实配置更新时间'),
  'business_segment_versions':('个股数据','主营构成报告期完整结构化版本、真实修订及来源批次；不保存原始JSON'),
  'business_segment_items':('个股数据','主营构成行业、产品、地区明细；十进制原值及精确来源页引用'),
  'index_price_definitions':('指数数据','指数点位来源字段、点数单位、采样频率及缺值规则的版本定义'),

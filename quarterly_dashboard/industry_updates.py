@@ -179,7 +179,7 @@ def _perform(service, action, target, recheck, progress, batch_id, *, run_id=Non
     directory.mkdir(parents=True,exist_ok=True)
     progress(f'全市场财务 {target} · 全 A 股三表及业绩指标 · 行业展示 {len(stocks)} 家沪深公司')
     from .collection import RequestCollector
-    collector=RequestCollector(service.db,progress=progress)
+    collector=RequestCollector(service.db,progress=progress,cancelled=lambda:service.collection_cancelled(run_id))
     operation_id='sw_update_runs:'+str(run_id) if run_id is not None else 'financial:'+str(target)
     try:
         datasets=market_financial.collect_public(service.db,operation_id,target,collector,progress,recheck=recheck,

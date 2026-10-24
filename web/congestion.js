@@ -74,7 +74,7 @@
   if(typeof document==='undefined')return;
   const el=id=>document.getElementById('congestion-'+id);
   const leguCloseKey='legu:congestion-close';
-  let data=null,controller=null,requestNumber=0,settingsDirty=false,pollTimer=null,amountOverlay=false,crosshairTimer=null;
+  let data=null,controller=null,requestNumber=0,pollTimer=null,amountOverlay=false,crosshairTimer=null;
   const fmt=value=>value===null||value===undefined?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:2,minimumFractionDigits:2});
   const time=value=>window.DashboardTime.format(value);
   const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -167,15 +167,13 @@
     });
     const providers={csindex:'中证指数',sina:'新浪',sws:'申万宏源',legu:'乐咕乐股'};
     const basis={unspecified:'来源未标识收益口径',price:'价格指数',total_return:'全收益指数',net_return:'净收益指数',congestion_close:'拥挤度采集附带的收盘价'};
-    el('points').textContent=overlay.available?`点位：${providers[overlay.provider]||overlay.provider} · ${overlay.frequency==='daily'?'日频':'月频'} · ${basis[overlay.return_type]||overlay.return_type} · ${overlay.first_date}—${overlay.last_date}${pointRows.some(r=>r.close!==null)?'':'；本区间暂无点位'}`:'该指数暂无本地点位数据，可通过现有指数采集入口补充。';
+    el('points').textContent=overlay.available?`点位：${providers[overlay.provider]||overlay.provider} · ${overlay.frequency==='daily'?'日频':'月频'} · ${basis[overlay.return_type]||overlay.return_type} · ${overlay.first_date}—${overlay.last_date}${pointRows.some(r=>r.close!==null)?'':'；本区间暂无点位'}`:'该指数暂无本地点位数据，可前往后台维护的采集管理补充。';
   }
   function renderProgress(operation=data?.operations[0]) {
     let result={};try{result=JSON.parse(operation?.result_json||'{}');}catch{}
     el('status').textContent=operation?.status==='running'?(result.message||'正在采集，等待任务完成…'):
-      result.message||(data.initialized?'本地数据已就绪':'请先获取／恢复历史；初始化后启用每日检查。');
-    el('full').disabled=data.running||data.initialized;
-    el('full').textContent=data.initialized?'历史已初始化':'获取／恢复历史';
-    el('update').disabled=data.running||!data.initialized;el('cancel').disabled=!data.running;el('save').disabled=!data.initialized;
+      result.message||(data.initialized?'本地数据已就绪':'请前往采集管理获取／恢复历史。');
+
   }
   function schedulePoll() {
     clearTimeout(pollTimer);pollTimer=null;
@@ -209,7 +207,7 @@
     el('conflicts').textContent=data.conflicts.length?'来源值有差异：'+data.conflicts.map(row=>`${row.date} API ${fmt(row.values.api_history*100)}% / 网页 ${fmt(row.values.html_recent_table*100)}%`).join('；'):'';
     renderProgress();
     el('check').textContent=data.last_check?`最近请求：${time(data.last_check.obtained_at)} · ${data.last_check.parse_status==='complete'?'解析成功':'未通过解析'}${data.last_check.file_path?' · 初始化归档':' · 仅数据库记录'}`:'尚无请求记录';
-    if(!settingsDirty){el('enabled').checked=!!data.schedule.enabled;el('time').value=data.schedule.local_time;}
+    el('schedule').textContent=`自动检查${data.schedule.enabled?'已开启':'已关闭'} · 北京时间 ${data.schedule.local_time}；设置统一在采集管理修改。`;
     el('recent').replaceChildren(...data.channels.html_recent_table.rows.filter(r=>r.value!==null).slice(-30).reverse().map(row=>{
       const tr=document.createElement('tr');
       for(const value of [row.observation_date,fmt(row.value*100)+'%',fmt(row.close),fmt(row.top5_amount_yi),fmt(row.total_amount_yi)]){const td=document.createElement('td');td.textContent=value;tr.append(td);}
@@ -232,23 +230,10 @@
       }
     }
   }
-  const notifyCollection=()=>document.dispatchEvent(new CustomEvent('index-collection-change',{detail:{source:'congestion'}}));
-  async function collect(mode) {
-    el('full').disabled=true;el('update').disabled=true;
-    try{await api('/api/indices/collect',{datasets:['market_congestion'],providers:['legu'],mode});notifyCollection();await pollProgress();}
-    catch(error){el('status').textContent=error.message;el('full').disabled=!!data?.initialized;el('update').disabled=!data?.initialized;}
-  }
-  el('full').onclick=()=>collect('full');el('update').onclick=()=>collect('incremental');
-  el('cancel').onclick=async()=>{try{await api('/api/indices/cancel',{});notifyCollection();await pollProgress();}catch(error){el('status').textContent=error.message;}};
   el('range').onchange=draw;el('index').onchange=load;
   el('frequency').onchange=draw;
   el('benchmark').onchange=draw;
   el('amount').onclick=()=>{amountOverlay=!amountOverlay;draw();};
-  for(const id of ['enabled','time'])el(id).onchange=()=>{settingsDirty=true;};
-  el('save').onclick=async()=>{
-    try{await api('/api/indices/congestion/schedule',{enabled:el('enabled').checked,local_time:el('time').value});settingsDirty=false;await load();}
-    catch(error){el('status').textContent=error.message;}
-  };
   document.addEventListener('visibilitychange',()=>{clearTimeout(pollTimer);pollTimer=null;if(!document.hidden)pollProgress();});
   document.addEventListener('index-collection-change',event=>{if(event.detail?.source!=='congestion')pollProgress();});
   load();

@@ -248,22 +248,36 @@ class IndustryService:
             return conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE status='running'",
                 (stamp,'后台中断，已有行业快照保留；请在行业页面重试补缺')).rowcount
 
+    def collection_cancelled(self, run_id):
+        if run_id is None:
+            return False
+        with self.db.connection() as conn:
+            row=conn.execute('SELECT status,cancel_requested FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+            return not row or row['status']!='running' or bool(row['cancel_requested'])
+
+    def reserve_refresh(self, conn, action, target, recheck=False):
+        from .industry_updates import validate_request
+        validate_request(action,target,recheck)
+        if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+            raise ValueError('已有行业任务运行，未启动重复更新')
+        return conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES(?,?,?,?,'running')",
+            (action,target,int(recheck),datetime.now(timezone.utc).isoformat())).lastrowid
+
     def start_refresh(self, action, target, recheck=False):
         from .industry_updates import validate_request
         validate_request(action,target,recheck)
-        current = self.status()
-        if current['running']:
-            return current
         with self._lock:
-            if self._status['running']:
-                return dict(self._status)
+            with self.db.connection(write=True) as conn:
+                if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+                    return {'running':True,'message':'已有行业任务正在运行','error':None}
+                run_id=self.reserve_refresh(conn,action,target,recheck)
             self._status = {'running':True,'message':f'准备更新行业 {target}','error':None,'action':action,'target':target}
-        threading.Thread(target=self._refresh,args=(action,target,recheck),daemon=True,name='sw-industry-refresh').start()
+        threading.Thread(target=self._refresh,args=(action,target,recheck,run_id),daemon=True,name='sw-industry-refresh').start()
         return self.status()
 
-    def _refresh(self, action, target, recheck):
+    def _refresh(self, action, target, recheck, run_id=None):
         from .industry_updates import merge_run_result, perform
-        run_id=None
+        reserved=run_id is not None
         def persist_progress(update):
             if run_id is None:
                 return
@@ -297,10 +311,8 @@ class IndustryService:
                                  (json.dumps(saved,ensure_ascii=False,separators=(',',':')),run_id))
         try:
             with self.db.connection(write=True) as conn:
-                if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
-                    raise ValueError('已有行业任务运行，未启动重复更新')
-                run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES(?,?,?,?,'running')",
-                    (action,target,int(recheck),datetime.now(timezone.utc).isoformat())).lastrowid
+                if not reserved:
+                    run_id=self.reserve_refresh(conn,action,target,recheck)
             result=perform(self,action,target,recheck,progress,run_id=run_id,progress_state=persist_progress)
             with self.db.connection(write=True) as conn:
                 conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",

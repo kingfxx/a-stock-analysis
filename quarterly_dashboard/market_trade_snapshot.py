@@ -289,7 +289,7 @@ def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress
     operation=f'sw_update_runs:{run[0]}'
     def cancelled():
         with db.connection() as conn:
-            return conn.execute('SELECT status FROM sw_update_runs WHERE id=?',(run[0],)).fetchone()[0]!='running'
+            return service.collection_cancelled(run[0])
     http=RequestCollector(db,progress=progress,cancelled=cancelled)
     day=target_date(db,quarter,operation=operation,http=http,progress=progress)
     item=collect_day(db,operation,day,quarter=quarter,http=http,recheck=recheck,progress=progress,

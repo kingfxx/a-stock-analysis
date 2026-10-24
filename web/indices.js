@@ -23,27 +23,8 @@ function renderMetricButtons(){const group=el('metric-tabs'),families=el('kind')
 function definitionFor(row){const entry=data.definitions.find(def=>def.provider===row.provider&&def.series_key===row.series_key&&def.definition_version===row.definition_version);return entry?JSON.parse(entry.definition_json):null;}
 function fieldFor(row){const fields=Object.values(definitionFor(row)?.fields||{});const candidates=metricFamily==='pe'?['pe_ttm','pe_rolling','pe_source']:[metricFamily];return candidates.find(field=>fields.includes(field))||null;}
 async function api(url,body){const response=await fetch(url,body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok)throw Error(result.error||'请求失败');return result;}
-function renderWorkProgress(operation,result){const summary=el('progress-summary'),list=el('progress-sources'),work=result.work_progress;list.replaceChildren();
-if(!operation){summary.textContent='尚未执行指数采集。';return;}
-if(!work||!Number.isInteger(work.total)){summary.textContent=`该历史任务未记录总进度。${operation.status==='failed'?'任务未完成；错误原因已保存在任务记录中，已发布分段仍保留。':operation.status==='cancelled'?'任务已停止，已发布分段仍保留。':''}`;return;}
-const processed=(work.success||0)+(work.skipped||0)+(work.failed||0)+(work.cancelled||0),total=work.total;
-if(total===0)summary.textContent=work.phase==='planning'?'正在统计本轮采集任务…':'本轮没有需要采集的估值任务（0/0）。';
-else summary.textContent=`已处理 ${processed}/${total} 项；已采集成功 ${work.success||0} 项，已跳过 ${work.skipped||0} 项，失败 ${work.failed||0} 项，已停止 ${work.cancelled||0} 项，进行中 ${work.running||0} 项，待执行 ${work.pending||0} 项。`;
-summary.textContent+=' 计数单位为独立采集任务，不代表数据行数或覆盖完整性。';
-const labels={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'中美国债收益率'},stateNames={success:'成功',skipped:'跳过',failed:'失败',cancelled:'已停止',pending:'待执行',running:'进行中'};
-for(const [provider,counts] of Object.entries(work.providers||{})){const item=document.createElement('li'),done=(counts.success||0)+(counts.skipped||0)+(counts.failed||0)+(counts.cancelled||0);let text=`${labels[provider]||provider}：已处理 ${done}/${counts.total} 项（成功 ${counts.success||0}，跳过 ${counts.skipped||0}，失败 ${counts.failed||0}，已停止 ${counts.cancelled||0}，进行中 ${counts.running||0}，待执行 ${counts.pending||0}）`;
-if(counts.current)text+=`；当前：${counts.current}`;item.textContent=text;list.append(item);}
-const current=work.current;if(operation.status==='running'&&current&&current.message&&!Object.values(work.providers||{}).some(item=>item.current)){
-const item=document.createElement('li');item.textContent=`${labels[current.provider]||current.provider}：${current.message}`;list.append(item);}
-if(operation.status==='failed'){
-const failedProviders=Object.entries(work.providers||{}).filter(([,counts])=>(counts.failed||0)>0).map(([provider])=>labels[provider]||provider);
-let errorInfo=result.errors||operation.error||{};if(typeof errorInfo==='string'){try{errorInfo=JSON.parse(errorInfo);}catch{errorInfo={operation:errorInfo};}}
-const recordedProviders=errorInfo&&typeof errorInfo==='object'?Object.keys(errorInfo).filter(key=>labels[key]):[];
-const sources=[...new Set([...failedProviders,...recordedProviders])];
-summary.textContent+=sources.length?` 错误摘要：${sources.join('、')}来源有任务失败；详细诊断已保存在任务记录中。`:' 错误摘要：采集未能完成，详细诊断已保存在任务记录中。';}
-else if(operation.status==='cancelled')summary.textContent+=' 已停止；已完成分段保留。';
-}
-function renderStatus(){const operation=data.operations[0],running=operation?.status==='running';for(const id of ['full','incremental','review','audit'])el(id).disabled=running;el('cancel').disabled=!running;
+function renderWorkProgress(operation,result){window.CollectionProgress.render({summary:el('progress-summary'),list:el('progress-sources')},operation,result);}
+function renderStatus(){const operation=data.operations[0],running=operation?.status==='running';
 let result={};try{if(operation)result=JSON.parse(operation.result_json)||{};}catch{result={};}
 el('progress').textContent=!operation?'尚未执行采集':operation.status==='running'?'指数与国债数据采集中':operation.status==='complete'?'采集已完成':operation.status==='cancelled'?'采集已停止，已完成分段保留':'采集未全部完成，请查看进度摘要';
 renderWorkProgress(operation,result);
@@ -237,10 +218,8 @@ async function load(refreshChoices=true){try{const status=await api('/api/indice
 // Refresh versions when returning to a tab; status polling never reads all history.
 document.addEventListener('visibilitychange',()=>{clearTimeout(timer);timer=null;if(!document.hidden)load(false);});
 window.addEventListener('focus',()=>load(false));
-const notifyCollection=()=>document.dispatchEvent(new CustomEvent('index-collection-change',{detail:{source:'indices'}}));
 document.addEventListener('index-collection-change',event=>{if(event.detail?.source!=='indices')load(false);});
-async function collect(mode){try{const body={mode};if(mode==='incremental')body.datasets=['bond_zh_us_rate'];await api('/api/indices/collect',body);notifyCollection();await load(false);}catch(error){el('progress').textContent=error.message;}}
-el('full').onclick=()=>collect('full');el('incremental').onclick=()=>collect('incremental');el('review').onclick=()=>collect('review');el('audit').onclick=()=>collect('audit');el('cancel').onclick=async()=>{try{await api('/api/indices/cancel',{});el('progress').textContent='已请求停止，等待当前请求返回后保存进度';}catch(error){el('progress').textContent=error.message;}};el('point-overlay').onclick=()=>{pointOverlay=!pointOverlay;if(metricFamily==='crowding'){draw();return;}el('point-overlay').setAttribute('aria-pressed',String(pointOverlay));if(pointOverlay&&(!pointData||pointCode!==el('code').value))loadPointOverlay(el('code').value);else draw();};
+el('point-overlay').onclick=()=>{pointOverlay=!pointOverlay;if(metricFamily==='crowding'){draw();return;}el('point-overlay').setAttribute('aria-pressed',String(pointOverlay));if(pointOverlay&&(!pointData||pointCode!==el('code').value))loadPointOverlay(el('code').value);else draw();};
 el('progress-toggle').onclick=()=>{const details=el('progress-details'),expanded=details.hidden;details.hidden=!expanded;el('progress-toggle').setAttribute('aria-expanded',String(expanded));el('progress-toggle').textContent=expanded?'收起进度':'查看进度';};
 el('kind').onchange=renderCodes;el('parent').onchange=()=>{el('industry-second').value='';renderCodes();};el('industry-second').onchange=renderCodes;el('code').onchange=()=>{const selected=data.catalog.find(row=>row.index_code===el('code').value);renderMetricButtons();renderSeries(true);updateSelectedIndex(selected);};el('series').onchange=loadHistory;for(const id of ['range','benchmark','frequency'])el(id).onchange=draw;el('metric').onchange=draw;
 el('industry-crowding-level').onchange=loadIndustryCrowding;el('industry-crowding-range').onchange=loadIndustryCrowding;

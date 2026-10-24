@@ -237,7 +237,7 @@ def ensure_daily_memberships(service, progress=lambda message:None, *, today=Non
         directory=service.directory/'membership_checks'/day
         directory.mkdir(parents=True,exist_ok=True)
         from .collection import RequestCollector
-        collector=RequestCollector(service.db,progress=progress)
+        collector=RequestCollector(service.db,progress=progress,cancelled=lambda:service.collection_cancelled(run_id))
         bundle=fetch_directory(directory,day,progress,db=service.db,operation_id=operation_id,collector=collector)
         old_by_code={r['stock_code']:r for r in old['members']}
         new_by_code={r['stock_code']:r for r in bundle['members']}
