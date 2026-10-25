@@ -90,6 +90,7 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             assert page.locator('#shipping-forecast-entry a').get_attribute('rel')=='noopener'
             assert page.locator('#shipping-forecast-entry a').inner_text()=='海控净利润测算/运价趋势'
             assert '→' not in page.locator('#shipping-forecast-entry a').inner_text()
+            assert page.locator('#shipping-forecast-entry').evaluate("e=>getComputedStyle(e).marginLeft===getComputedStyle(document.querySelector('.chart-explanation')).marginLeft")
             page.goto(base+'/?code=601919&tab=shipping-forecast')
             expect(page.locator('.scenario')).to_have_count(3)
             expect(page.locator('#save')).to_be_enabled()
@@ -154,7 +155,8 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             expect(page.locator('#trend-hover-card')).to_contain_text('CCFI 综合')
             expect(page.locator('#trend-hover-card')).to_contain_text('归母净利润')
             assert page.locator('#trend-chart').evaluate('e=>e.layout.shapes.length===1')
-            assert page.locator('#trend-profit-chart').evaluate("e=>e.layout.shapes.some(s=>s.name==='neutral-forecast'&&s.type==='rect'&&s.x0==='2026-08-31'&&s.x1==='2026-10-30'&&s.y0===0&&s.y1>0)&&e.data.find(t=>t.name==='单季度归母净利润').width===60*86400000&&!e.layout.annotations?.some(a=>a.name==='neutral-forecast-label')&&e.layout.shapes.some(s=>s.type==='line')")
+            assert page.locator('#trend-chart').evaluate("e=>JSON.stringify(e._fullLayout.xaxis.range)===JSON.stringify(document.querySelector('#trend-profit-chart')._fullLayout.xaxis.range)")
+            assert page.locator('#trend-profit-chart').evaluate("e=>{const s=e.layout.shapes.find(s=>s.name==='neutral-forecast'),t=e.data.find(t=>t.name==='单季度归母净利润'),i=t.customdata.indexOf('2026-06-30'),q2start=new Date(Date.parse(t.x[i])-t.width[i]/2).toISOString().slice(0,10),q2end=new Date(Date.parse(t.x[i])+t.width[i]/2).toISOString().slice(0,10),a=e._fullLayout.xaxis,px=d=>a._offset+a.l2p(a.d2l(d));return s?.type==='rect'&&s.x0==='2026-07-01'&&s.x1==='2026-10-01'&&s.y0===0&&s.y1>0&&q2start==='2026-04-01'&&q2end==='2026-07-01'&&px('2026-07-31')>px(s.x0)&&px('2026-07-31')<px(s.x1)&&!e.layout.annotations?.some(a=>a.name==='neutral-forecast-label')&&e.layout.shapes.some(s=>s.type==='line')}")
             latest=page.locator('#trend-chart .scatterlayer .trace .points path').last
             latest_box=latest.bounding_box();assert latest_box and latest_box['width']>0
             page.mouse.move(latest_box['x']+latest_box['width']/2,latest_box['y']+latest_box['height']/2)
@@ -176,5 +178,13 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             page.locator('#tab-forecast').click()
             expect(page.locator('#forecast-view')).to_be_visible()
             assert page.locator('[data-case="base"][data-key="override"]').input_value()=='0'
+            page.goto(base+'/?code=601919&tab=shipping-forecast&view=trend')
+            expect(page.locator('#trend-view')).to_be_visible()
+            page.wait_for_function("document.getElementById('trend-coverage').textContent.length>0")
+            page.select_option('#trend-quality','preferred')
+            expect(page.locator('#trend-chart')).to_have_class(__import__('re').compile('js-plotly-plot'))
+            page.select_option('#trend-profit','quarter')
+            expect(page.locator('#trend-profit-chart')).to_have_class(__import__('re').compile('js-plotly-plot'))
+            assert page.locator('#trend-chart').evaluate("e=>JSON.stringify(e._fullLayout.xaxis.range)===JSON.stringify(document.querySelector('#trend-profit-chart')._fullLayout.xaxis.range)")
             assert not errors
         finally:browser.close()
