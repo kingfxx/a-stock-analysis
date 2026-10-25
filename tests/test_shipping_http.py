@@ -91,6 +91,9 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             expect(page.locator('.scenario')).to_have_count(3)
             expect(page.locator('#save')).to_be_enabled()
             assert page.locator('.scenario h3').all_text_contents()==['悲观情景','中性情景','乐观情景']
+            assert page.locator('.calc-explanation summary').all_text_contents()==['计算说明']*3
+            page.locator('.calc-explanation summary').first.click()
+            expect(page.locator('#explanation-bear')).to_contain_text('归母净利润')
             assert page.locator('#weekly-lead-weeks').input_value()=='2'
             assert page.locator('#industry tbody tr').count()==3
             page.locator('[data-industry-scope="沿海"]').uncheck()
@@ -129,6 +132,7 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             assert page.locator('#weekly-lead-weeks').input_value()=='3'
             page.locator('#tab-trend').click()
             expect(page.locator('#trend-view')).to_be_visible()
+            expect(page.locator('#trend-chart .empty')).to_be_visible()
             page.select_option('#trend-quality','preferred')
             expect(page.locator('#trend-coverage')).to_contain_text('46')
             expect(page.locator('#trend-chart')).to_have_class(__import__('re').compile('js-plotly-plot'))
@@ -147,7 +151,11 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             expect(page.locator('#trend-hover-card')).to_contain_text('CCFI 综合')
             expect(page.locator('#trend-hover-card')).to_contain_text('归母净利润')
             assert page.locator('#trend-chart').evaluate('e=>e.layout.shapes.length===1')
-            assert page.locator('#trend-profit-chart').evaluate('e=>!e.layout.shapes?.length')
+            assert page.locator('#trend-profit-chart').evaluate("e=>e.layout.shapes.some(s=>s.name==='neutral-forecast'&&s.type==='rect'&&s.x0==='2026-08-31'&&s.x1==='2026-10-30'&&s.y0===0&&s.y1>0)&&e.data.find(t=>t.name==='单季度归母净利润').width===60*86400000&&!e.layout.annotations?.some(a=>a.name==='neutral-forecast-label')&&e.layout.shapes.some(s=>s.type==='line')")
+            latest=page.locator('#trend-chart .scatterlayer .trace .points path').last
+            latest_box=latest.bounding_box();assert latest_box and latest_box['width']>0
+            page.mouse.move(latest_box['x']+latest_box['width']/2,latest_box['y']+latest_box['height']/2)
+            expect(page.locator('#trend-hover-card')).to_contain_text('中性预测 2026Q3')
             page.select_option('#trend-index','SCFI')
             expect(page.locator('#trend-chart')).to_contain_text('当前筛选没有可展示数据')
             page.select_option('#trend-index','CCFI')
@@ -157,6 +165,11 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             overflow=page.evaluate('''() => [...document.querySelectorAll('*')].map(e=>({tag:e.tagName,id:e.id,cls:String(e.className).slice(0,60),right:e.getBoundingClientRect().right,width:e.getBoundingClientRect().width})).filter(x=>x.right>innerWidth+1).slice(0,12)''')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),overflow
             assert page.locator('.trend-filters').evaluate('(e)=>e.getBoundingClientRect().height>250')
+            mobile_latest=page.locator('#trend-chart .scatterlayer .trace .points path').last
+            mobile_box=mobile_latest.bounding_box();assert mobile_box and mobile_box['width']>0
+            page.mouse.move(mobile_box['x']+mobile_box['width']/2,mobile_box['y']+mobile_box['height']/2)
+            expect(page.locator('#trend-hover-card')).to_contain_text('中性预测 2026Q3')
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             page.locator('#tab-forecast').click()
             expect(page.locator('#forecast-view')).to_be_visible()
             assert page.locator('[data-case="base"][data-key="override"]').input_value()=='0'
