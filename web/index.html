@@ -398,6 +398,7 @@
       <table class="trend-history-table"><thead id="trend-history-head"></thead><tbody id="trend-history-body"></tbody></table>
     </div>
     <p id="trend-history-footer" class="trend-history-footer"></p>
+    <p id="shipping-forecast-entry" hidden><a href="/?code=601919&amp;tab=shipping-forecast">中远海控利润预测 →</a></p>
     <details class="chart-explanation">
       <summary>说明</summary>
       <p id="chart-note" class="note"></p>
@@ -687,6 +688,7 @@
     });
   }
   function render() {
+    document.getElementById('shipping-forecast-entry').hidden = state.code !== '601919';
     metrics.roic.name = selectedPeriod === 'year' ? 'ROIC（年度，简化估算）' : 'ROIC（TTM，简化估算）';
     const cutoff = new Date();
     cutoff.setHours(0, 0, 0, 0);

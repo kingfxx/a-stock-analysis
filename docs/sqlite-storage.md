@@ -1,6 +1,6 @@
 # SQLite 存储、数据更新与备份
 
-当前结构版本为v40。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
+当前结构版本为v42。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
 
 v37仅扩展既有`index_price_observations`，新增volume、amount、change_points、change_pct、turnover_rate、amount_ratio、constituent_count、mean_price、float_market_cap和mean_float_market_cap十个可空字段，另增field_lineage_json字段级来源/估算JSON，不新增业务表。中证/申万原series及行情行就地升级v2，保留ID及OHLC，不保留v1行情副本；Legu/Sina继续v1。每个series_id/observation_date物理唯一，历史修订就地更新，version只作计数；不建立独立derived行情。估算字段标记及父依赖同行存储，官方值优先；仅补算保留原source/batch/obtained_at，computed_at在估算JSON中，updated_at是真实写入时间；缺依赖保持NULL或撤回。单位、字段映射、缺值和派生估算规则见[指数行情字段映射](index-data-collection.md#field-mapping)。v38后逻辑来源/时间语义保持，物理来源/时间格式见下节。
 
@@ -540,3 +540,15 @@ python -m quarterly_dashboard.storage check --database $restorePath
 两张新表在maintenance.DESCRIPTIONS登记「运行与配置」。TIME_COLUMNS自动识别上述真实字段，空表／缺时间显示暂无数据／未记录，slot_key和目标报告期不作为更新时间。公共batch通过槽位operation_ref识别真实scheduled触发；来源文件策略及数值精度不变。
 
 隔离库1000条代表性槽位实测含索引258048字节（258.048字节/行），规则仅1行分配8192字节（含主键索引，页分配下限，不作稳态行大小估计）；1000条领域记录+槽位写入约17ms，任务目录常用读取约5—7ms。机器与规模相关，实测及查询计划见[data/verification报告](../data/verification/reports/collection_management_20261025.json)。维护统计已验证新表发现、分类、用途、数量、大小、真实时间及外键。设计与限制见[统一采集管理](collection-management.md)。
+## 航运行业研究（v41）
+
+`research_shipping_rate_points`：指数/频率/原航线名/统计类型/起止区间/来源通道定义事实身份，保存数值、单位、公布变化、披露日、质量及修订链；source_id/batch_id组合外键关联公共证据，不逐行复制URL、正文或哈希。全年与YTD均值独立保存，Excel与官方通道不覆盖彼此。
+
+`research_shipping_report_metrics`：正式document/parse、指标、集团范围、累计口径、单位/币种、证据页及提取版本；单季差分和单箱收入读取时计算。`research_shipping_industry_metrics`：港口吞吐量、指标期、报告月、披露日、单位、同比与来源修订；scope分别保留全国/沿海/内河及原文规模以上/主要限定，basis区分monthly当月、ytd年初累计、annual全年，period为统计区间终月，不将累计量冒充当月值；现有行业表无适用港口统计口径，单设此表，不混入运价或公司财务。
+
+`research_shipping_forecast_versions`：601919专用目标季度、名称、模型和输入hash、紧凑输入引用/参数/结果快照；禁止UPDATE，保存新版本而非覆盖历史。四表均为「行业研究」，维护时间来自真实created_at；空表/空时间不以报告期或观察日补齐，显示未记录。业务表无完整源库副本，PDF/解析复用正式存储，原文归档与来源预算复用公共表。细节见[航运预测](shipping-forecast.md)。
+
+
+## 可调采集限速（v42）
+
+collection_rate_limits以(task_key,provider)复合主键保存settings_json和真实updated_at，一项配置一行，不重复来源或事实。仅保存七个可调数值，不改变数值精度；60秒窗口、冷却及重试规则不作为自由配置。当前九个网络任务／来源组合含索引占8192字节（表4096、索引4096；页开销下约910字节/行），参数JSON平均110字节；1000次逐笔保存约8760ms，九任务列表读取约3.5—4.1ms，本机单次测量。主键命中点查；真实应用策略只在公共批次scope_json中保存一次紧凑快照，不写到每条事实。隔离维护统计已核对用途、分类、数量、大小和真实更新时间；空表时间为空。[复测报告](../data/verification/reports/collection_rate_limits_20261025.json)。

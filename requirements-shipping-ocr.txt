@@ -1,0 +1,5 @@
+# Optional, local-only MOT image extraction. Can also be installed in data/runtime/shipping-ocr.
+rapidocr_onnxruntime==1.4.4
+onnxruntime>=1.17,<2
+pyclipper==1.4.0
+shapely==2.1.2

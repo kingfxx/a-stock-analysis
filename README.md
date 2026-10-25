@@ -83,3 +83,5 @@ python -m pytest tests -q
 ```
 
 自动测试使用隔离临时数据库。前端回归还需要 Node.js，部分真实浏览器测试需 Edge；测试端口须与日常后台分开。运行与项目维护约定见 [AGENTS.md](AGENTS.md)。
+
+- [中远海控利润预测：正式数据、三情景与版本复盘](docs/shipping-forecast.md)（601919经营趋势历史表下入口，来源采集统一在采集管理）。

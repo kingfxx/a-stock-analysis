@@ -127,3 +127,47 @@ def test_non_cninfo_stock_fast_still_skips_interval_and_window(tmp_path):
     call(collector,batch,'sina',stock_fast=True)
     call(collector,batch,'sina',stock_fast=True)
     assert session.calls[1]==session.calls[0]
+
+
+@pytest.mark.parametrize('provider',['mot','sse'])
+def test_shipping_interval_rest_and_budget_survive_new_collector(tmp_path,provider):
+    db,_,clock,session,collector=setup(tmp_path)
+    batch=begin_batch(db,'shipping-op','shipping.page',provider)
+    collector.uniform=lambda a,b:a
+    for _ in range(20):call(collector,batch,provider)
+    resumed=RequestCollector(db,session=session,clock=clock.time,sleep=clock.sleep,uniform=lambda a,b:a)
+    call(resumed,batch,provider)
+    assert [b-a for a,b in zip(session.calls,session.calls[1:])]==[2]*19+[12]
+    assert json.loads(resumed.state(provider)['budget_json'])['count']==21
+    policy=resumed.policy_for(provider)
+    assert (policy.interval,policy.jitter,policy.window_requests,policy.max_concurrency)==(2,3,30,1)
+    assert resumed.report()['provider_policies']['shipping']['rest_min']==10
+    assert resumed.policy_for('other')==PacingPolicy()
+    with pytest.raises(ValueError):RequestCollector(db,policy=policy)
+    with pytest.raises(ValueError):resumed.policy_for(provider,index_parallel=True)
+
+
+@pytest.mark.parametrize('provider',['mot','sse'])
+def test_shipping_existing_window_and_denial_still_apply(tmp_path,provider):
+    db,_,clock,session,collector=setup(tmp_path)
+    batch=begin_batch(db,'shipping-op','shipping.page',provider)
+    state=collector.state(provider)
+    state['budget_json']=json.dumps({'starts':[clock.value-10]*30,'ready_at':clock.value,'count':30})
+    collector.save_state(state);initial=clock.value
+    call(collector,batch,provider)
+    assert session.calls[0]>=initial+50
+    denied=Session(clock,[Response(429,b'{}',{'Retry-After':'7200'})])
+    resumed=RequestCollector(db,session=denied,clock=clock.time,sleep=clock.sleep,uniform=lambda a,b:a)
+    with pytest.raises(ProviderBlocked):call(resumed,batch,provider)
+    deadline=__import__('datetime').datetime.fromisoformat(resumed.state(provider)['cooldown_until']).timestamp()
+    assert deadline-clock.value>=7200
+    with pytest.raises(ProviderBlocked):call(resumed,batch,provider)
+    assert len(denied.calls)==1
+
+
+@pytest.mark.parametrize('change',[{'interval':1},{'jitter':2},{'window_requests':60},{'max_concurrency':2},{'rest_min':0}])
+def test_shipping_policy_rejects_unapproved_values(change):
+    values=dict(interval=2,jitter=3,window=60,window_requests=30,rest_every=20,
+                rest_min=10,rest_max=10,cooldown=3600,provider='shipping',max_concurrency=1)
+    values.update(change)
+    with pytest.raises(ValueError):PacingPolicy(**values)

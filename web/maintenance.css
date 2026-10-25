@@ -34,3 +34,8 @@
 .collection-provider-menu.collection-provider-above .collection-provider-options{top:auto;bottom:100%}.collection-target-custom[hidden]{display:none!important}
 
 .collection-provider-menu.collection-provider-align-right .collection-provider-options{left:auto;right:0}
+.collection-dataset{padding-top:16px;margin-top:18px;border-top:1px solid var(--line)}.collection-dataset h3{font-size:16px}.collection-task [data-shipping-view][hidden]{display:none!important}[data-shipping-module]{min-width:0}
+
+[data-task-rate-form]{border-top:1px solid var(--border,#36505b);padding-top:12px;margin-top:16px}
+[data-task-rate-form] .collection-fields{align-items:end}
+[data-task-rate-form] input{width:140px}

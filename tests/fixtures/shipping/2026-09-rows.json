@@ -1,0 +1,93 @@
+[
+  {
+    "route": "综合",
+    "annual": 1197.6,
+    "ytd": 1476.76,
+    "monthly": 1887.59,
+    "change": 2.8
+  },
+  {
+    "route": "欧洲",
+    "annual": 1609.22,
+    "ytd": 1855.18,
+    "monthly": 2088.57,
+    "change": -10.9
+  },
+  {
+    "route": "地中海",
+    "annual": 1982.8,
+    "ytd": 2377.01,
+    "monthly": 2572.1,
+    "change": -11.4
+  },
+  {
+    "route": "美西",
+    "annual": 911.25,
+    "ytd": 1171.18,
+    "monthly": 1679.51,
+    "change": 9.8
+  },
+  {
+    "route": "美东",
+    "annual": 1053.67,
+    "ytd": 1326.52,
+    "monthly": 1921.65,
+    "change": 6.2
+  },
+  {
+    "route": "波红",
+    "annual": 1228.79,
+    "ytd": 2424.71,
+    "monthly": 3921.32,
+    "change": 20
+  },
+  {
+    "route": "澳新",
+    "annual": 1039.68,
+    "ytd": 1268.99,
+    "monthly": 1775.63,
+    "change": 8.6
+  },
+  {
+    "route": "西非",
+    "annual": 947,
+    "ytd": 987.78,
+    "monthly": 1116.8,
+    "change": -5
+  },
+  {
+    "route": "南非",
+    "annual": 1249.22,
+    "ytd": 1222.51,
+    "monthly": 1435.69,
+    "change": -2.6
+  },
+  {
+    "route": "南美",
+    "annual": 766.27,
+    "ytd": 1024.56,
+    "monthly": 1618.36,
+    "change": 20.7
+  },
+  {
+    "route": "日本",
+    "annual": 968.48,
+    "ytd": 953.42,
+    "monthly": 992.13,
+    "change": 6.5
+  },
+  {
+    "route": "东南亚",
+    "annual": 947.92,
+    "ytd": 1007.76,
+    "monthly": 1149.87,
+    "change": 14.6
+  },
+  {
+    "route": "韩国",
+    "annual": 493.24,
+    "ytd": 602.42,
+    "monthly": 708.27,
+    "change": 13.9
+  }
+]

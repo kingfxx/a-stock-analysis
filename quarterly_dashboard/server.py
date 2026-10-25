@@ -1274,6 +1274,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_POST(self):
         path = urlparse(self.path).path
+        if path in {'/api/shipping-forecast/save','/api/shipping-forecast/prepare-report'}:
+            try:
+                self._ai_host()
+                if self.headers.get('Origin') not in {f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'} or not secrets.compare_digest(self.headers.get('X-Local-Session',''),LOCAL_SESSION_TOKEN):
+                    self._ai_reply({'error':'拒绝跨站或缺少本地会话的保存'},403);return
+                size=int(self.headers.get('Content-Length','0'))
+                if self.headers.get_content_type()!='application/json' or not 0<size<=32768:
+                    raise ValueError('请提交有效JSON')
+                from .shipping_forecast import save_version
+                command=json.loads(self.rfile.read(size))
+                if path.endswith('/prepare-report'):
+                    from .shipping_report_metrics import prepare_shipping_report
+                    if not isinstance(command,dict) or set(command)!={'period'} or not isinstance(command['period'],str):raise ValueError('请指定单一报告期')
+                    self._ai_reply(prepare_shipping_report(Database(DATABASE_PATH),command['period']))
+                else:
+                    self._ai_reply(save_version(Database(DATABASE_PATH),command))
+            except (ValueError,StorageError) as exc:self._ai_reply({'error':str(exc)},400)
+            except (OSError,RuntimeError,sqlite3.DatabaseError) as exc:self._ai_reply({'error':str(exc)},503)
+            return
         if path.startswith('/api/notes/'):
             self._notes_request(urlparse(self.path), write=True); return
         if path in {'/api/maintenance/compact','/api/maintenance/stock-cleanup/preview','/api/maintenance/stock-cleanup/execute'}:
@@ -1283,7 +1302,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/ai/") or path == "/api/analysis" or path.startswith("/api/analysis/") or path == '/api/business-judgment' or path.startswith('/api/business-judgment/'):
             self._ai_post(path)
             return
-        if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh", "/api/indices/collect", "/api/indices/cancel", "/api/indices/congestion/schedule", "/api/maintenance/collections/run", "/api/maintenance/collections/cancel", "/api/maintenance/collections/schedule"}:
+        if path not in {"/api/stock-groups", "/api/maintenance/unfollowed", "/api/industry/refresh", "/api/indices/collect", "/api/indices/cancel", "/api/indices/congestion/schedule", "/api/maintenance/collections/run", "/api/maintenance/collections/cancel", "/api/maintenance/collections/schedule", "/api/maintenance/collections/rate-limit"}:
             self.send_error(404)
             return
         status = 200
@@ -1298,13 +1317,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("分组请求大小无效")
             command = json.loads(self.rfile.read(size).decode("utf-8"))
             if path.startswith('/api/maintenance/collections/'):
-                if not isinstance(command,dict) or set(command)-{'task_key','params','schedule'}:
+                if not isinstance(command,dict) or set(command)-{'task_key','params','schedule','provider','settings'}:
                     raise ValueError('采集管理请求无效')
                 management=CollectionManagement(Database(DATABASE_PATH),industry_service())
                 key=command.get('task_key')
                 if path.endswith('/run'):
                     if set(command)-{'task_key','params'}:raise ValueError('运行参数无效')
                     data=management.start(key,command.get('params',{}))
+                elif path.endswith('/rate-limit'):
+                    if set(command)!={'task_key','provider','settings'}:raise ValueError('限速配置参数无效')
+                    data=management.configure_rate(key,command['provider'],command['settings'])
                 elif path.endswith('/cancel'):
                     if set(command)!={'task_key'}:raise ValueError('停止参数无效')
                     data=management.cancel(key)
@@ -1364,6 +1386,28 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == '/api/shipping-trend':
+            try:
+                self._ai_host()
+                from .shipping_forecast import read_trend
+                query=parse_qs(parsed.query)
+                if query.get('code',['601919'])[0] != '601919': raise ValueError('航运趋势仅适用601919')
+                data=read_trend(Database(DATABASE_PATH), index=query.get('index',['CCFI'])[0], frequency=query.get('frequency',['monthly'])[0],
+                    route=query.get('route',['综合'])[0], years=query.get('range',['all'])[0], quality=query.get('quality',['official'])[0],
+                    profit=query.get('profit',['none'])[0], selected_years=query.get('years',[''])[0].split(',') if query.get('years') else [])
+                self._ai_reply(dict(data,session_token=LOCAL_SESSION_TOKEN))
+            except (ValueError,StorageError,sqlite3.DatabaseError) as exc:self._ai_reply({'error':str(exc)},400)
+            return
+        if parsed.path == '/api/shipping-forecast':
+            try:
+                self._ai_host()
+                from .shipping_forecast import read_forecast, read_version
+                query=parse_qs(parsed.query);db=Database(DATABASE_PATH)
+                if query.get('code',['601919'])[0]!='601919':raise ValueError('航运预测仅适用601919')
+                data=read_version(db,query['version'][0]) if 'version' in query else read_forecast(db,query.get('target',['2026Q3'])[0])
+                self._ai_reply(dict(data,session_token=LOCAL_SESSION_TOKEN))
+            except (ValueError,StorageError) as exc:self._ai_reply({'error':str(exc)},400)
+            return
         if parsed.path == '/api/notes' or parsed.path.startswith('/api/notes/'):
             self._notes_request(parsed); return
         if parsed.path.startswith('/vendor/notes/'):
@@ -1546,7 +1590,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path in {"/datetime.js", "/research-layout.css", "/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
                              "/financial-statements.js", "/financial-statements.css", "/business-segments.js", "/business-segments.css", "/business-segment-aliases.js", "/business-segment-names.js", "/industry.js", "/industry.css",
                              "/maintenance.js", "/maintenance.css", "/collection-progress.js", "/collection-progress.css", "/investment-notes.js", "/investment-notes.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css",
-                             "/dividend-forecast.js", "/dividend-forecast.css"}:
+                             "/dividend-forecast.js", "/dividend-forecast.css", "/shipping-forecast.js", "/shipping-forecast.css"}:
             body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
@@ -1566,7 +1610,10 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/":
             query = parse_qs(parsed.query)
             code = query.get("code", ["601919"])[0]
-            body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
+            if query.get('tab')==['shipping-forecast'] and code=='601919':
+                body=(ROOT/'web'/'shipping-forecast.html').read_bytes()
+            else:
+                body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
             content_type = "text/html; charset=utf-8"
         elif parsed.path == '/api/maintenance/storage':
             query=parse_qs(parsed.query)

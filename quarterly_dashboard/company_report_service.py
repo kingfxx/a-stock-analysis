@@ -243,6 +243,38 @@ class CompanyReportService:
                 records.append({"period":year[1]+("-12-31" if kind=="annual" else "-06-30"),"kind":kind,"published":published,"url":"https://static.cninfo.com.cn/"+item["adjunctUrl"]})
         return [max([r for r in records if r['kind']==kind],key=lambda r:(r['period'],r['published'])) for kind in ('annual','interim') if any(r['kind']==kind for r in records)]
 
+    def prepare_period(self, code, period):
+        """Explicit single-period preparation, including Q1/Q3, from local official metadata."""
+        from .collection import begin_batch, finish_batch, RequestCollector, parsed_source
+        code=normalize_code(code)
+        if period[5:] not in {'03-31','06-30','09-30','12-31'}:
+            raise ValueError('财报期次无效')
+        datetime.strptime(period,'%Y-%m-%d')
+        with self.db.connection() as conn:
+            metadata=conn.execute("SELECT m.* FROM stock_announcement_metadata m JOIN instruments i ON i.id=m.instrument_id WHERE i.code=? AND m.period=? AND m.title_category='formal_report' AND m.revision_marker IN ('original','revision') AND m.date_conflict=0 AND m.id NOT IN (SELECT supersedes_id FROM stock_announcement_metadata WHERE supersedes_id IS NOT NULL) ORDER BY m.published_on DESC,m.id DESC LIMIT 1",(code,period)).fetchone()
+            saved=conn.execute('SELECT d.* FROM company_report_documents d JOIN instruments i ON i.id=d.instrument_id WHERE i.code=? AND d.report_period=? ORDER BY d.id DESC LIMIT 1',(code,period)).fetchone()
+        if saved and (not metadata or saved['source_url']=='https://static.cninfo.com.cn/'+metadata['adjunct_url']):
+            doc=dict(saved);return dict(document=doc,parse=self.parse(doc),cached=True)
+        if not metadata:raise ValueError('本地没有已核验的正式报告公告，请先更新个股公告资料')
+        url='https://static.cninfo.com.cn/'+metadata['adjunct_url'].lstrip('/')
+        if urlparse(url).hostname!='static.cninfo.com.cn' or not url.lower().endswith('.pdf'):
+            raise ValueError('公告PDF地址无效')
+        batch=begin_batch(self.db,'report-prepare-'+__import__('uuid').uuid4().hex,'company.report_pdf','cninfo',
+                          scope=dict(code=code,period=period,announcement_row_id=metadata['id']),domain='company_reports',parser_version=PARSER_VERSION)
+        source=None
+        try:
+            response,source=RequestCollector(self.db).get(batch,'cninfo','company.report_pdf',url,expect='binary')
+            with tempfile.TemporaryDirectory() as folder:
+                file=Path(folder)/'report.pdf';file.write_bytes(response.content)
+                doc=self.import_report(code,period,file,url=url,published_on=metadata['published_on'])
+            parse=self.parse(doc)
+            parsed_source(self.db,source,fields=['pdf','period','company'])
+            finish_batch(self.db,batch,'complete','complete',result=dict(document_id=doc['id'],parse_id=parse['id']))
+            return dict(document=doc,parse=parse,cached=False)
+        except Exception as exc:
+            if source:parsed_source(self.db,source,error=exc)
+            finish_batch(self.db,batch,'failed','unknown',error=exc);raise
+
     def cached_documents(self, code):
         code=normalize_code(code)
         today=datetime.now(__import__('zoneinfo').ZoneInfo('Asia/Shanghai')).date().isoformat()

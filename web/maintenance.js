@@ -213,7 +213,7 @@
     let collectionBusy=false,collectionTimer=null,collectionTasks=[];
     const operationDetails=new Map();
     const collectionVisible=()=>!panel.hidden&&!el('maintenance-collection-panel').hidden&&!document.hidden;
-    const providerNames={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富'};
+    const providerNames={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所 / 航运研究所',mot:'交通运输部'};
     const progressMarkup='<div class="index-progress-details" role="status" aria-live="polite"><p data-progress-summary></p><ul data-progress-sources></ul></div>';
     const modeNames={incremental:'增量更新／原范围续跑',review:'修订核对',full:'历史初始化／恢复全量',audit:'覆盖核查',backfill:'指定范围回填'};
     function providerMenu(task,selected,title){
@@ -228,16 +228,33 @@
       const choices=recentTargets(task),custom=!choices.includes(value),id=`${task.task_key}-${kind}-target`;
       return `<label>${task.action==='financial_period'?'报告期':'季度'}<select data-target-preset aria-controls="${id}">${choices.map(target=>`<option value="${target}" ${target===value?'selected':''}>${target}</option>`).join('')}<option value="custom" ${custom?'selected':''}>手动输入…</option></select></label><label class="collection-target-custom" ${custom?'':'hidden'}>手填${task.action==='financial_period'?'报告期 YYYY-MM-DD':'季度 YYYYQn'}<input id="${id}" name="target" value="${esc(value)}" required></label>`;
     }
+    const rateFields={interval:'完成后间隔（秒）',jitter:'随机追加等待上限（秒）',window_requests:'60秒最多请求数',rest_every:'每完成多少次休息',rest_min:'休息最短（秒）',rest_max:'休息最长（秒）',max_concurrency:'同源最大并发'};
+    const rateBounds={interval:[1,3600],jitter:[0,600],window_requests:[1,60],rest_every:[1,1000],rest_min:[0,3600],rest_max:[0,3600],max_concurrency:[1,2]};
+    function rateSettings(task){
+      if(task.manual_only)return '<details data-task-rates><summary>限速设置</summary><p>本地资料导入不产生网络请求，无需设置限速。</p></details>';
+      if(!task.rate_limits)return '<details data-task-rates><summary>限速设置</summary><p>新功能需在后台重启后使用。</p></details>';
+      return `<details data-task-rates><summary>限速设置</summary><p>按任务和提供方保存，手动与自动采集共用。保存不会启动采集或清空已有预算，下一次任务生效；有任务运行时请待结束后保存。同一来源仍跨任务、进程和重启共享锁、预算及冷却。并发为上限，串行分页不会因此并行。</p>${task.rate_limits.map(rate=>`<form data-task-rate-form data-rate-provider="${esc(rate.provider)}"><h4>${esc(providerNames[rate.provider]||rate.provider)}</h4><p data-rate-saved></p><div class="collection-fields"><label>配置模板<select data-rate-preset aria-label="${esc(providerNames[rate.provider]||rate.provider)}限速模板"><option value="current">当前参数</option><option value="default">默认</option><option value="faster">较快</option><option value="custom">手动调整</option></select></label>${Object.entries(rateFields).map(([name,label])=>`<label>${label}<input type="number" name="${name}" min="${rateBounds[name][0]}" max="${name==='max_concurrency'?rate.max_concurrency:rateBounds[name][1]}" step="${['interval','jitter','rest_min','rest_max'].includes(name)?'any':'1'}" value="${rate.current[name]}" required></label>`).join('')}<button type="submit">保存限速设置</button></div><p>滚动窗口固定60秒；拒绝后立即停止，冷却至少1小时并遵守更长 Retry-After；最多${rate.max_attempts}次尝试，重试仍等待60／120秒。支持同源并发上限：${rate.max_concurrency}。</p><p data-rate-status role="status" aria-live="polite"></p></form>`).join('')}</details>`;
+    }
+    function updateRateForms(card,task){
+      for(const rate of task.rate_limits||[]){
+        const form=card.querySelector(`[data-rate-provider="${rate.provider}"]`);if(!form)continue;
+        form.querySelector('[data-rate-saved]').textContent=rate.updated_at?`当前已保存参数 · 更新时间 ${date(rate.updated_at)}`:'当前使用采集器原有参数（尚未自定义）';
+        if(!form.dataset.dirty){for(const name of Object.keys(rateFields))form.elements[name].value=rate.current[name];form.querySelector('[data-rate-preset]').value='current';}
+        form.querySelector('button[type=submit]').disabled=collectionTasks.some(other=>other.running);
+      }
+    }
     function taskForm(task){
       const key=task.task_key,schedule=task.schedule,rule=schedule.rule;
       const target=task.action?recentTargets(task)[0]:null;
-      return `<article class="panel collection-task" data-task="${key}"><h3>${esc(task.name)} <small>${esc(task.group)} · ${esc(task.providers.map(provider=>providerNames[provider]||provider).join(' / '))}</small></h3><div data-task-status></div>
+      const shipping=key.startsWith('shipping_');
+      return `<article class="${shipping?'collection-dataset':'panel collection-task'}" data-task="${key}"><h3>${key==='shipping_image_review'?'人工核验补正':esc(task.name)} <small>${esc(task.group)} · ${esc(task.providers.map(provider=>providerNames[provider]||provider).join(' / '))}</small></h3><div data-task-status></div>
+        ${key==='shipping_monthly'?'<p>同一次采集自动处理 HTML 表格和图片，校验后发布月度指数及已披露的吞吐量。不确定的图片保留缺口，可在下方人工核验补正。</p>':''}
         ${key==='sovereign_yields'?'<p>本入口独立采集东方财富中美国债收益率。旧联合运行历史见指数采集，以下仅列国债独立运行。</p>':key==='indices'?'<p>本入口只采集所选指数来源；国债使用独立入口。所有批量采集统一在此管理。</p>':''}
         <form data-task-run><h4>手动采集</h4><div class="collection-fields"><label>模式<select name="mode">${task.modes.map(mode=>`<option value="${mode}">${esc(modeNames[mode])}</option>`).join('')}</select></label>
-        ${task.action?targetPicker(task,target,'manual'):''}
-        ${key==='indices'?`${providerMenu(task,task.providers,'提供方')}<label>起始日（可选）<input type="date" name="start"></label><label>结束日（可选）<input type="date" name="end"></label>`:''}
+        ${task.action?targetPicker(task,target,'manual'):''}${task.manual_only?'<label>本地文件路径<input name="file" required placeholder="Excel原件或已核验JSON"></label>':''}
+        ${key==='indices'||key==='shipping_monthly'?`${key==='indices'?providerMenu(task,task.providers,'提供方'):''}<label>起始日（可选）<input type="date" name="start"></label><label>结束日（可选）<input type="date" name="end"></label>`:''}
         <button type="submit">运行所选范围…</button>${task.supports_cancel?'<button type="button" data-task-cancel>请求停止</button>':'<span>暂不提供用户停止；失败后可按原范围续跑。</span>'}</div></form>
-        <details><summary>自动检查：${schedule.enabled?'已开启':'已关闭'} · 北京时间 ${esc(schedule.local_time)}</summary><form data-task-schedule>
+        ${task.manual_only?'<p>本地资料导入仅手动，不提供自动检查。</p>':`<details><summary>自动检查：${schedule.enabled?'已开启':'已关闭'} · 北京时间 ${esc(schedule.local_time)}</summary><form data-task-schedule>
         <p>检查频率不等于数据频率。后台服务运行时自动检查，关闭网页不影响。服务晚启动时补做最近一次到期检查，多次漏跑合并为一次；例如18:00到期，次日09:00启动会补查前一次。首次保存启用从下一个计划时间开始，不立即采集。关闭仅阻止新调度，已运行任务继续。自动检查仅增量，财务／快照只检查所填目标。</p><div class="collection-fields">
         <label><input name="enabled" type="checkbox" ${schedule.enabled?'checked':''}>启用自动检查</label><label>北京时间<input name="local_time" type="time" value="${esc(schedule.local_time)}" required></label>
         <label>频率<select name="frequency">${[['daily','每日'],['weekly','每周'],['monthly','每月']].map(([value,label])=>`<option value="${value}" ${rule.frequency===value?'selected':''}>${label}</option>`).join('')}</select></label>
@@ -246,13 +263,23 @@
         <label>月发布窗口起日（可选）<input name="window_start" type="number" min="1" max="31" value="${rule.window?.[0]||''}"></label><label>止日<input name="window_end" type="number" min="1" max="31" value="${rule.window?.[1]||''}"></label>
         ${task.action?targetPicker(task,schedule.params.target||target,'schedule'):''}
         ${key==='indices'?`${providerMenu(task,schedule.params.providers||task.providers,'自动检查来源')}`:''}
-        <button type="submit">保存定时设置</button></div></form></details><details><summary>进度、最近20次运行及来源证据</summary><div data-task-history></div></details></article>`;
+        <button type="submit">保存定时设置</button></div></form></details>`}<details><summary>进度、最近20次运行及来源证据</summary><div data-task-history></div></details>${rateSettings(task)}</article>`;
+    }
+    function shippingModule(list){
+      let module=list.querySelector('[data-shipping-module]');if(module)return module;
+      const selected=collectionTasks.find(task=>task.task_key.startsWith('shipping_')&&task.running)?.task_key||'shipping_monthly';
+      const view=['shipping_monthly','shipping_weekly','shipping_research_import'].includes(selected)?selected:'shipping_monthly';
+      list.insertAdjacentHTML('beforeend',`<article class="panel collection-task" data-shipping-module><h3>航运采集 <small>按数据类型分别设置采集范围和自动检查</small></h3><p data-shipping-status></p><div class="collection-fields"><label>采集数据<select data-shipping-select aria-label="航运采集数据">${[['shipping_monthly','官方月度指数与吞吐量（含图片）'],['shipping_weekly','CCFI / SCFI 周度'],['shipping_research_import','既有研究资料导入']].map(([key,label])=>`<option value="${key}" ${view===key?'selected':''}>${label}</option>`).join('')}</select></label></div><div data-shipping-view="shipping_monthly" ${view==='shipping_monthly'?'':'hidden'}><div data-shipping-slot="shipping_monthly"></div><details data-shipping-correction><summary>图片识别待核验时：人工核验补正及历史记录</summary><p>常规图片随月度数据自动解析。仅自动校验未通过时，使用与原图片配对的已核验 JSON 补正。</p><div data-shipping-slot="shipping_image_review"></div></details></div><div data-shipping-view="shipping_weekly" ${view==='shipping_weekly'?'':'hidden'} data-shipping-slot="shipping_weekly"></div><div data-shipping-view="shipping_research_import" ${view==='shipping_research_import'?'':'hidden'} data-shipping-slot="shipping_research_import"></div></article>`);
+      return list.querySelector('[data-shipping-module]');
     }
     function renderCollections(){
       const list=el('maintenance-collection-list');
+      const shipping=collectionTasks.filter(task=>task.task_key.startsWith('shipping_'));
+      if(shipping.length){const module=shippingModule(list);module.querySelector('[data-shipping-status]').textContent=shipping.some(task=>task.running)?`运行中：${shipping.filter(task=>task.running).map(task=>task.name).join('、')}。切换数据类型可查看进度或请求停止。`:'各类数据独立保留运行记录与定时设置。';}
       for(const task of collectionTasks){
         let card=list.querySelector(`[data-task="${task.task_key}"]`);
-        if(!card){list.insertAdjacentHTML('beforeend',taskForm(task));card=list.lastElementChild;}
+        if(!card){const container=task.task_key.startsWith('shipping_')?list.querySelector(`[data-shipping-slot="${task.task_key}"]`):list;container.insertAdjacentHTML('beforeend',taskForm(task));card=container.lastElementChild;}
+        updateRateForms(card,task);
         const previousRuns=new Set([...card.querySelectorAll('[data-run]')].map(node=>node.dataset.run));
         const opened=new Set([...card.querySelectorAll('[data-task-history] details[open]')].map(node=>node.dataset.run));
         const batchesOpen=Boolean(card.querySelector('[data-task-batches]')?.open);
@@ -280,11 +307,22 @@
       if(!response.ok)throw Error(data.error||'操作失败');return data;
     }
     el('maintenance-collection-list').addEventListener('change',event=>{
+      if(event.target.matches('[data-shipping-select]')){const module=event.target.closest('[data-shipping-module]');module.querySelectorAll('[data-shipping-view]').forEach(view=>{view.hidden=view.dataset.shippingView!==event.target.value;});return;}
+      const rateForm=event.target.closest('[data-task-rate-form]');
+      if(rateForm){
+        rateForm.dataset.dirty='true';
+        if(event.target.matches('[data-rate-preset]')&&event.target.value!=='custom'){
+          const task=collectionTasks.find(task=>task.task_key===rateForm.closest('[data-task]').dataset.task),rate=task.rate_limits.find(rate=>rate.provider===rateForm.dataset.rateProvider);
+          for(const name of Object.keys(rateFields))rateForm.elements[name].value=rate[event.target.value][name];
+        }else if(!event.target.matches('[data-rate-preset]'))rateForm.querySelector('[data-rate-preset]').value='custom';
+        rateForm.querySelector('[data-rate-status]').textContent='参数未保存';return;
+      }
       const preset=event.target.closest('[data-target-preset]');
       if(preset){const form=preset.closest('form'),input=form.querySelector('input[name=target]'),custom=preset.value==='custom';input.closest('label').hidden=!custom;if(custom)input.focus();else input.value=preset.value;return;}
       const menu=event.target.closest('[data-provider-menu]');if(!menu)return;
       menu.querySelector('[data-provider-selection]').textContent=`已选 ${menu.querySelectorAll('input:checked').length} / ${menu.querySelectorAll('input').length} 项`;
     });
+    el('maintenance-collection-list').addEventListener('input',event=>{const form=event.target.closest('[data-task-rate-form]');if(form&&event.target.matches('input')){form.dataset.dirty='true';form.querySelector('[data-rate-preset]').value='custom';form.querySelector('[data-rate-status]').textContent='参数未保存';}});
     panel.addEventListener('toggle',event=>{
       const menu=event.target;if(!menu.matches?.('[data-provider-menu]')||!menu.open)return;
       const options=menu.querySelector('.collection-provider-options'),box=menu.getBoundingClientRect(),below=innerHeight-box.bottom-12,above=box.top-12;
@@ -294,16 +332,23 @@
     document.addEventListener('click',event=>{panel.querySelectorAll('[data-provider-menu][open]').forEach(menu=>{if(!menu.contains(event.target))menu.open=false;});});
     el('maintenance-collection-list').addEventListener('submit',async event=>{
       event.preventDefault();const form=event.target,card=form.closest('[data-task]'),key=card.dataset.task,values=new FormData(form),isSchedule=form.hasAttribute('data-task-schedule');
+      if(form.hasAttribute('data-task-rate-form')){
+        const settings=Object.fromEntries(Object.keys(rateFields).map(name=>[name,Number(values.get(name))])),button=form.querySelector('button[type=submit]'),status=form.querySelector('[data-rate-status]');
+        button.disabled=true;
+        try{await collectionPost('rate-limit',{task_key:key,provider:form.dataset.rateProvider,settings});delete form.dataset.dirty;await loadCollections();status.textContent='已保存，下一次采集任务生效。';}
+        catch(error){status.textContent=error.message;}
+        finally{button.disabled=collectionTasks.some(task=>task.running);}return;
+      }
       const params={mode:isSchedule?'incremental':values.get('mode')};
-      if(values.has('target'))params.target=values.get('target').trim();
-      if(key==='indices'){params.providers=values.getAll('provider');for(const field of ['start','end'])if(values.get(field))params[field]=values.get(field);}
-      const scopes={market_financial:`全市场财务：全A股四表，报告期 ${params.target}。`,trade_snapshot:`季度交易快照：${params.target} 的季末交易日，完整分页校验后保存。`,indices:`指数估值与行情：${(params.providers||[]).map(provider=>providerNames[provider]||provider).join('、')}；${params.start||'按本地水位及所选模式'} 至 ${params.end||'最近已完成交易日'}。本入口不附带国债采集。`,market_congestion:'大盘拥挤度：乐咕来源。首次历史初始化包含API与HTML；后续更新只检查HTML。',sovereign_yields:'中美国债收益率：东方财富，独立运行；按本地水位补采，首次从2002年至今。'};
+      if(values.has('target'))params.target=values.get('target').trim();if(values.has('file'))params.file=values.get('file').trim();
+      if(key==='indices'||key==='shipping_monthly'){if(key==='indices')params.providers=values.getAll('provider');for(const field of ['start','end'])if(values.get(field))params[field]=values.get(field);}
+      const scopes={shipping_research_import:`按哈希复用已有研究Excel、14份正式报告及解析，文件：${params.file}。`,shipping_image_review:`发布明确核验的图片转录，保留图片及核验文件证据，文件：${params.file}。`,shipping_weekly:'官方可见CCFI全部航线及SCFI综合；只补当期和上期，不承诺历史完整。',shipping_monthly:`交通运输部月度指数及市场分析：${params.start||'2022-12'} 至 ${params.end||'最新'}。HTML表格与图片一起解析；校验未通过的图片保留缺口。`,market_financial:`全市场财务：全A股四表，报告期 ${params.target}。`,trade_snapshot:`季度交易快照：${params.target} 的季末交易日，完整分页校验后保存。`,indices:`指数估值与行情：${(params.providers||[]).map(provider=>providerNames[provider]||provider).join('、')}；${params.start||'按本地水位及所选模式'} 至 ${params.end||'最近已完成交易日'}。本入口不附带国债采集。`,market_congestion:'大盘拥挤度：乐咕来源。首次历史初始化包含API与HTML；后续更新只检查HTML。',sovereign_yields:'中美国债收益率：东方财富，独立运行；按本地水位补采，首次从2002年至今。'};
       const historyWarning=['full','backfill','audit'].includes(params.mode)?'历史初始化／回填或核查可能耗时较长。':'';
       if(!isSchedule&&!confirm(`确认运行${collectionTasks.find(task=>task.task_key===key).name}？\n模式：${modeNames[params.mode]}\n${scopes[key]}\n${historyWarning}已提交分段保留，缺失不补造。`))return;
       let command={task_key:key,params};
       if(isSchedule){const frequency=values.get('frequency'),rule={frequency};if(frequency==='weekly')rule.weekday=Number(values.get('weekday'));if(frequency==='monthly'){rule.day=Number(values.get('day'));if(values.get('window_start')||values.get('window_end'))rule.window=[Number(values.get('window_start')),Number(values.get('window_end'))];}command={task_key:key,schedule:{enabled:values.has('enabled'),local_time:values.get('local_time'),rule,params}};}
       const button=form.querySelector('button[type=submit]');button.disabled=true;
-      try{await collectionPost(isSchedule?'schedule':'run',command);if(isSchedule)card.querySelector('details>summary').textContent=`自动检查：${values.has('enabled')?'已开启':'已关闭'} · 北京时间 ${values.get('local_time')}`;await loadCollections();}
+      try{await collectionPost(isSchedule?'schedule':'run',command);if(isSchedule)form.closest('details').querySelector(':scope>summary').textContent=`自动检查：${values.has('enabled')?'已开启':'已关闭'} · 北京时间 ${values.get('local_time')}`;await loadCollections();}
       catch(error){el('maintenance-collection-status').textContent=error.message;}
       finally{button.disabled=!isSchedule&&collectionTasks.some(other=>other.running&&Boolean(other.action)===Boolean(collectionTasks.find(task=>task.task_key===key)?.action));}
     });

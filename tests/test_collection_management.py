@@ -4,7 +4,7 @@ from threading import Event, Thread
 
 import pytest
 
-from quarterly_dashboard.collection_management import CollectionManagement, ZONE, due_slot, next_check, validate_params, validate_rule
+from quarterly_dashboard.collection_management import CollectionManagement, ZONE, due_slot, next_check, validate_params, validate_rule, TASKS
 from quarterly_dashboard.industry_service import IndustryService
 from quarterly_dashboard.storage import Database
 from quarterly_dashboard import index_collection, market_congestion
@@ -38,7 +38,7 @@ def enable(management,key='indices',rule=None,params=None):
 def test_reads_are_local_and_new_schedules_are_disabled(management,monkeypatch):
     monkeypatch.setattr(index_collection,'run_operation',lambda *a:pytest.fail('read started network'))
     result=management.read()
-    assert len(result['tasks'])==5
+    assert {t['task_key'] for t in result['tasks']} == set(TASKS)
     assert all(not item['schedule']['enabled'] for item in result['tasks'])
     with management.db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM collection_schedules').fetchone()[0]==0

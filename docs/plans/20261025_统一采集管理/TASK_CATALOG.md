@@ -8,6 +8,6 @@
 |market_congestion|market_congestion.start / incremental、review、full|同上|同上；首次full初始化需明确确认|legu；初始化归档，后续HTML metadata_only；保留原每日开关和时间|
 |sovereign_yields|index_collection.start_operation datasets=[bond_zh_us_rate] / incremental|同上|同上|eastmoney东方财富，公共保守策略；管理页为独立增量，原指数页只读，旧联合历史保留；独立历史不混入联合任务整体状态|
 
-业务页面已移除可执行批量入口，仅保留只读数据/进度及导航；统一采集管理使用上述真实服务。未改造CLI历史入口不自动纳入定时，不批量改写旧历史。个股到期检查、分类独立工具、BigQuant价格/历史合成、正式财报与模型不注册为可运行任务；航运未实现，不注册占位任务。
+业务页面已移除可执行批量入口，仅保留只读数据/进度及导航；统一采集管理使用上述真实服务。未改造CLI历史入口不自动纳入定时，不批量改写旧历史。个股到期检查、分类独立工具、BigQuant价格/历史合成、正式财报与模型不注册为可运行任务；航运已在后续[正式接入](../20261024_ccfi海控利润预测/ACCEPTANCE.md)注册shipping_weekly、shipping_monthly、shipping_research_import、shipping_image_review，真实接口见[航运文档](../../shipping-collection.md)，定时默认关闭，导入仅手动。
 
 任务列表只读最近20条领域运行记录、其公共batch与来源摘要，不读取维护storage、不扫描事实表。覆盖仅展示这些batch的原判定与范围，并明确不是全历史覆盖。历史证据通过详情API引用，不复制来源响应。

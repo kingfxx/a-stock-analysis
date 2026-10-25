@@ -42,9 +42,14 @@ def compact_database(db, validate):
         conn.close()
 
 DESCRIPTIONS={
+ 'research_shipping_rate_points':('行业研究','CCFI/SCFI周月综合及航线事实、统计区间、来源质量与真实修订'),
+ 'research_shipping_report_metrics':('行业研究','海控正式财报累计收入和箱量、范围、单位及解析页引用'),
+ 'research_shipping_forecast_versions':('行业研究','海控目标季度模型和三情景不可改写快照，含输入版本及训练截止'),
+ 'research_shipping_industry_metrics':('行业研究','港口全国/沿海/内河吞吐量，指标月、报告月、披露日及来源修订'),
  'market_indicator_observations':('市场指标','市场拥挤度、收盘点位和两类亿元成交额；独立来源通道、真实取得时间及修订'),
  'collection_schedule_rules':('运行与配置','统一采集日周月规则与白名单参数；真实配置更新时间'),
  'collection_schedule_slots':('运行与配置','定时槽位领取、领域运行引用、崩溃待恢复及真实执行时间'),
+ 'collection_rate_limits':('运行与配置','按采集任务及真实提供方保存的限速参数；updated_at为真实配置更新时间'),
  'collection_schedules':('运行与配置','采集任务自动检查开关、北京时间及真实配置更新时间'),
  'business_segment_versions':('个股数据','主营构成报告期完整结构化版本、真实修订及来源批次；不保存原始JSON'),
  'business_segment_items':('个股数据','主营构成行业、产品、地区明细；十进制原值及精确来源页引用'),

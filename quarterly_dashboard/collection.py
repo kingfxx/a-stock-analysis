@@ -76,7 +76,19 @@ class PacingPolicy:
     max_concurrency: int = 1
 
     def __post_init__(self):
-        # The sole faster policy is an explicit, fixed cninfo authorization.
+        if self.provider == 'custom':
+            from .collection_rate_limits import fields, validate
+            validate(fields(self))
+            if self.window != 60 or self.cooldown < 3600 or not 1 <= self.max_attempts <= 3:
+                raise ValueError('自定义限速不能修改窗口、冷却或重试保护')
+            return
+        # Faster policies are fixed exceptions explicitly authorized per provider/task.
+        if self.provider == 'shipping':
+            if ((self.interval,self.jitter,self.window,self.window_requests,self.rest_every,
+                 self.rest_min,self.rest_max,self.cooldown)!=(2,3,60,30,20,10,10,3600)
+                    or self.max_concurrency!=1 or not 1<=self.max_attempts<=3):
+                raise ValueError('航运限速配置必须符合已授权策略')
+            return
         if self.provider == 'cninfo':
             if ((self.interval, self.jitter, self.window, self.window_requests, self.rest_every,
                     self.rest_min, self.rest_max, self.cooldown) != (2, 0, 60, 30, 20, 0, 0, 3600)
@@ -103,6 +115,35 @@ class PacingPolicy:
                 or self.rest_min < 60 or self.rest_max < self.rest_min or self.cooldown < 3600
                 or self.max_concurrency!=1 or not 1 <= self.max_attempts <= 3):
             raise ValueError('指数采集限速配置不能低于保守默认要求')
+
+
+def pacing_policy(provider, base, *, index_parallel=False, industry_profile=None):
+    if provider in ('mot','sse'):
+        if index_parallel or industry_profile is not None:
+            raise ValueError('航运来源不能混用指数或行业提速策略')
+        return PacingPolicy(interval=2,jitter=3,window=60,window_requests=30,
+            rest_every=20,rest_min=10,rest_max=10,cooldown=3600,
+            max_attempts=base.max_attempts,provider='shipping',max_concurrency=1)
+    if industry_profile is not None:
+        if index_parallel or provider!='eastmoney' or industry_profile not in ('financial','snapshot'):
+            raise ValueError('行业限速策略只能用于明确的东财行业任务')
+        return PacingPolicy(interval=2,jitter=3,window=60,window_requests=30,
+            rest_every=20,rest_min=15,rest_max=15,cooldown=3600,max_attempts=base.max_attempts,
+            provider='industry_financial' if industry_profile=='financial' else 'industry_snapshot',
+            max_concurrency=2 if industry_profile=='financial' else 1)
+    if industry_profile is None and index_parallel and provider=='cninfo':
+        raise ValueError('指数并行策略不能与CNINFO策略混用')
+    if provider == 'cninfo':
+        return PacingPolicy(interval=2,jitter=0,window=60,window_requests=30,
+            rest_every=20,rest_min=0,rest_max=0,cooldown=3600,max_attempts=base.max_attempts,
+            provider='cninfo')
+    if index_parallel:
+        return PacingPolicy(interval=3 if provider=='legu' else 2,jitter=4 if provider=='legu' else 3,
+            window=60,window_requests=30,
+            rest_every=20,rest_min=10,rest_max=10,cooldown=3600,max_attempts=base.max_attempts,
+            provider='index_legu' if provider=='legu' else 'index_parallel',
+            max_concurrency=1 if provider=='legu' else 2)
+    return base
 
 
 def begin_batch(db, operation_id, dataset, provider, start=None, end=None, *, scope=None,
@@ -179,21 +220,23 @@ def read_source(db, source_id):
     return raw,item
 
 
-def reusable_source(db, batch_id, source_id):
-    """Register a same-day verified archive in a new batch without copying its file."""
+def reusable_source(db, batch_id, source_id, *, reparse=False):
+    """Reference an archive without copying it; explicit reparse remains pending until validated."""
     fields=('source_system','dataset','request_key','request_json','http_status','file_path','content_type',
             'compression','raw_sha256','stored_sha256','hash_basis','raw_bytes','stored_bytes','fields_json','obtained_at')
     with db.connection() as conn:
         original=conn.execute('SELECT * FROM collection_sources WHERE id=?',(source_id,)).fetchone()
         target=conn.execute('SELECT source_system,dataset FROM collection_batches WHERE id=?',(batch_id,)).fetchone()
-    if not original or original['request_status'] not in ('success','reused') or original['parse_status']!='complete':
+    if not original or original['request_status'] not in ('success','reused') or original['parse_status'] not in (('complete','failed') if reparse else ('complete',)):
         raise ValueError('来源未通过请求及解析校验，不能复用')
     if not target or (target['source_system'],target['dataset'])!=(original['source_system'],original['dataset']):
         raise ValueError('复用来源与目标批次提供方或数据集不一致')
     if not original['obtained_at'] or not original['file_path']:
         raise ValueError('来源缺少原始取得时间或归档文件')
     values={field:original[field] for field in fields}
-    values.update(batch_id=batch_id,request_status='reused',parse_status='complete',reused_source_id=source_id)
+    if reparse:read_source(db,source_id)
+    values.update(batch_id=batch_id,request_status='reused',parse_status='pending' if reparse else 'complete',reused_source_id=source_id)
+    if reparse:values['fields_json']=None
     with db.connection(write=True) as conn:
         values['attempt_no']=conn.execute('SELECT coalesce(max(attempt_no),0)+1 FROM collection_sources '
             'WHERE batch_id=? AND dataset=? AND request_key=?',
@@ -234,28 +277,17 @@ class RequestCollector:
         self.halted={}
         self.requests=0
         self.retries=0
+        self._batch_policies={}
 
     def policy_for(self, provider, *, index_parallel=False, industry_profile=None):
-        if industry_profile is not None:
-            if index_parallel or provider!='eastmoney' or industry_profile not in ('financial','snapshot'):
-                raise ValueError('行业限速策略只能用于明确的东财行业任务')
-            return PacingPolicy(interval=2,jitter=3,window=60,window_requests=30,
-                rest_every=20,rest_min=15,rest_max=15,cooldown=3600,max_attempts=self.policy.max_attempts,
-                provider='industry_financial' if industry_profile=='financial' else 'industry_snapshot',
-                max_concurrency=2 if industry_profile=='financial' else 1)
-        if industry_profile is None and index_parallel and provider=='cninfo':
-            raise ValueError('指数并行策略不能与CNINFO策略混用')
-        if provider == 'cninfo':
-            return PacingPolicy(interval=2,jitter=0,window=60,window_requests=30,
-                rest_every=20,rest_min=0,rest_max=0,cooldown=3600,max_attempts=self.policy.max_attempts,
-                provider='cninfo')
-        if index_parallel:
-            return PacingPolicy(interval=3 if provider=='legu' else 2,jitter=4 if provider=='legu' else 3,
-                window=60,window_requests=30,
-                rest_every=20,rest_min=10,rest_max=10,cooldown=3600,max_attempts=self.policy.max_attempts,
-                provider='index_legu' if provider=='legu' else 'index_parallel',
-                max_concurrency=1 if provider=='legu' else 2)
-        return self.policy
+        return pacing_policy(provider, self.policy, index_parallel=index_parallel, industry_profile=industry_profile)
+
+    def batch_policy(self, batch_id, provider, policy):
+        from .collection_rate_limits import for_batch
+        cache_key=(batch_id,provider)
+        if cache_key not in self._batch_policies:
+            self._batch_policies[cache_key]=for_batch(self.db,batch_id,provider,policy)
+        return self._batch_policies[cache_key]
 
     def spawn(self):
         """Create a worker with its own HTTP session and the same shared pacing hooks."""
@@ -510,6 +542,7 @@ class RequestCollector:
 
     def report(self):
         return dict(policy=asdict(self.policy),provider_policies={
+                        'shipping':asdict(self.policy_for('mot')),
                         'cninfo':asdict(self.policy_for('cninfo')),
                         'index_parallel':asdict(self.policy_for('index_parallel',index_parallel=True)),
                         'index_legu':asdict(self.policy_for('legu',index_parallel=True)),
@@ -524,7 +557,7 @@ class RequestCollector:
         Request metadata must be sanitized by the adapter. Exceptions are recorded
         by class only because SDK diagnostics may contain authentication material.
         """
-        policy=self.policy_for(provider)
+        policy=self.batch_policy(batch_id,provider,self.policy_for(provider))
         for attempt in range(1,policy.max_attempts+1):
             if provider in self.halted:
                 raise ProviderBlocked(f'{provider} 本轮已停止')
@@ -635,6 +668,8 @@ class RequestCollector:
         if evidence_mode not in ('archive', 'metadata_only'):
             raise ValueError('不支持的来源证据策略')
         policy=self.policy_for(provider,index_parallel=index_parallel,industry_profile=industry_profile)
+        if not stock_fast:
+            policy=self.batch_policy(batch_id,provider,policy)
         scrub=lambda values:{k:v for k,v in (values or {}).items() if k.lower() not in ('token','apikey','api_key')}
         request=dict(transport='http',method=method,url=url,params=scrub(params))
         if method=='POST': request['data']=scrub(data)

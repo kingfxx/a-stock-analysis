@@ -8,13 +8,17 @@ import re
 import sqlite3
 from threading import Event, Thread
 
-from . import index_collection, market_congestion
+from . import index_collection, market_congestion, shipping_collection
 from .collection import encoded
 from .collection_schedule import latest_daily_date
 from .storage import utc_now
 
 ZONE = market_congestion.ZONE
 TASKS = {
+    'shipping_research_import': dict(name='航运既有研究资料导入', group='航运研究', providers=['user_excel'], modes=['incremental'], manual_only=True),
+    'shipping_image_review': dict(name='航运月度图片核验导入', group='航运研究', providers=['mot'], modes=['incremental'], manual_only=True),
+    'shipping_weekly': dict(name='航运 CCFI / SCFI 周度', group='航运研究', providers=['sse'], modes=['incremental','review']),
+    'shipping_monthly': dict(name='航运官方月度指数与吞吐量', group='航运研究', providers=['mot'], modes=['incremental','backfill','review']),
     'market_financial': dict(name='全市场财务四表', group='全市场', providers=['eastmoney'],
                              action='financial_period', modes=['incremental', 'review']),
     'trade_snapshot': dict(name='季度交易快照', group='全市场', providers=['eastmoney'],
@@ -42,16 +46,28 @@ def validate_params(key, params, *, scheduled=False):
     spec = task(key)
     if not isinstance(params, dict):
         raise ValueError('任务参数须为对象')
-    allowed = {'mode', 'target'} if 'action' in spec else {'mode', 'providers', 'start', 'end'} if key == 'indices' else {'mode'}
+    allowed = {'mode','file'} if spec.get('manual_only') else {'mode', 'target'} if 'action' in spec else {'mode', 'providers', 'start', 'end'} if key == 'indices' else {'mode','start','end'} if key == 'shipping_monthly' else {'mode'}
     if set(params) - allowed:
         raise ValueError('任务参数不在白名单中')
     params = dict(params)
     mode = params.setdefault('mode', 'incremental')
+    if spec.get('manual_only'):
+        if scheduled:raise ValueError('本地资料导入不支持定时运行')
+        if not isinstance(params.get('file'),str) or not params['file'].strip() or len(params['file'])>1000:
+            raise ValueError('请指定本地导入文件')
     if mode not in spec['modes'] or scheduled and mode != 'incremental':
         raise ValueError('模式无效；自动检查仅允许增量')
     if 'action' in spec:
         from .industry_updates import validate_request
         validate_request(spec['action'], params.get('target'), mode == 'review')
+    if key == 'shipping_monthly':
+        for boundary in ('start','end'):
+            if boundary in params and (not isinstance(params[boundary],str) or index_collection.day(params[boundary]) != params[boundary]):
+                raise ValueError('范围须为YYYY-MM-DD')
+        if params.get('start','') > params.get('end','9999'):
+            raise ValueError('日期范围倒置')
+        if scheduled and set(params) & {'start','end'}:
+            raise ValueError('自动检查不能配置历史范围')
     if key == 'indices':
         providers = params.setdefault('providers', spec['providers'])
         if not isinstance(providers, list) or not providers or any(p not in spec['providers'] for p in providers):
@@ -150,6 +166,8 @@ class CollectionManagement:
         with self.db.connection(write=True) as conn:
             current = self.schedules(conn)[key]
             current.update(command)
+            if TASKS[key].get('manual_only') and current['enabled']:
+                raise ValueError('资料导入仅手动，不允许开启定时')
             if type(current['enabled']) is not bool or not isinstance(current['local_time'], str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', current['local_time']):
                 raise ValueError('请指定布尔开关和北京时间HH:MM')
             rule = validate_rule(current['rule'])
@@ -170,6 +188,8 @@ class CollectionManagement:
 
     def reserve(self, conn, key, params):
         spec = task(key)
+        if key.startswith('shipping_'):
+            return shipping_collection.reserve(conn,key,params)
         if 'action' in spec:
             run = self.industry.reserve_refresh(conn, spec['action'], params['target'], params['mode'] == 'review')
             return 'sw_update_runs:' + str(run)
@@ -184,7 +204,9 @@ class CollectionManagement:
 
     def execute(self, key, params, ref):
         try:
-            if 'action' in task(key):
+            if key.startswith('shipping_'):
+                shipping_collection.run(self.db,ref)
+            elif 'action' in task(key):
                 self.industry._refresh(TASKS[key]['action'], params['target'], params['mode'] == 'review', int(ref.split(':')[1]))
             else:
                 index_collection.run_operation(self.db, ref)
@@ -218,13 +240,21 @@ class CollectionManagement:
 
     @staticmethod
     def _predicate(key):
+        if key.startswith('shipping_'):
+            return "json_extract(scope_json,'$.dataset')=?", (key,)
         if key == 'market_congestion':
             return "json_extract(scope_json,'$.dataset')=?", (key,)
         if key == 'sovereign_yields':
             return "json_extract(scope_json,'$.dataset') IS NULL AND json_extract(scope_json,'$.datasets[0]')=? AND coalesce(json_array_length(json_extract(scope_json,'$.providers')),0)=0", ('bond_zh_us_rate',)
         return "json_extract(scope_json,'$.dataset') IS NULL AND (coalesce(json_array_length(json_extract(scope_json,'$.datasets')),0)=0 OR coalesce(json_array_length(json_extract(scope_json,'$.providers')),0)>0)", ()
 
+    def configure_rate(self, key, provider, settings):
+        from .collection_rate_limits import save
+        with self.db.connection(write=True) as conn:
+            return save(conn, key, provider, settings)
+
     def read(self):
+        from .collection_rate_limits import describe
         now = datetime.now(ZONE)
         items = []
         with self.db.connection() as conn:
@@ -253,6 +283,7 @@ class CollectionManagement:
                 schedule = schedules[key]
                 schedule['next_check'] = next_check(schedule, now)
                 items.append(dict(task_key=key, **spec, supports_cancel='action' not in spec,
+                    rate_limits=[] if spec.get('manual_only') else describe(conn,key,spec['providers']),
                     schedule=schedule, running=any(r['status'] == 'running' for r in rows),
                     last_check=source[0] if source else None,
                     last_success=next((r['finished_at'] for r in rows if r['status'] == 'complete'), None),
