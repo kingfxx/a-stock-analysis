@@ -97,6 +97,7 @@ class StockCleanupService:
         if self.activity_check() or (not ignore_prepare and _PREPARE_LOCK.locked()):
             reasons.append('采集、财报准备或分析任务正在启动／运行')
         for table, states in (('sync_runs', "'running'"), ('sw_update_runs', "'running'"),
+                              ('index_collection_operations', "'running'"),
                               ('ai_analysis_runs', "'queued','running','validating'")):
             if conn.execute(f'SELECT 1 FROM {table} WHERE status IN ({states}) LIMIT 1').fetchone():
                 reasons.append('存在未完成的采集、行业或分析任务')

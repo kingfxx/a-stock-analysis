@@ -106,7 +106,11 @@ class PriceService:
             identity = self.db.ensure_instrument(code)
             key = SyncKey(identity, "prices_raw" if adjustment == "raw" else "prices_adjusted", SOURCE, adjustment)
             state = sync_state(self.db, key)
-            prior_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
+            prior_failure = recent_sync_failure(self.db, key)
+            # A request queued behind the failed attempt shares that outcome.
+            # A later explicit refresh may retry; automatic retries remain quiet.
+            if prior_failure and (refresh or full) and prior_failure['finished_at'] < requested_at:
+                prior_failure = None
             if prior_failure:
                 message = f"价格更新失败，继续使用已有版本：{prior_failure['error']}"
                 if state.get("data_status") == "data":

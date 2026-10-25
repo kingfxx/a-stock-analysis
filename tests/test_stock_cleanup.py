@@ -356,7 +356,7 @@ def test_compaction_shrinks_database_without_changing_records(cleanup):
     assert db.check()['integrity']=='ok'
 
 
-@pytest.mark.parametrize('blocked',['confirmation','requests','task','disk','lock'])
+@pytest.mark.parametrize('blocked',['confirmation','requests','task','index_task','disk','lock'])
 def test_compaction_preconditions_preserve_database(cleanup,monkeypatch,blocked):
     from collections import namedtuple
     import sqlite3
@@ -367,6 +367,9 @@ def test_compaction_preconditions_preserve_database(cleanup,monkeypatch,blocked)
     if blocked=='confirmation':command={'confirm':'yes'}
     elif blocked=='requests':gate.enter()
     elif blocked=='task':cleanup.db.start_sync(SyncKey(cleanup.db.ensure_instrument('600900'),'financial:lrb','test'),parser_version='test',methodology_version='test')
+    elif blocked=='index_task':
+        with cleanup.db.connection(write=True) as conn:
+            conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at) VALUES('test','incremental','{}','running','2026-10-25')")
     elif blocked=='disk':monkeypatch.setattr(maintenance.shutil,'disk_usage',lambda folder:namedtuple('Space','total used free')(100,100,0))
     elif blocked=='lock':
         external=sqlite3.connect(cleanup.db.path)

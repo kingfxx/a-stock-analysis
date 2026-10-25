@@ -262,10 +262,10 @@ def _add_missing_name(data: dict, path: Path, session: requests.Session) -> dict
     return data
 
 
-def _add_sqlite_missing_name(db: Database, data: dict) -> dict:
+def _add_sqlite_missing_name(db: Database, data: dict, *, refresh=False) -> dict:
     if (data.get("name") or "").strip():
         return data
-    if recent_failed_stock_batch(db, "instrument_name", data["code"]):
+    if not refresh and recent_failed_stock_batch(db, "instrument_name", data["code"]):
         return {**data, "warnings": [*data.get("warnings", []), "股票名称最近自动获取失败，暂缓重试"]}
     identity = instrument_id(db, data["code"])
     with db.connection() as conn:
@@ -275,7 +275,7 @@ def _add_sqlite_missing_name(db: Database, data: dict) -> dict:
         return {**data, "warnings": [*data.get("warnings", []), "股票名称暂缺，未建立无关联的外部请求"]}
     run_id = row["id"]
     batch_id = begin_stock_batch(db, run_id, "tencent", "instrument_name", data["code"],
-                                 trigger="automatic", scope={"source_interface": "qt.gtimg.cn",
+                                 trigger="manual_refresh" if refresh else "automatic", scope={"source_interface": "qt.gtimg.cn",
                                                               "related_to_dataset": "financial"},
                                  parser_version="tencent_quote_v1", definition_version="instrument_name_v1")
     try:
@@ -810,7 +810,7 @@ def load_chart_data(code: str, section: str, refresh: bool = False, *, price_ver
                     data["announcement_sync"] = announcement.get("sync", {})
                 else:
                     data = _financial_with_announcement_state(data, fundamentals.db)
-                data = _add_sqlite_missing_name(fundamentals.db, data)
+                data = _add_sqlite_missing_name(fundamentals.db, data, refresh=refresh or full)
                 data['business_segment_sync'] = segments.get('sync', {})
                 data["dividend_events"] = dividends.read(code)
                 data["dividend_basis"] = DIVIDEND_BASIS if data["dividend_events"] else None
@@ -1040,7 +1040,7 @@ class Handler(BaseHTTPRequestHandler):
     def _cleanup_service(self):
         with _SERVICE_LOCK:
             if not hasattr(self.server, 'stock_cleanup'):
-                self.server.stock_cleanup = StockCleanupService(Database(DATABASE_PATH), activity_check=_restore_activity)
+                self.server.stock_cleanup = StockCleanupService(Database(DATABASE_PATH), activity_check=_runtime_worker_activity)
         return self.server.stock_cleanup
 
     def _cleanup_post(self, path):
@@ -1731,12 +1731,21 @@ def _initialize_runtime(db, skip_legacy=False):
     print(f'行业中断任务 {industry_recovered} 个；行业仅通过独立入口更新',flush=True)
 
 
-def _restore_activity():
+def _runtime_worker_activity():
+    """Check in-memory workers without opening SQLite during exclusive maintenance."""
     with _SERVICE_LOCK:
-        with Database(DATABASE_PATH).connection() as conn:
-            index_running=bool(conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone())
-        return index_running or any(s.status()['running'] for s in _INDUSTRY_SERVICES.values()) or any(
+        for service in _INDUSTRY_SERVICES.values():
+            with service._lock:
+                if service._status['running']:
+                    return True
+        return any(
             s.worker and s.worker.is_alive() for s in _AI_SERVICES.values())
+
+
+def _restore_activity():
+    with Database(DATABASE_PATH).connection() as conn:
+        index_running=bool(conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone())
+    return index_running or _runtime_worker_activity()
 
 
 def _clear_runtime_services():

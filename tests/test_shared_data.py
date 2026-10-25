@@ -300,7 +300,7 @@ def test_daily_backup_preserves_state_before_first_update(db, tmp_path, monkeypa
         return original(path)
     monkeypatch.setattr(db, "backup", backup)
     service.update("600887", "financing")
-    path = next((tmp_path / "backups").glob("shared-daily-*.sqlite3"))
+    path = next((tmp_path / "backups" / "stock_cloud_bkp").glob("shared-daily-*.sqlite3"))
     snapshot = path.read_bytes()
     assert Database(path).check()["instruments"] == 0
     service.update("300750", "financing", refresh=True)
@@ -323,7 +323,7 @@ def test_daily_backup_rolls_over_without_restart(db, tmp_path, monkeypatch):
     Clock.day = 2
     service.update("300750", "financing")
     previous = Database(tmp_path / "backups/shared-daily-2026-10-01.sqlite3")
-    current = Database(tmp_path / "backups/shared-daily-2026-10-02.sqlite3")
+    current = Database(tmp_path / "backups/stock_cloud_bkp/shared-daily-2026-10-02.sqlite3")
     assert previous.check()["instruments"] == 0
     assert current.check()["instruments"] == 1
     assert db.check()["instruments"] == 2
@@ -404,7 +404,7 @@ def test_requested_qfq_day_requires_matching_raw_and_hfq(mismatch):
         assert result[0]['source_basis']=='tencent-current-ohlc-verified-unadjusted'
 
 
-def test_price_bundle_projects_market_cap_without_qfq(monkeypatch):
+def test_price_bundle_projects_market_cap_without_qfq(db, monkeypatch):
     from types import SimpleNamespace
     data={'code':'688825','reports':[
         {'period':'2026-03-31','publish_date':'2026-07-09','shares':100,'revenue_ytd':10,'profit_ytd':1},
@@ -414,7 +414,7 @@ def test_price_bundle_projects_market_cap_without_qfq(monkeypatch):
     monkeypatch.setattr(server,'services',lambda:(
         SimpleNamespace(cached=lambda *args:{}),SimpleNamespace(version_info=lambda *args:{})))
     monkeypatch.setattr(server,'shared_projection',lambda *args,**kwargs:(None,raw,[]))
-    monkeypatch.setattr(server,'p4_services',lambda:(SimpleNamespace(read=lambda *args:data),
+    monkeypatch.setattr(server,'p4_services',lambda:(SimpleNamespace(read=lambda *args:data,db=db),
         SimpleNamespace(read=lambda *args:[]),SimpleNamespace(read=lambda *args:{})))
     bundle=server.price_bundle('688825',version=0)
     rows=bundle['financial']['views']['quarter']
@@ -508,7 +508,8 @@ def test_overlapping_full_audits_share_one_fetch_but_later_audit_runs(db, monkey
     assert len(source.calls) == 2
 
 
-def test_concurrent_failed_price_refresh_reuses_failure_and_valid_version(db, monkeypatch):
+@pytest.mark.parametrize("full",[False,True])
+def test_concurrent_failed_price_refresh_reuses_failure_and_valid_version(db, monkeypatch, full):
     from stock_analysis.domains.stocks import price_service
 
     source = Prices(history())
@@ -537,9 +538,9 @@ def test_concurrent_failed_price_refresh_reuses_failure_and_valid_version(db, mo
     monkeypatch.setattr(price_service, "data_lock", observed_lock)
     service.fetcher = failed_fetch
     with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(service.ensure, "600887", refresh=True)
+        first = pool.submit(service.ensure, "600887", refresh=not full,full=full)
         assert started.wait(3)
-        follower = pool.submit(service.ensure, "600887", refresh=True)
+        follower = pool.submit(service.ensure, "600887", refresh=not full,full=full)
         assert queued.wait(3)
         release.set()
         results = [first.result(), follower.result()]
@@ -551,6 +552,12 @@ def test_concurrent_failed_price_refresh_reuses_failure_and_valid_version(db, mo
     with db.connection() as conn:
         assert conn.execute("SELECT count(*) FROM sync_runs WHERE dataset='prices_adjusted' "
                             "AND status='failed'").fetchone()[0] == 1
+
+    # A request started after the failure is an explicit retry, even inside 5 seconds.
+    later=service.ensure("600887",refresh=not full,full=full)
+    assert later['version']==original and 'source unavailable' in later['warnings'][0]
+    with db.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM sync_runs WHERE dataset='prices_adjusted' AND status='failed'").fetchone()[0]==2
 
 
 @pytest.mark.parametrize("section", ["financing", "shareholders"])

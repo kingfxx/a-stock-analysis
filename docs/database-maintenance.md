@@ -158,3 +158,7 @@ collection_schedule_rules、collection_schedule_slots分类「运行与配置」
 ## 限速配置（v42）
 
 collection_rate_limits登记为「运行与配置」，用途为按采集任务及真实提供方保存限速参数。更新时间使用TIME_COLUMNS识别的updated_at，不用任务目标日期；空表显示暂无数据，缺时间显示未记录。隔离库验证空表／九配置、真实时间、记录数、表及索引大小、主键点查和外键。[限速配置测量](../data/verification/reports/collection_rate_limits_20261025.json)。本轮按用户要求不迁移日常库、不重启8765。
+
+### 整理时的任务检查
+
+空间整理持有 SQLite 独占锁，采集、行业、分析及指数任务状态均使用当前整理连接检查；运行中线程另从内存状态检查，避免活动回调通过第二个连接等待自身独占锁。活动任务仍阻止整理，不绕过任务保护。

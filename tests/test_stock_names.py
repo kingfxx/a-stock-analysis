@@ -13,6 +13,8 @@ from stock_analysis.infrastructure.storage import Database
 def no_unrelated_mainop_requests(monkeypatch):
     monkeypatch.setattr(server.BusinessSegmentService, 'update',
                         lambda *args, **kwargs: {'sync': {}, 'warnings': []})
+    monkeypatch.setattr(server.AnnouncementService, 'update',
+                        lambda *args, **kwargs: {'dates': {}, 'sync': {}, 'warnings': []})
 
 
 @pytest.fixture
@@ -52,8 +54,9 @@ def test_missing_name_is_backfilled_asynchronously_and_searchable_without_report
     assert calls == ['600900'], 'existing names must not be repeatedly requested'
 
 
+@pytest.mark.parametrize('retry_mode',['manual','automatic_expired'])
 @pytest.mark.parametrize('response',[None,'','   ','offline'])
-def test_name_failure_keeps_facts_and_retries_on_next_update(cached_company, monkeypatch, response):
+def test_name_failure_keeps_facts_and_retries_on_next_update(cached_company, monkeypatch, response, retry_mode):
     db, service = cached_company
     original = service.read('600900')
     def fetch(*args):
@@ -66,7 +69,11 @@ def test_name_failure_keeps_facts_and_retries_on_next_update(cached_company, mon
     assert service.read('600900')['name'] is None
     assert server.p4_loading('600900')['financial'] is True
     monkeypatch.setattr(server,'fetch_stock_name',lambda *args: '长江电力')
-    assert server._add_sqlite_missing_name(db,failed)['name']=='长江电力'
+    assert server._add_sqlite_missing_name(db,failed)['name'] is None
+    if retry_mode=='automatic_expired':
+        with db.connection(write=True) as conn:
+            conn.execute("UPDATE collection_batches SET finished_at='2000-01-01T00:00:00+00:00' WHERE dataset='stock.instrument_name'")
+    assert server._add_sqlite_missing_name(db,failed,refresh=retry_mode=='manual')['name']=='长江电力'
     assert service.read('600900')['name']=='长江电力'
 
 
