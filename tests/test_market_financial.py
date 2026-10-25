@@ -90,7 +90,7 @@ def test_v32_rebuild_preserves_legacy_rows_and_adds_disjoint_public_references(t
     db=Database(path)
     latest=storage.MIGRATIONS
     # Build a v31 database, then apply only the v32 migration under test.
-    monkeypatch.setattr(storage,'MIGRATIONS',latest[:-2])
+    monkeypatch.setattr(storage,'MIGRATIONS',tuple(m for m in latest if m[0]<=31))
     db.initialize()
     with db.connection(write=True) as conn:
         batch=conn.execute("INSERT INTO market_financial_batches(report_date,started_at,status,obtained_at) VALUES('2025-06-30','2026-01-01','complete','2026-01-01')").lastrowid
@@ -99,7 +99,7 @@ def test_v32_rebuild_preserves_legacy_rows_and_adds_disjoint_public_references(t
             source_id=conn.execute("INSERT INTO market_financial_sources(batch_id,dataset,page_number,url,params_json,file_path,content_hash,raw_bytes,stored_bytes,obtained_at,fields_json) VALUES(?,?,1,'https://old.test','{}','old.gz','abc',1,1,'2026-01-01','[]')",(batch,dataset)).lastrowid
             conn.execute(f"INSERT INTO {table}(exchange,report_date,version,is_latest,batch_id,source_id,content_hash,definition_version,obtained_at,updated_at,security_code) VALUES('sh','2025-06-30',1,1,?,?,'legacy-hash','v1','2026-01-01','2026-01-02','600000')",(batch,source_id))
             ids[table]=(batch,source_id,tuple(conn.execute(f'SELECT * FROM {table}').fetchone()))
-    monkeypatch.setattr(storage,'MIGRATIONS',latest[:-1])
+    monkeypatch.setattr(storage,'MIGRATIONS',tuple(m for m in latest if m[0]<=32))
     db.initialize()
     with db.connection() as conn:
         assert conn.execute('PRAGMA user_version').fetchone()[0]==32
@@ -111,7 +111,8 @@ def test_v32_rebuild_preserves_legacy_rows_and_adds_disjoint_public_references(t
             assert conn.execute(f"SELECT count(*) FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL",(table,)).fetchone()[0]==2
         assert conn.execute('SELECT count(*) FROM market_financial_industry').fetchone()[0]==1
         assert conn.execute('PRAGMA foreign_key_check').fetchall()==[]
-    from stock_analysis.collection.collection import archive_source,begin_batch
+    from stock_analysis.collection.collection import archive_source
+    from historical_collection import begin_batch
     public_batch=begin_batch(db,'op','market.financial.income','eastmoney',start='2025-06-30',end='2025-06-30')
     public_source=archive_source(db,public_batch,'eastmoney','market.financial.income',{'url':'https://new.test'},1,raw=b'{}')
     with db.connection(write=True) as conn:

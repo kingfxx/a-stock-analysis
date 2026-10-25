@@ -66,8 +66,8 @@ def http(db,results,clock=None):
     return RequestCollector(db,session=session,clock=clock.time,sleep=clock.sleep,uniform=lambda a,b:a),session,clock
 
 
-def source(db,provider='csindex',series='history.rolling'):
-    batch=begin_batch(db,'test','index.test',provider)
+def source(db,provider='csindex',series='history.rolling', *, batch_factory=begin_batch):
+    batch=batch_factory(db,'test','index.test',provider)
     result=archive_source(db,batch,provider,'index.test',{'method':'GET','url':'https://example.test','params':{}},1,
                           raw=b'{"data":[]}',response=response(),obtained_at='2026-10-11T01:00:00+00:00')
     parsed_source(db,result,fields=['peg'])

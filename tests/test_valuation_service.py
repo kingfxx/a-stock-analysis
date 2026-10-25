@@ -25,7 +25,7 @@ def test_initial_three_windows_then_one_year_update_preserves_dense_history(tmp_
     service = ValuationService(db, tmp_path / "legacy", fetch_indicator=fetch)
     initial = service.update("601919", [], refresh=True)
     assert len(calls) == 9
-    assert list((tmp_path / "backups").glob("facts-daily-*.sqlite3"))
+    assert list((tmp_path / "backups" / "stock_cloud_bkp").glob("facts-daily-*.sqlite3"))
     assert {window for _, window in calls} == {"近十年", "近五年", "近三年"}
     assert [row["date"] for row in initial["observation_rows"]] == [
         "2020-01-01", "2024-01-01", "2026-01-01"]

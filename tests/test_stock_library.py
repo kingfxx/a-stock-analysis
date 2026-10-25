@@ -40,7 +40,7 @@ def test_groups_order_multimembership_and_preferences_survive_reopen(library):
     assert data['selected_group'] == 'all'
     assert len(data['stocks']) == 3
     assert data['groups'][0]['codes'] == []
-    assert list((library.db.path.parent / 'backups').glob('stocks-daily-*.sqlite3'))
+    assert list((library.db.path.parent / 'backups' / 'stock_cloud_bkp').glob('stocks-daily-*.sqlite3'))
 
 
 def test_invalid_batch_and_sort_are_atomic(library):

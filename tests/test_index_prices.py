@@ -1,3 +1,4 @@
+from historical_collection import begin_batch as historical_batch
 import json
 import sqlite3
 
@@ -25,8 +26,8 @@ def db(tmp_path):
     return db
 
 
-def seed(db, *, provider='csindex', code='000300', kind='broad', rows=None, dataset='index.cs.history'):
-    batch=begin_batch(db,'test',dataset,provider,'2026-10-09','2026-10-09',scope={'code':code,'level':1 if kind=='industry' else None})
+def seed(db, *, provider='csindex', code='000300', kind='broad', rows=None, dataset='index.cs.history', batch_factory=begin_batch):
+    batch=batch_factory(db,'test',dataset,provider,'2026-10-09','2026-10-09',scope={'code':code,'level':1 if kind=='industry' else None})
     sid=archive_source(db,batch,provider,dataset,dict(url='https://example.test',params={'indexCode':code,'startDate':'20261009','endDate':'20261009'}),1,
         raw=json.dumps({'data':rows or []}).encode(),response=response(),obtained_at='2026-10-11T01:00:00Z')
     parsed_source(db,sid,fields=['close'])
@@ -509,7 +510,7 @@ def test_v36_migration_preserves_latest_id_and_is_immediately_idempotent(tmp_pat
     migrations=storage.MIGRATIONS
     with monkeypatch.context() as patch:
         patch.setattr(storage,'MIGRATIONS',tuple(m for m in migrations if m[0]<=36));db.initialize()
-        batch,sid,_=seed(db)
+        batch,sid,_=seed(db, batch_factory=historical_batch)
         with db.connection(write=True) as conn:
             conn.execute('INSERT INTO index_price_definitions VALUES(?,?,?,?,?)',('csindex','history.points','v1',encoded(legacy_definition('csindex','history.points')),'2026-10-01T00:00:00Z'))
             conn.execute("INSERT INTO index_price_series VALUES(17,'cn:000300','csindex','history.points','daily','unspecified','v1','2026-10-01T00:00:00Z')")

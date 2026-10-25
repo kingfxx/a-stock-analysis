@@ -1,3 +1,4 @@
+from historical_collection import begin_batch as historical_batch
 import json
 import sqlite3
 from datetime import date,timedelta
@@ -117,7 +118,7 @@ def test_failed_migration_rolls_back_and_can_resume_after_fix(tmp_path,monkeypat
     database=Database(tmp_path/'old.sqlite3')
     with monkeypatch.context() as old:
         old.setattr(storage,'MIGRATIONS',tuple(m for m in storage.MIGRATIONS if m[0]<=37))
-        database.initialize();batch,sid,_=seed(database)
+        database.initialize();batch,sid,_=seed(database, batch_factory=historical_batch)
         with database.connection(write=True) as conn:
             conn.execute("INSERT INTO index_price_series VALUES(1,'cn:000300','csindex','history.points','daily','unspecified','v2','2026-10-01T00:00:00Z')")
             lineage={'_raw':{'revision':1,'fields':{'close':{'source_id':sid,'batch_id':batch,'obtained_at':'2026-10-11T01:00:00Z'}}}}
@@ -131,6 +132,6 @@ def test_failed_migration_rolls_back_and_can_resume_after_fix(tmp_path,monkeypat
         conn.execute("UPDATE index_price_observations SET obtained_at='2026-10-11T01:00:00Z'")
     database.initialize()
     with database.connection() as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0]==38
+        assert conn.execute('PRAGMA user_version').fetchone()[0]==storage.MIGRATIONS[-1][0]
         row=price_fact(conn,'SELECT * FROM index_price_observations_read')
         assert row['close']==100 and row['id']==1 and row['content_hash']==hashed

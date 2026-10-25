@@ -27,7 +27,7 @@ def test_proposal_becomes_implemented_without_duplicate_cash(tmp_path):
 
     service = DividendService(db, tmp_path / "legacy", fetch_page=fetch)
     assert service.update("601919")["events"] == []
-    assert list((tmp_path / "backups").glob("facts-daily-*.sqlite3"))
+    assert list((tmp_path / "backups" / "stock_cloud_bkp").glob("facts-daily-*.sqlite3"))
     source[:] = [_event("2026-03-20", status="实施分配", ex_date="2026-06-26")]
     result = service.update("601919", refresh=True)
     assert len(result["events"]) == 1

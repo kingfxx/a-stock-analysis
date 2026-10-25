@@ -1,3 +1,4 @@
+from historical_collection import begin_batch as historical_batch
 """v26 only adds transactional cache generations and registers maintenance metadata."""
 import sqlite3
 
@@ -14,7 +15,7 @@ def test_revision_migration_preserves_facts_and_tracks_transaction(tmp_path,monk
     with monkeypatch.context() as old:
         old.setattr(storage,'MIGRATIONS',tuple(m for m in migrations if m[0]<=25))
         db.initialize()
-        _,_,row=source(db)
+        _,_,row=source(db, batch_factory=historical_batch)
         with db.connection(write=True) as conn:publish(conn,[row])
         with db.connection() as conn:
             before=[tuple(r) for r in conn.execute('SELECT * FROM index_valuation_observations')]

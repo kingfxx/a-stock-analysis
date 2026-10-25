@@ -1,3 +1,4 @@
+from historical_collection import begin_batch as historical_batch
 """v24→v25 preserves full observations, revisions and source constraints."""
 import sqlite3
 
@@ -17,8 +18,8 @@ def test_upgrade_preserves_revisions_and_sources(tmp_path, monkeypatch):
     with monkeypatch.context() as old:
         old.setattr(storage, 'MIGRATIONS', tuple(m for m in migrations if m[0]<25))
         database.initialize()
-        batch, sid, row = source(database)
-        month_batch, month_sid, month_row = source(database, 'legu', 'pe.ordinary')
+        batch, sid, row = source(database, batch_factory=historical_batch)
+        month_batch, month_sid, month_row = source(database, 'legu', 'pe.ordinary', batch_factory=historical_batch)
         with database.connection(write=True) as conn:
             install_definitions(conn)
             columns = [r['name'] for r in conn.execute('PRAGMA table_info(index_valuation_observations)')]

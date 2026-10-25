@@ -56,9 +56,10 @@ def test_old_schema_upgraded_in_copy_and_original_unchanged(tmp_path,monkeypatch
         old_tables={r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
     with db.connection() as conn:
         new_tables={r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+        seed_counts={name:conn.execute(f'SELECT count(*) FROM {name}').fetchone()[0] for name in new_tables-old_tables}
     assert preview['source_table_count']==len(old_tables)
     assert preview['table_count']==len(new_tables)
-    assert preview['added_tables']==[{'name':name,'rows':1 if name=='index_read_revisions' else 0}
+    assert preview['added_tables']==[{'name':name,'rows':seed_counts[name]}
                                      for name in sorted(new_tables-old_tables)]
     assert digest(old.path)==original
     schedule(manager,preview)
