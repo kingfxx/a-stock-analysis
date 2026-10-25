@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from stock_analysis.paths import PROJECT_ROOT
+from stock_analysis.runtime import run_server
 from stock_analysis.http.assets import asset_path
+from stock_analysis.http.rendering import research_sidebar as render_research_sidebar
 import html
 import hashlib
 import json
@@ -41,12 +43,13 @@ from stock_analysis.domains.indices.index_collection import start_operation, run
 from stock_analysis.domains.indices.index_repository import read_indices
 from stock_analysis.domains.indices.index_read_service import IndexReadService
 from stock_analysis.domains.market import market_congestion
-from stock_analysis.collection.collection_management import CollectionManagement, Scheduler
+from stock_analysis.collection.collection_management import CollectionManagement
 from stock_analysis.collection.collection import ProviderBlocked, read_source
 from stock_analysis.maintenance.database_restore import RestoreManager, RequestGate, MAX_UPLOAD
 from stock_analysis.domains.stocks.dividend_service import DividendService
 from stock_analysis.domains.valuation.valuation_service import ValuationService
-from stock_analysis.domains.stocks.update_service import ChipService, instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update, recent_sync_failure
+from stock_analysis.domains.stocks.sync_support import instrument_id, sync_state, recently_checked, checked_today, audit_due, backup_before_update, recent_sync_failure
+from stock_analysis.domains.stocks.update_service import ChipService
 from stock_analysis.infrastructure.storage import SyncKey
 from stock_analysis.domains.stocks.stock_collection import (begin_stock_batch, complete_stock_batch, fail_stock_batch,
                                recent_failed_stock_batch, routed_stock_requests)
@@ -101,43 +104,7 @@ _DATA_LOCKS: dict[str, Lock] = {}
 
 
 def research_sidebar(page: str) -> str:
-    """Render the shared stock picker and research navigation for each page."""
-    views = (
-        ("trend", "企业经营趋势", "trend-panel"),
-        ("business", "主营构成", "business-panel"),
-        ("statements", "财务分析", "statements-panel"),
-        ("notes", "投资笔记", "notes-panel"),
-        ("industry", "行业内对比", "industry-panel"),
-        ("maintenance", "后台维护", "maintenance-panel"),
-    )
-    if page == "indices":
-        items = [f'<a class="nav-link" data-view="{key}" href="/?tab={key}">{label}</a>' for key, label, _ in views]
-        items.insert(5, '<a class="nav-link" href="/indices" aria-current="page">指数分析</a>')
-        nav_role = ""
-        filters = ""
-        entity = ("当前指数", "current-index-name", "current-index-code", "指数分析", "当前指数、股票选择和研究视图")
-    else:
-        items = []
-        for index, (key, label, panel) in enumerate(views):
-            tabindex = '' if index == 0 else ' tabindex="-1"'
-            items.append(f'<button id="{key}-tab" type="button" role="tab" aria-selected="{str(index == 0).lower()}" aria-controls="{panel}"{tabindex}>{label}</button>')
-        items.insert(5, '<a id="indices-link" class="nav-link" href="/indices">指数分析</a>')
-        nav_role = 'role="tablist"'
-        filters = '''<details id="industry-filter-details" class="industry-filter-details" hidden><summary>行业筛选</summary><div class="industry-filter-body"></div></details>
-  <details id="statement-filter-details" class="industry-filter-details statement-filter-details" open hidden><summary>财务筛选</summary><div class="statement-filter-body"></div></details>
-  <details id="business-filter-details" class="industry-filter-details business-filter-details" hidden><summary>主营筛选</summary><div class="business-filter-body"></div></details>'''
-        entity = ("当前标的", "current-stock-name", "current-stock-code", "—", "当前标的、股票选择和研究视图")
-    caption, name_id, code_id, initial_name, aria_label = entity
-    return (RESEARCH_SIDEBAR_TEMPLATE
-            .replace("__SIDEBAR_LABEL__", aria_label)
-            .replace("__ENTITY_CAPTION__", caption)
-            .replace("__ENTITY_NAME_ID__", name_id)
-            .replace("__ENTITY_CODE_ID__", code_id)
-            .replace("__ENTITY_NAME__", initial_name)
-            .replace("__ENTITY_CODE__", "—")
-            .replace("__NAV_ROLE__", nav_role)
-            .replace("__NAV_ITEMS__", "".join(items))
-            .replace("__FILTERS__", filters))
+    return render_research_sidebar(page, RESEARCH_SIDEBAR_TEMPLATE)
 
 
 FINANCIAL_VALUES = ("revenue_ytd", "profit_ytd", "shares", "equity") + NEW_REPORT_FIELDS
@@ -1772,33 +1739,17 @@ def _restore_activity():
             s.worker and s.worker.is_alive() for s in _AI_SERVICES.values())
 
 
+def _clear_runtime_services():
+    with _SERVICE_LOCK:
+        _SERVICES.clear(); _AI_SERVICES.clear(); _INDUSTRY_SERVICES.clear(); _MAINTENANCE_SERVICES.clear()
+        _DATA_LOCKS.clear()
+
+
 def serve(port: int = 8765, open_browser: bool = False):
-    db=Database(DATABASE_PATH);manager=RestoreManager(db,activity_check=_restore_activity);reloaded=False
-    while True:
-        with instance_lock(DATABASE_PATH):
-            server=ThreadingHTTPServer(('127.0.0.1',port),Handler)
-            server.restore_manager=manager;server.request_gate=RequestGate()
-            try:
-                _initialize_runtime(db,skip_legacy=reloaded)
-                scheduler=Scheduler(CollectionManagement(db,industry_service()),gate=server.request_gate)
-                scheduler.start()
-                print(f'季度分析页面：http://127.0.0.1:{port}/',flush=True)
-                if open_browser and not reloaded:webbrowser.open(f'http://127.0.0.1:{port}/')
-                server.serve_forever()
-            except KeyboardInterrupt:
-                return
-            finally:
-                # Drain request threads and release all connections before replacing SQLite.
-                if 'scheduler' in locals():
-                    scheduler.close()
-                    del scheduler
-                server.server_close()
-                if hasattr(server, 'index_reader'):
-                    server.index_reader.close()
-            if not manager.pending:return
-            result=manager.execute()
-            print('数据库恢复：'+json.dumps(result,ensure_ascii=False),flush=True)
-            with _SERVICE_LOCK:
-                _SERVICES.clear();_AI_SERVICES.clear();_INDUSTRY_SERVICES.clear();_MAINTENANCE_SERVICES.clear()
-                _DATA_LOCKS.clear()
-            reloaded=True
+    return run_server(
+        port, open_browser, database_path=DATABASE_PATH, handler=Handler,
+        server_factory=ThreadingHTTPServer, initialize=_initialize_runtime,
+        activity_check=_restore_activity,
+        management_factory=lambda db: CollectionManagement(db, industry_service()),
+        clear_state=_clear_runtime_services, open_url=webbrowser.open,
+    )

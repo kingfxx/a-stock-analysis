@@ -42,3 +42,5 @@
 - D19：2026-10-25 用户明确要求开始实施，D18 的仅计划限制结束；继续单代理。
 - D20：第一阶段交叉模块按主职责归档：sources/stock_collection/price_projection/update_service 属 stocks；institution_forecast 属 valuation；report_backup 属 research/reports；index_note_snapshots 属 notes；bigquant_sdk 属 market。当前依赖保留，后续再拆分。
 - D21：完整基线在不含 data 的原始跟踪源码快照执行，所有测试使用明确临时库；宿主机执行用于避免沙箱 SQLite 文件 rename 拒绝。
+
+- D22：前后端迁移验收后，第三阶段首批限于 runtime、侧栏渲染、两个既有领域升级、估值纯计算及共享同步辅助的提取；保留旧函数导出作为同一新包内的调用兼容，不增加旧 quarterly_dashboard 包。大范围路由和内嵌前端拆分仍按需求逐项推进，见 INTERNAL_EXTRACTIONS.md。

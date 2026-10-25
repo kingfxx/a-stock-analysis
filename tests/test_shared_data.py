@@ -565,6 +565,8 @@ def test_chip_checks_once_per_shanghai_day(db, tmp_path, monkeypatch, section):
         def now(cls, tz=None):
             return (now + cls.offset).astimezone(tz)
     monkeypatch.setattr(update_service, "datetime", Clock)
+    from stock_analysis.domains.stocks import sync_support
+    monkeypatch.setattr(sync_support, "datetime", Clock)
     calls = []
     def fetch(*args, **kwargs):
         calls.append(kwargs)
@@ -596,6 +598,8 @@ def test_price_checks_once_per_day_but_manual_refresh_bypasses(db, monkeypatch, 
         def now(cls, tz=None):
             return (now + cls.offset).astimezone(tz)
     monkeypatch.setattr(update_service, "datetime", Clock)
+    from stock_analysis.domains.stocks import sync_support
+    monkeypatch.setattr(sync_support, "datetime", Clock)
     source = Prices(history())
     service = PriceService(db, fetcher=source)
     service.ensure("600887", adjustment)
@@ -622,6 +626,8 @@ def test_daily_check_boundary_is_shanghai_midnight(monkeypatch):
         def now(cls, tz=None):
             return datetime(2026, 10, 2, 0, 1, tzinfo=timezone(timedelta(hours=8))).astimezone(tz)
     monkeypatch.setattr(update_service, "datetime", Clock)
+    from stock_analysis.domains.stocks import sync_support
+    monkeypatch.setattr(sync_support, "datetime", Clock)
     assert not update_service.checked_today({"checked_at": "2026-10-01T15:59:00+00:00"})
     assert update_service.checked_today({"checked_at": "2026-10-01T16:00:00+00:00"})
 

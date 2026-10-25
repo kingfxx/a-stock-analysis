@@ -3,7 +3,7 @@
 from pypinyin import lazy_pinyin, Style
 
 from stock_analysis.infrastructure.storage import utc_now
-from stock_analysis.domains.stocks.update_service import backup_before_update
+from stock_analysis.domains.stocks.sync_support import backup_before_update
 
 
 class StockLibrary:

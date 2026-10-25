@@ -78,3 +78,14 @@
 ### 阶段一实际部署完成
 
 新后台 PID33200；主页、指数、航运页面均200，日志无启动异常。schema_migrations、collection_schedules、collection_schedule_rules、collection_rate_limits、collection_provider_state 与切换前一致；没有活动采集、没有新增定时或真实回填。
+
+## 第三阶段首批与最终结果
+
+- runtime、侧栏、两个领域升级、估值纯计算及共享同步辅助已提取，详见 INTERNAL_EXTRACTIONS.md。29个函数体AST保持，纯估值模块不加载 requests/sqlite3。
+- 最终1575 passed、49 failed、1 skipped；失败集合与阶段二完全相同，无新增失败，无超时或未完成文件。来源分页漏导入math问题已修复，24项来源契约复测通过；最终逐文件XML/日志与汇总已更新。
+- 相对原始基线50失败，本次指数筛选断言通过一次，按既有波动处理，未宣称修复；原始50节点清单保留以便对照。
+- 最终127个模块导入在禁止网络/SQLite连接下通过，原业务资源77项及前端49项哈希一致；39静态HTTP内容/MIME、4拒绝路径、2页无库访问验收再次通过。
+- 最终8765部署：三页面200，schema42不变，全部记录的迁移/定时/限速/提供方状态与切换前一致，启动日志正常；证据 structure-live-prefinal.json / structure-live-final.json 与 structure-server-final.out.log / .err.log。
+- 自动回归使用隔离库且禁止外部socket，生产验收只读；没有手动启动采集/回填或模型生成，没有新增定时。
+
+最终后台 PID40764；清理已完成，保留当前后台及日志。原源码快照和测试临时库已删除；完整逐文件结果、原始文件哈希清单及可复用验收工具保留。

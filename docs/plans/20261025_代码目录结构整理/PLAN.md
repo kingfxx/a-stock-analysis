@@ -1,7 +1,7 @@
 # 代码目录结构整理计划
 
 日期：2026-10-25。
-状态：2026-10-25 用户已授权开始实施；阶段一迁移已完成，正在隔离回归。
+状态：前后端目录迁移及第三阶段首批职责提取已完成；最终回归与8765部署通过。后续可拆项见 INTERNAL_EXTRACTIONS.md。
 
 ## 目标与已确认方向
 
@@ -197,7 +197,7 @@ investment/
 
 ## 待实施时细化事项
 
-- 逐文件归属清单尚未生成；特别核对横跨领域的 stock_collection、price_projection、report_backup、institution_forecast、note_snapshots 等，选择主职责并记录依据。
-- 根 web 的全部文件清单及动态引用链尚待阶段二逐项盘点；结构中的目录仅在有实际归属文件时创建。
+- 逐文件归属已完成，见 MIGRATION_MAP.md / PYTHON_MIGRATION.json；跨领域归属依据已记入 DECISIONS.md。
+- 根 web 的49项原始资源及动态引用已盘点并迁移，见 FRONTEND_MAP.md；仅创建有实际文件的目录。
 - 实际外部 CLI 消费者、Python 导入兼容需求尚待检查；当前没有证据要求长期旧包兼容层。
-- 本轮未执行测试和原库验收，未承诺全仓现有测试均通过；阶段三的具体拆分顺序在前两阶段完成后更新。
+- 最终回归与原8765验收已完成，结果及既有失败见 ACCEPTANCE.md；第三阶段首批已实施，其余细分路线见 INTERNAL_EXTRACTIONS.md。

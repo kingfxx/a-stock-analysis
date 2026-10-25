@@ -8,9 +8,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from quarterly_dashboard.industry_bulk import publish
-from quarterly_dashboard.industry_service import IndustryService, dumps
-from quarterly_dashboard.storage import Database, DEFAULT_DATABASE
+from stock_analysis.domains.industries.industry_bulk import publish
+from stock_analysis.domains.industries.industry_service import IndustryService, dumps
+from stock_analysis.infrastructure.storage import Database, DEFAULT_DATABASE
 
 TABLES = ('instruments', 'financial_reports', 'valuation_observations', 'raw_daily_prices', 'ai_analysis_runs')
 

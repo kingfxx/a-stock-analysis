@@ -14,8 +14,7 @@ from stock_analysis.domains.stocks.sources import (PROFIT_KEYS, fetch_financial_
 from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, utc_now
 from stock_analysis.domains.stocks.stock_collection import begin_stock_batch, routed_stock_requests
 from stock_analysis.domains.stocks.disclosure_dates import apply_disclosure_dates
-from stock_analysis.domains.stocks.update_service import (audit_due, backup_before_update, data_lock, mark_failed,
-                             next_audit, recently_checked, recent_sync_failure, sync_state)
+from stock_analysis.domains.stocks.sync_support import audit_due, backup_before_update, data_lock, mark_failed, next_audit, recently_checked, recent_sync_failure, sync_state
 
 
 SOURCE = "sina:CompanyFinanceService.getFinanceReport2022"

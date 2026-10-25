@@ -9,9 +9,7 @@ from stock_analysis.infrastructure.network import create_data_session
 from stock_analysis.domains.stocks.sources import fetch_price_history, normalize_code, price_equal
 from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, StorageError, utc_now
 from stock_analysis.domains.stocks.stock_collection import begin_stock_batch, routed_stock_requests
-from stock_analysis.domains.stocks.update_service import (audit_due, data_lock, digest, encoded, instrument_id, mark_failed,
-                             next_audit, recently_checked, recent_sync_failure, checked_today, sync_state,
-                             backup_before_update)
+from stock_analysis.domains.stocks.sync_support import audit_due, data_lock, digest, encoded, instrument_id, mark_failed, next_audit, recently_checked, recent_sync_failure, checked_today, sync_state, backup_before_update
 
 SOURCE = "tencent"
 

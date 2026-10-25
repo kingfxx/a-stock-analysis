@@ -552,3 +552,5 @@ python -m stock_analysis.infrastructure.storage check --database $restorePath
 ## 可调采集限速（v42）
 
 collection_rate_limits以(task_key,provider)复合主键保存settings_json和真实updated_at，一项配置一行，不重复来源或事实。仅保存七个可调数值，不改变数值精度；60秒窗口、冷却及重试规则不作为自由配置。当前九个网络任务／来源组合含索引占8192字节（表4096、索引4096；页开销下约910字节/行），参数JSON平均110字节；1000次逐笔保存约8760ms，九任务列表读取约3.5—4.1ms，本机单次测量。主键命中点查；真实应用策略只在公共批次scope_json中保存一次紧凑快照，不写到每条事实。隔离维护统计已核对用途、分类、数量、大小和真实更新时间；空表时间为空。[复测报告](../data/verification/reports/collection_rate_limits_20261025.json)。
+
+目录整理后，v32 财务来源升级和 v37 指数价格升级分别由 `stock_analysis/domains/financials/schema_upgrade.py` 与 `stock_analysis/domains/indices/schema_upgrade.py` 执行；storage 在原版本分支中延迟调用。SQL 历史文件、顺序、校验和及 schema 版本保持。服务运行/恢复重载循环位于 `stock_analysis/runtime.py`，业务初始化入口仍在 HTTP server。

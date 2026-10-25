@@ -162,98 +162,6 @@ class SyncResult:
                 raise ValueError("Audit timestamps must use UTC")
 
 
-def _migrate_financial_public_sources(conn):
-    """Mechanically rebuild financial tables and preserve every historical column/value."""
-    tables = ("market_financial_income", "market_financial_balance",
-              "market_financial_cashflow", "market_financial_performance")
-    view = conn.execute("SELECT sql FROM sqlite_master WHERE type='view' AND name='market_financial_industry'").fetchone()
-    if view:
-        conn.execute("DROP VIEW market_financial_industry")
-    for table in tables:
-        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
-        if not row or not row[0]:
-            raise StorageError(f"Missing financial table {table}")
-        original = row[0]
-        indexes = [r[0] for r in conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL", (table,))]
-        legacy = original.replace("batch_id INTEGER NOT NULL REFERENCES market_financial_batches(id)",
-                                  "batch_id INTEGER REFERENCES market_financial_batches(id)")
-        legacy = legacy.replace("source_id INTEGER NOT NULL REFERENCES market_financial_sources(id)",
-                                "source_id INTEGER REFERENCES market_financial_sources(id)")
-        if legacy == original:
-            raise StorageError(f"Unexpected legacy references in {table}")
-        create = legacy.replace(f"CREATE TABLE {table} (", f"CREATE TABLE {table}_v32 (", 1).rstrip().removesuffix(";")
-        columns = ("collection_batch_id INTEGER REFERENCES collection_batches(id),"
-            " collection_source_id INTEGER,")
-        marker = " UNIQUE(security_code,exchange,report_date,version)"
-        if marker not in create:
-            raise StorageError(f"Cannot locate uniqueness constraint for {table}")
-        create = create.replace(marker, " "+columns+marker.strip(), 1)
-        constraint = (", CHECK((batch_id IS NOT NULL AND source_id IS NOT NULL AND collection_batch_id IS NULL AND collection_source_id IS NULL)"
-            " OR (batch_id IS NULL AND source_id IS NULL AND collection_batch_id IS NOT NULL AND collection_source_id IS NOT NULL)),"
-            " FOREIGN KEY(collection_source_id,collection_batch_id) REFERENCES collection_sources(id,batch_id)")
-        if not create.endswith(")"):
-            raise StorageError(f"Cannot parse table definition for {table}")
-        conn.execute(create[:-1] + constraint + ")")
-        names = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
-        quoted = ",".join('"'+name.replace('"','""')+'"' for name in names)
-        conn.execute(f"INSERT INTO {table}_v32({quoted},collection_batch_id,collection_source_id) "
-                     f"SELECT {quoted},NULL,NULL FROM {table}")
-        conn.execute(f"DROP TABLE {table}")
-        conn.execute(f"ALTER TABLE {table}_v32 RENAME TO {table}")
-        for statement in indexes:
-            conn.execute(statement)
-    conn.execute("ALTER TABLE sw_memberships ADD COLUMN collection_batch_id INTEGER REFERENCES collection_batches(id)")
-    conn.execute("ALTER TABLE sw_memberships ADD COLUMN collection_source_id INTEGER REFERENCES collection_sources(id)")
-    for verb in ("INSERT", "UPDATE OF collection_batch_id,collection_source_id"):
-        conn.execute(f"""CREATE TRIGGER sw_memberships_public_source_{'insert' if verb == 'INSERT' else 'update'}
-            BEFORE {verb} ON sw_memberships
-            WHEN (NEW.collection_batch_id IS NULL) != (NEW.collection_source_id IS NULL)
-              OR (NEW.collection_source_id IS NOT NULL AND NOT EXISTS(
-                SELECT 1 FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id
-                  JOIN sw_imports i ON i.id=NEW.import_id WHERE s.id=NEW.collection_source_id
-                  AND s.batch_id=NEW.collection_batch_id AND b.operation_id=json_extract(i.source_manifest_json,'$.collection_operation_id')
-                  AND ((s.source_system='sse' AND s.dataset='market.listings.sse')
-                    OR (s.source_system='szse' AND s.dataset='market.listings.szse'))))
-            BEGIN SELECT RAISE(ABORT,'invalid public membership source pair'); END""")
-    if view:
-        sql = view[0].replace("i.source_id AS income_source_id, p.source_id AS performance_source_id,",
-            "i.source_id AS income_source_id, p.source_id AS performance_source_id, "
-            "i.collection_source_id AS income_collection_source_id, i.collection_batch_id AS income_collection_batch_id, "
-            "p.collection_source_id AS performance_collection_source_id, p.collection_batch_id AS performance_collection_batch_id,")
-        conn.execute(sql)
-
-
-def _migrate_single_row_index_prices(conn):
-    """Upgrade current CSI/SWS facts in place; migration never fetches source data."""
-    from stock_analysis.collection.collection import encoded
-    from stock_analysis.domains.indices.index_prices import DEFINITIONS, FIELDS, install_definitions, price_hash
-
-    # Keep the current observation for each business date; version history is
-    # represented by the row's version counter and archived collection sources.
-    conn.execute("DELETE FROM index_price_observations WHERE is_latest=0")
-    install_definitions(conn)
-    conn.execute("DROP TRIGGER IF EXISTS index_price_series_immutable")
-    conn.execute("""UPDATE index_price_series SET definition_version='v2'
-        WHERE provider IN ('csindex','sws') AND definition_version='v1'""")
-    conn.execute("""CREATE TRIGGER index_price_series_immutable BEFORE UPDATE ON index_price_series
-        BEGIN SELECT RAISE(ABORT,'insert a new index price series identity'); END""")
-
-    for row in conn.execute("""SELECT f.*,s.provider,s.series_key FROM index_price_observations f
-        JOIN index_price_series s ON s.id=f.series_id WHERE s.provider IN ('csindex','sws')""").fetchall():
-        provider, key = row['provider'], row['series_key']
-        definition = DEFINITIONS[(provider, key)]
-        lineage = {'_raw': {'revision': int(row['version']), 'fields': {
-            name: {'source_id': row['source_id'], 'batch_id': row['batch_id'], 'obtained_at': row['obtained_at']}
-            for name in FIELDS if row[name] is not None
-        }}}
-        values = {name: row[name] for name in FIELDS}
-        content_hash = price_hash(values, definition, row['withdrawal_reason'], lineage)
-        conn.execute("UPDATE index_price_observations SET field_lineage_json=?,content_hash=? WHERE id=?",
-                     (encoded(lineage), content_hash, row['id']))
-    conn.execute("CREATE UNIQUE INDEX index_price_one_row_per_date ON index_price_observations(series_id,observation_date)")
-
-
 class Database:
     def __init__(self, path: Path | str = DEFAULT_DATABASE, *, journal_mode="auto", busy_timeout_ms=5000):
         self.path = Path(path).resolve()
@@ -318,14 +226,16 @@ class Database:
                     for statement in _sql_statements(sql):
                         conn.execute(statement)
                     if version == 32:
-                        _migrate_financial_public_sources(conn)
+                        from stock_analysis.domains.financials.schema_upgrade import migrate_public_sources
+                        migrate_public_sources(conn)
                     if version == 35:
                         migrate_financial_json(conn)
                     if version == 38:
                         from stock_analysis.domains.indices.index_price_codec import migrate
                         migrate(conn)
                     if version == 37:
-                        _migrate_single_row_index_prices(conn)
+                        from stock_analysis.domains.indices.schema_upgrade import migrate_single_row_prices
+                        migrate_single_row_prices(conn)
                     if version == 4:
                         from stock_analysis.domains.stocks.financing_storage import migrate_financing
                         audit = migrate_financing(conn)

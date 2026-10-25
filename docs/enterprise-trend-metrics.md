@@ -172,7 +172,7 @@ PE／PB／PS 的有效分位样本要求值为正，股息率允许零。负 PE 
 | [roic.py](../stock_analysis/domains/financials/roic.py) | ROIC 与投入资本纯计算 |
 | [price_projection.py](../stock_analysis/domains/stocks/price_projection.py) | 共享价格匹配至季末、披露日及筹码观察日 |
 | [dividend_service.py](../stock_analysis/domains/stocks/dividend_service.py) | 分红事件状态、每十股转每股及来源股本 |
-| [valuation.py](../stock_analysis/domains/valuation/valuation.py) | PS、股息率、周期聚合、分位和参考线 |
+| [calculations.py](../stock_analysis/domains/valuation/calculations.py) | PS、股息率、周期聚合、分位和参考线 |
 | [valuation_service.py](../stock_analysis/domains/valuation/valuation_service.py) | 百度估值事实与同业快照读取／更新 |
 | [chips.py](../stock_analysis/domains/stocks/chips.py) | 东方财富筹码事实解析 |
 | [index.html](../web/pages/index.html) | 18 项菜单、图表单位、悬浮说明与用户选择 |
