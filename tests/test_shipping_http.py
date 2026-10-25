@@ -51,7 +51,10 @@ def test_http_read_only_auth_and_saved_snapshot(live,monkeypatch):
     assert payload['context']['model']['n']==14
     with db.connection() as c:assert c.execute('SELECT count(*) FROM research_shipping_forecast_versions').fetchone()[0]==0
     command=dict(target='2026Q3',name='隔离验收',weekly_lead_weeks=2,input_hash=payload['context']['input_hash'],scenarios=payload['defaults'])
-    assert s.post(base+'/api/shipping-forecast/save',json=command,timeout=5).status_code==403
+    for _ in range(5):
+        assert s.post(base+'/api/shipping-forecast/save',json=command,timeout=5).status_code==403
+    with db.connection() as c:
+        assert c.execute('SELECT count(*) FROM research_shipping_forecast_versions').fetchone()[0]==0
     headers=dict(Origin=base,**{'X-Local-Session':payload['session_token']})
     saved=s.post(base+'/api/shipping-forecast/save',json=command,headers=headers,timeout=5)
     assert saved.ok

@@ -1246,13 +1246,16 @@ class Handler(BaseHTTPRequestHandler):
         if path in {'/api/shipping-forecast/save','/api/shipping-forecast/prepare-report','/api/shipping-forecast/delete'}:
             try:
                 self._ai_host()
-                if self.headers.get('Origin') not in {f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'} or not secrets.compare_digest(self.headers.get('X-Local-Session',''),LOCAL_SESSION_TOKEN):
-                    self._ai_reply({'error':'拒绝跨站或缺少本地会话的保存'},403);return
                 size=int(self.headers.get('Content-Length','0'))
                 if self.headers.get_content_type()!='application/json' or not 0<size<=32768:
                     raise ValueError('请提交有效JSON')
+                # Drain the bounded body before closing an unauthorized request;
+                # unread inbound bytes can reset the connection before 403 arrives.
+                body=self.rfile.read(size)
+                if self.headers.get('Origin') not in {f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'} or not secrets.compare_digest(self.headers.get('X-Local-Session',''),LOCAL_SESSION_TOKEN):
+                    self._ai_reply({'error':'拒绝跨站或缺少本地会话的保存'},403);return
                 from stock_analysis.domains.research.sectors.shipping.shipping_forecast import save_version, delete_version
-                command=json.loads(self.rfile.read(size))
+                command=json.loads(body)
                 if path.endswith('/delete'):
                     if not isinstance(command,dict) or set(command)!={'id'}:
                         raise ValueError('删除版本请求无效')
