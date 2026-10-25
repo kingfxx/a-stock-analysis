@@ -222,12 +222,15 @@ def months_for(target, lag=1):
     return [f'{n//12:04d}-{n%12+1:02d}' for n in range(start,start+3)]
 
 
-def rate_window(points, target, *, weekly=False):
+def rate_window(points, target, *, weekly=False, lead_weeks=2):
     if weekly:
+        if lead_weeks not in (2, 3, 4):
+            raise ValueError('周度提前周数须为2、3或4周')
         y,q = map(int,target.split('Q'))
-        start = date(y,(q-1)*3+1,1)-timedelta(days=14)
+        shift=timedelta(weeks=lead_weeks)
+        start = date(y,(q-1)*3+1,1)-shift
         end = date(y+1,1,1) if q==4 else date(y,q*3+1,1)
-        end -= timedelta(days=14)
+        end -= shift
         selected = [p for p in points if p['frequency']=='weekly' and start.isoformat()<=p['period_start']<end.isoformat()]
         byday = {}
         for p in sorted(selected,key=lambda p:(p['quality']=='official',p['id'])):
@@ -237,8 +240,8 @@ def rate_window(points, target, *, weekly=False):
         complete = bool(values) and (date.fromisoformat(values[0]['period_start'])-start).days<=10 and (end-date.fromisoformat(values[-1]['period_start'])).days<=10 and all((date.fromisoformat(b['period_start'])-date.fromisoformat(a['period_start'])).days<=14 for a,b in zip(values,values[1:])) and end<=date.today()
         return dict(value=sum(p['value'] for p in values)/len(values) if values and complete else None,
                     observed_mean=sum(p['value'] for p in values)/len(values) if values else None,
-                    count=len(values), complete=complete, start=start.isoformat(),end_exclusive=end.isoformat(),
-                    refs=[p['id'] for p in values],note='整季前移14天；日期含日历推定，停发/漏周覆盖待核验')
+                    count=len(values), complete=complete, start=start.isoformat(),end_exclusive=end.isoformat(),lead_weeks=lead_weeks,
+                    refs=[p['id'] for p in values],note=f'整季前移{lead_weeks}周；日期含日历推定，停发/漏周覆盖待核验')
     months = months_for(target)
     selected = {}
     for p in sorted(points,key=lambda p:(p['quality']=='official',p['id'])):
@@ -258,9 +261,11 @@ def fit(rows):
     return dict(intercept=float(a),slope=float(b),n=len(rows),training_end=rows[-1]['period'])
 
 
-def model_context(db, target):
+def model_context(db, target, weekly_lead_weeks=2):
     if not isinstance(target,str) or not re.fullmatch(r'20\d{2}Q[1-4]',target):
         raise ValueError('目标季度须为YYYYQn')
+    if weekly_lead_weeks not in (2,3,4):
+        raise ValueError('周度提前周数须为2、3或4周')
     with db.connection() as conn:
         rates = current_rates(conn)
         history = financials(conn)
@@ -274,19 +279,23 @@ def model_context(db, target):
     anchor = prior[-1] if prior else None
     used_rates=set()
     for label in [target]+[r['label'] for r in prior]:
-        for weekly in (False,True):
-            used_rates.update(rate_window(points,label,weekly=weekly)['refs'])
+        used_rates.update(rate_window(points,label)['refs'])
+        used_rates.update(rate_window(points,label,weekly=True,lead_weeks=weekly_lead_weeks)['refs'])
     rows = []
     for r in prior:
         window = rate_window(points,r['label'])
         if window['complete']:
             rows.append(dict(period=r['period'],label=r['label'],rate=window['value'],unit_rmb=business[r['period']]['unit_rmb'],profit=r['profit']))
     model = fit(rows)
-    common=[]
+    common=[];weekly_rows=[]
     for r in rows:
-        weekly=rate_window(points,r['label'],weekly=True)
+        weekly=rate_window(points,r['label'],weekly=True,lead_weeks=weekly_lead_weeks)
         if weekly['complete']:
             common.append(dict(r,weekly_rate=weekly['value']))
+    for r in prior:
+        weekly=rate_window(points,r['label'],weekly=True,lead_weeks=weekly_lead_weeks)
+        if weekly['complete'] and r['period'] in business:
+            weekly_rows.append(dict(period=r['period'],label=r['label'],rate=weekly['value'],unit_rmb=business[r['period']]['unit_rmb'],profit=r['profit']))
     comparison={}
     for mode in ('monthly','weekly'):
         samples=[dict(r,rate=r['weekly_rate'] if mode=='weekly' else r['rate']) for r in common]
@@ -306,10 +315,13 @@ def model_context(db, target):
         prediction = prev['unit_rmb']+m['slope']*(actual['rate']-prev['rate'])
         backtests.append(dict(target=actual['label'],actual=actual['unit_rmb'],prediction=prediction,
             error=prediction-actual['unit_rmb'],baseline_error=prev['unit_rmb']-actual['unit_rmb'],training_end=m['training_end']))
-    context = dict(target=target,model_version=MODEL,model=model,anchor=anchor,
+    forecast_window=rate_window(points,target,weekly=True,lead_weeks=weekly_lead_weeks)
+    anchor_weekly_window=rate_window(points,anchor['label'],weekly=True,lead_weeks=weekly_lead_weeks) if anchor else dict(value=None,refs=[])
+    context = dict(target=target,model_version=MODEL,model=model,forecast_model=fit(weekly_rows),anchor=anchor,
         business=business.get(anchor['period']) if anchor else None,
-        target_window=rate_window(points,target),weekly_window=rate_window(points,target,weekly=True),
-        anchor_window=rate_window(points,anchor['label']) if anchor else None,
+        target_window=rate_window(points,target),weekly_window=forecast_window,forecast_window=forecast_window,
+        weekly_lead_weeks=weekly_lead_weeks,anchor_window=rate_window(points,anchor['label']) if anchor else None,
+        forecast_anchor_window=anchor_weekly_window,
         history=[{k:v for k,v in r.items() if k!='sources'} for r in history],backtests=backtests,window_comparison=comparison,
         validation=dict(mae=float(np.mean([abs(r['error']) for r in backtests])) if backtests else None,
                         baseline_mae=float(np.mean([abs(r['baseline_error']) for r in backtests])) if backtests else None,
@@ -324,7 +336,7 @@ def defaults(context):
     anchor = context['anchor']; b = context['business']
     if not anchor or not b or anchor['pretax']==0:
         return {}
-    common = dict(rate=context['target_window']['value'],fx=0,extra=0,override=None)
+    common = dict(rate=context.get('forecast_window',context['target_window'])['value'],fx=0,extra=0,override=None)
     return dict(bear=dict(common,revenue_model='manual',elasticity=.55,volume=0,cost=6,below=-18,conversion=72),
         base=dict(common,revenue_model='linear',elasticity=.65,volume=2,cost=4.5,
                   below=anchor['pretax']-(anchor['revenue']-anchor['cost']),conversion=anchor['profit']/anchor['pretax']*100),
@@ -348,7 +360,9 @@ def calculate(context, params):
         raise ValueError('箱量、单位成本或指数范围无效')
     if params['rate'] is None and params['override'] is None:
         return dict(profit=None,reason='未来窗口/来源缺值，填写CCFI情景假设或收入覆盖后计算')
-    p=params;b=context['business'];a=context['anchor'];m=context['model'];aw=context['anchor_window']['value']
+    p=params;b=context['business'];a=context['anchor'];
+    m=context['forecast_model'] if 'forecast_model' in context else context['model']
+    aw=context.get('forecast_anchor_window',context['anchor_window'])['value']
     if p['override'] is not None:
         growth=p['override']/100
     elif p['revenue_model']=='linear':
@@ -367,9 +381,10 @@ def calculate(context, params):
 
 
 def save_version(db, command):
-    if not isinstance(command,dict) or set(command)-{'target','name','scenarios','input_hash','kind'}:
+    if not isinstance(command,dict) or set(command)-{'target','name','scenarios','input_hash','kind','weekly_lead_weeks'}:
         raise ValueError('保存参数无效')
-    context=model_context(db,command.get('target'))
+    lead_weeks=command.get('weekly_lead_weeks',2)
+    context=model_context(db,command.get('target'),lead_weeks)
     if command.get('input_hash')!=context['input_hash']:
         raise ValueError('本地输入已有修订，请重新载入后另存版本')
     scenarios=command.get('scenarios')
@@ -387,8 +402,8 @@ def save_version(db, command):
     return dict(id=id,results=result)
 
 
-def read_forecast(db,target='2026Q3'):
-    context=model_context(db,target)
+def read_forecast(db,target='2026Q3',weekly_lead_weeks=2):
+    context=model_context(db,target,weekly_lead_weeks)
     with db.connection() as conn:
         versions=[dict(r) for r in conn.execute('SELECT id,target,name,kind,model_version,input_hash,created_at FROM research_shipping_forecast_versions ORDER BY id DESC LIMIT 100')]
         coverage=[dict(r) for r in conn.execute('SELECT index_name,frequency,statistic,channel,quality,count(*) AS rows,min(period_start) AS first,max(period_end) AS last FROM research_shipping_rate_points GROUP BY index_name,frequency,statistic,channel,quality')]
@@ -408,3 +423,17 @@ def read_version(db,id):
     row['actual_profit']=actual
     row['errors']={k:v['profit']-actual if actual is not None and v.get('profit') is not None else None for k,v in row['snapshot']['results'].items()}
     return row
+
+
+def delete_version(db, id):
+    try:
+        version_id = int(id)
+    except (TypeError, ValueError):
+        raise ValueError('版本编号无效')
+    if version_id <= 0:
+        raise ValueError('版本编号无效')
+    with db.connection(write=True) as conn:
+        cursor = conn.execute('DELETE FROM research_shipping_forecast_versions WHERE id=?', (version_id,))
+        if cursor.rowcount != 1:
+            raise ValueError('版本不存在')
+    return {'deleted': version_id}

@@ -37,3 +37,26 @@
 - 窄屏浏览器复核显示双Tab、可用年份、多年叠加图；CCFI官方综合月度153点，2014-01至2026-09。真实页面保持窄屏布局，筛选两列排列。SCFI月度空态在隔离Edge及正式数据API核对通过。
 - 已在浏览器确认切换Tab不会丢失未保存参数，不触发保存。原始数据、定时任务配置及历史版本保持不变；正式页面GET仅本地只读。
 - 最终结果：代码、文档、隔离数据库测试、HTTP与桌面/窄屏验收、生产服务重启和日志/访问检查均完成。真实覆盖仍以本记录表格所列为限，缺期不补造。
+
+
+## 2026-10-25 页面反馈验收补充
+
+- 年度叠加曲线在有数据的中间点标出年份。悬浮完整趋势时，运价和季度利润图同时出现日期标线；悬浮多年月份对比时，利润子图按季度同步标线。该行为已在8765实际页面上观察。
+- 研究入口文字为「海控净利润测算/运价趋势」，使用行业对比导航样式并设置新标签。预测版本为可选择的清单项，时间按北京时间显示至秒；载入会读取原快照参数、展示原预测/现有实绩对照并跳到情景区。情景顺序固定为悲观、中性、乐观。
+- 整季周度预测窗口可选提前2/3/4周，默认2周；窗口和相应模型样本随选择刷新。行业箱量参考支持全国、沿海、内河多选，默认全选。
+- `python -m pytest tests/test_shipping_forecast.py -q --basetemp=.pytest-shipping-followup-tmp`：21 passed。`node --check web/shipping-forecast.js` 与 `python -m compileall -q quarterly_dashboard/shipping_forecast.py quarterly_dashboard/server.py` 通过。
+- 隔离 `tests/test_shipping_http.py` 再次在本机回环超时；第一用例失败后浏览器用例未能结束，项目既有HTTP UI测试也出现同类问题。桌面/窄屏范围、选项、趋势年份标签、完整图与利润图标线、多年图与利润季度标线已通过用户本地8765页面实际检查；服务重启后再次核验API与关键控件。失败限制详记 `data/verification/reports/shipping-production/ui-followup-http-blocked.json`。
+- 真实数据限制不变：CCFI官方综合月度153期（2014-01至2026-09）；CCFI/SCFI官方综合周度各2期（2026-10-16、23）；SCFI月度0期。历史空档/未来未完月份仍为空，不推导、不插值。
+- 最终验收服务PID 39456，原命令行为 `python.exe -u app.py --port 8765`，后台保持运行；页面、脚本及默认预测API均在最终启动日志中返回200，选择三周窗口的API也返回200。验收日志位于 `data/verification/logs/shipping-forecast-followup-final-8765.out.log` 与 `.err.log`。
+- 在经营趋势页实际点击入口后，浏览器标签数由1变为2，新标签打开预测页，确认 target=_blank 生效。
+- 隔离HTTP pytest被本机回环限制阻断，未计为通过；确认并停止由该pytest持有的18760测试监听，临时目录清理完成。完整事实与限制见 `data/verification/reports/shipping-production/ui-followup-http-blocked.json`。原生产库只读，正式事实与预测版本未写入。
+
+## 2026-10-25 页面反馈二次修订正式验收
+
+- 主页入口已与说明左边缘对齐并去掉箭头，仍新标签打开；航运研究时间统一北京时间秒级格式；页面数值最多两位小数，预测字段只格式化显示。
+- 年份文字选取所选曲线相对留白处并放在线段上/下方。完整趋势只保留运价图标线和单张悬浮卡，同时显示同日运价和同季度单季度/累计利润；多年图不联动。宿主浏览器复核示例：2026-06-30，CCFI 1,550.31点、2026Q2单季度归母净利润75.42亿元。
+- 历史版本选中只更新选择态；「载入所选版本」才读取参数并跳至情景区，不展开参数JSON；明确确认后可删除。隔离HTTP测试验证本地Origin/session保护、删除与已删除版本不可读取。未删除生产历史版本。
+- `python -m pytest tests/test_shipping_forecast.py tests/test_shipping_http.py -q --basetemp=.pytest-shipping-final-tmp`：23 passed，含Edge桌面1440px及390px窄屏验收、版本选中/加载、两位小数、合并hover及无横向溢出。`node --check`、`py_compile`通过。此前默认沙箱的本地回环请求被WinError 10013拒绝；获准在受限测试回环端口执行后，完整HTTP/Edge套件通过。
+- 检查原8765命令及PID、正式库运行/排队采集为0后，自动重启原服务为PID 25536，`127.0.0.1:8765`保持监听。启动日志已记录页面、静态资源及CCFI完整/季度利润API 200，错误日志为空。用户日常服务保持运行。
+- 真实数据仍为CCFI官方综合月度153点（2014-01至2026-09）、CCFI/SCFI官方综合周度各2点（2026-10-16、23）、SCFI月度0点；空态和缺期如实保留。验收数据见 `data/verification/reports/shipping-production/ui-feedback-round2.json`。
+- 已清理本轮所有项目内pytest临时目录。

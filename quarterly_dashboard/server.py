@@ -1274,7 +1274,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_POST(self):
         path = urlparse(self.path).path
-        if path in {'/api/shipping-forecast/save','/api/shipping-forecast/prepare-report'}:
+        if path in {'/api/shipping-forecast/save','/api/shipping-forecast/prepare-report','/api/shipping-forecast/delete'}:
             try:
                 self._ai_host()
                 if self.headers.get('Origin') not in {f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'} or not secrets.compare_digest(self.headers.get('X-Local-Session',''),LOCAL_SESSION_TOKEN):
@@ -1282,9 +1282,13 @@ class Handler(BaseHTTPRequestHandler):
                 size=int(self.headers.get('Content-Length','0'))
                 if self.headers.get_content_type()!='application/json' or not 0<size<=32768:
                     raise ValueError('请提交有效JSON')
-                from .shipping_forecast import save_version
+                from .shipping_forecast import save_version, delete_version
                 command=json.loads(self.rfile.read(size))
-                if path.endswith('/prepare-report'):
+                if path.endswith('/delete'):
+                    if not isinstance(command,dict) or set(command)!={'id'}:
+                        raise ValueError('删除版本请求无效')
+                    self._ai_reply(delete_version(Database(DATABASE_PATH),command['id']))
+                elif path.endswith('/prepare-report'):
                     from .shipping_report_metrics import prepare_shipping_report
                     if not isinstance(command,dict) or set(command)!={'period'} or not isinstance(command['period'],str):raise ValueError('请指定单一报告期')
                     self._ai_reply(prepare_shipping_report(Database(DATABASE_PATH),command['period']))
@@ -1404,7 +1408,7 @@ class Handler(BaseHTTPRequestHandler):
                 from .shipping_forecast import read_forecast, read_version
                 query=parse_qs(parsed.query);db=Database(DATABASE_PATH)
                 if query.get('code',['601919'])[0]!='601919':raise ValueError('航运预测仅适用601919')
-                data=read_version(db,query['version'][0]) if 'version' in query else read_forecast(db,query.get('target',['2026Q3'])[0])
+                data=read_version(db,query['version'][0]) if 'version' in query else read_forecast(db,query.get('target',['2026Q3'])[0],int(query.get('weekly_lead_weeks',['2'])[0]))
                 self._ai_reply(dict(data,session_token=LOCAL_SESSION_TOKEN))
             except (ValueError,StorageError) as exc:self._ai_reply({'error':str(exc)},400)
             return

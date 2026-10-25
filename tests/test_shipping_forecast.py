@@ -128,6 +128,13 @@ def test_shipping_page_has_tabs_and_trend_controls():
     assert 'tab-forecast' in html and 'tab-trend' in html
     assert all(f'id="trend-{name}"' in html for name in ('index','frequency','route','range','quality','profit','years'))
     assert '/api/shipping-trend?' in js and "hovermode:'x unified'" in js
+    assert 'weekly-lead-weeks' in html and 'industry-scope-all' in html
+    index=(Path(__file__).parents[1]/'web/index.html').read_text(encoding='utf8')
+    assert '海控净利润测算/运价趋势' in index and 'target="_blank"' in index and 'class="industry-navigation"' in index
+    assert "scenarioOrder=['bear','base','bull']" in js and "plotly_hover" in js
+    assert 'load-version' in html and 'delete-version' in html and "确认删除预测版本" in js
+    assert "hoverinfo:'none'" in js and 'trend-hover-card' in html and 'bindCrosshairPair' not in js
+    assert 'timeFmt(d.coverage.latest_obtained)' in js and 'textposition:above?' in js
 
 
 def test_official_priority_and_incomplete_future(db):
@@ -147,6 +154,23 @@ def test_official_priority_and_incomplete_future(db):
     assert months_for('2024Q1')==['2023-12','2024-01','2024-02']
     week=rate_window(points,'2026Q3',weekly=True)
     assert week['start']=='2026-06-17' and week['end_exclusive']=='2026-09-17'
+
+
+def test_weekly_forecast_window_accepts_only_two_three_or_four_weeks(db):
+    from datetime import date,timedelta
+    batch,source=evidence(db);template=next(p for p in parse_sse((FIX/'ccfi.html').read_text(encoding='utf8'),'CCFI') if p['route']=='综合')
+    points=[];d=date(2023,12,1);end=date(2024,4,1)
+    while d<=end:
+        p=deepcopy(template);p.update(period_start=d.isoformat(),period_end=d.isoformat(),published_on=d.isoformat(),value=1200+(d-date(2023,12,1)).days)
+        points.append(p);d+=timedelta(days=7)
+    publish_rates(db,points,batch,source)
+    with db.connection() as conn:points=current_rates(conn)
+    windows={n:rate_window(points,'2024Q1',weekly=True,lead_weeks=n) for n in (2,3,4)}
+    assert [windows[n]['start'] for n in (2,3,4)]==['2023-12-18','2023-12-11','2023-12-04']
+    assert all(w['complete'] for w in windows.values())
+    assert len({w['value'] for w in windows.values()})==3
+    with pytest.raises(ValueError):rate_window(points,'2024Q1',weekly=True,lead_weeks=5)
+    with pytest.raises(ValueError):read_forecast(db,'2024Q1',weekly_lead_weeks=1)
 
 
 def test_scenarios_zero_override_and_missing():
@@ -230,9 +254,13 @@ def test_save_snapshot_and_stale_input(db,monkeypatch):
     with db.connection(write=True) as conn:
         with pytest.raises(sqlite3.IntegrityError):conn.execute('UPDATE research_shipping_forecast_versions SET name=? WHERE id=?',('修改',id))
     original=read_version(db,id)
+    from quarterly_dashboard.shipping_forecast import delete_version
+    assert delete_version(db,id)=={'deleted':id}
+    with pytest.raises(ValueError,match='版本不存在'):read_version(db,id)
+    with pytest.raises(ValueError,match='版本不存在'):delete_version(db,id)
     context['input_hash']='new'
     with pytest.raises(ValueError):save_version(db,command)
-    assert read_version(db,id)['snapshot']==original['snapshot']
+    assert original['snapshot']['scenarios']==command['scenarios']
 
 
 def test_weekly_managed_incremental_and_refusal_stops_shared_source(db,monkeypatch):

@@ -137,3 +137,24 @@
 - 正式覆盖只读复核：CCFI官方综合月度153点（2014-01至2026-09），CCFI与SCFI官方周度各2点（2026-10-16、23），SCFI月度0点。显示空态，不从周度推导月度或编造历史。
 - 8765重启前确认原PID10844的命令行为`python.exe -u app.py --port 8765`且正式库无运行中采集，重启后PID23756。正式趋势页和SCFI月度趋势API均HTTP200；保留日志`data/verification/logs/shipping-trend-tabs-final-8765.out.log`与`data/verification/logs/shipping-trend-tabs-final-8765.err.log`。真实窄屏页面及多年份图已复核。
 - 使用说明和本验收结果见[航运预测说明](../../shipping-forecast.md)与[TREND_TABS_ACCEPTANCE.md](TREND_TABS_ACCEPTANCE.md)。后续本任务反馈仍更新本计划目录。
+
+
+## 2026-10-25 页面反馈实现与验收
+
+- 按本轮截图反馈沿用本计划：多年趋势在线段有效点中间标年份；完整趋势/实际利润和多年对比/利润子图均启用悬浮标线联动，多年月份/ISO周映射至季度位置。
+- 企业经营趋势入口改用「行业内对比」同款导航样式，文案为「海控净利润测算/运价趋势」，新标签打开。预测页加入2/3/4周窗口选择（默认2周），选择同步影响周窗口和模型样本；行业箱量按全国、沿海、内河多选，默认全选。
+- 版本管理改为单选清单，显示北京时间至秒；选择行直接载入目标、周数及情景，展示原预测/最新实际误差并定位至情景测算。情景始终按悲观、中性、乐观排列。
+- `tests/test_shipping_forecast.py` 21项通过；前端 `node --check` 和相关Python `compileall` 通过。隔离 `tests/test_shipping_http.py` 本机回环超时并挂起，未记为通过；挂起pytest及18760临时服务已按命令行确认后停止。正式宿主浏览器复核覆盖1440×900及390×844，无横向溢出；完整/多年图标线、年份标注、版本#2载入与跳转、秒级时间、三周窗口变化及行业范围多选均通过。页面/API HTTP 200见最终后台日志，测试限制及证据见 `data/verification/reports/shipping-production/ui-followup-http-blocked.json`。
+- 核对正式库活动采集为0并识别原服务命令 `python.exe -u app.py --port 8765` 后，最终重启为PID 39456并保持监听。日志为 `data/verification/logs/shipping-forecast-followup-final-8765.out.log` 和 `.err.log`。已清理本轮 `.pytest-shipping-followup-tmp`；本轮未写入正式运价/财报事实、保存预测版本或启动采集。
+
+## 2026-10-25 页面反馈二次修订
+
+- 经营趋势入口与下方说明左边缘对齐，去掉链接文字末尾箭头，保持新标签打开；航运研究页可见时间统一项目 `DashboardTime` 北京时间格式至秒，展示数值最多两位小数（仅显示格式化，参数原值精度保留）。
+- 多年趋势在同一有效周期里计算其他所选年度曲线间距，年份标签放在相对空白的一侧；多年图不再试图和利润子图联动。
+- 完整运价趋势和季度利润使用单一自定义悬浮卡片，同时显示运价点数与该季度利润。悬浮时只在运价图显示一条竖线；移除重复Plotly spike及其分离的两组hover标签。横轴缩放仍同步。
+- 预测历史改为纯选择清单；选择不会改变预测输入或展开原始JSON，只有明确点击「载入所选版本」才读取参数并定位情景测算。增加确认删除按钮及同源、本地会话令牌保护的删除API。更新保持快照不可UPDATE的数据库约束。
+- 更新 `docs/shipping-forecast.md` 与隔离HTTP/UI用例。`python -m pytest tests/test_shipping_forecast.py -q --basetemp=.pytest-shipping-feedback-tmp`：21 passed；Node/py_compile通过。后续完成HTTP及桌面/窄屏复验、原8765核验重启和运行检查后补录结果与日志证据。
+
+### 二次修订验收完成
+
+完整测试 `python -m pytest tests/test_shipping_forecast.py tests/test_shipping_http.py -q --basetemp=.pytest-shipping-final-tmp` 共23项通过，覆盖隔离SQLite、带本地会话保护的版本删除接口、Edge 1440px/390px交互和窄屏无溢出。`node --check`、`py_compile`通过。宿主浏览器核实联动卡、秒级时间、两位小数、年份标注和选择后手动加载；未对生产版本执行删除。正式服务由原PID 39456核验后自动重启，最终PID 25536持续监听8765，启动日志中页面/静态资源/趋势API为200，错误日志为空。当前CCFI/SCFI覆盖与空态复核报告：`data/verification/reports/shipping-production/ui-feedback-round2.json`。所有本轮pytest临时目录已清理。
