@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
 const context={window:{}};vm.createContext(context);
-vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/financial-statements.js'),'utf8'),context);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/features/financials/financial-statements.js'),'utf8'),context);
 const {amount,sourceText,esc,waterfallLabel,waterfallTickFormat,cashChangeText,shareText,balanceShare}=context.window.financialStatementFormat;
 assert.equal(amount({value:0,unit:'元'}),'0.00 亿元');
 assert.equal(amount({value:null,unit:'元'}),'待补');

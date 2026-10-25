@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
+const page = fs.readFileSync(path.join(__dirname, '../web/pages/index.html'), 'utf8');
 const start = page.indexOf('  // Background data loading.');
 assert.ok(start >= 0, 'The page must support background chart loading');
 const header = page.slice(page.indexOf('<header>'), page.indexOf('</header>'));
@@ -30,7 +30,7 @@ function setup(loading, views = {quarter:[{profit:10}]}, extra = {}) {
       return elements.get(id);
     }},
     confirm: () => false,
-    window: {DashboardTime:require('../web/datetime.js'),dispatchEvent(event) { if (event.type === 'dashboard-data-state') events.push(event.detail.updating); }},
+    window: {DashboardTime:require('../web/shared/datetime.js'),dispatchEvent(event) { if (event.type === 'dashboard-data-state') events.push(event.detail.updating); }},
     CustomEvent: class { constructor(type, init) { this.type=type; this.detail=init.detail; } },
     fetch: url => new Promise(resolve => pending.set(url, resolve))
   };

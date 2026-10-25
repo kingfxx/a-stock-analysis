@@ -123,13 +123,13 @@ def test_profit_trend_uses_gjzb_first_lrb_field_fallback_and_cumulative_differen
 
 
 def test_shipping_page_has_tabs_and_trend_controls():
-    html=(Path(__file__).parents[1]/'web/shipping-forecast.html').read_text(encoding='utf8')
-    js=(Path(__file__).parents[1]/'web/shipping-forecast.js').read_text(encoding='utf8')
+    html=(Path(__file__).parents[1]/'web/pages/shipping-forecast.html').read_text(encoding='utf8')
+    js=(Path(__file__).parents[1]/'web/features/research/sectors/shipping/shipping-forecast.js').read_text(encoding='utf8')
     assert 'tab-forecast' in html and 'tab-trend' in html
     assert all(f'id="trend-{name}"' in html for name in ('index','frequency','route','range','quality','profit','years'))
     assert '/api/shipping-trend?' in js and "hovermode:'x unified'" in js
     assert 'weekly-lead-weeks' in html and 'industry-scope-all' in html
-    index=(Path(__file__).parents[1]/'web/index.html').read_text(encoding='utf8')
+    index=(Path(__file__).parents[1]/'web/pages/index.html').read_text(encoding='utf8')
     assert '海控净利润测算/运价趋势' in index and 'target="_blank"' in index and 'class="industry-navigation"' in index
     assert "scenarioOrder=['bear','base','bull']" in js and "plotly_hover" in js
     assert 'load-version' in html and 'delete-version' in html and "确认删除预测版本" in js
@@ -239,7 +239,7 @@ def test_formal_page_and_read_only_contract(db,monkeypatch):
     monkeypatch.setattr(RequestCollector,'get',lambda *a,**k:pytest.fail('GET不得采集'))
     payload=read_forecast(db,'2026Q3')
     assert not payload['coverage'] and payload['context']['model'] is None
-    html=(Path(__file__).parents[1]/'web/shipping-forecast.html').read_text(encoding='utf8')
+    html=(Path(__file__).parents[1]/'web/pages/shipping-forecast.html').read_text(encoding='utf8')
     assert '前往采集管理' in html and '运行所选范围' not in html
     with pytest.raises(ValueError):model_context(db,'2026Q5')
 

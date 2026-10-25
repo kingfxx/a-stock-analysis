@@ -22,7 +22,7 @@ def browser(function, args):
     node = shutil.which('node')
     if not node:
         pytest.skip('Node.js required for parity')
-    script = "const d=require('./web/dividend-forecast.js');process.stdout.write(JSON.stringify(d[process.argv[1]](...JSON.parse(process.argv[2]))));"
+    script = "const d=require('./web/features/valuation/dividend-forecast.js');process.stdout.write(JSON.stringify(d[process.argv[1]](...JSON.parse(process.argv[2]))));"
     result = subprocess.run([node, '-e', script, function, json.dumps(args)], cwd=ROOT, capture_output=True, text=True, encoding='utf-8', check=True)
     return json.loads(result.stdout)
 

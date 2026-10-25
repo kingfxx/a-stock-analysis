@@ -21,7 +21,7 @@ def test_python_browser_growth_results_match(base, stages, rate, terminal):
     if not node:
         pytest.skip('Node.js is needed for the browser calculation comparison')
     args = [base, *stages, rate, terminal]
-    script = "const d=require('./web/dcf.js');console.log(JSON.stringify(d.calculateGrowth(...JSON.parse(process.argv[1]),1e8,10)));"
+    script = "const d=require('./web/features/valuation/dcf.js');console.log(JSON.stringify(d.calculateGrowth(...JSON.parse(process.argv[1]),1e8,10)));"
     run = subprocess.run([node, '-e', script, json.dumps(args)], cwd=Path(__file__).resolve().parents[1],
                          capture_output=True, text=True, check=True)
     browser = json.loads(run.stdout)

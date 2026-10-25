@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
 const context={window:{}};vm.createContext(context);
-vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/business-segments.js'),'utf8'),context);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/features/financials/business-segments.js'),'utf8'),context);
 const {items,growth,periodsFor,series,yoySeries,percent,esc}=context.window.businessSegmentPresentation;
 const row=(key,name,value,extra={})=>({item_key:key,item_name:name,revenue:value,...extra});
 const period=(date,rows)=>({report_date:date,dimensions:{'2':rows}});

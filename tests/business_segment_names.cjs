@@ -4,7 +4,7 @@ const vm=require('node:vm');
 const path=require('node:path');
 const context={window:{}};vm.createContext(context);
 for(const file of ['business-segment-aliases.js','business-segment-names.js','business-segments.js'])
-  vm.runInContext(fs.readFileSync(path.join(__dirname,'../web',file),'utf8'),context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/features/financials',file),'utf8'),context);
 const {normalize}=context.window.businessSegmentNames;
 const {series,yoySeries}=context.window.businessSegmentPresentation;
 const row=(name,value=100,extra={})=>({item_name:name,item_key:JSON.stringify([extra.item_code??null,name]),revenue:value,cost:60,gross_profit:40,revenue_share:0.5,cost_share:0.4,profit_share:0.6,gross_margin:0.4,...extra});

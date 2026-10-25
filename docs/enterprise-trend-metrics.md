@@ -175,7 +175,7 @@ PE／PB／PS 的有效分位样本要求值为正，股息率允许零。负 PE 
 | [valuation.py](../stock_analysis/domains/valuation/valuation.py) | PS、股息率、周期聚合、分位和参考线 |
 | [valuation_service.py](../stock_analysis/domains/valuation/valuation_service.py) | 百度估值事实与同业快照读取／更新 |
 | [chips.py](../stock_analysis/domains/stocks/chips.py) | 东方财富筹码事实解析 |
-| [index.html](../web/index.html) | 18 项菜单、图表单位、悬浮说明与用户选择 |
+| [index.html](../web/pages/index.html) | 18 项菜单、图表单位、悬浮说明与用户选择 |
 
 调整指标时同步核对本文件、页面说明与上述实现；区分来源直接取数、程序推算、历史导入和人工覆盖，不把预期取数规则写成已实现行为。
 

@@ -1,3 +1,4 @@
+from stock_analysis.http.assets import asset_path
 """HTTP/browser acceptance on an isolated database and explicit available port."""
 import json
 from http.server import ThreadingHTTPServer
@@ -41,7 +42,7 @@ def live(tmp_path,monkeypatch):
             if self.path.startswith('/api/maintenance/storage'):state['storage']+=1
             if self.path=='/api/maintenance/collections':state['collections']+=1
             if self.path in ('/maintenance.js','/datetime.js','/maintenance.css','/collection-progress.js','/collection-progress.css'):
-                path=root/'web'/self.path[1:];body=path.read_bytes()
+                path=asset_path(self.path[1:]);body=path.read_bytes()
                 self.send_response(200);self.send_header('Content-Type','text/css' if path.suffix=='.css' else 'text/javascript');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
             super()._do_GET()
     for port in (*range(18760,18780),8768,8766):
@@ -105,7 +106,7 @@ def test_browser_rate_templates_custom_save_polling_and_guards(live):
             form=card.locator('[data-rate-provider="legu"]')
             expect(form.locator('input[name=interval]')).to_have_value('7.5')
             expect(form.locator('input[name=max_concurrency]')).to_have_attribute('max','1')
-            styles=(Path(__file__).resolve().parents[1]/'web/index.html').read_text(encoding='utf-8').split('<style>',1)[1].split('</style>',1)[0]
+            styles=(Path(__file__).resolve().parents[1]/'web/pages/index.html').read_text(encoding='utf-8').split('<style>',1)[1].split('</style>',1)[0]
             page.add_style_tag(content=styles)
             card.screenshot(path=str(db.path.parent/'rate-preview.png'))
             state['running']=True;page.click('#maintenance-refresh');page.wait_for_timeout(150)

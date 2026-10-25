@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from stock_analysis.paths import PROJECT_ROOT
+from stock_analysis.http.assets import asset_path
 import html
 import hashlib
 import json
@@ -81,9 +82,9 @@ _AI_SERVICES = {}
 _INDUSTRY_SERVICES = {}
 _MAINTENANCE_SERVICES = {}
 LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
-TEMPLATE = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
-RESEARCH_SIDEBAR_TEMPLATE = (ROOT / "web" / "research-sidebar.html").read_text(encoding="utf-8")
-CHECKLIST_DISPLAY_VERSION = hashlib.sha256((ROOT / 'web' / 'ai-checklist.js').read_bytes()).hexdigest()[:12]
+TEMPLATE = (asset_path('index.html')).read_text(encoding="utf-8")
+RESEARCH_SIDEBAR_TEMPLATE = (asset_path('research-sidebar.html')).read_text(encoding="utf-8")
+CHECKLIST_DISPLAY_VERSION = hashlib.sha256((asset_path('ai-checklist.js')).read_bytes()).hexdigest()[:12]
 REPORT_DATE_BASIS = "sina_same_period_shift_v1"
 PRICE_REFERENCE_BASIS = "long_trading_gap_v1"
 CASH_FLOW_BASIS = "sina_cash_flow_ytd_v1"
@@ -1419,7 +1420,7 @@ class Handler(BaseHTTPRequestHandler):
             filename = parsed.path.removeprefix('/vendor/notes/')
             if filename not in {'codemirror.js', 'markdown-mode.js', 'markdown-it.js', 'footnote.js', 'purify.js', 'codemirror.css'}:
                 self.send_error(404); return
-            body = (ROOT / 'web' / 'vendor' / 'notes' / filename).read_bytes()
+            body = (asset_path('vendor/notes/' + filename)).read_bytes()
             self.send_response(200)
             self.send_header('Content-Type', 'text/css' if filename.endswith('.css') else 'text/javascript')
             self.send_header('Content-Length', str(len(body)))
@@ -1536,9 +1537,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in {'/indices','/indices.js','/indices.css','/congestion.js'}:
             name='indices.html' if parsed.path=='/indices' else parsed.path.lstrip('/')
             if parsed.path == '/indices':
-                body=(ROOT/'web'/name).read_text(encoding='utf-8').replace('__RESEARCH_SIDEBAR__',research_sidebar('indices')).encode('utf-8')
+                body=(asset_path(name)).read_text(encoding='utf-8').replace('__RESEARCH_SIDEBAR__',research_sidebar('indices')).encode('utf-8')
             else:
-                body=(ROOT/'web'/name).read_bytes()
+                body=(asset_path(name)).read_bytes()
             self.send_response(200)
             self.send_header('Content-Type',{'html':'text/html; charset=utf-8','js':'text/javascript; charset=utf-8','css':'text/css; charset=utf-8'}[name.rsplit('.',1)[1]])
             self.send_header('Content-Length',str(len(body)))
@@ -1587,16 +1588,16 @@ class Handler(BaseHTTPRequestHandler):
             body = get_plotlyjs().encode("utf-8")
             content_type = "text/javascript; charset=utf-8"
         elif parsed.path == "/stock-picker.js":
-            body = (ROOT / "web" / "stock-picker.js").read_bytes()
+            body = (asset_path('stock-picker.js')).read_bytes()
             content_type = "text/javascript; charset=utf-8"
         elif parsed.path == "/samples/industry-summary.html":
-            body = (ROOT / "web" / "samples" / "industry-summary.html").read_bytes()
+            body = (asset_path('samples/industry-summary.html')).read_bytes()
             content_type = "text/html; charset=utf-8"
         elif parsed.path in {"/datetime.js", "/research-layout.css", "/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
                              "/financial-statements.js", "/financial-statements.css", "/business-segments.js", "/business-segments.css", "/business-segment-aliases.js", "/business-segment-names.js", "/industry.js", "/industry.css",
                              "/maintenance.js", "/maintenance.css", "/collection-progress.js", "/collection-progress.css", "/investment-notes.js", "/investment-notes.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css",
                              "/dividend-forecast.js", "/dividend-forecast.css", "/shipping-forecast.js", "/shipping-forecast.css"}:
-            body = (ROOT / "web" / parsed.path.lstrip("/")).read_bytes()
+            body = (asset_path(parsed.path.lstrip("/"))).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
         elif parsed.path == "/api/stock-groups":
             body = json.dumps(StockLibrary(services()[0].db).read(), ensure_ascii=False).encode("utf-8")
@@ -1616,7 +1617,7 @@ class Handler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             code = query.get("code", ["601919"])[0]
             if query.get('tab')==['shipping-forecast'] and code=='601919':
-                body=(ROOT/'web'/'shipping-forecast.html').read_bytes()
+                body=(asset_path('shipping-forecast.html')).read_bytes()
             else:
                 body = render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
             content_type = "text/html; charset=utf-8"

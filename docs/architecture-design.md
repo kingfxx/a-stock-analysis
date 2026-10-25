@@ -4,7 +4,7 @@
 
 ## 代码目录整理（2026-10-25）
 
-主 Python 包已迁至 `stock_analysis/`，业务主题集中在 `domains/`，后端 HTTP 代码在 `http/`；仓库根 `web/` 为前端资源。公共采集在 `collection/`，SQLite/网络基础在 `infrastructure/`，维护在 `maintenance/`。航运专题位于 `domains/research/sectors/shipping/`。
+主 Python 包已迁至 `stock_analysis/`，业务主题集中在 `domains/`，后端 HTTP 代码在 `http/`；仓库根 `web/` 为前端资源，按 `pages/`、`shared/`、`features/`、`vendor/`、`samples/` 组织。`web/asset-map.json` 显式映射原逻辑资源名到磁盘位置，HTTP 白名单与浏览器 URL 保持。公共采集在 `collection/`，SQLite/网络基础在 `infrastructure/`，维护在 `maintenance/`。航运专题位于 `domains/research/sectors/shipping/`。
 
 项目根路径统一从 `stock_analysis.paths.PROJECT_ROOT` 获取。数据仍保存在原 `data/`；SQL 迁移位于 `infrastructure/migrations/`，研究提示词在 `domains/research/assessment/prompts/`，资源随真实调用领域归档。目录迁移保持 SQL、提示词和资源字节不变。生成缓存不迁移。
 
@@ -62,14 +62,14 @@ PS(TTM)、ROIC、ROE、自由现金流、分红率、股息率及分位统计并
 | [stock_analysis/domains/financials/core.py](../stock_analysis/domains/financials/core.py) | 财务纯计算：累计值拆季、连续四季度 TTM、年度视图、披露日快照、同比、利润率、ROE、债务／净现金、分红归属及年度分红率；调用 ROIC 纯函数。 |
 | [stock_analysis/domains/financials/roic.py](../stock_analysis/domains/financials/roic.py) | ROIC 纯计算与输入检查，保留 `excess_cash`、`non_operating_adjustments` 两个扩展口；不独立取数、不单独启动任务。 |
 | [stock_analysis/domains/valuation/valuation.py](../stock_analysis/domains/valuation/valuation.py) | 百度／东方财富适配与估值计算：原始观察、日／周／月聚合、PS、股息率、历史分位和同行对照。 |
-| [web/index.html](../web/index.html) | 页面模板及前端 JS：股票搜索、A/B/C 选择、Plotly 图表、悬停详情、多轴零点对齐、后台加载状态及标签页选项保存。 |
+| [web/pages/index.html](../web/pages/index.html) | 页面模板及前端 JS：股票搜索、A/B/C 选择、Plotly 图表、悬停详情、多轴零点对齐、后台加载状态及标签页选项保存。 |
 | [tests/](../tests/) | Python 回归测试，覆盖解析、财务周期、ROIC、分红率、缓存保护、后台加载和估值。 |
 | `tests/chart_hover.cjs`、`chart_axes.cjs`、`background_loading.cjs` | 用 Node.js 执行页面中的实际渲染／加载逻辑，检查悬停、零轴范围和异步更新；由 Python 测试调用。 |
 | [docs/plans/](plans/) | 历史需求与实现方案；当前行为以代码、本设计文档和 [README](../README.md) 为准。 |
 | [experiments/source_probe/](../experiments/source_probe/) | 独立数据源实验，不是生产页面的调用路径。 |
 | [requirements.txt](../requirements.txt)、[.gitignore](../.gitignore)、[LICENSE](../LICENSE) | 运行依赖版本、本地数据忽略规则、项目许可证。 |
 
-页面的数据流为：`来源适配 → SQLite 各模块事实与共享价格 → 计算与日期匹配 → 页面 JSON → Plotly 图表`。页面先读已保存事实，再在后台协调价格版本和过期模块的独立更新。财报字段映射在 `sources.py`，计算公式在 `core.py`／`roic.py`／`valuation.py`，图表交互在 `web/index.html`。
+页面的数据流为：`来源适配 → SQLite 各模块事实与共享价格 → 计算与日期匹配 → 页面 JSON → Plotly 图表`。页面先读已保存事实，再在后台协调价格版本和过期模块的独立更新。财报字段映射在 `sources.py`，计算公式在 `core.py`／`roic.py`／`valuation.py`，图表交互在 `web/pages/index.html`。
 
 ## 数据存储方式
 

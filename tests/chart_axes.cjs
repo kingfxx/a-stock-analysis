@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
+const page = fs.readFileSync(path.join(__dirname, '../web/pages/index.html'), 'utf8');
 const metricCode = page.slice(page.indexOf('  const metrics = {'), page.indexOf('  let selectedPeriod ='));
 const renderCode = page.slice(page.indexOf('  function label(row)'), page.indexOf('  seriesControls.forEach(series => {'));
 

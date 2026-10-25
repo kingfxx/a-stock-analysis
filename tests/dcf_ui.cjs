@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
-const file=path.join(__dirname,'../web/dcf.js');
+const file=path.join(__dirname,'../web/features/valuation/dcf.js');
 const {calculate,calculateGrowth,forecastStandard,forecastThreeStage,discountCashFlows,wacc}=require(file);
 const close=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-8*Math.max(1,Math.abs(expected)),`${actual} != ${expected}`);
 // Constant cash flow with zero terminal growth is a perpetuity worth FCF/r.
@@ -87,7 +87,7 @@ async function domTest(data,failFirst=false,autoData=null){
   const document={readyState:'complete',createElement(){return new Element();},getElementById(id){return id==='dcf-toggle'?button:id==='valuation-standard'?standard:{textContent:JSON.stringify({code:'600519'})};}};
   const window=new Element();
   window.dispatchEvent=()=>{};
-  window.DashboardTime=require('../web/datetime.js');
+  window.DashboardTime=require('../web/shared/datetime.js');
   vm.runInNewContext(fs.readFileSync(file,'utf8'),{window,document,Plotly,URLSearchParams,Event,fetch:async url=>{
     if(url.startsWith('/api/dcf/wacc?'))return {ok:true,json:async()=>autoData};
     requests++;assert.equal(url,'/api/dcf?code=600519');return {ok:!(failFirst&&requests===1),status:503,json:async()=>data};

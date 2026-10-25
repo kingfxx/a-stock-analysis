@@ -3,7 +3,7 @@ const vm=require('node:vm');
 const assert=require('node:assert/strict');
 const path=require('node:path');
 const window={};
-vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../web/ai-checklist.js'),'utf8'),{window});
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../web/features/research/assessment/ai-checklist.js'),'utf8'),{window});
 const parse=window.checklistProductBlocks;
 for(const period of ['[2026年上半年]','【2026年上半年】','［2026年上半年］','2026年上半年｜','2026年上半年 |','2026年上半年：']){
  const text='定性说明。\n'+period+'主营业务收入合计1119.22亿元，含抵销；航运—1072.98亿元—收入占比95.87%；抵销—-17.04亿元—-1.52%。\n'+period+'主营业务毛利合计205.26亿元，含抵销；航运—184.45亿元—毛利贡献89.86%；抵销—3.32亿元—1.62%；毛利贡献不等于净利润贡献。';

@@ -514,7 +514,7 @@ python -m stock_analysis.infrastructure.storage check --database $restorePath
 | 融资精简与沿用来源检查 | [financing_storage.py](../stock_analysis/domains/stocks/financing_storage.py) |
 | 共享价格、版本发布及租约清理 | [price_service.py](../stock_analysis/domains/stocks/price_service.py) |
 | 财报、分红与估值更新 | [fundamental_service.py](../stock_analysis/domains/financials/fundamental_service.py)、[dividend_service.py](../stock_analysis/domains/stocks/dividend_service.py)、[valuation_service.py](../stock_analysis/domains/valuation/valuation_service.py) |
-| 图表范围、频率及刷新操作 | [web/index.html](../web/index.html) |
+| 图表范围、频率及刷新操作 | [web/pages/index.html](../web/pages/index.html) |
 | 全字段交易日快照、季度恢复与来源回放 | [market_trade_snapshot.py](../stock_analysis/domains/market/market_trade_snapshot.py)、[字段字典](../stock_analysis/domains/market/resources/market_trade_snapshot_fields.json) |
 | 公共来源归档、同源预算与冷却 | [collection.py](../stock_analysis/collection/collection.py) |
 

@@ -21,12 +21,12 @@
 
 | 代码 | 定时用途 | 检查结论 |
 |---|---|---|
-| `web/industry.js` | 行业财务/交易快照任务运行中约1.5秒读状态，结束后加载数据 | 已按运行状态停止，无空闲持续刷新；轮询只更新任务状态和按钮 |
-| `web/ai-assessment.js` | 排队/生成/校验任务查询；登录连接期间2秒检查，最长10分钟 | 有任务或登录条件约束；更新研判摘要/抽屉，不重载主页面图表；报告抽屉重绘保留滚动位置 |
-| `web/ai-checklist.js` | 与AI研判类似的任务和登录状态查询 | 同上，无无条件空闲定时刷新 |
-| `web/business-judgment.js` | 活跃任务约2秒更新抽屉；1秒更新耗时文字 | 限任务/提交期间；秒表为客户端文字变化，不是每秒联网或刷新主页面 |
-| `web/maintenance.js` | 明确启动数据库恢复后2秒查询状态；恢复完成后刷新页面 | 属于恢复生命周期，空闲无轮询；恢复后的页面重载是显式操作结果 |
-| `web/stock-picker.js` | requestAnimationFrame用于拖拽交互 | 不是数据定时刷新 |
+| `web/features/industries/industry.js` | 行业财务/交易快照任务运行中约1.5秒读状态，结束后加载数据 | 已按运行状态停止，无空闲持续刷新；轮询只更新任务状态和按钮 |
+| `web/features/research/assessment/ai-assessment.js` | 排队/生成/校验任务查询；登录连接期间2秒检查，最长10分钟 | 有任务或登录条件约束；更新研判摘要/抽屉，不重载主页面图表；报告抽屉重绘保留滚动位置 |
+| `web/features/research/assessment/ai-checklist.js` | 与AI研判类似的任务和登录状态查询 | 同上，无无条件空闲定时刷新 |
+| `web/features/research/assessment/business-judgment.js` | 活跃任务约2秒更新抽屉；1秒更新耗时文字 | 限任务/提交期间；秒表为客户端文字变化，不是每秒联网或刷新主页面 |
+| `web/features/maintenance/maintenance.js` | 明确启动数据库恢复后2秒查询状态；恢复完成后刷新页面 | 属于恢复生命周期，空闲无轮询；恢复后的页面重载是显式操作结果 |
+| `web/shared/stock-picker.js` | requestAnimationFrame用于拖拽交互 | 不是数据定时刷新 |
 | 财务报表、DCF等其余自有页面代码 | 未发现同类setInterval/setTimeout业务刷新 | 本次未修改 |
 
 ## 验证

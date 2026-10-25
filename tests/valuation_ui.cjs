@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
+const page = fs.readFileSync(path.join(__dirname, '../web/pages/index.html'), 'utf8');
 const decoder = page.slice(page.indexOf('  function expandValuationPayload('), page.indexOf('  const state ='));
 const source = decoder + page.slice(page.indexOf('  let valuationMetric ='), page.indexOf('  // Chip assessment charts.'));
 
@@ -42,7 +42,7 @@ function fixture(range = '3', persistedFrequency = null, persistedBenchmark = nu
     seriesControls:[], modeOf() {},
     document:{getElementById:element,querySelectorAll:selector =>
       selector === '[data-valuation-metric]' ? metricButtons : []},
-    window:{DashboardTime:require('../web/datetime.js'),addEventListener() {}},
+    window:{DashboardTime:require('../web/shared/datetime.js'),addEventListener() {}},
     sessionStorage:{setItem() {}},
     localStorage:{getItem:key => storage.get(key) ?? null,setItem:(key,value) => storage.set(key,value)},
     fetch:url => { requests.push(url); throw new Error('frequency switch requested network'); },

@@ -1,6 +1,7 @@
 """Crowding reads existing daily amount ratios and uses the actual page scripts."""
 import json
 from pathlib import Path
+from stock_analysis.http.assets import asset_path
 from urllib.parse import urlparse, parse_qs
 
 import pytest
@@ -57,7 +58,7 @@ def test_browser_crowding_switch_statistics_gaps_and_valuation(db):
         url=urlparse(request.request.url);path=url.path;query=parse_qs(url.query)
         calls.append(path)
         if path=='/indices':
-            body=(root/'web/indices.html').read_text(encoding='utf-8').replace('__RESEARCH_SIDEBAR__',server.research_sidebar('indices'))
+            body=(root/'web/pages/indices.html').read_text(encoding='utf-8').replace('__RESEARCH_SIDEBAR__',server.research_sidebar('indices'))
             request.fulfill(body=body,content_type='text/html');return
         if path=='/api/indices/catalog':body=reader.catalog()
         elif path=='/api/indices/status':body=reader.status()
@@ -67,7 +68,7 @@ def test_browser_crowding_switch_statistics_gaps_and_valuation(db):
         elif path=='/api/indices/congestion':body=json.dumps(market_congestion.read(db))
         elif path.startswith('/api/'):body='{}'
         else:
-            file=Path(plotly.__file__).parent/'package_data/plotly.min.js' if path=='/plotly.min.js' else root/'web'/path.lstrip('/')
+            file=Path(plotly.__file__).parent/'package_data/plotly.min.js' if path=='/plotly.min.js' else asset_path(path.lstrip('/'))
             request.fulfill(path=str(file),content_type='text/javascript' if path.endswith('.js') else 'text/css');return
         request.fulfill(body=body,content_type='application/json')
     try:

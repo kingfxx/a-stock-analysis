@@ -1,6 +1,6 @@
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),assert=require('node:assert/strict');
-const context={window:{DashboardTime:require('../web/datetime.js')},URLSearchParams};
-vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../web/industry.js'),'utf8'),context);
+const context={window:{DashboardTime:require('../web/shared/datetime.js')},URLSearchParams};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../web/features/industries/industry.js'),'utf8'),context);
 const display=context.window.industryMarketDisplay;
 assert.match(display([]).note,/尚无已发布市值汇总/);
 assert.equal(display([{quarter:'2026Q3'}]).mode,'markers');

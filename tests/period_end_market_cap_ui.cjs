@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
+const page = fs.readFileSync(path.join(__dirname, '../web/pages/index.html'), 'utf8');
 assert.equal((page.match(/<option value="period_end_market_cap">季末市值<\/option>/g) || []).length, 3);
 const metricCode = page.slice(page.indexOf('  const metrics = {'), page.indexOf('  let selectedPeriod ='));
 const renderCode = page.slice(page.indexOf('  function label(row)'), page.indexOf('  seriesControls.forEach(series => {'));

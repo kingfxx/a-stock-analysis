@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-const page = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
+const page = fs.readFileSync(path.join(__dirname, '../web/pages/index.html'), 'utf8');
 const source = page.slice(page.indexOf('  // Chip assessment charts.'), page.indexOf('  // Background data loading.'));
 assert.match(page, /id="financing-range"><option value="1" selected>1年/);
 

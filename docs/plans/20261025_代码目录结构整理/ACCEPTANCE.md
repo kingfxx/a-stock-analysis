@@ -66,7 +66,10 @@
 
 ## 阶段二
 
-尚未实施。
+- 完整回归：1575 passed、49 failed、1 skipped，无新增失败；与阶段一相比，指数筛选的一项浏览器断言本次通过（视为波动，不宣称修复业务问题）。
+- 49 个前端文件字节保持；39 个 HTTP 静态 URL 内容/MIME、4 个拒绝路径、两页面的无数据库访问检查通过。
+- 部署 PID32140，主页/指数/航运三页面200，schema42不变，临时旧资源在切换后删除。
+- 对照证据：structure-stage2/SUMMARY.json、structure-assets.json、structure-live-prestage2.json、structure-live-stage2.json。
 
 ## 后台与配置
 

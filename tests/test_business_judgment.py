@@ -292,9 +292,9 @@ def test_browser_generation_history_evidence_and_layout(db):
                 else:request.abort();return
                 request.fulfill(content_type='application/json',body=encoded(data))
             page.route('**/*',route);page.goto(base)
-            page.add_style_tag(path=str(root/'web/ai-checklist.css'))
-            page.add_script_tag(path=str(root/'web/datetime.js'))
-            page.add_script_tag(path=str(root/'web/business-judgment.js'))
+            page.add_style_tag(path=str(root/'web/features/research/assessment/ai-checklist.css'))
+            page.add_script_tag(path=str(root/'web/shared/datetime.js'))
+            page.add_script_tag(path=str(root/'web/features/research/assessment/business-judgment.js'))
             page.evaluate("document.querySelector('.context').innerHTML='<span><button>公告</button></span><button>Checklist</button><button>AI 研报</button><button>AI 设置</button>';window.initBusinessJudgment({code:'601919'},document.querySelector('.context'),()=>{});")
             assert page.locator('.context button').all_text_contents()==['公告','Checklist','经营判断','AI 研报','AI 设置']
             page.get_by_role('button',name='经营判断',exact=True).click()

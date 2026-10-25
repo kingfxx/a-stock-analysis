@@ -8,7 +8,7 @@ from stock_analysis.domains.valuation.valuation_transport import compact_valuati
 
 
 def decode_in_browser(payload):
-    page = (Path(__file__).resolve().parents[1]/'web'/'index.html').read_text(encoding='utf-8')
+    page = (Path(__file__).resolve().parents[1]/'web/pages/index.html').read_text(encoding='utf-8')
     decoder = page[page.index('  function expandValuationPayload('):page.index('  const state =')]
     script = decoder + "\nconst data=JSON.parse(require('fs').readFileSync(0,'utf8')); const decoded=expandValuationPayload(data); console.log(JSON.stringify(expandValuationPayload(decoded)));"
     result = subprocess.run(['node', '-e', script], input=json.dumps(payload),

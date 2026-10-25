@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict');
-const {periodKey,chartSeries,leguCloseOverlay,dailyStatistics}=require('../web/congestion.js');
+const {periodKey,chartSeries,leguCloseOverlay,dailyStatistics}=require('../web/features/market/congestion.js');
 const channels={api_history:{rows:[
   {observation_date:'2026-07-27',value:.50},{observation_date:'2026-07-30',value:.51},
   {observation_date:'2026-07-31',value:null},{observation_date:'2026-08-03',value:null},
