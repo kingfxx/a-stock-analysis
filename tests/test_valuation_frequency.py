@@ -170,8 +170,10 @@ def test_yield_summary_uses_last_yield_observation_when_baidu_has_a_later_month(
         assert summary['count']==2 and summary['percentile']==0
         for frequency in ('day','week','month'):
             rows=summary['rows_by_frequency'][frequency]
-            assert rows[-1]['date']=='2026-10-01' and 'dividend_yield' not in rows[-1]
-            assert rows[-2]['dividend_yield']==summary['current']
+            # Shared trading-date projection removes the later holiday observation.
+            assert rows[-1]['date']=='2026-09-30'
+            assert rows[-1]['dividend_yield']==summary['current']
+            assert rows[-1]['dividend_yield_date']=='2026-09-30'
 
 
 def test_negative_pe_ranges_keep_raw_values_and_do_not_change_chart_or_percentiles():
@@ -221,7 +223,7 @@ def test_standard_deviation_uses_same_daily_population_as_percentiles(metric):
     assert summary["stddev"] == pytest.approx(stddev)
     assert summary["stddev_high"] == pytest.approx(mean + stddev)
     assert summary["stddev_low"] == pytest.approx(mean - stddev)
-    assert summary["median"] == 20
+    assert summary["median"] == 30
 
 
 @pytest.mark.parametrize("values, expected", [

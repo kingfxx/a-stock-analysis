@@ -107,6 +107,6 @@ def test_browser_crowding_switch_statistics_gaps_and_valuation(db):
                 page.locator('[data-metric-family=pe]').click()
                 page.wait_for_function("document.getElementById('current').textContent==='13.10 倍'")
                 assert not errors
-                assert not any('/collect' in path for path in calls)
+                assert not any('/api/indices/collect' in path for path in calls)
             finally:browser.close()
     finally:reader.close()

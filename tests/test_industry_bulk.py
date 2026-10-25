@@ -3,7 +3,7 @@ import copy
 import pytest
 
 from stock_analysis.domains.industries.industry_bulk import cap_rows, fetch_pages, publish, recent_quarters
-from stock_analysis.domains.industries.industry_service import IndustryService
+from industry_financial_fixture import PublishedIndustryService as IndustryService, publish_financials
 from stock_analysis.infrastructure.storage import Database
 from datetime import date
 from test_industries import fixture_bundle
@@ -98,6 +98,7 @@ def test_publish_versions_quarter_and_no_individual_tables(tmp_path):
     collection = {**initial, 'foundation': foundation, 'caps': [{'quarter': '2026Q3', 'target_date': '2026-09-30',
                   'rows': caps, 'roster': roster}], 'manifest': {'scope': 'all_market_one_year', 'pilot_industries': []}}
     publish(service, collection)
+    publish_financials(db,collection["financials"])
     assert service.read(industry='630701', mode='ytd', period='2025-06-30')['market_series'][0]['total_cap'] == 301
     with db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM instruments').fetchone()[0] == 0
@@ -119,6 +120,7 @@ def test_old_finance_visible_and_empty_cap_stays_null(tmp_path):
                   'caps': [{'quarter': '2016Q4', 'rows': [], 'roster': roster}],
                   'manifest': {'scope': 'all_market_history', 'years': 10, 'pilot_industries': []}}
     publish(service, collection)
+    publish_financials(db,collection["financials"])
     assert '2016-09-30' in service.read(industry='630701', mode='ytd')['periods']
     with db.connection() as conn:
         rows = conn.execute("SELECT known_count,known_cap,total_cap FROM sw_industry_cap_quarters WHERE quarter='2016Q4'").fetchall()

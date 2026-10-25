@@ -96,31 +96,38 @@ def test_offline_compaction_backup_integrity_and_business_hashes(tmp_path):
 
 
 def test_full_market_batch_update_skips_known_and_stores_only_revision(tmp_path,monkeypatch):
+    from stock_analysis.domains.industries import industry_updates
+    from stock_analysis.domains.market import market_trade_snapshot as snapshot
+    from market_snapshot_fixture import collector, cap_record
     monkeypatch.setattr('stock_analysis.domains.industries.industry_memberships.ensure_daily_memberships',
         lambda *a,**k:{'status':'complete','reused':True})
-    from stock_analysis.domains.industries import industry_bulk; from stock_analysis.domains.industries import industry_updates
     bundle=copy.deepcopy(fixture_bundle())
     for value in range(1000,4997):
         stock=f'{value:06d}'
         bundle['members'].append({**bundle['members'][0],'stock_code':stock,'industry_code':None})
         bundle['caps'].append({**bundle['caps'][0],'stock_code':stock,'total_cap':1})
     service=IndustryService(Database(tmp_path/'full.sqlite3'));service.db.initialize()
-    service.directory=tmp_path/'sources';service.import_bundle(bundle,capture_local=False)
-    monkeypatch.setattr(industry_updates,'target_trade_date',lambda *a:'2026-09-30')
-    calls=[]
-    def fetch(session,directory,report,columns,filter_,progress,pacer):
-        assert report=='RPT_VALUEANALYSIS_DET' and "2026-09-30" in filter_
-        calls.append(report)
-        return ([{'SECURITY_CODE':r['stock_code'],'TRADE_DATE':r['trade_date'],
-                  'TOTAL_MARKET_CAP':120 if r['stock_code']=='300750' else r['total_cap']}
-                 for r in bundle['caps']], [{'file':f'page{i}.json','sha256':str(i)} for i in range(8)])
-    monkeypatch.setattr(industry_bulk,'fetch_pages',fetch)
+    service.import_bundle(bundle,capture_local=False)
+    with service.db.connection(write=True) as conn:
+        member=service.foundation()['member_import_id']
+        conn.execute("INSERT INTO sw_cap_quarter_rosters VALUES('2026Q3','2026-09-30','current_constituents_backfill',?)",(member,))
+        conn.execute("INSERT INTO sw_cap_quarter_members SELECT '2026Q3',stock_code,industry_code FROM sw_memberships WHERE import_id=?",(member,))
+    records=[cap_record(r['stock_code'],'2026-09-30',r['total_cap']) for r in bundle['caps']]
+    client,session=collector(service.db,records)
+    snapshot.collect_day(service.db,'initial','2026-09-30',quarter='2026Q3',http=client,progress=lambda _:None)
+    monkeypatch.setattr(snapshot,'RequestCollector',lambda *a,**k:client)
+    initial_calls=len(session.calls)
     skipped=industry_updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)
-    assert skipped['requested_count']==0 and not calls
+    assert skipped['snapshot']['skipped'] and len(session.calls)==initial_calls
+    records[0]['TOTAL_MARKET_CAP']=120
     revised=industry_updates.perform(service,'cap_quarter','2026Q3',True,lambda _:None)
-    assert revised['requested_count']==4000 and len(calls)==1 and not revised['failures']
+    assert revised['snapshot']['revised']==1 and not revised['failures']
+    assert len(session.calls)==initial_calls+8
     repeated=industry_updates.perform(service,'cap_quarter','2026Q3',True,lambda _:None)
-    assert repeated['import_id']==revised['import_id']
+    assert repeated['snapshot']['unchanged']==4000 and repeated['snapshot']['revised']==0
     with service.db.connection() as conn:
-        assert conn.execute('SELECT count(*) FROM sw_cap_facts').fetchone()[0]==4001
-        assert conn.execute("SELECT count(*) FROM sw_cap_facts WHERE provenance_json!='{}' OR provenance_id IS NULL").fetchone()[0]==0
+        assert conn.execute('SELECT count(*) FROM sw_cap_facts').fetchone()[0]==4000
+        assert conn.execute('SELECT count(*) FROM market_trade_snapshot').fetchone()[0]==4001
+        assert conn.execute("SELECT count(*) FROM market_trade_snapshot WHERE security_code='300750' AND is_latest=1 AND total_market_cap=120").fetchone()[0]==1
+        assert not conn.execute('PRAGMA foreign_key_check').fetchall()
+        assert conn.execute("SELECT count(*) FROM collection_sources WHERE file_path IS NULL OR raw_sha256 IS NULL").fetchone()[0]==0

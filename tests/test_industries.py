@@ -188,7 +188,7 @@ def test_versions_same_quarter_and_failed_import_preserve_old(service):
     changed['financials'][-1]['revenue']=9
     service.import_bundle(changed)
     r=service.read(industry='630701',mode='ytd')
-    assert len(r['market_series'])==1 and r['market_series'][0]['trade_date']=='2026-09-30'
+    assert len(r['market_series'])==1 and r['market_series'][0]['trade_date']=='2026-09-29'
     with service.db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM sw_financial_facts').fetchone()[0]==7
     invalid=copy.deepcopy(b);invalid['members']=invalid['members'][:1]
@@ -356,7 +356,7 @@ def test_stock_financial_refresh_does_not_collect_or_change_industry_snapshot(se
     monkeypatch.setattr(server,'p4_services',lambda:(Fundamentals(),Dividends(),None))
     monkeypatch.setattr(server,'industry_service',lambda:pytest.fail('stock refresh reached industry service'))
     monkeypatch.setattr(server,'_financial_payload',lambda value:value)
-    monkeypatch.setattr(server,'_add_sqlite_missing_name',lambda db,value:value)
+    monkeypatch.setattr(server,'_add_sqlite_missing_name',lambda db,value,**kwargs:value)
     monkeypatch.setattr(server,'cached_stocks',lambda:[])
     server.load_chart_data('300750','financial',True,full=True)
     # Reloading the service also remains fixed; this is not merely an in-memory cache.
@@ -427,7 +427,8 @@ def test_quarter_cap_default_skip_and_revision_only_changed_company(service,monk
         conn.execute("INSERT INTO sw_cap_quarter_rosters VALUES('2026Q3','2026-09-30','current_constituents_backfill',?)",(member,))
         conn.execute("INSERT INTO sw_cap_quarter_members SELECT '2026Q3',stock_code,industry_code FROM sw_memberships WHERE import_id=? AND industry_code='630701'",(member,))
     data=row('300750');data.update(TRADE_DATE='2026-09-30',TOTAL_MARKET_CAP=120,TOTAL_SHARES=12)
-    client,calls=http(service.db,[data])
+    other=row('000001');other.update(TRADE_DATE='2026-09-30',TOTAL_MARKET_CAP=200,TOTAL_SHARES=20)
+    client,calls=http(service.db,[data,other])
     monkeypatch.setattr(snapshot,'RequestCollector',lambda *a,**k:client)
     result=updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)
     assert result['legacy_updated'] is False and len(calls.calls)==1
@@ -436,9 +437,9 @@ def test_quarter_cap_default_skip_and_revision_only_changed_company(service,monk
     assert len(calls.calls)==1
     with service.db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM sw_cap_facts').fetchone()[0]==3
-        assert conn.execute('SELECT count(*) FROM market_trade_snapshot').fetchone()[0]==1
+        assert conn.execute('SELECT count(*) FROM market_trade_snapshot').fetchone()[0]==2
     data['TOTAL_MARKET_CAP']=100;data['TOTAL_SHARES']=10
-    client,_=http(service.db,[data]);monkeypatch.setattr(snapshot,'RequestCollector',lambda *a,**k:client)
+    client,_=http(service.db,[data,other]);monkeypatch.setattr(snapshot,'RequestCollector',lambda *a,**k:client)
     updates.perform(service,'cap_quarter','2026Q3',True,lambda _:None)
     assert service.read(industry='630701',mode='ytd')['market_series'][-1]['total_cap']==300
 
@@ -494,11 +495,11 @@ def test_industry_api_requires_explicit_task_stock_routes_stay_separate(service,
     from stock_analysis.http import server
     calls=[]
     monkeypatch.setattr(server,'industry_service',lambda:service)
-    monkeypatch.setattr(service,'start_refresh',lambda *args:calls.append(args) or {'running':True})
+    monkeypatch.setattr(service,'start_refresh',lambda *args,**kwargs:calls.append(args) or {'running':True})
     stock_calls=[]
     monkeypatch.setattr(server,'load_chart_data',lambda code,section,refresh,**options:
                         stock_calls.append((code,section,refresh,options['full'])) or {})
-    monkeypatch.setattr(server,'price_bundle',lambda code,**options:stock_calls.append((code,'prices',options['refresh'],options['full'])) or {})
+    monkeypatch.setattr(server,'price_bundle',lambda code,**options:stock_calls.append((code,'prices',options['refresh'],options['full'])) or {'valuation':{}})
     http=ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     thread=Thread(target=http.serve_forever,daemon=True);thread.start()
     try:

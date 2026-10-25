@@ -321,9 +321,11 @@ def test_browser_polling_preserves_zoom_and_filter_resets(live):
             after=page.locator('#congestion-chart').evaluate("n=>[n._fullLayout.xaxis.range,n._fullLayout.yaxis.range,n._fullLayout.yaxis2.range]")
             assert after==before
             assert page.evaluate('window.zoomRefreshes')==1
-            idle_requests=len(requests)
+            idle_requests=history_reads()
+            idle_status=page.evaluate("window.statusReads")
             page.clock.fast_forward(35000)
-            assert len(requests)==idle_requests  # Both blocks stop their timers when idle.
+            assert history_reads()==idle_requests
+            assert page.evaluate("window.statusReads")==idle_status  # Both blocks stop their timers when idle.
             revision=page.locator('#congestion-chart').evaluate('n=>n.layout.uirevision')
             page.locator('#congestion-frequency').select_option('month')
             assert page.locator('#congestion-chart').evaluate('n=>n.layout.uirevision')!=revision
@@ -339,13 +341,12 @@ def test_browser_polling_preserves_zoom_and_filter_resets(live):
             with database.connection(write=True) as conn:
                 conn.execute("UPDATE index_collection_operations SET status='complete',finished_at=? WHERE operation_id=?",(m.utc_now(),external_operation))
             page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
-            page.wait_for_function("!document.getElementById('congestion-update').disabled && document.getElementById('congestion-cancel').disabled")
-            # Starting from idle wakes both progress blocks, without reloading chart data.
-            history_before=history_reads()
-            page.locator('#congestion-update').click()
-            page.wait_for_function("!document.getElementById('cancel').disabled && !document.getElementById('congestion-cancel').disabled")
-            assert history_reads()==history_before
-            assert len(calls)==1
+            page.wait_for_function('minimum=>window.statusReads>=minimum',arg=status_before+4)
+            # Collection controls live in maintenance; this page only links there.
+            assert page.locator('#congestion-update').count()==0
+            assert page.locator('#congestion-cancel').count()==0
+            assert page.locator('a[href*="maintenance"]').count()>0
+            assert not calls
         finally:browser.close()
 
 
@@ -368,7 +369,7 @@ def test_browser_dual_axes_all_broad_ranges_and_read_only(live):
             page.wait_for_function("document.getElementById('congestion-current').textContent==='41.66%'")
             assert page.locator('#congestion-index').input_value()=='cn:000001'
             assert page.locator('#congestion-range').input_value()=='5'
-            assert page.locator('#congestion-frequency').input_value()=='day'
+            assert page.locator('#congestion-frequency').input_value()=='auto'
             assert page.locator('#congestion-index').locator('option:checked').inner_text()=='上证指数'
             assert page.locator('#congestion-date').inner_text()=='2026-10-16'
             assert not page.locator('#congestion-coverage').is_visible()
@@ -400,17 +401,17 @@ def test_browser_dual_axes_all_broad_ranges_and_read_only(live):
             assert '拥挤度采集附带的收盘价' in page.locator('#congestion-points').text_content()
             assert page.locator('#congestion-history-summary').inner_text()==summary
             page.locator('#congestion-range').select_option('10')
-            assert page.locator('#congestion-frequency').input_value()=='week'
+            assert page.locator('#congestion-frequency').input_value()=='day'
             page.locator('#congestion-frequency').select_option('month')
             assert page.locator('#congestion-frequency').input_value()=='month'
             page.locator('#congestion-range').select_option('all')
-            assert page.locator('#congestion-frequency').input_value()=='week'
+            assert page.locator('#congestion-frequency').input_value()=='month'
             page.locator('#congestion-index').select_option('cn:000300')
             page.wait_for_function("document.getElementById('congestion-points').textContent.includes('暂无本地点位')")
             assert page.locator('#congestion-range').input_value()=='all'
             assert page.locator('#congestion-current').inner_text()=='41.66%'
             page.locator('#congestion-range').select_option('5')
-            assert page.locator('#congestion-frequency').input_value()=='day'
+            assert page.locator('#congestion-frequency').input_value()=='month'
             page.set_viewport_size({'width':390,'height':844})
             assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')
             assert not calls and not external and not errors

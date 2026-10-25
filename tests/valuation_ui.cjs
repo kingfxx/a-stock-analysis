@@ -17,6 +17,7 @@ function fixture(range = '3', persistedFrequency = null, persistedBenchmark = nu
       textContent:'', attributes:{}, listeners:{},
       setAttribute(name, value) { this.attributes[name] = String(value); },
       getAttribute(name) { return this.attributes[name] ?? null; },
+      on() {},
       addEventListener(name, callback) { this.listeners[name] = callback; }
     });
     return elements.get(id);
@@ -37,16 +38,17 @@ function fixture(range = '3', persistedFrequency = null, persistedBenchmark = nu
     sparse_hint:'较早段观测较稀疏；请以悬浮提示中的实际日期为准。'
   };
   const context = {
+    CustomEvent:class { constructor(type,options) { this.type=type;Object.assign(this,options); } },
     state:{valuation:{views:{'3':{pe:view},'5':{pe:view},'10':{pe:view}},warnings:[]}},
     savedSelections:{valuationRange:range}, selectedPeriod:'quarter', comparisonRange:{value:'all'},
     seriesControls:[], modeOf() {},
     document:{getElementById:element,querySelectorAll:selector =>
       selector === '[data-valuation-metric]' ? metricButtons : []},
-    window:{DashboardTime:require('../web/shared/datetime.js'),addEventListener() {}},
+    window:{DashboardTime:require('../web/shared/datetime.js'),addEventListener() {},dispatchEvent() {}},
     sessionStorage:{setItem() {}},
     localStorage:{getItem:key => storage.get(key) ?? null,setItem:(key,value) => storage.set(key,value)},
     fetch:url => { requests.push(url); throw new Error('frequency switch requested network'); },
-    Plotly:{react:(id,traces,layout) => plots.push({id,traces,layout})}
+    Plotly:{react:(id,traces,layout) => { plots.push({id,traces,layout});return Promise.resolve(); }}
   };
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -93,10 +95,11 @@ for (const [range, expectedDate] of [['3','2026-09-28'],['5','2026-09-29'],['10'
   priceUi.render();
   const traces = priceUi.plots.at(-1).traces;
   const price = traces.find(trace => trace.name === '前复权股价');
-  assert.deepEqual(Array.from(price.x), ['2026-02-15','2026-03-01','2026-03-08']);
+  assert.deepEqual(Array.from(price.x), ['2026-02-13','2026-02-27','2026-03-08']);
   assert.deepEqual(Array.from(price.y), [13.87,14.57,null]);
   assert.equal(price.connectgaps, false);
-  assert.equal(price.customdata[0][0], '2026-02-13');
+  assert.match(price.hovertemplate, /前复权股价/);
+  assert.equal(priceUi.element('valuation-note').textContent.includes('周期'), true);
   assert.equal(traces[0].x.length, 4);
 }
 
@@ -117,9 +120,12 @@ ui = fixture('10');
 ui.render();
 const trace = ui.plots.at(-1).traces[0];
 assert.equal(trace.x[0], '2026-09-30');
-assert.equal(trace.customdata[0][0], '2026-09-27');
-assert.equal(trace.customdata[0][1], '（本周期未完结）');
-assert.match(trace.hovertemplate, /实际观察日：%\{customdata\[0\]\}/);
+assert.equal(ui.context.state.valuation.views['10'].pe.rows_by_frequency.month[0].pe_date, '2026-09-27');
+assert.equal(ui.context.state.valuation.views['10'].pe.rows_by_frequency.month[0].period_complete, false);
+assert.match(trace.hovertemplate, /PE/);
+assert.doesNotMatch(trace.hovertemplate, /实际观察日/);
+assert.equal(ui.plots.at(-1).layout.hovermode, 'x unified');
+assert.equal(ui.plots.at(-1).layout.xaxis.hoverformat, '%Y-%m-%d');
 assert.match(ui.element('valuation-note').textContent, /较早段观测较稀疏/);
 
 // A later row for another metric must not clear the yield card; unavailable percentiles never print null%.

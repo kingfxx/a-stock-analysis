@@ -46,7 +46,7 @@ def test_page_read_never_starts_announcement_collection(tmp_path, monkeypatch):
     assert "sina_unverified" in page
 
 
-def test_financial_update_allows_initial_sync_only_for_explicit_refresh(tmp_path, monkeypatch):
+def test_financial_update_allows_initial_sync_for_initialization_and_explicit_refresh(tmp_path, monkeypatch):
     root = tmp_path / "fundamentals"
     monkeypatch.setattr(server, "DATABASE_PATH", tmp_path / "db.sqlite3")
     monkeypatch.setattr(server, "CACHE", root)
@@ -62,7 +62,8 @@ def test_financial_update_allows_initial_sync_only_for_explicit_refresh(tmp_path
     monkeypatch.setattr(AnnouncementService, "update", fake_update)
     server.load_chart_data("601919", "financial", refresh=False)
     server.load_chart_data("601919", "financial", refresh=True)
-    assert [call["allow_initial"] for call in calls] == [False, True]
+    assert [call["allow_initial"] for call in calls] == [True, True]
+    assert [call["refresh"] for call in calls] == [False, True]
 
 
 def test_announcement_failure_keeps_sina_reports_available(tmp_path, monkeypatch):

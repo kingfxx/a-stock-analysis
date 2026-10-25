@@ -1,5 +1,5 @@
-from historical_collection import begin_batch as historical_batch
 """v26 only adds transactional cache generations and registers maintenance metadata."""
+from historical_collection import begin_batch as historical_batch
 import sqlite3
 
 from stock_analysis.infrastructure import storage

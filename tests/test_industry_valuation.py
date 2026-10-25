@@ -37,6 +37,10 @@ def test_quarter_end_valuation_same_date_and_ttm_across_modes(tmp_path):
     with db.connection(write=True) as conn:
         member_id=conn.execute('SELECT member_import_id FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()[0]
         conn.execute("INSERT INTO sw_cap_quarter_rosters VALUES('2025Q2','2025-06-30','current_constituents_backfill',?)",(member_id,))
+    from stock_analysis.domains.market import market_trade_snapshot as snapshot
+    from market_snapshot_fixture import collector, cap_record
+    client,_=collector(db,[cap_record('300750','2025-06-30',120,12)])
+    snapshot.collect_day(db,'test-valuation','2025-06-30',quarter='2025Q2',http=client,progress=lambda _:None)
     from stock_analysis.domains.market.market_price_backfill import publish
     publish(db,{'member_import_id':member_id,'sources':[{'source':'bigquant:cn_stock_real_bar1d',
         'dataset':'cn_stock_real_bar1d','params':{},'file_path':'test.json.gz','content_hash':'b'*64,
@@ -58,7 +62,14 @@ def test_quarter_end_valuation_same_date_and_ttm_across_modes(tmp_path):
     publish_financials(db,bundle['financials'])
     company=lambda:next(c for c in service.read(code='300750',period='2025-06-30')['companies'] if c['code']=='300750')
     assert company()['pb']==3
-    for bps in (None,0,-1):
+    # A valid BPS becoming null is a rejected withdrawal, not a published revision.
+    missing=copy.deepcopy(bundle['financials'])
+    for fact in missing:
+        if fact['period']=='2025-06-30':fact['bps']=None
+    with pytest.raises(ValueError,match='来源值变空'):
+        publish_financials(db,missing)
+    assert company()['pb']==3
+    for bps in (0,-1):
         for fact in bundle['financials']:
             if fact['period']=='2025-06-30':fact['bps']=bps
         publish_financials(db,bundle['financials'])
@@ -67,11 +78,11 @@ def test_quarter_end_valuation_same_date_and_ttm_across_modes(tmp_path):
         if fact['period']=='2025-06-30':fact['bps']=4
     publish_financials(db,bundle['financials'])
     with db.connection(write=True) as conn:
-        conn.execute("UPDATE market_quarterly_prices SET trade_date='2025-06-27'")
+        conn.execute("UPDATE market_trade_snapshot SET trade_date='2025-06-27'")
     assert company()['pb'] is None
     with db.connection(write=True) as conn:
-        conn.execute("UPDATE market_quarterly_prices SET trade_date='2025-06-30'")
+        conn.execute("UPDATE market_trade_snapshot SET trade_date='2025-06-30'")
     assert company()['pb']==3
     with db.connection(write=True) as conn:
-        conn.execute('DELETE FROM market_quarterly_prices')
+        conn.execute('DELETE FROM market_trade_snapshot')
     assert company()['pb'] is None

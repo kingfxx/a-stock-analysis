@@ -83,21 +83,27 @@ def test_sdk_error_messages_and_timeout(setup, monkeypatch):
         prices.run_sdk(backfill.ROOT)
 
 
-def test_cap_task_calls_prices_after_saving_even_without_cap_gaps(setup, monkeypatch, tmp_path):
+def test_cap_task_reuses_saved_snapshot_with_prices_without_separate_sdk(setup, monkeypatch):
     from stock_analysis.domains.industries import industry_updates as updates
-    service, foundation = setup
-    foundation['members'] += [{'stock_code':str(n).zfill(6),'listing_date':'2000-01-01'} for n in range(3999)]
-    service.foundation = lambda:foundation
-    service.directory = tmp_path/'industry'
-    service.cap_known = lambda day:{'600000'}
-    events = []
-    service.import_bundle = lambda *a,**k:events.append('saved cap') or 1
-    monkeypatch.setattr('stock_analysis.domains.industries.industry_memberships.ensure_daily_memberships', lambda *a:{})
-    monkeypatch.setattr(updates, 'target_trade_date', lambda *a:'2026-09-30')
-    monkeypatch.setattr(updates, 'cap_roster', lambda *a:{'members':[{'stock_code':'600000'}], 'composition':'test'})
-    def sync_prices(*args):
-        events.append('prices'); return {'status':'failed','error':'BigQuant 权限不足'}
-    monkeypatch.setattr(prices, 'sync_quarter', sync_prices)
-    result = updates.perform(service, 'cap_quarter', '2026Q3', False, lambda _:None)
-    assert events==['saved cap','prices']
-    assert result['requested_count']==0 and result['quarter_prices']['status']=='failed'
+    from stock_analysis.domains.market import market_trade_snapshot as snapshot
+    from market_snapshot_fixture import collector, cap_record
+    from test_industries import fixture_bundle
+    db=setup[0].db
+    service=IndustryService(db)
+    service.import_bundle(fixture_bundle(),capture_local=False)
+    with db.connection(write=True) as conn:
+        member=service.foundation()['member_import_id']
+        conn.execute("INSERT INTO sw_cap_quarter_rosters VALUES('2026Q3','2026-09-30','current_constituents_backfill',?)",(member,))
+        conn.execute("INSERT INTO sw_cap_quarter_members SELECT '2026Q3',stock_code,industry_code FROM sw_memberships WHERE import_id=?",(member,))
+    records=[cap_record(r['stock_code'],'2026-09-30',r['total_cap']) for r in fixture_bundle()['caps']]
+    client,session=collector(db,records)
+    snapshot.collect_day(db,'initial','2026-09-30',quarter='2026Q3',http=client,progress=lambda _:None)
+    before=len(session.calls)
+    monkeypatch.setattr(snapshot,'RequestCollector',lambda *a,**k:client)
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_memberships.ensure_daily_memberships',lambda *a,**k:{})
+    monkeypatch.setattr(prices,'sync_quarter',lambda *a,**k:pytest.fail('snapshot must include raw prices without a separate SDK'))
+    result=updates.perform(service,'cap_quarter','2026Q3',False,lambda _:None)
+    assert result['snapshot']['skipped'] and len(session.calls)==before
+    assert result['quarter_prices']['status']=='complete'
+    with db.connection() as conn:
+        assert conn.execute('SELECT count(*) FROM market_trade_snapshot WHERE close_price=10').fetchone()[0]==3

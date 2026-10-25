@@ -1,5 +1,5 @@
-from historical_collection import begin_batch as historical_batch
 """v24→v25 preserves full observations, revisions and source constraints."""
+from historical_collection import begin_batch as historical_batch
 import sqlite3
 
 import pytest

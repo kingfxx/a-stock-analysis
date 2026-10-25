@@ -89,7 +89,13 @@ def test_index_point_overlay_http_reports_selected_real_series(index_server):
     assert not missing['available'] and missing['rows']==[]
 
 
-def test_browser_cooldown_time_is_beijing_to_seconds(index_server):
+def test_browser_cooldown_time_is_beijing_to_seconds(index_server,monkeypatch):
+    from datetime import datetime, timezone
+    from stock_analysis.domains.indices import index_read_service
+    class Clock(datetime):
+        @classmethod
+        def now(cls,tz=None):return datetime(2026,10,17,7,0,tzinfo=timezone.utc)
+    monkeypatch.setattr(index_read_service,"datetime",Clock)
     playwright=pytest.importorskip('playwright.sync_api')
     base,calls,db=index_server
     with db.connection(write=True) as conn:
@@ -101,6 +107,7 @@ def test_browser_cooldown_time_is_beijing_to_seconds(index_server):
             page=browser.new_page(timezone_id='America/Los_Angeles')
             errors=[]
             page.on('pageerror',lambda error:errors.append(str(error)))
+            page.clock.install(time=datetime(2026,10,17,7,0,tzinfo=timezone.utc))
             page.goto(base+'/indices',wait_until='networkidle')
             assert page.locator('#cooldowns').inner_text()=='乐咕乐股：HTTP 429，冷却截止（北京时间）2026-10-17 15:29:57'
             assert not errors and not calls
@@ -129,9 +136,10 @@ def test_browser_toggles_real_index_points_on_right_axis(index_server):
             button.click()
             page.wait_for_function("document.getElementById('chart').data?.some(t=>t.name==='指数点位')")
             price=page.locator('#chart').evaluate("node=>node.data.find(t=>t.name==='指数点位')")
-            assert price['y']==[4600] and price['customdata']==['2026-10-09']
+            assert price['y']==[4600] and price['x']==['2026-10-09']
             assert page.locator('#chart').evaluate("node=>node._fullLayout.yaxis2.side")=='right'
-            assert '中证指数' in page.locator('#point-overlay-note').inner_text()
+            assert price['hovertemplate']=='指数点位：%{y:.2f} 点<extra></extra>'
+            assert page.locator('#chart').evaluate("n=>n._fullLayout.hovermode")=='x unified'
             button.click()
             page.wait_for_function("!document.getElementById('chart').data.some(t=>t.name==='指数点位')")
             assert button.get_attribute('aria-pressed')=='false' and not errors
@@ -205,7 +213,7 @@ def test_browser_explicit_series_filters_sources_and_no_auto_collection(index_se
             page.mouse.move(coordinates['x'], coordinates['y'])
             page.wait_for_selector('#chart .hoverlayer .legend')
             hover = page.locator('#chart .hoverlayer').text_content()
-            assert '13.10' in hover and '实际观察日' in hover and '2026-10-09' in hover
+            assert '13.10' in hover and '滚动 PE' in hover and hover.count('2026-10-09')==1
             assert page.locator('#current').inner_text() == '13.10 倍'
             basis = page.locator('#basis').inner_text()
             page.locator('#benchmark').select_option('stddev')

@@ -45,7 +45,7 @@ def test_stock_picker_drag_with_real_browser(tmp_path, monkeypatch, script, expe
         payload = {'code':code,'views':{},'warnings':[],'valuation':{'views':{}},'loading':{},
                    'price_version':1,'price_needs_update':False,'stock_library':data,'unfollowed':library.is_unfollowed(code),
                    'cached_stocks':[{'code':stock['code'],'name':stock['name']} for stock in data['stocks']]}
-        return server.TEMPLATE.replace('__PAYLOAD__',json.dumps(payload,ensure_ascii=False)).replace('__CODE__',code).replace('__ERROR__','')
+        return server.TEMPLATE.replace('__RESEARCH_SIDEBAR__',server.research_sidebar('stock')).replace('__PAYLOAD__',json.dumps(payload,ensure_ascii=False)).replace('__CODE__',code).replace('__ERROR__','')
     monkeypatch.setattr(server, 'render_page', page)
     httpd = server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     httpd.restore_manager = server.RestoreManager(db)

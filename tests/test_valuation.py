@@ -92,9 +92,9 @@ def test_dividend_yield_uses_paid_cash_in_trailing_year_and_raw_month_close():
     events = [{"date": "2025-02-01", "per_share": .5},
               {"date": "2026-02-15", "per_share": 1.0}]
     yields = monthly_dividend_yields(prices, events)
-    assert yields == [{"date": "2026-01-30", "value": 5},
-                      {"date": "2026-02-27", "value": 5},
-                      {"date": "2026-03-31", "value": 5}]
+    assert yields == [{"date": "2026-01-30", "value": 5, "raw_close": 10, "cash_dividend_per_share_365": .5},
+                      {"date": "2026-02-27", "value": 5, "raw_close": 20, "cash_dividend_per_share_365": 1},
+                      {"date": "2026-03-31", "value": 5, "raw_close": 20, "cash_dividend_per_share_365": 1}]
     merged = merge_dividend_yields([{"date": "2026-02-28", "pe": 10}], yields)
     assert merged[1]["dividend_yield"] == 5
     assert merged[1]["dividend_yield_date"] == "2026-02-27"

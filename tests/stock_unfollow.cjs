@@ -14,7 +14,7 @@ const assert = require('node:assert/strict');
   const send=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{const result=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;};
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  const wait=async expression=>{for(let i=0;i<160;i++){if(await evaluate(expression))return;await sleep(25);}throw Error('Timed out: '+expression);};
+  const wait=async expression=>{for(let i=0;i<160;i++){if(await evaluate(expression))return;await sleep(25);}throw Error('Timed out: '+expression+'; status='+await evaluate('document.getElementById("maintenance-unfollowed-status")?.textContent'));};
   const idle=()=>wait('document.querySelector("#stock-groups button") && !document.getElementById("stock-manage").disabled');
   const click=async id=>{await evaluate(`document.getElementById(${JSON.stringify(id)}).click()`);await idle();};
   const read=async()=>(await fetch(base+'/api/stock-groups')).json();

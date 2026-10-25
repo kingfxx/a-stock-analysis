@@ -34,7 +34,7 @@ def test_financial_parser_uses_report_period_and_disclosure_date():
     assert parse_financial_reports(income, balance) == [{
         "period": "2025-06-30", "publish_date": "2025-08-15",
         "source_publish_date": "2025-08-15",
-        "revenue_ytd": 250.5, "profit_ytd": 45.2,
+        "revenue_ytd": 250.5, "profit_ytd": 45.2, "adjusted_profit_ytd": None,
         "operating_cost_ytd": 150.5, "net_profit_ytd": 50.0,
         "monetary_funds": 300.0,
         "profit_before_tax_ytd": None, "income_tax_expense_ytd": None,

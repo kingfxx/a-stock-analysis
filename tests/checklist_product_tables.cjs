@@ -9,9 +9,9 @@ for(const period of ['[2026年上半年]','【2026年上半年】','［2026年�
  const text='定性说明。\n'+period+'主营业务收入合计1119.22亿元，含抵销；航运—1072.98亿元—收入占比95.87%；抵销—-17.04亿元—-1.52%。\n'+period+'主营业务毛利合计205.26亿元，含抵销；航运—184.45亿元—毛利贡献89.86%；抵销—3.32亿元—1.62%；毛利贡献不等于净利润贡献。';
  const blocks=parse(text),tables=blocks.filter(b=>b.type==='table');
  assert.equal(tables.length,1,period);
- assert.equal(tables[0].headers[1],'收入（亿元）');
- assert.equal(tables[0].headers[3],'毛利（亿元）');
- assert.equal(tables[0].rows[1][1],'-17.04');
+ assert.equal(tables[0].headers[1],'收入金额');
+ assert.equal(tables[0].headers[3],'毛利金额');
+ assert.equal(tables[0].rows[1][1],'-17.04亿元');
  assert.equal(tables[0].rows[1][2],'-1.52%');
  assert.ok(blocks.some(b=>b.type==='text' && b.text==='毛利贡献不等于净利润贡献。'));
  assert.equal(blocks[0].text,'定性说明。');
@@ -23,8 +23,8 @@ console.log('Product table period formats, negative values and unmatched notes v
 const varied=parse('定性说明。\n2026年1-6月｜分部净利润口径；光模块业务 — 148.06亿元 — 占比未披露；其他 — -0.73亿元 — 占比未披露。\n2025年 | 营业收入口径，分母为收入合计；光通信收发模块 — 374.57亿元（97.95%）；其他 — 7.83亿元 (2.05%)。');
 const variedTables=varied.filter(b=>b.type==='table');
 assert.equal(variedTables.length,2);
-assert.equal(variedTables[0].headers[1],'分部净利润（亿元）');
-assert.equal(variedTables[0].rows[1][1],'-0.73');
+assert.equal(variedTables[0].headers[1],'分部净利润金额');
+assert.equal(variedTables[0].rows[1][1],'-0.73亿元');
 assert.equal(variedTables[1].rows[0][2],'97.95%');
 assert.equal(variedTables[1].rows[1][2],'2.05%');
 
@@ -32,15 +32,16 @@ const trusted=[{id:'company.page.test',metric:'report_excerpt',value:[{business_
 const verified=parse('2026年1-6月｜分部净利润；光模块—148.06亿元—未披露；其他—-0.73亿元—未披露。',trusted).find(b=>b.type==='table');
 assert.equal(verified.rows[0][2],'100.49%');
 assert.equal(verified.rows[1][2],'-0.49%');
-assert.equal(verified.rows[2][1],'668.13元');
+assert.equal(verified.rows[2][1],'0.00亿元');
+assert.equal(trusted[0].value[0].business_metrics.profit_mix.rows[2].profit,668.13,'display rounding preserves the original evidence');
 assert.equal(verified.evidenceId,'company.page.test');
 // An unrelated period cannot silently update an immutable historical snapshot.
 const old=parse('2025年｜分部净利润；光模块—100亿元—未披露。',trusted).find(b=>b.type==='table');
 assert.equal(old.rows[0][2],'未披露');
 
 const telecom=parse('2025年｜主营业务口径；电信服务—5239.25亿元—收入占主营业务100%，毛利率29.1%。').find(b=>b.type==='table');
-assert.equal(telecom.headers[1],'收入（亿元）');
-assert.equal(parse('2025年｜业务口径；电信服务—5239.25亿元—未披露。')[0].headers[1],'金额（亿元）');
+assert.equal(telecom.headers[1],'收入金额');
+assert.equal(parse('2025年｜业务口径；电信服务—5239.25亿元—未披露。')[0].headers[1],'金额');
 const incomeEvidence=[{id:'telecom.page',metric:'report_excerpt',value:[{business_metrics:{revenue_mix:{period:'2026-06-30',unit:'亿元',basis:'主营收入构成',denominator:2441,rows:[{name:'通信收入',revenue:2130,share_pct:87.2593},{name:'智能收入',revenue:311,share_pct:12.7407}],note:'天翼云618亿元另口径，不能相加；报告智能收入占比12.8%'}}}]}];
 const telecomIncome=parse('2026年上半年｜主营收入口径；通信收入—2130亿元—未披露；智能收入—311亿元—12.8%；天翼云—618亿元—未披露。',incomeEvidence).find(b=>b.type==='table');
 assert.equal(telecomIncome.rows.length,2);
@@ -66,9 +67,9 @@ const bus=parse('核心业务说明。\n2025年：主营业务分产品收入，
 const busTables=bus.filter(b=>b.type==='table');
 assert.equal(busTables.length,1);
 assert.equal(busTables[0].rows[0][0],'客车产品');
-assert.equal(busTables[0].headers[1],'收入（万元）');
-assert.equal(busTables[0].headers[3],'毛利（万元）');
-assert.equal(busTables[0].rows[0][3],'910,221.88');
+assert.equal(busTables[0].headers[1],'收入金额');
+assert.equal(busTables[0].headers[3],'毛利金额');
+assert.equal(busTables[0].rows[0][3],'91.02亿元');
 assert.ok(bus.some(b=>b.type==='text' && b.text.includes('2026年上半年')));
 
 // Missing shares and plain year labels must not suppress the domestic/overseas amounts.
@@ -79,12 +80,12 @@ for(const period of ['2025年','2025年度'])for(const label of ['收入','销�
  assert.equal(table.headers.join(','),'报告期,地区,收入,占比');
  assert.equal(table.rows.length,2);
  assert.equal(table.rows[0][1],'国内');
- assert.equal(table.rows[0][2],'1,540,227.81万元');
+ assert.equal(table.rows[0][2],'154.02亿元');
  assert.equal(table.rows[0][3],'42.19%（计算）');
  assert.equal(table.rows[1][1],'海外');
- assert.equal(table.rows[1][2],'2,110,790.63万元');
+ assert.equal(table.rows[1][2],'211.08亿元');
  assert.equal(table.rows[1][3],'57.81%（计算）');
- assert.ok(table.note.includes('分母3,651,018.44万元'));
+ assert.ok(table.note.includes('分母365.10亿元'));
  assert.ok(region.some(b=>b.type==='text' && b.text.includes('2026年上半年')));
 }
 const noShare=window.checklistMarketBlocks('2025年度：国内销售收入1540227.81万元、海外销售收入2110790.63万元；年度销售收入同比国内-12.38%、海外+38.87%。');
@@ -114,10 +115,10 @@ const allMeasures=parse('2025年度｜分部净利润口径；光模块—117.05
 const allTables=allMeasures.filter(b=>b.type==='table');
 assert.equal(allTables.length,1);
 assert.equal(allTables[0].headers.length,7);
-assert.equal(allTables[0].headers[1],'收入（亿元）');
-assert.equal(allTables[0].headers[3],'毛利（亿元）');
-assert.equal(allTables[0].headers[5],'分部净利润（亿元）');
-assert.equal(allTables[0].rows[1][5],'-1.25');
+assert.equal(allTables[0].headers[1],'收入金额');
+assert.equal(allTables[0].headers[3],'毛利金额');
+assert.equal(allTables[0].headers[5],'分部净利润金额');
+assert.equal(allTables[0].rows[1][5],'-1.25亿元');
 const differentProducts=parse('2025年｜收入口径；光模块—100亿元—100%。\n2025年｜分部净利润；器件—20亿元—100%。');
 assert.equal(differentProducts.filter(b=>b.type==='table').length,2);
 
@@ -135,12 +136,12 @@ for(const table of railTables) {
 const railRaw=parse(railSource.conclusions.products).filter(b=>b.type==='table');
 assert.equal(railRaw.length,2);
 assert.equal(railRaw[0].rows[0][0],'铁路装备');
-assert.equal(railRaw[0].rows[0][3],'17,275,532');
+assert.equal(railRaw[0].rows[0][3],'172.76亿元');
 const railMarket=window.checklistMarketBlocks(railSource.conclusions.market).find(b=>b.type==='table');
 assert.equal(railMarket.rows.length,4);
 assert.equal(railMarket.rows[0][1],'中国大陆');
 assert.equal(railMarket.rows[1][1],'其他国家或地区');
-assert.equal(railMarket.rows[1][2],'16,203,642千元');
+assert.equal(railMarket.rows[1][2],'162.04亿元');
 assert.ok(railMarket.rows.every(row=>row[3].includes('计算')));
 assert.ok(!window.checklistMarketBlocks(railSource.conclusions.market).some(b=>b.type==='text' && /交易收入,\d/.test(b.text)));
 
@@ -151,7 +152,7 @@ assert.equal(structured.headers.length,7);
 assert.equal(structured.headers[1],'收入金额');
 assert.equal(structured.headers[3],'毛利金额');
 assert.equal(structured.headers[5],'分部净利润金额');
-assert.equal(structured.rows[1][5],'-1亿元');
+assert.equal(structured.rows[1][5],'-1.00亿元');
 assert.equal(structured.rows[0][6],'100.00%（计算）');
 const multiRegions=window.checklistStructuredBlocks({id:'market',conclusion:'地区定义按报告。',tables:[structuredTable('income',[{name:'亚太（含港澳台）',amount:60,share_pct:null},{name:'欧洲',amount:30,share_pct:30},{name:'美洲',amount:10,share_pct:null}],{classification:'地区',basis:'合并对外收入'})]}).find(b=>b.type==='table');
 assert.equal(multiRegions.rows.length,3);
@@ -170,10 +171,10 @@ for(const prefix of ['', '收入']) {
  const tables=ship.filter(b=>b.type==='table');
  assert.equal(tables.length,2);
  assert.equal(tables[0].rows.length,3);
- assert.equal(tables[0].headers[1],'收入（亿元）');
- assert.equal(tables[0].rows[0][1],'815.25');
+ assert.equal(tables[0].headers[1],'收入金额');
+ assert.equal(tables[0].rows[0][1],'815.25亿元');
  assert.equal(tables[0].rows[1][0],'船舶配套、机电设备及其他');
  assert.ok(tables[0].rows[0][2].includes('毛利率17.21%'));
- assert.equal(tables[1].rows[0][1],'1312.79');
+ assert.equal(tables[1].rows[0][1],'1,312.79亿元');
  assert.equal(ship[0].text,'定性说明。');
 }

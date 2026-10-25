@@ -18,7 +18,7 @@ const script=fs.readFileSync(path.join(__dirname,'../web/features/indices/indice
 const render=script.slice(script.indexOf('function renderStatus()'),script.indexOf('const parentOf='));
 vm.runInNewContext(render+';renderStatus();',{
   window:{DashboardTime:time},el,data:{operations:[],cooldowns:[{source_system:'legu',reason:'HTTP 429',cooldown_until:'2026-10-17T07:29:57.867636+00:00'}]},
-  providers:{legu:'乐咕乐股'},renderWorkProgress(){},clearTimeout(){},setTimeout(){},timer:null
+  providers:{legu:'乐咕乐股'},renderWorkProgress(){},clearTimeout(){},setTimeout(){},timer:null,cooldownTimer:null,document:{hidden:false},Date:class extends Date { static now(){return Date.parse('2026-10-17T07:00:00Z');} }
 });
 assert.equal(el('cooldowns').textContent,'乐咕乐股：HTTP 429，冷却截止（北京时间）2026-10-17 15:29:57');
 for(const name of ['index.html','indices.html']){

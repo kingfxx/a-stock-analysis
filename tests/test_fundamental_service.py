@@ -311,15 +311,21 @@ def test_existing_three_statements_backfill_key_indicators_in_same_table(tmp_pat
         return {"records": {"20260630": raw}, "total": 1}
 
     service = FundamentalService(db, tmp_path, fetch_page=fetch)
-    with monkeypatch.context() as context:
-        context.setattr("stock_analysis.domains.financials.fundamental_service.REPORT_TYPES", ("lrb", "fzb", "llb"))
-        service.update("601919")
+    identity = db.ensure_instrument("601919")
+    for kind in ("lrb", "fzb", "llb"):
+        key = SyncKey(identity, f"financial:{kind}", SOURCE)
+        run = db.start_sync(key, parser_version="sina_reports_v1", methodology_version="raw_facts_v1")
+        from stock_analysis.domains.stocks.sync_support import next_audit
+        db.complete_sync(run, SyncResult(1, "2026-06-30", "2026-06-30", "2026-06-30",
+                         next_full_audit_at=next_audit("financial")),
+                         lambda conn, kind=kind: db.upsert_financial_reports(conn, key, run,
+                         [{"period":"2026-06-30", "publish_date":"2026-08-29",
+                           "raw_json":_record("20260630", 100, "2026-08-29")}]))
     calls.clear()
     result = service.update("601919")
     assert not result["warnings"]
     assert calls == [("gjzb", 200, 1)]
     identity = db.ensure_instrument("601919")
-    from stock_analysis.domains.financials.fundamental_service import SOURCE
     saved = db.financial_reports(identity, SOURCE, "gjzb")
     assert len(saved) == 1
     assert json.loads(saved[0]["raw_json"]) == raw_indicator
