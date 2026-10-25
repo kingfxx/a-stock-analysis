@@ -77,6 +77,42 @@ def test_http_read_only_auth_and_saved_snapshot(live,monkeypatch):
     assert s.post(base+'/api/shipping-forecast/delete',json={'id':saved.json()['id']},timeout=5).status_code==403
 
 
+
+def assert_monthly_quarter_alignment(page):
+    # Compare rendered SVG edges with the monthly markers in both charts.
+    result=page.evaluate("""() => {
+        const rate=document.getElementById('trend-chart'),profit=document.getElementById('trend-profit-chart'),
+            t=profit.data[0],bars=[...profit.querySelectorAll('.barlayer .point path')],
+            points=[...rate.querySelectorAll('.scatterlayer .trace .points path')],
+            series=rate.data[0],axis=profit._fullLayout.xaxis,
+            px=x=>profit.getBoundingClientRect().left+axis._offset+axis.l2p(x);
+        const checks=t.customdata.map((date,i)=>{
+            const last=Number(date.slice(0,4))*12+Number(date.slice(5,7))-1,
+                ids=[last-2,last-1,last].map(x=>series.x.indexOf(x));
+            if(ids.some(i=>i<0))return true;
+            const box=bars[i].getBoundingClientRect(),xs=ids.map(i=>{const b=points[i].getBoundingClientRect();return b.x+b.width/2;});
+            return Math.abs(box.left-xs[0])<1&&Math.abs((box.left+box.right)/2-xs[1])<1&&Math.abs(box.right-xs[2])<1;
+        });
+        const shape=profit.layout.shapes.find(s=>s.name==='neutral-forecast'),
+            q3=2026*12+6,forecastOk=shape&&shape.x0===q3&&shape.x1===q3+2,
+            gap=t.x.every((x,i)=>i===0||x-t.width[i]/2>t.x[i-1]+t.width[i-1]/2);
+        return {checks,forecastOk,gap,axes:JSON.stringify(rate._fullLayout.xaxis.range)===JSON.stringify(axis.range),
+            samePixels:series.x.every(x=>Math.abs(px(x)-(rate.getBoundingClientRect().left+rate._fullLayout.xaxis._offset+rate._fullLayout.xaxis.l2p(x)))<1)};
+    }""")
+    assert all(result['checks']) and result['forecastOk'] and result['gap'] and result['axes'] and result['samePixels'],result
+    page.locator('#trend-chart').scroll_into_view_if_needed()
+    for month in ('04','05','06'):
+        marker=page.locator('#trend-chart').evaluate("""(e,month)=>{
+            const i=e.data[0].customdata.indexOf('2026-'+month+'-'+(month==='05'?'31':'30')),
+                p=e.querySelectorAll('.scatterlayer .trace .points path')[i].getBoundingClientRect();
+            return {x:p.x+p.width/2,y:p.y+p.height/2};
+        }""",month)
+        page.mouse.move(marker['x'],marker['y'])
+        from playwright.sync_api import expect
+        expect(page.locator('#trend-hover-card')).to_contain_text('2026-'+month+'-'+('31' if month=='05' else '30'))
+        expect(page.locator('#trend-hover-card')).to_contain_text('2026Q2')
+
+
 def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
     base,db,state,web=live;seed(db,monkeypatch)
     from playwright.sync_api import sync_playwright,expect
@@ -140,7 +176,7 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             page.select_option('#trend-quality','preferred')
             expect(page.locator('#trend-coverage')).to_contain_text('46')
             expect(page.locator('#trend-chart')).to_have_class(__import__('re').compile('js-plotly-plot'))
-            page.select_option('#trend-profit','quarter')
+            assert page.locator('#trend-profit').input_value()=='quarter'
             expect(page.locator('#trend-profit-chart')).to_have_class(__import__('re').compile('js-plotly-plot'))
             assert page.locator('#trend-years').evaluate('(e)=>e.multiple')
             page.select_option('#trend-years',['2023','2024'])
@@ -156,7 +192,11 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             expect(page.locator('#trend-hover-card')).to_contain_text('归母净利润')
             assert page.locator('#trend-chart').evaluate('e=>e.layout.shapes.length===1')
             assert page.locator('#trend-chart').evaluate("e=>JSON.stringify(e._fullLayout.xaxis.range)===JSON.stringify(document.querySelector('#trend-profit-chart')._fullLayout.xaxis.range)")
-            assert page.locator('#trend-profit-chart').evaluate("e=>{const s=e.layout.shapes.find(s=>s.name==='neutral-forecast'),t=e.data.find(t=>t.name==='单季度归母净利润'),i=t.customdata.indexOf('2026-06-30'),q2start=new Date(Date.parse(t.x[i])-t.width[i]/2).toISOString().slice(0,10),q2end=new Date(Date.parse(t.x[i])+t.width[i]/2).toISOString().slice(0,10),a=e._fullLayout.xaxis,px=d=>a._offset+a.l2p(a.d2l(d));return s?.type==='rect'&&s.x0==='2026-07-01'&&s.x1==='2026-10-01'&&s.y0===0&&s.y1>0&&q2start==='2026-04-01'&&q2end==='2026-07-01'&&px('2026-07-31')>px(s.x0)&&px('2026-07-31')<px(s.x1)&&!e.layout.annotations?.some(a=>a.name==='neutral-forecast-label')&&e.layout.shapes.some(s=>s.type==='line')}")
+            assert_monthly_quarter_alignment(page)
+            page.evaluate("Plotly.relayout('trend-chart',{'xaxis.range[0]':24312,'xaxis.range[1]':24322})")
+            page.wait_for_function("document.getElementById('trend-profit-chart')._fullLayout.xaxis.range[0]===24312")
+            assert_monthly_quarter_alignment(page)
+            assert page.locator('#trend-chart').evaluate("e=>e.layout.xaxis.ticktext.includes('2026-04')&&e.layout.xaxis.ticktext.includes('2026-06')")
             latest=page.locator('#trend-chart .scatterlayer .trace .points path').last
             latest_box=latest.bounding_box();assert latest_box and latest_box['width']>0
             page.mouse.move(latest_box['x']+latest_box['width']/2,latest_box['y']+latest_box['height']/2)
@@ -170,6 +210,7 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             overflow=page.evaluate('''() => [...document.querySelectorAll('*')].map(e=>({tag:e.tagName,id:e.id,cls:String(e.className).slice(0,60),right:e.getBoundingClientRect().right,width:e.getBoundingClientRect().width})).filter(x=>x.right>innerWidth+1).slice(0,12)''')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),overflow
             assert page.locator('.trend-filters').evaluate('(e)=>e.getBoundingClientRect().height>250')
+            assert_monthly_quarter_alignment(page)
             mobile_latest=page.locator('#trend-chart .scatterlayer .trace .points path').last
             mobile_box=mobile_latest.bounding_box();assert mobile_box and mobile_box['width']>0
             page.mouse.move(mobile_box['x']+mobile_box['width']/2,mobile_box['y']+mobile_box['height']/2)
@@ -183,8 +224,85 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             page.wait_for_function("document.getElementById('trend-coverage').textContent.length>0")
             page.select_option('#trend-quality','preferred')
             expect(page.locator('#trend-chart')).to_have_class(__import__('re').compile('js-plotly-plot'))
-            page.select_option('#trend-profit','quarter')
+            assert page.locator('#trend-profit').input_value()=='quarter'
             expect(page.locator('#trend-profit-chart')).to_have_class(__import__('re').compile('js-plotly-plot'))
             assert page.locator('#trend-chart').evaluate("e=>JSON.stringify(e._fullLayout.xaxis.range)===JSON.stringify(document.querySelector('#trend-profit-chart')._fullLayout.xaxis.range)")
             assert not errors
+        finally:browser.close()
+
+
+def test_browser_month_week_switch_preserves_quarter_alignment(live,monkeypatch):
+    base,db,state,web=live;seed(db,monkeypatch)
+    from playwright.sync_api import sync_playwright,expect
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            for width in (1440,390):
+                page=browser.new_page(viewport=dict(width=width,height=1000))
+                page.goto(base+'/?code=601919&tab=shipping-forecast&view=trend')
+                page.wait_for_function("document.getElementById('trend-coverage').textContent.length>0")
+                page.select_option('#trend-quality','preferred')
+                page.wait_for_function("document.getElementById('trend-chart').data?.length")
+                page.select_option('#trend-profit','quarter')
+                page.wait_for_function("document.getElementById('trend-profit-chart').data?.length")
+                page.select_option('#trend-frequency','weekly')
+                page.wait_for_function("document.getElementById('trend-chart')._fullLayout?.xaxis.type==='date' && document.getElementById('trend-profit-chart')._fullLayout?.xaxis.type==='date'")
+                page.evaluate("Plotly.relayout('trend-chart',{'xaxis.range[0]':'2026-04-01','xaxis.range[1]':'2026-10-01'})")
+                page.wait_for_function("Date.parse(document.getElementById('trend-profit-chart')._fullLayout.xaxis.range[0])===Date.parse('2026-04-01')")
+                result=page.evaluate("""()=>{
+                    const a=document.getElementById('trend-chart'),b=document.getElementById('trend-profit-chart'),t=b.data[0],i=t.customdata.indexOf('2026-06-30'),
+                        start=Date.parse(t.x[i])-t.width[i]/2,end=Date.parse(t.x[i])+t.width[i]/2,day=86400000,
+                        dates=a.data[0].x.filter(d=>d>='2026-04-01'&&d<'2026-07-01'),
+                        box=b.querySelectorAll('.barlayer .point path')[i].getBoundingClientRect(),axis=a._fullLayout.xaxis,
+                        px=d=>a.getBoundingClientRect().left+axis._offset+axis.l2p(axis.d2l(d)),
+                        shape=b.layout.shapes.find(s=>s.name==='neutral-forecast');
+                    return {dateAxis:a._fullLayout.xaxis.type==='date'&&b._fullLayout.xaxis.type==='date',
+                        sameRange:JSON.stringify(axis.range)===JSON.stringify(b._fullLayout.xaxis.range),
+                        nearEdges:Math.abs(start-Date.parse('2026-04-01'))<=4*day&&Math.abs(end-Date.parse('2026-07-01'))<=4*day,
+                        weeklyPixels:dates.every(d=>px(d)>=box.left-4*day/ (Date.parse('2026-10-01')-Date.parse('2026-04-01'))*axis._length-1&&px(d)<=box.right+4*day/(Date.parse('2026-10-01')-Date.parse('2026-04-01'))*axis._length+1),
+                        gap:Date.parse(shape.x0)>end&&Date.parse(shape.x0)-end<=8*day,
+                        forecast:Math.abs(Date.parse(shape.x0)-Date.parse('2026-07-01'))<=4*day&&Math.abs(Date.parse(shape.x1)-Date.parse('2026-10-01'))<=4*day};
+                }""")
+                assert all(result.values()),result
+                page.locator('#trend-chart').scroll_into_view_if_needed()
+                for day,quarter in [('2026-04-03','2026Q2'),('2026-06-26','2026Q2'),('2026-07-03','2026Q3')]:
+                    xy=page.locator('#trend-chart').evaluate("""(e,day)=>{const i=e.data[0].x.indexOf(day),p=e.querySelectorAll('.scatterlayer .trace .points path')[i].getBoundingClientRect();return {x:p.x+p.width/2,y:p.y+p.height/2};}""",day)
+                    page.mouse.move(xy['x'],xy['y'])
+                    expect(page.locator('#trend-hover-card')).to_contain_text(day)
+                    expect(page.locator('#trend-hover-card')).to_contain_text(quarter)
+                page.select_option('#trend-frequency','monthly')
+                page.wait_for_function("document.getElementById('trend-chart')._fullLayout?.xaxis.type==='linear' && document.getElementById('trend-profit-chart')._fullLayout?.xaxis.type==='linear'")
+                assert_monthly_quarter_alignment(page)
+                page.close()
+        finally:browser.close()
+
+
+def test_weekly_forecast_without_overlapping_actual_profits(live,monkeypatch):
+    base,db,state,web=live;seed(db,monkeypatch)
+    batch=begin_batch(db,'weekly-official-fixture','shipping.fixture','sse',domain='research_shipping')
+    source=archive_source(db,batch,'sse','shipping.fixture',dict(transport='fixture'),1,raw=b'official weekly fixture')
+    forecast.publish_rates(db,[dict(index_name='CCFI',frequency='weekly',route='综合',statistic='release',
+        period_start=day,period_end=day,value=1500,unit='点',quality='official',channel='sse',published_on=day)
+        for day in ('2026-10-16','2026-10-23')],batch,source)
+    from playwright.sync_api import sync_playwright,expect
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            for width in (1440,390):
+                page=browser.new_page(viewport=dict(width=width,height=1000))
+                page.goto(base+'/?code=601919&tab=shipping-forecast&view=trend')
+                page.wait_for_function("document.getElementById('trend-coverage').textContent.length>0")
+                page.select_option('#trend-frequency','weekly')
+                page.wait_for_function("document.getElementById('trend-chart')._fullLayout?.xaxis.type==='date'")
+                with page.expect_response('**/api/shipping-trend?**') as response:
+                    page.select_option('#trend-profit','quarter')
+                assert response.value.json()['profit']==[]
+                page.wait_for_function("document.getElementById('trend-profit-chart').data?.some(t=>t.meta?.forecast)")
+                assert page.locator('#trend-profit-chart').evaluate("""e=>{const s=e.layout.shapes.find(s=>s.name==='neutral-forecast'),a=e._fullLayout;return s.line.dash==='dash'&&s.y1>0&&a.yaxis.range[1]>=s.y1&&Date.parse(a.xaxis.range[0])<=Date.parse(s.x0)&&Date.parse(a.xaxis.range[1])>=Date.parse(s.x1)&&e.data[0].x.length===0;}""")
+                bar=page.locator('#trend-profit-chart .barlayer .trace').last.locator('.point path')
+                bar.scroll_into_view_if_needed();box=bar.bounding_box();assert box and box['width']>0 and box['height']>0
+                page.mouse.move(box['x']+box['width']/2,box['y']+box['height']/2)
+                expect(page.locator('#trend-hover-card')).to_contain_text('中性预测 2026Q3')
+                expect(page.locator('#trend-hover-card')).to_contain_text('亿元')
+                page.close()
         finally:browser.close()
