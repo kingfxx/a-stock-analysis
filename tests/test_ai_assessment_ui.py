@@ -7,7 +7,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from quarterly_dashboard import server
+from stock_analysis.http import server
 from test_ai_assessment import database, service, wait_terminal
 from uuid import uuid4
 

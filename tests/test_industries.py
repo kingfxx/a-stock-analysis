@@ -3,15 +3,15 @@ import json
 
 import pytest
 
-from quarterly_dashboard.industry_service import IndustryService, aggregate, value_for
-from quarterly_dashboard.industry_sources import financial_rows, parse_quotes
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.industries.industry_service import IndustryService, aggregate, value_for
+from stock_analysis.domains.industries.industry_sources import financial_rows, parse_quotes
+from stock_analysis.infrastructure.storage import Database
 from industry_financial_fixture import PublishedIndustryService
 
 
 @pytest.fixture(autouse=True)
 def no_unrelated_mainop_requests(monkeypatch):
-    from quarterly_dashboard.business_segment_service import BusinessSegmentService
+    from stock_analysis.domains.financials.business_segment_service import BusinessSegmentService
     monkeypatch.setattr(BusinessSegmentService, 'update',
                         lambda *args, **kwargs: {'sync': {}, 'warnings': []})
 
@@ -36,7 +36,7 @@ def fixture_bundle():
 
 @pytest.fixture
 def service(tmp_path,monkeypatch):
-    monkeypatch.setattr('quarterly_dashboard.industry_memberships.ensure_daily_memberships',
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_memberships.ensure_daily_memberships',
         lambda *a,**k:{'status':'complete','reused':True})
     db=Database(tmp_path/'industry.sqlite3');db.initialize()
     return PublishedIndustryService(db)
@@ -249,7 +249,7 @@ def test_financial_zero_missing_and_future_notice():
 
 
 def test_local_priority_equivalent_scope_and_zero(service):
-    from quarterly_dashboard.industry_service import local_financials
+    from stock_analysis.domains.industries.industry_service import local_financials
     class Conn:
         def execute(self,*_):
             return [{'code':'300750','period':'2025-06-30','report_type':kind,'source':'sina',
@@ -261,7 +261,7 @@ def test_local_priority_equivalent_scope_and_zero(service):
 
 
 def test_api_read_validation_and_assets(service,monkeypatch):
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
     from http.server import ThreadingHTTPServer
     from threading import Thread
     import urllib.request
@@ -284,7 +284,7 @@ def test_api_read_validation_and_assets(service,monkeypatch):
 
 
 def test_quarter_history_exact_dates_no_forward_fill_and_reference_validation():
-    from quarterly_dashboard.industry_cap_history import quarter_facts,parse_history
+    from stock_analysis.domains.industries.industry_cap_history import quarter_facts,parse_history
     payload={'Result':[{'DisplayData':{'resultData':{'tplData':{'result':{'chartInfo':[
         {'header':['总市值'],'type':'近一年','body':[['2026-03-30','90'],['2026-06-30','110'],['2026-09-30','120']]}
     ]}}}}}]}
@@ -326,7 +326,7 @@ def test_market_chart_distinguishes_snapshot_from_trend():
 
 
 def save_local_financial(db, revenue, profit):
-    from quarterly_dashboard.storage import SyncKey,SyncResult
+    from stock_analysis.infrastructure.storage import SyncKey,SyncResult
     identity=db.ensure_instrument('300750','测试企业')
     key=SyncKey(identity,'financial:lrb','sina')
     run=db.start_sync(key,parser_version='test',methodology_version='test',trigger_reason='test')
@@ -338,7 +338,7 @@ def save_local_financial(db, revenue, profit):
 
 
 def test_stock_financial_refresh_does_not_collect_or_change_industry_snapshot(service,monkeypatch):
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
     save_local_financial(service.db,100,10)
     service.import_bundle(fixture_bundle())
     before=service.read(industry='630701',mode='ytd',period='2025-06-30')
@@ -368,9 +368,9 @@ def test_stock_financial_refresh_does_not_collect_or_change_industry_snapshot(se
 
 
 def test_financial_task_one_period_reuses_local_and_never_fetches_caps(service,monkeypatch,tmp_path):
-    from quarterly_dashboard import industry_updates as updates,market_financial
+    from stock_analysis.domains.industries import industry_updates as updates; from stock_analysis.domains.market import market_financial
     from test_market_financial import prepared_public_datasets, row as financial_row, datasets
-    from quarterly_dashboard.market_financial import FIELDS
+    from stock_analysis.domains.market.market_financial import FIELDS
     service.directory=tmp_path/'sources'
     bundle=fixture_bundle()
     for i in range(3997):
@@ -419,7 +419,7 @@ def test_financial_repeat_ignores_response_file_changes_and_preserves_valid_valu
 
 
 def test_quarter_cap_default_skip_and_revision_only_changed_company(service,monkeypatch,tmp_path):
-    from quarterly_dashboard import industry_updates as updates, market_trade_snapshot as snapshot
+    from stock_analysis.domains.industries import industry_updates as updates; from stock_analysis.domains.market import market_trade_snapshot as snapshot
     from test_market_trade_snapshot import row, http
     service.import_bundle(fixture_bundle())
     with service.db.connection(write=True) as conn:
@@ -444,7 +444,7 @@ def test_quarter_cap_default_skip_and_revision_only_changed_company(service,monk
 
 
 def test_partial_cap_retry_keeps_old_values_and_frozen_members(service,monkeypatch,tmp_path):
-    from quarterly_dashboard import industry_updates as updates, market_trade_snapshot as snapshot
+    from stock_analysis.domains.industries import industry_updates as updates; from stock_analysis.domains.market import market_trade_snapshot as snapshot
     from test_market_trade_snapshot import row, http
     bundle=fixture_bundle();bundle['caps']=bundle['caps'][:1];service.import_bundle(bundle)
     with service.db.connection(write=True) as conn:
@@ -466,7 +466,7 @@ def test_partial_cap_retry_keeps_old_values_and_frozen_members(service,monkeypat
 
 def test_ended_quarter_validation_calendar_weekend_and_exact_target(service,monkeypatch,tmp_path):
     from datetime import date
-    from quarterly_dashboard import industry_updates as updates
+    from stock_analysis.domains.industries import industry_updates as updates
     for action,target in [('refresh_pilot','2026Q3'),('financial_period','2026-07-01'),('cap_quarter','2026Q4')]:
         with pytest.raises(ValueError):updates.validate_request(action,target,today=date(2026,10,3))
     # Legacy helper may reuse known local dates, but must not fetch a calendar itself.
@@ -481,7 +481,7 @@ def test_ended_quarter_validation_calendar_weekend_and_exact_target(service,monk
 
 
 def test_target_period_source_filter_and_content_addressed_samples(monkeypatch,tmp_path):
-    from quarterly_dashboard import industry_updates as updates
+    from stock_analysis.domains.industries import industry_updates as updates
     with pytest.raises(ValueError,match='collect_public'):
         updates.fetch_financial_period(tmp_path,['300750'],'2025-06-30')
 
@@ -491,7 +491,7 @@ def test_industry_api_requires_explicit_task_stock_routes_stay_separate(service,
     from threading import Thread
     from urllib.request import Request,urlopen
     from urllib.error import HTTPError
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
     calls=[]
     monkeypatch.setattr(server,'industry_service',lambda:service)
     monkeypatch.setattr(service,'start_refresh',lambda *args:calls.append(args) or {'running':True})
@@ -519,7 +519,7 @@ def test_industry_api_requires_explicit_task_stock_routes_stay_separate(service,
 
 
 def test_industry_job_audits_success_and_failure(service,monkeypatch,tmp_path):
-    from quarterly_dashboard import industry_updates as updates
+    from stock_analysis.domains.industries import industry_updates as updates
     service.import_bundle(fixture_bundle());service.directory=tmp_path/'sources'
     monkeypatch.setattr(updates,'perform',lambda *a,**k:{'requested_count':0,'failures':[]})
     service._refresh('cap_quarter','2026Q3',False)
@@ -537,7 +537,7 @@ def test_industry_job_audits_success_and_failure(service,monkeypatch,tmp_path):
 
 
 def test_populated_schema9_migration_preserves_cap_values_and_rejected_versions(monkeypatch,tmp_path):
-    from quarterly_dashboard import storage
+    from stock_analysis.infrastructure import storage
     migrations=storage.MIGRATIONS
     monkeypatch.setattr(storage,'MIGRATIONS',migrations[:9])
     db=Database(tmp_path/'old.sqlite3');db.initialize();b=fixture_bundle()

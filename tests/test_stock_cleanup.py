@@ -5,14 +5,14 @@ from uuid import uuid4
 
 import pytest
 
-from quarterly_dashboard import stock_cleanup
-from quarterly_dashboard.company_report_service import CompanyReportService
-from quarterly_dashboard.database_restore import RequestGate
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.stock_cleanup import StockCleanupService
-from quarterly_dashboard.stock_library import StockLibrary
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult
+from stock_analysis.maintenance import stock_cleanup
+from stock_analysis.domains.research.reports.company_report_service import CompanyReportService
+from stock_analysis.maintenance.database_restore import RequestGate
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.maintenance.stock_cleanup import StockCleanupService
+from stock_analysis.domains.stocks.stock_library import StockLibrary
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult
 from test_ai_assessment import database, snapshot
 from test_industries import fixture_bundle
 
@@ -84,8 +84,8 @@ def test_financial_selection_removes_facts_and_watermarks_without_backup(cleanup
 
 
 def test_kept_snapshot_blocks_source_and_report_cache_cleanup(cleanup,tmp_path):
-    from quarterly_dashboard.analysis_repository import AnalysisRepository
-    from quarterly_dashboard.analysis_validation import prompt
+    from stock_analysis.domains.research.assessment.analysis_repository import AnalysisRepository
+    from stock_analysis.domains.research.assessment.analysis_validation import prompt
     doc=document(cleanup.db,tmp_path)
     service=CompanyReportService(cleanup.db)
     parse_path=service.resolve(doc['relative_path']).parent/'parsed'/'test'/'pages.jsonl'
@@ -128,8 +128,8 @@ def test_stale_preview_rejected_before_deletion(cleanup,change):
     elif change=='file':
         cache.write_text('newer cache')
     else:
-        from quarterly_dashboard.analysis_repository import AnalysisRepository
-        from quarterly_dashboard.analysis_validation import prompt
+        from stock_analysis.domains.research.assessment.analysis_repository import AnalysisRepository
+        from stock_analysis.domains.research.assessment.analysis_validation import prompt
         run=AnalysisRepository(cleanup.db).enqueue(snapshot(cleanup.db),uuid4().hex,'model','account',prompt())
         AnalysisRepository(cleanup.db).cancel(run['id'])
     gate=RequestGate();gate.enter()
@@ -183,8 +183,8 @@ def test_cross_stock_export_keeps_referenced_pdf(cleanup,tmp_path):
 
 
 def test_industry_latest_research_retained_while_financial_sources_removed(cleanup):
-    from quarterly_dashboard.analysis_repository import AnalysisRepository
-    from quarterly_dashboard.analysis_validation import prompt
+    from stock_analysis.domains.research.assessment.analysis_repository import AnalysisRepository
+    from stock_analysis.domains.research.assessment.analysis_validation import prompt
     db=cleanup.db
     industry=IndustryService(db)
     bundle=fixture_bundle();bundle['members'].append({**bundle['members'][0],'stock_code':'600900','name':'测试企业'})
@@ -263,7 +263,7 @@ def test_corrupt_pdf_keeps_only_available_parse_cache(cleanup,tmp_path):
 
 
 def test_cleanup_never_calls_database_or_report_backup(cleanup,tmp_path,monkeypatch):
-    import quarterly_dashboard.report_backup as report_backup_module
+    import stock_analysis.domains.research.reports.report_backup as report_backup_module
     doc=document(cleanup.db,tmp_path)
     def fail(*args,**kwargs):raise AssertionError('cleanup must not create backups')
     monkeypatch.setattr(Database,'backup',fail)
@@ -284,7 +284,7 @@ def test_cleanup_http_requires_origin_session_preview_and_confirmation(cleanup,m
     from threading import Thread
     from urllib.request import Request,urlopen
     from urllib.error import HTTPError
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
 
     monkeypatch.setattr(server,'DATABASE_PATH',cleanup.db.path)
     httpd=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
@@ -315,7 +315,7 @@ def test_cleanup_http_requires_origin_session_preview_and_confirmation(cleanup,m
 
 @pytest.mark.parametrize('expiry',['2099-01-01T00:00:00+00:00','2000-01-01T00:00:00+00:00'])
 def test_price_leases_protect_live_versions_and_expired_versions_delete_atomically(cleanup,expiry):
-    from quarterly_dashboard.storage import utc_now
+    from stock_analysis.infrastructure.storage import utc_now
     from test_storage import price_candidate
     db=cleanup.db
     key=SyncKey(db.ensure_instrument('600900'),'prices_adjusted','qq','qfq')
@@ -360,7 +360,7 @@ def test_compaction_shrinks_database_without_changing_records(cleanup):
 def test_compaction_preconditions_preserve_database(cleanup,monkeypatch,blocked):
     from collections import namedtuple
     import sqlite3
-    from quarterly_dashboard import maintenance
+    from stock_analysis.maintenance import maintenance
     gate=RequestGate();gate.enter()
     command={'confirm':'整理'}
     external=None

@@ -1,7 +1,7 @@
 import pytest
 
-from quarterly_dashboard import server
-from quarterly_dashboard.storage import Database, StorageError, instance_lock
+from stock_analysis.http import server
+from stock_analysis.infrastructure.storage import Database, StorageError, instance_lock
 
 
 def test_startup_imports_legacy_datasets_without_rewriting_json_or_network(tmp_path, monkeypatch):

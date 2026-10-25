@@ -11,7 +11,7 @@ import openpyxl
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from quarterly_dashboard.financial_storage import decompress_json
+from stock_analysis.domains.financials.financial_storage import decompress_json
 
 
 def shifted_months(year, quarter, lag):

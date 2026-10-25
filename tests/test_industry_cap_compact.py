@@ -1,10 +1,10 @@
 import copy
 import json
 
-from quarterly_dashboard.industry_cap_compact import cap_fingerprint, compact, compact_cap_rows, prune_exact_cap_duplicates
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.industry_storage import cap_rows_with_provenance
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.industries.industry_cap_compact import cap_fingerprint, compact, compact_cap_rows, prune_exact_cap_duplicates
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.domains.industries.industry_storage import cap_rows_with_provenance
+from stock_analysis.infrastructure.storage import Database
 from test_industries import fixture_bundle
 
 
@@ -91,14 +91,14 @@ def test_offline_compaction_backup_integrity_and_business_hashes(tmp_path):
     assert result['values_and_sources_unchanged'] and result['other_tables_unchanged']
     assert result['integrity_check']==result['foreign_key_check']=='ok'
     assert result['before_rows']==result['after_rows']==3
-    from quarterly_dashboard.storage import MIGRATIONS
+    from stock_analysis.infrastructure.storage import MIGRATIONS
     assert Database(result['backup']).check()['schema_version']==MIGRATIONS[-1][0]
 
 
 def test_full_market_batch_update_skips_known_and_stores_only_revision(tmp_path,monkeypatch):
-    monkeypatch.setattr('quarterly_dashboard.industry_memberships.ensure_daily_memberships',
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_memberships.ensure_daily_memberships',
         lambda *a,**k:{'status':'complete','reused':True})
-    from quarterly_dashboard import industry_bulk, industry_updates
+    from stock_analysis.domains.industries import industry_bulk; from stock_analysis.domains.industries import industry_updates
     bundle=copy.deepcopy(fixture_bundle())
     for value in range(1000,4997):
         stock=f'{value:06d}'

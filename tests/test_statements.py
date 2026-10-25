@@ -9,11 +9,11 @@ from urllib.request import urlopen
 
 import pytest
 
-from quarterly_dashboard import server
-from quarterly_dashboard.fundamental_service import SOURCE
-from quarterly_dashboard.financial_storage import decompress_json
-from quarterly_dashboard.statements import read_statements
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult
+from stock_analysis.http import server
+from stock_analysis.domains.financials.fundamental_service import SOURCE
+from stock_analysis.domains.financials.financial_storage import decompress_json
+from stock_analysis.domains.financials.statements import read_statements
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult
 
 
 def raw(kind, values, **meta):

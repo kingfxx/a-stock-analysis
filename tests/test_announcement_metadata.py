@@ -4,11 +4,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from quarterly_dashboard import announcement_sources
-from quarterly_dashboard.announcement_sources import AnnouncementSources
-from quarterly_dashboard.collection import RequestCollector, archive_source, begin_batch
-from quarterly_dashboard.disclosure_dates import apply_disclosure_dates, choose, classify
-from quarterly_dashboard.storage import Database, SyncKey
+from stock_analysis.domains.stocks import announcement_sources
+from stock_analysis.domains.stocks.announcement_sources import AnnouncementSources
+from stock_analysis.collection.collection import RequestCollector, archive_source, begin_batch
+from stock_analysis.domains.stocks.disclosure_dates import apply_disclosure_dates, choose, classify
+from stock_analysis.infrastructure.storage import Database, SyncKey
 
 
 class Response:
@@ -166,7 +166,7 @@ def test_migration_registers_tables_and_maintenance_time_paths(tmp_path):
     with db.connection() as conn:
         tables={r['name'] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {'stock_announcement_identities','stock_announcement_metadata','report_disclosure_dates'} <= tables
-    from quarterly_dashboard.maintenance import DESCRIPTIONS, PARENT_TIMES
+    from stock_analysis.maintenance.maintenance import DESCRIPTIONS, PARENT_TIMES
     for name in ('stock_announcement_identities','stock_announcement_metadata','report_disclosure_dates'):
         assert name in DESCRIPTIONS and name in PARENT_TIMES
 

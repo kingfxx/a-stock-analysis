@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Event, Lock
 
 from test_industries import fixture_bundle, service
-from quarterly_dashboard import industry_service
+from stock_analysis.domains.industries import industry_service
 
 
 def test_provenance_is_shared_and_read_does_not_mutate_it(service):

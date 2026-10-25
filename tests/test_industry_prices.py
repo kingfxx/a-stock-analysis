@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from quarterly_dashboard import industry_prices as prices, market_price_backfill as backfill
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.industries import industry_prices as prices; from stock_analysis.domains.market import market_price_backfill as backfill
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ def test_sdk_error_messages_and_timeout(setup, monkeypatch):
 
 
 def test_cap_task_calls_prices_after_saving_even_without_cap_gaps(setup, monkeypatch, tmp_path):
-    from quarterly_dashboard import industry_updates as updates
+    from stock_analysis.domains.industries import industry_updates as updates
     service, foundation = setup
     foundation['members'] += [{'stock_code':str(n).zfill(6),'listing_date':'2000-01-01'} for n in range(3999)]
     service.foundation = lambda:foundation
@@ -92,7 +92,7 @@ def test_cap_task_calls_prices_after_saving_even_without_cap_gaps(setup, monkeyp
     service.cap_known = lambda day:{'600000'}
     events = []
     service.import_bundle = lambda *a,**k:events.append('saved cap') or 1
-    monkeypatch.setattr('quarterly_dashboard.industry_memberships.ensure_daily_memberships', lambda *a:{})
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_memberships.ensure_daily_memberships', lambda *a:{})
     monkeypatch.setattr(updates, 'target_trade_date', lambda *a:'2026-09-30')
     monkeypatch.setattr(updates, 'cap_roster', lambda *a:{'members':[{'stock_code':'600000'}], 'composition':'test'})
     def sync_prices(*args):

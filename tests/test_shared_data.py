@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard import server
-from quarterly_dashboard.chips import _fetch_chip_report
-from quarterly_dashboard.price_projection import chip_prices, financial_prices, valuation_prices
-from quarterly_dashboard.price_service import PriceService, PriceVersionUnavailable
-from quarterly_dashboard.sources import fetch_price_history, parse_price_history
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult, instance_lock
-from quarterly_dashboard.update_service import ChipService, FINANCING_SOURCE, sync_state
+from stock_analysis.http import server
+from stock_analysis.domains.stocks.chips import _fetch_chip_report
+from stock_analysis.domains.stocks.price_projection import chip_prices, financial_prices, valuation_prices
+from stock_analysis.domains.stocks.price_service import PriceService, PriceVersionUnavailable
+from stock_analysis.domains.stocks.sources import fetch_price_history, parse_price_history
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, instance_lock
+from stock_analysis.domains.stocks.update_service import ChipService, FINANCING_SOURCE, sync_state
 
 
 @pytest.fixture
@@ -311,7 +311,7 @@ def test_daily_backup_preserves_state_before_first_update(db, tmp_path, monkeypa
 
 def test_daily_backup_rolls_over_without_restart(db, tmp_path, monkeypatch):
     from datetime import datetime, timezone
-    from quarterly_dashboard import storage
+    from stock_analysis.infrastructure import storage
     class Clock(datetime):
         day = 1
         @classmethod
@@ -330,7 +330,7 @@ def test_daily_backup_rolls_over_without_restart(db, tmp_path, monkeypatch):
 
 
 def test_concurrent_daily_backup_is_created_once(db, monkeypatch):
-    from quarterly_dashboard.update_service import backup_before_update
+    from stock_analysis.domains.stocks.update_service import backup_before_update
     calls = []
     original = db.backup
     def backup(path):
@@ -479,7 +479,7 @@ def test_committed_version_survives_cleanup_failure(db, monkeypatch):
 
 
 def test_overlapping_full_audits_share_one_fetch_but_later_audit_runs(db, monkeypatch):
-    from quarterly_dashboard import price_service
+    from stock_analysis.domains.stocks import price_service
     started, queued, guard = Event(), Event(), Lock()
     original_lock = price_service.data_lock
     entrants = 0
@@ -509,7 +509,7 @@ def test_overlapping_full_audits_share_one_fetch_but_later_audit_runs(db, monkey
 
 
 def test_concurrent_failed_price_refresh_reuses_failure_and_valid_version(db, monkeypatch):
-    from quarterly_dashboard import price_service
+    from stock_analysis.domains.stocks import price_service
 
     source = Prices(history())
     service = PriceService(db, fetcher=source)
@@ -556,7 +556,7 @@ def test_concurrent_failed_price_refresh_reuses_failure_and_valid_version(db, mo
 @pytest.mark.parametrize("section", ["financing", "shareholders"])
 def test_chip_checks_once_per_shanghai_day(db, tmp_path, monkeypatch, section):
     from datetime import datetime, timezone
-    from quarterly_dashboard import update_service
+    from stock_analysis.domains.stocks import update_service
     local = timezone(timedelta(hours=8))
     now = datetime.now(local)
     class Clock(datetime):
@@ -588,7 +588,7 @@ def test_chip_checks_once_per_shanghai_day(db, tmp_path, monkeypatch, section):
 @pytest.mark.parametrize("adjustment", ["raw", "qfq"])
 def test_price_checks_once_per_day_but_manual_refresh_bypasses(db, monkeypatch, adjustment):
     from datetime import datetime, timezone
-    from quarterly_dashboard import update_service
+    from stock_analysis.domains.stocks import update_service
     now = datetime.now(timezone.utc)
     class Clock(datetime):
         offset = timedelta()
@@ -616,7 +616,7 @@ def test_price_checks_once_per_day_but_manual_refresh_bypasses(db, monkeypatch, 
 
 def test_daily_check_boundary_is_shanghai_midnight(monkeypatch):
     from datetime import datetime, timezone
-    from quarterly_dashboard import update_service
+    from stock_analysis.domains.stocks import update_service
     class Clock(datetime):
         @classmethod
         def now(cls, tz=None):
@@ -631,7 +631,7 @@ def test_daily_check_boundary_is_shanghai_midnight(monkeypatch):
     ("shareholders", None), ("dividends", None), ("industry", None)])
 def test_audit_policy_by_dataset(dataset, days):
     from datetime import datetime, timezone
-    from quarterly_dashboard.update_service import audit_due, next_audit
+    from stock_analysis.domains.stocks.update_service import audit_due, next_audit
     due = audit_due({"next_full_audit_at": "2000-01-01T00:00:00+00:00"}, dataset)
     assert due == (days is not None)
     deadline = next_audit(dataset)
@@ -684,7 +684,7 @@ def test_raw_price_overlap_gap_retries_full_once(db):
 
 def test_p4_page_ignores_old_dividend_and_industry_audit_dates(db, monkeypatch):
     from types import SimpleNamespace
-    from quarterly_dashboard.storage import utc_now
+    from stock_analysis.infrastructure.storage import utc_now
     monkeypatch.setattr(server, "services", lambda: (SimpleNamespace(db=db), None))
     db.ensure_instrument('600887', '伊利股份')
     def state(db, key):

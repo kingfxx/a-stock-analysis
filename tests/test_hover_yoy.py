@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard.core import build_period_rows, view_rows
+from stock_analysis.domains.financials.core import build_period_rows, view_rows
 
 
 def test_chart_renderer_appends_yoy_only_to_supported_metrics():

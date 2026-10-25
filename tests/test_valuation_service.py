@@ -2,8 +2,8 @@
 
 import json
 
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard.valuation_service import ValuationService
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.domains.valuation.valuation_service import ValuationService
 
 
 def test_initial_three_windows_then_one_year_update_preserves_dense_history(tmp_path):
@@ -136,7 +136,7 @@ def test_long_offline_gap_expands_beyond_three_year_window(tmp_path):
 
 def test_normal_valuation_only_merges_three_months_and_full_still_corrects_old_dates(tmp_path, monkeypatch):
     from datetime import date
-    from quarterly_dashboard import valuation_service
+    from stock_analysis.domains.valuation import valuation_service
     class Clock(date):
         @classmethod
         def today(cls): return date(2026, 10, 1)
@@ -161,7 +161,7 @@ def test_normal_valuation_only_merges_three_months_and_full_still_corrects_old_d
 
 def test_valuation_long_gap_expands_source_and_merges_back_to_saved_watermark(tmp_path, monkeypatch):
     from datetime import date
-    from quarterly_dashboard import valuation_service
+    from stock_analysis.domains.valuation import valuation_service
     class Clock(date):
         @classmethod
         def today(cls): return date(2026, 10, 1)
@@ -183,7 +183,7 @@ def test_valuation_long_gap_expands_source_and_merges_back_to_saved_watermark(tm
 
 def test_valuation_missing_known_recent_date_does_not_advance_watermark(tmp_path, monkeypatch):
     from datetime import date
-    from quarterly_dashboard import valuation_service
+    from stock_analysis.domains.valuation import valuation_service
     class Clock(date):
         @classmethod
         def today(cls): return date(2026, 10, 1)

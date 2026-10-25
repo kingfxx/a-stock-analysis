@@ -5,11 +5,11 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import requests
 
-from quarterly_dashboard import market_congestion as m
-from quarterly_dashboard.collection import (RequestCollector, PacingPolicy, archive_source,
+from stock_analysis.domains.market import market_congestion as m
+from stock_analysis.collection.collection import (RequestCollector, PacingPolicy, archive_source,
     begin_batch, finish_batch, parsed_source, read_source)
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.storage import Database
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture
@@ -173,8 +173,8 @@ def test_daily_schedule_restart_busy_disabled_and_cooldown(db,monkeypatch):
 
 
 def test_index_dependency_respects_pre_and_post_threshold_deduplication(db,monkeypatch):
-    from quarterly_dashboard import collection
-    from quarterly_dashboard.index_collection import start_operation
+    from stock_analysis.collection import collection
+    from stock_analysis.domains.indices.index_collection import start_operation
     ready(db)
     current={'now':datetime(2026,10,17,17,59,tzinfo=m.ZONE)}
     monkeypatch.setattr(m,'local_now',lambda:current['now'])
@@ -212,7 +212,7 @@ def test_config_and_identity_definition_guards(db):
 
 def test_maintenance_time_categories_and_foreign_keys(db):
     # Discovery also covers an empty table before initialization.
-    from quarterly_dashboard.maintenance import DESCRIPTIONS,table_time
+    from stock_analysis.maintenance.maintenance import DESCRIPTIONS,table_time
     with db.connection() as conn:
         for table in ('market_indicator_observations','collection_schedules'):
             columns=[r['name'] for r in conn.execute('PRAGMA table_info('+table+')')]
@@ -231,8 +231,8 @@ def test_maintenance_time_categories_and_foreign_keys(db):
 def live(db,monkeypatch):
     from http.server import ThreadingHTTPServer
     from threading import Thread
-    from quarterly_dashboard import server
-    from quarterly_dashboard.index_repository import catalog
+    from stock_analysis.http import server
+    from stock_analysis.domains.indices.index_repository import catalog
     ready(db)
     with db.connection(write=True) as conn:
         catalog(conn,'cn:000001','上证指数','broad',provider='csindex',provider_code='000001')
@@ -266,7 +266,7 @@ def test_http_contract_defaults_schedule_and_read_only(live):
 
 def test_browser_polling_preserves_zoom_and_filter_resets(live):
     playwright=pytest.importorskip('playwright.sync_api')
-    from quarterly_dashboard.index_prices import publish_prices
+    from stock_analysis.domains.indices.index_prices import publish_prices
     from test_index_prices import point,seed as price_seed
     base,database,calls=live
     batch,sid,code=price_seed(database,code='000001')
@@ -351,7 +351,7 @@ def test_browser_polling_preserves_zoom_and_filter_resets(live):
 
 def test_browser_dual_axes_all_broad_ranges_and_read_only(live):
     playwright=pytest.importorskip('playwright.sync_api')
-    from quarterly_dashboard.index_prices import publish_prices
+    from stock_analysis.domains.indices.index_prices import publish_prices
     from test_index_prices import point,seed as price_seed
     base,database,calls=live
     batch,sid,code=price_seed(database,code='000001')

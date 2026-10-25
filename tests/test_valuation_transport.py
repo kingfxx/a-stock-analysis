@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 import subprocess
 
-from quarterly_dashboard import server
-from quarterly_dashboard.valuation_transport import compact_valuation
+from stock_analysis.http import server
+from stock_analysis.domains.valuation.valuation_transport import compact_valuation
 
 
 def decode_in_browser(payload):

@@ -3,12 +3,12 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from quarterly_dashboard.collection import ProviderBlocked, RequestCollector, begin_batch
-from quarterly_dashboard.network import create_data_session
-from quarterly_dashboard.stock_collection import routed_stock_requests
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult
-from quarterly_dashboard.fundamental_service import FundamentalService
-from quarterly_dashboard.update_service import recent_sync_failure
+from stock_analysis.collection.collection import ProviderBlocked, RequestCollector, begin_batch
+from stock_analysis.infrastructure.network import create_data_session
+from stock_analysis.domains.stocks.stock_collection import routed_stock_requests
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult
+from stock_analysis.domains.financials.fundamental_service import FundamentalService
+from stock_analysis.domains.stocks.update_service import recent_sync_failure
 
 
 class Clock:
@@ -285,7 +285,7 @@ def test_expired_baidu_cooldown_requires_metric_response_structure(tmp_path):
         conn.execute("INSERT INTO collection_provider_state(source_system,cooldown_until,reason,denials,budget_json,updated_at) "
                      "VALUES('baidu',?,'denied',1,'{}','test')", (expired,))
 
-    from quarterly_dashboard.valuation import fetch_valuation_indicator
+    from stock_analysis.domains.valuation.valuation import fetch_valuation_indicator
     with routed_stock_requests(db, batch, "baidu", "valuation", collector=collector):
         with create_data_session() as routed:
             try:
@@ -326,7 +326,7 @@ def test_expired_baidu_cooldown_clears_only_after_valid_chart_response(tmp_path)
         conn.execute("INSERT INTO collection_provider_state(source_system,cooldown_until,reason,denials,budget_json,updated_at) "
                      "VALUES('baidu',?,'denied',1,'{}','test')", (expired,))
 
-    from quarterly_dashboard.valuation import fetch_valuation_indicator
+    from stock_analysis.domains.valuation.valuation import fetch_valuation_indicator
     with routed_stock_requests(db, batch, "baidu", "valuation", collector=collector):
         with create_data_session() as routed:
             assert fetch_valuation_indicator("600519", routed, "pe")[0]["value"] == 10
@@ -351,7 +351,7 @@ def test_expired_sina_cooldown_rejects_report_count_list_mismatch(tmp_path):
         conn.execute("INSERT INTO collection_provider_state(source_system,cooldown_until,reason,denials,budget_json,updated_at) "
                      "VALUES('sina',?,'denied',1,'{}','test')", (expired,))
 
-    from quarterly_dashboard.sources import fetch_financial_report_page
+    from stock_analysis.domains.stocks.sources import fetch_financial_report_page
     with routed_stock_requests(db, batch, "sina", "financial", collector=collector):
         with create_data_session() as routed:
             try:
@@ -373,7 +373,7 @@ def test_expired_sina_cooldown_accepts_valid_report_page(tmp_path):
                                  sleep=clock.sleep, uniform=lambda *_: 0)
     expired_provider_cooldown(db, "sina", clock)
 
-    from quarterly_dashboard.sources import fetch_financial_report_page
+    from stock_analysis.domains.stocks.sources import fetch_financial_report_page
     with routed_stock_requests(db, batch, "sina", "financial", collector=collector):
         with create_data_session() as routed:
             assert fetch_financial_report_page("600519", routed, "lrb")["total"] == 1
@@ -396,7 +396,7 @@ def test_expired_eastmoney_cooldown_rejects_invalid_chip_pagination(tmp_path):
         conn.execute("INSERT INTO collection_provider_state(source_system,cooldown_until,reason,denials,budget_json,updated_at) "
                      "VALUES('eastmoney',?,'denied',1,'{}','test')", (expired,))
 
-    from quarterly_dashboard.chips import _fetch_chip_report
+    from stock_analysis.domains.stocks.chips import _fetch_chip_report
     with routed_stock_requests(db, batch, "eastmoney", "financing", collector=collector):
         with create_data_session() as routed:
             try:
@@ -418,7 +418,7 @@ def test_expired_eastmoney_cooldown_accepts_valid_chip_page(tmp_path):
                                  sleep=clock.sleep, uniform=lambda *_: 0)
     expired_provider_cooldown(db, "eastmoney", clock)
 
-    from quarterly_dashboard.chips import _fetch_chip_report
+    from stock_analysis.domains.stocks.chips import _fetch_chip_report
     with routed_stock_requests(db, batch, "eastmoney", "financing", collector=collector):
         with create_data_session() as routed:
             assert _fetch_chip_report("600519", "financing", routed)[0]["SCODE"] == "600519"
@@ -434,7 +434,7 @@ def test_expired_eastmoney_cooldown_accepts_explicit_no_data_protocol(tmp_path):
                                  clock=clock.time, sleep=clock.sleep, uniform=lambda *_: 0)
     expired_provider_cooldown(db, "eastmoney", clock)
 
-    from quarterly_dashboard.chips import _fetch_chip_report
+    from stock_analysis.domains.stocks.chips import _fetch_chip_report
     with routed_stock_requests(db, batch, "eastmoney", "financing", collector=collector):
         with create_data_session() as routed:
             assert _fetch_chip_report("600519", "financing", routed) == []
@@ -457,7 +457,7 @@ def test_expired_tencent_cooldown_rejects_missing_requested_stock_node(tmp_path)
         conn.execute("INSERT INTO collection_provider_state(source_system,cooldown_until,reason,denials,budget_json,updated_at) "
                      "VALUES('tencent',?,'denied',1,'{}','test')", (expired,))
 
-    from quarterly_dashboard.sources import fetch_price_history
+    from stock_analysis.domains.stocks.sources import fetch_price_history
     with routed_stock_requests(db, batch, "tencent", "prices", collector=collector):
         with create_data_session() as routed:
             try:
@@ -480,7 +480,7 @@ def test_expired_tencent_cooldown_accepts_matching_stock_name_quote(tmp_path):
                                  uniform=lambda *_: 0)
     expired_provider_cooldown(db, "tencent", clock)
 
-    from quarterly_dashboard.sources import fetch_stock_name
+    from stock_analysis.domains.stocks.sources import fetch_stock_name
     with routed_stock_requests(db, batch, "tencent", "name", collector=collector):
         with create_data_session() as routed:
             assert fetch_stock_name("600519", routed) == "TestCompany"
@@ -499,8 +499,8 @@ def test_expired_tencent_cooldown_rejects_wrong_stock_name_quote(tmp_path):
                                  uniform=lambda *_: 0)
     expired_provider_cooldown(db, "tencent", clock)
 
-    from quarterly_dashboard.collection import ProviderBlocked
-    from quarterly_dashboard.sources import fetch_stock_name
+    from stock_analysis.collection.collection import ProviderBlocked
+    from stock_analysis.domains.stocks.sources import fetch_stock_name
     with routed_stock_requests(db, batch, "tencent", "name", collector=collector):
         with create_data_session() as routed:
             try:
@@ -522,7 +522,7 @@ def test_expired_tencent_qfq_cooldown_accepts_direct_qfqday(tmp_path):
                                  sleep=clock.sleep, uniform=lambda *_: 0)
     expired_provider_cooldown(db, "tencent", clock)
 
-    from quarterly_dashboard.sources import fetch_price_history
+    from stock_analysis.domains.stocks.sources import fetch_price_history
     with routed_stock_requests(db, batch, "tencent", "prices", collector=collector):
         with create_data_session() as routed:
             rows = fetch_price_history("600519", routed, "qfq", start="2026-01-01", end="2026-01-31")
@@ -542,7 +542,7 @@ def test_expired_tencent_qfq_day_fallback_defers_recovery_until_raw_hfq_match(tm
                                  clock=clock.time, sleep=clock.sleep, uniform=lambda *_: 0)
     expired_provider_cooldown(db, "tencent", clock)
 
-    from quarterly_dashboard.sources import fetch_price_history
+    from stock_analysis.domains.stocks.sources import fetch_price_history
     with routed_stock_requests(db, batch, "tencent", "prices", collector=collector):
         with create_data_session() as routed:
             rows = fetch_price_history("600519", routed, "qfq", start="2026-01-01", end="2026-01-31")
@@ -569,7 +569,7 @@ def test_expired_tencent_qfq_fallback_mismatch_keeps_provider_blocked(tmp_path):
                                  uniform=lambda *_: 0)
     expired_provider_cooldown(db, "tencent", clock)
 
-    from quarterly_dashboard.sources import fetch_price_history
+    from stock_analysis.domains.stocks.sources import fetch_price_history
     with routed_stock_requests(db, batch, "tencent", "prices", collector=collector):
         with create_data_session() as routed:
             try:

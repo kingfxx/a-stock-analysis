@@ -5,9 +5,9 @@ from urllib.error import HTTPError
 
 import pytest
 
-from quarterly_dashboard import server, storage
-from quarterly_dashboard.stock_library import StockLibrary
-from quarterly_dashboard.storage import Database
+from stock_analysis.http import server; from stock_analysis.infrastructure import storage
+from stock_analysis.domains.stocks.stock_library import StockLibrary
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture
@@ -150,8 +150,8 @@ def test_group_http_routes_persist_and_reject_cross_site_writes(library, monkeyp
 
 
 def test_unfollow_keeps_facts_and_files_and_restores_groups_after_reopen(library, tmp_path, monkeypatch):
-    from quarterly_dashboard.fundamental_service import FundamentalService
-    from quarterly_dashboard.maintenance import MaintenanceService
+    from stock_analysis.domains.financials.fundamental_service import FundamentalService
+    from stock_analysis.maintenance.maintenance import MaintenanceService
 
     cache = tmp_path / 'fundamentals'; cache.mkdir()
     (cache / '001309.json').write_text(json.dumps({'code':'001309','reports':[
@@ -260,7 +260,7 @@ def test_unfollowed_http_restore_and_update_guard(library, monkeypatch):
 
 
 def test_v14_upgrade_and_empty_inventory(tmp_path, monkeypatch):
-    from quarterly_dashboard.maintenance import MaintenanceService
+    from stock_analysis.maintenance.maintenance import MaintenanceService
 
     db = Database(tmp_path/'v14.sqlite3')
     with monkeypatch.context() as patch:

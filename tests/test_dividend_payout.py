@@ -1,6 +1,6 @@
 import pytest
 
-from quarterly_dashboard.core import build_period_rows, view_rows
+from stock_analysis.domains.financials.core import build_period_rows, view_rows
 
 
 @pytest.mark.parametrize('profit, dividend, expected', [

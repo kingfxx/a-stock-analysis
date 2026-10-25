@@ -4,10 +4,10 @@ from threading import Event, Thread
 
 import pytest
 
-from quarterly_dashboard.collection_management import CollectionManagement, ZONE, due_slot, next_check, validate_params, validate_rule, TASKS
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard import index_collection, market_congestion
+from stock_analysis.collection.collection_management import CollectionManagement, ZONE, due_slot, next_check, validate_params, validate_rule, TASKS
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.domains.indices import index_collection; from stock_analysis.domains.market import market_congestion
 
 
 @pytest.fixture
@@ -157,7 +157,7 @@ def test_new_schedule_incremental_only_and_publication_window_target(management)
 
 
 def test_maintenance_registration_empty_and_actual_times(management):
-    from quarterly_dashboard.maintenance import DESCRIPTIONS,table_time
+    from stock_analysis.maintenance.maintenance import DESCRIPTIONS,table_time
     with management.db.connection() as conn:
         for name in ('collection_schedule_rules','collection_schedule_slots'):
             assert DESCRIPTIONS[name][0]=='运行与配置'
@@ -202,7 +202,7 @@ def test_saved_configuration_waits_for_future_slot(management):
 
 
 def test_public_batches_keep_real_scheduled_trigger(management):
-    from quarterly_dashboard.collection import begin_batch
+    from stock_analysis.collection.collection import begin_batch
     enable(management)
     def execute(key,params,ref):
         batch=begin_batch(management.db,ref,'index.test','legu',scope={'test':True})
@@ -215,8 +215,8 @@ def test_public_batches_keep_real_scheduled_trigger(management):
 
 
 def test_scheduler_gate_and_shutdown_cancel_only_scheduled(management):
-    from quarterly_dashboard.collection_management import Scheduler
-    from quarterly_dashboard.database_restore import RequestGate
+    from stock_analysis.collection.collection_management import Scheduler
+    from stock_analysis.maintenance.database_restore import RequestGate
     gate=RequestGate();gate.blocked=True;entered=Event()
     def tick(**kwargs):entered.set()
     management.tick=tick
@@ -249,7 +249,7 @@ def test_list_projects_small_summary_and_detail_keeps_full_evidence(management):
 
 
 def test_explicit_complete_target_stops_publication_window(management):
-    from quarterly_dashboard.collection import begin_batch,finish_batch
+    from stock_analysis.collection.collection import begin_batch,finish_batch
     enable(management,'market_financial',rule={'frequency':'monthly','window':[1,31]},params={'target':'2026-06-30'})
     def execute(key,params,ref):
         for dataset in ('income','balance','cashflow','performance'):

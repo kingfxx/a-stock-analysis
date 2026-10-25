@@ -25,7 +25,7 @@
 ## 导入已有 PDF
 
 ```powershell
-python -m quarterly_dashboard.company_report_service --code 600887 --period 2025-12-31 --file <PDF路径> --url <正式来源URL> --published-on 2026-04-30
+python -m stock_analysis.domains.research.reports.company_report_service --code 600887 --period 2025-12-31 --file <PDF路径> --url <正式来源URL> --published-on 2026-04-30
 ```
 
 ## 备份和恢复
@@ -33,8 +33,8 @@ python -m quarterly_dashboard.company_report_service --code 600887 --period 2025
 既有 SQLite 日备份不包含文件系统 PDF。需要完整迁移时使用：
 
 ```powershell
-python -m quarterly_dashboard.report_backup --output E:\backup\investment-full.zip
-python -m quarterly_dashboard.report_backup --restore E:\backup\investment-full.zip --output E:\backup\investment-restored
+python -m stock_analysis.domains.research.reports.report_backup --output E:\backup\investment-full.zip
+python -m stock_analysis.domains.research.reports.report_backup --restore E:\backup\investment-full.zip --output E:\backup\investment-restored
 ```
 
 备份仅包含数据库、已登记财报原件及必要解析文件和 SHA256 清单，不含 AI 凭据。备份文件和恢复目录必须不存在；恢复前验证路径与全部文件哈希，恢复后核验数据库。恢复资料位于新目录，接管日常库属于独立维护操作。

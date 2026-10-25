@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard import sources, valuation
+from stock_analysis.domains.stocks import sources; from stock_analysis.domains.valuation import valuation
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "p4"

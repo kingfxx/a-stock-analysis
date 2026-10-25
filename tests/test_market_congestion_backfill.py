@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from quarterly_dashboard import market_congestion as m
-from quarterly_dashboard import market_congestion_backfill as backfill
-from quarterly_dashboard.collection import archive_source,begin_batch,finish_batch,parsed_source,read_source
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.market import market_congestion as m
+from stock_analysis.domains.market import market_congestion_backfill as backfill
+from stock_analysis.collection.collection import archive_source,begin_batch,finish_batch,parsed_source,read_source
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture

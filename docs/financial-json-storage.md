@@ -7,7 +7,7 @@ Schema v35，仅涉及 `financial_reports.raw_json`。不新增表，不更改�
 - 现有列保留 TEXT 亲和性，物理写入为 SQLite BLOB。普通数据库浏览器看到二进制，不能直接 `json_extract(raw_json,...)`；必须先用协议解码。旧纯文本继续可读。
 - 每条独立编码：6 bytes `ASTKFR` 加版本 byte `01`（整体 magic 为 `b'ASTKFR\x01'`，共 7 bytes），8 bytes 大端未压缩长度，32 bytes 原文 SHA256，最后为 `zlib.compress(UTF-8, level=6)` 的完整流。
 - 原始文本保持逐字节一致；新采集仍先按项目原规则生成 canonical JSON 及 `content_hash`，再压缩。内嵌哈希和行内 content_hash 都针对原始 UTF-8，不针对压缩流。
-- `quarterly_dashboard.financial_storage` 集中编解码。解码限制 64 MiB、验证长度、完整流、无尾随数据及 SHA256，不静默回退损坏 BLOB。
+- `stock_analysis.domains.financials.financial_storage` 集中编解码。解码限制 64 MiB、验证长度、完整流、无尾随数据及 SHA256，不静默回退损坏 BLOB。
 - 仓储 `Database.financial_reports()` 返回解压后的原 TEXT。三表、DCF/WACC、旧行业适配器、研究快照、Checklist 与清理预览的直接 SQL 读取入口显式调用统一解码，不在全库行工厂增加额外操作。研究快照依然嵌入原 JSON 文本。
 - `.agents/skills/a-share-value-research/scripts/research.py` 保持独立标准库读取，支持相同协议；交叉兼容性由测试覆盖。其他外部 SQL 工具需主动适配协议。
 

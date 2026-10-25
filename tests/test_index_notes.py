@@ -1,9 +1,9 @@
 import pytest
 
-from quarterly_dashboard.investment_notes import InvestmentNotes, NoteConflict
-from quarterly_dashboard.note_snapshots import catalog as note_catalog
-from quarterly_dashboard.index_repository import publish, catalog
-from quarterly_dashboard.index_prices import publish_prices
+from stock_analysis.domains.notes.investment_notes import InvestmentNotes, NoteConflict
+from stock_analysis.domains.notes.note_snapshots import catalog as note_catalog
+from stock_analysis.domains.indices.index_repository import publish, catalog
+from stock_analysis.domains.indices.index_prices import publish_prices
 from test_index_prices import point
 from test_index_collection import db, source
 from test_index_ui import index_server

@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from quarterly_dashboard import server
-from quarterly_dashboard.investment_notes import InvestmentNotes
+from stock_analysis.http import server
+from stock_analysis.domains.notes.investment_notes import InvestmentNotes
 from test_index_ui import index_server, db
 
 

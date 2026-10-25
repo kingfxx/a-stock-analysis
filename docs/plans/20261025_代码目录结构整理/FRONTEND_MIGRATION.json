@@ -1,0 +1,247 @@
+[
+  {
+    "old": "ai-assessment.css",
+    "new": "features/research/assessment/ai-assessment.css",
+    "sha256": "08df73302c52e5b29942a6d7fcab3dd6fad885e40b8d8b8499ce3700d199d5f6"
+  },
+  {
+    "old": "ai-assessment.js",
+    "new": "features/research/assessment/ai-assessment.js",
+    "sha256": "eddefa06bfc650771097d89c69f15024eb9ca846c87570a178a8d4a69138ca71"
+  },
+  {
+    "old": "ai-checklist.css",
+    "new": "features/research/assessment/ai-checklist.css",
+    "sha256": "7694d80528ceb0645702825f54fe19d742a3f83d69ddf61cc7343608ad6ed492"
+  },
+  {
+    "old": "ai-checklist.js",
+    "new": "features/research/assessment/ai-checklist.js",
+    "sha256": "0f003cafd1ea2e00b09a96e5b46f2a6f4b188357610038c7e705332f05d60679"
+  },
+  {
+    "old": "business-judgment.js",
+    "new": "features/research/assessment/business-judgment.js",
+    "sha256": "d44dd5cf95b782b68b50c5313a758f5f928a33b36b71e3c79700b69393c141fc"
+  },
+  {
+    "old": "business-segment-aliases.js",
+    "new": "features/financials/business-segment-aliases.js",
+    "sha256": "e14dc747dc8e8453df5e1c1062b2b6d93ba55382fe3fc0b4580250510a1fdf37"
+  },
+  {
+    "old": "business-segment-names.js",
+    "new": "features/financials/business-segment-names.js",
+    "sha256": "5f71e181fb4c21e52f7220989a66243c2f0a2176860bca129d099c037d29e163"
+  },
+  {
+    "old": "business-segments.css",
+    "new": "features/financials/business-segments.css",
+    "sha256": "665de8544acd79379b210aff5349bf033f4c39ff4321b116fbadcc390522ef06"
+  },
+  {
+    "old": "business-segments.js",
+    "new": "features/financials/business-segments.js",
+    "sha256": "0c9c75509a3c96c4477eefccf0d7f0c4f53a75df87dcacfaa073082a151bbf50"
+  },
+  {
+    "old": "collection-progress.css",
+    "new": "features/maintenance/collection-progress.css",
+    "sha256": "f8880abf9532a7276308515875727fa00807888ccaa06ef32e7952063b459c49"
+  },
+  {
+    "old": "collection-progress.js",
+    "new": "features/maintenance/collection-progress.js",
+    "sha256": "a761a843a312c2971652f49ced945c30e9419b5c488a5870d8c5ebbd50db339b"
+  },
+  {
+    "old": "congestion.js",
+    "new": "features/market/congestion.js",
+    "sha256": "debf53b39d5c30d0416f57b735896e4d282bf8c6b2dfd16b33a8a79ea08605b6"
+  },
+  {
+    "old": "datetime.js",
+    "new": "shared/datetime.js",
+    "sha256": "490fcf074b5fc2729f4a1ac9ed40357c2827f6e51cb88ba45dc00cc19703e887"
+  },
+  {
+    "old": "dcf.css",
+    "new": "features/valuation/dcf.css",
+    "sha256": "942c7d177465cea128d70558ae6bd93499f001c9537f1a9db3fddb6421f62490"
+  },
+  {
+    "old": "dcf.js",
+    "new": "features/valuation/dcf.js",
+    "sha256": "a63c91a4433605737c2ad9c137584aae0464b9fd3d814b7d4f0b80fe56d11225"
+  },
+  {
+    "old": "dividend-forecast.css",
+    "new": "features/valuation/dividend-forecast.css",
+    "sha256": "a10d1f4268e4bae930e0448ecbb1bc9c613955feae393632a04dd5e2ce0eb51d"
+  },
+  {
+    "old": "dividend-forecast.js",
+    "new": "features/valuation/dividend-forecast.js",
+    "sha256": "8e92b0d6aca2bc1fbd7df89ccb7325d89d390ae671a690c534008990a7891454"
+  },
+  {
+    "old": "financial-statements.css",
+    "new": "features/financials/financial-statements.css",
+    "sha256": "379026f20fcec4e5ceab9ccf8dd25a6f4b4727041d8f65c89e2eedfb0e2e7301"
+  },
+  {
+    "old": "financial-statements.js",
+    "new": "features/financials/financial-statements.js",
+    "sha256": "2dd2228f53d3b8172a972b5a1452085056ae88111d8359d54a079531bf543ee0"
+  },
+  {
+    "old": "index.html",
+    "new": "pages/index.html",
+    "sha256": "f84c7709782b8007a50ff470199beebac76ac45ec219555fc743b0b27307d561"
+  },
+  {
+    "old": "indices.css",
+    "new": "features/indices/indices.css",
+    "sha256": "55a4b6fc97f1fbb2fa2dd2259c570c54e5ca4f1eae85d12e85a318c307f750e5"
+  },
+  {
+    "old": "indices.html",
+    "new": "pages/indices.html",
+    "sha256": "8ea1c1ee7f6d5a35bdedd44546ffd57202471e98df05f559173e98a6429c7208"
+  },
+  {
+    "old": "indices.js",
+    "new": "features/indices/indices.js",
+    "sha256": "4f191983287a223b34137cf33a97dc75f7c7424322da06be3e37acfd22f980a7"
+  },
+  {
+    "old": "industry.css",
+    "new": "features/industries/industry.css",
+    "sha256": "6e6ee62aa3a81d39cdc865ab5e9e9bff4f80e390d78485fa939ed06c76880d63"
+  },
+  {
+    "old": "industry.js",
+    "new": "features/industries/industry.js",
+    "sha256": "5918bbf3654f4c76f5f2f0cf199b0b1c4ce80f5cae06b7c1aa20c40937eee29a"
+  },
+  {
+    "old": "investment-notes.css",
+    "new": "features/notes/investment-notes.css",
+    "sha256": "c1eee3a8d05631658a1d3ce846adecffabb0bbfee9c4393457e8e0e4a81c2d00"
+  },
+  {
+    "old": "investment-notes.js",
+    "new": "features/notes/investment-notes.js",
+    "sha256": "b147222848a54e454e52449be73119dd9e4a5172596c9a140b18de9f6d983dd1"
+  },
+  {
+    "old": "maintenance.css",
+    "new": "features/maintenance/maintenance.css",
+    "sha256": "75fc03ca5df68f50abd00cbc123450a0523c51dd011f824aad69aad957e65ee2"
+  },
+  {
+    "old": "maintenance.js",
+    "new": "features/maintenance/maintenance.js",
+    "sha256": "e9a4c53f67583b2fd048cc23e024dfe61ef722dac523bde6b998da22a720a038"
+  },
+  {
+    "old": "research-layout.css",
+    "new": "shared/research-layout.css",
+    "sha256": "0a647f96e726c6f19272fcdfb505ab7b667e03380868c2cf377d8c7030133001"
+  },
+  {
+    "old": "research-sidebar.html",
+    "new": "shared/research-sidebar.html",
+    "sha256": "c27834de9f4ce4c27153479bc1adc7bb092ae8e5f780d5059f91523a029c3832"
+  },
+  {
+    "old": "samples/industry-summary.html",
+    "new": "samples/industry-summary.html",
+    "sha256": "76ba7c71cb0f6e621c3582d75b4e8f08a3c800ad33a84cd59f19decd4a16e8ba"
+  },
+  {
+    "old": "shipping-forecast.css",
+    "new": "features/research/sectors/shipping/shipping-forecast.css",
+    "sha256": "d7f25185abb15af3ede9d590f0f8644f0d593a41bb863ee96a3617de6f4489ff"
+  },
+  {
+    "old": "shipping-forecast.html",
+    "new": "pages/shipping-forecast.html",
+    "sha256": "4bf88da2829a78652b613257159af858aa0b6d114e5a6c2f6a4713e0c318797d"
+  },
+  {
+    "old": "shipping-forecast.js",
+    "new": "features/research/sectors/shipping/shipping-forecast.js",
+    "sha256": "ae2c47acbcb47cd0d0eeb1c1cc0cdd740e82ee7b211ac4b3f450cb09c22ef085"
+  },
+  {
+    "old": "stock-cleanup.js",
+    "new": "features/maintenance/stock-cleanup.js",
+    "sha256": "f28dfc5586e1f9ca7fd52e04fcec07e0c7e187114d0cba4bdf78228989aff03e"
+  },
+  {
+    "old": "stock-picker.js",
+    "new": "shared/stock-picker.js",
+    "sha256": "5fa407a96001139d0ba2210cf646eaa920787dd0e203beb661dea5395c80a48c"
+  },
+  {
+    "old": "vendor/notes/codemirror.css",
+    "new": "vendor/notes/codemirror.css",
+    "sha256": "eb494ea972d2661ef86f7f6ac656dd6786d721e49c9c1b46e1eb967e4b6f9bf3"
+  },
+  {
+    "old": "vendor/notes/codemirror.js",
+    "new": "vendor/notes/codemirror.js",
+    "sha256": "e98aac5ffa07bae58acd4ff07c4293059f8921c0ae0eba506929d8c6f41c9288"
+  },
+  {
+    "old": "vendor/notes/footnote.js",
+    "new": "vendor/notes/footnote.js",
+    "sha256": "d6fee58a3b56c5742fa18f3e01f1d317cc99975683ebd39c9195cb2aff0c2e42"
+  },
+  {
+    "old": "vendor/notes/LICENSE-codemirror",
+    "new": "vendor/notes/LICENSE-codemirror",
+    "sha256": "168a4becc968f5001e2ee2e0291b6e4daabafc1894a11ade1e11d56e96096e07"
+  },
+  {
+    "old": "vendor/notes/LICENSE-footnote",
+    "new": "vendor/notes/LICENSE-footnote",
+    "sha256": "81d61236a5f25294b2dad0c866d4ad6a40b865148b28df9a71f49ba771a6c54b"
+  },
+  {
+    "old": "vendor/notes/LICENSE-markdown-it",
+    "new": "vendor/notes/LICENSE-markdown-it",
+    "sha256": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+  },
+  {
+    "old": "vendor/notes/LICENSE-purify",
+    "new": "vendor/notes/LICENSE-purify",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  {
+    "old": "vendor/notes/manifest.json",
+    "new": "vendor/notes/manifest.json",
+    "sha256": "32c14c3758e8284a1896d1f03e85fe7fdca7922eb9ff09f81ff8d457ed8ba787"
+  },
+  {
+    "old": "vendor/notes/markdown-it.js",
+    "new": "vendor/notes/markdown-it.js",
+    "sha256": "391f2aa638e75e6c7859d0a5c5650ef0956722a45998f17e05b83bc655778e1e"
+  },
+  {
+    "old": "vendor/notes/markdown-mode.js",
+    "new": "vendor/notes/markdown-mode.js",
+    "sha256": "8fe7b11848f79cc9119b2a239f38a00944f6f2bb764a00bc837ecf8d34cf7690"
+  },
+  {
+    "old": "vendor/notes/purify.js",
+    "new": "vendor/notes/purify.js",
+    "sha256": "cd37898f9782adf54820c413191b5691803f0f137c799d6edcfd38523b4c2c31"
+  },
+  {
+    "old": "vendor/notes/README.md",
+    "new": "vendor/notes/README.md",
+    "sha256": "b2b2d4e8b8cb12c18fc1fa41ca289562af31eb57fade62c19f61587d9aecdb54"
+  }
+]

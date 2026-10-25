@@ -3,8 +3,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from quarterly_dashboard.index_read_service import IndexReadService
-from quarterly_dashboard.index_repository import publish, read_indices
+from stock_analysis.domains.indices.index_read_service import IndexReadService
+from stock_analysis.domains.indices.index_repository import publish, read_indices
 from test_index_collection import db, source
 
 
@@ -50,7 +50,7 @@ def test_cache_limits_and_simultaneous_miss(db,monkeypatch):
     seeded(db)
     service = IndexReadService(db,max_entries=2,max_bytes=1024*1024)
     args = dict(code='cn:000300',provider='csindex',series='history.rolling',metric='pe_rolling')
-    import quarterly_dashboard.index_read_service as module
+    import stock_analysis.domains.indices.index_read_service as module
     original = module.index_valuation_views
     calls=[]
     def count(*args,**kwargs):
@@ -83,7 +83,7 @@ def test_cache_limits_and_simultaneous_miss(db,monkeypatch):
 def test_midnight_invalidates_date_dependent_views(db,monkeypatch):
     seeded(db)
     from datetime import date
-    import quarterly_dashboard.index_read_service as module
+    import stock_analysis.domains.indices.index_read_service as module
     service=IndexReadService(db)
     try:
         first=service.catalog()
@@ -165,6 +165,6 @@ def test_monthly_zero_dividend_and_lightweight_status(db,monkeypatch):
         assert view['current']==0 and view['count']==1
         assert view['rows_by_frequency']['day']==view['rows_by_frequency']['week']==[]
         assert view['rows_by_frequency']['month'][0]['dividend_yield_date']=='2026-10-09'
-        monkeypatch.setattr('quarterly_dashboard.index_read_service.read_indices',lambda *_:pytest.fail('status must not read coverage/history'))
+        monkeypatch.setattr('stock_analysis.domains.indices.index_read_service.read_indices',lambda *_:pytest.fail('status must not read coverage/history'))
         assert 'operations' in json.loads(service.status())
     finally:service.close()

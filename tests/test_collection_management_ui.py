@@ -7,14 +7,14 @@ from threading import Thread
 import pytest
 import requests
 
-from quarterly_dashboard.collection_management import CollectionManagement, TASKS
-from quarterly_dashboard.database_restore import RequestGate, RestoreManager
-from quarterly_dashboard.storage import Database
+from stock_analysis.collection.collection_management import CollectionManagement, TASKS
+from stock_analysis.maintenance.database_restore import RequestGate, RestoreManager
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture
 def live(tmp_path,monkeypatch):
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
     db=Database(tmp_path/'ui.sqlite3');db.initialize()
     monkeypatch.setattr(server,'DATABASE_PATH',db.path)
     root=Path(__file__).resolve().parents[1]
@@ -115,8 +115,8 @@ def test_browser_rate_templates_custom_save_polling_and_guards(live):
 
 
 def test_rate_http_validation_no_execution_and_maintenance_gate(live):
-    from quarterly_dashboard.collection_rate_limits import fields
-    from quarterly_dashboard.collection import PacingPolicy
+    from stock_analysis.collection.collection_rate_limits import fields
+    from stock_analysis.collection.collection import PacingPolicy
     base,db,state,web=live
     session=requests.Session();session.trust_env=False
     command=dict(task_key='indices',provider='csindex',settings=fields(PacingPolicy()))
@@ -266,7 +266,7 @@ def test_browser_latest_once_collapsed_batches_and_dropdown_multi_select(live):
 
 def test_browser_recent_four_targets_default_latest_and_custom_preserved(live):
     from datetime import datetime,timezone
-    from quarterly_dashboard.industry_service import IndustryService
+    from stock_analysis.domains.industries.industry_service import IndustryService
     from playwright.sync_api import sync_playwright,expect
     base,db,state,web=live
     mg=CollectionManagement(db,IndustryService(db))

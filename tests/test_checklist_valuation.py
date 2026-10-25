@@ -2,11 +2,11 @@ import copy
 import json
 from uuid import uuid4
 import pytest
-from quarterly_dashboard.analysis_repository import AnalysisRepository
-from quarterly_dashboard.analysis_snapshot import encoded
-from quarterly_dashboard.checklist_snapshot import capture
-from quarterly_dashboard.checklist_validation import prompt,validate_output
-from quarterly_dashboard.checklist_valuation import valuation_item
+from stock_analysis.domains.research.assessment.analysis_repository import AnalysisRepository
+from stock_analysis.domains.research.assessment.analysis_snapshot import encoded
+from stock_analysis.domains.research.assessment.checklist_snapshot import capture
+from stock_analysis.domains.research.assessment.checklist_validation import prompt,validate_output
+from stock_analysis.domains.research.assessment.checklist_valuation import valuation_item
 from test_ai_assessment import database
 from test_checklist import result
 

@@ -72,7 +72,7 @@ v30读取同表独立 `historical-composite-v1` 系列；市值／价格逐字�
 
 ## 3. 四张财务表的全部源字段
 
-以下每行给出落库列、接口字段、类型、含义和单位/口径。字段来源为该节指定的接口；所有原始源字段映射均见 [`market_financial_fields.json`](../quarterly_dashboard/resources/market_financial_fields.json)。字段数不含上面的 11 个本地字段。
+以下每行给出落库列、接口字段、类型、含义和单位/口径。字段来源为该节指定的接口；所有原始源字段映射均见 [`market_financial_fields.json`](../stock_analysis/domains/market/resources/market_financial_fields.json)。字段数不含上面的 11 个本地字段。
 
 ### 3.1 `market_financial_income` — 利润表
 
@@ -688,9 +688,9 @@ PB = 同日 `market_trade_snapshot.close_price` 的季末未复权收盘价（�
 - [全市场四表采集、发布及历史补采](data-sources/market-financial-statements.md)
 - [旧行业业绩字段扩展说明](data-sources/industry-performance.md)
 - [数据库维护页与表统计](database-maintenance.md)
-- [财务源字段映射](../quarterly_dashboard/resources/market_financial_fields.json)
-- [行业财务 View 迁移](../quarterly_dashboard/migrations/020_industry_financial_view.sql)、[三表与来源迁移](../quarterly_dashboard/migrations/018_market_financial_statements.sql)、[业绩指标迁移](../quarterly_dashboard/migrations/019_market_financial_performance.sql)
-- [采集和版本写入逻辑](../quarterly_dashboard/market_financial.py)、[行业轻量读取](../quarterly_dashboard/industry_financial_reader.py)
+- [财务源字段映射](../stock_analysis/domains/market/resources/market_financial_fields.json)
+- [行业财务 View 迁移](../stock_analysis/infrastructure/migrations/020_industry_financial_view.sql)、[三表与来源迁移](../stock_analysis/infrastructure/migrations/018_market_financial_statements.sql)、[业绩指标迁移](../stock_analysis/infrastructure/migrations/019_market_financial_performance.sql)
+- [采集和版本写入逻辑](../stock_analysis/domains/market/market_financial.py)、[行业轻量读取](../stock_analysis/domains/industries/industry_financial_reader.py)
 
 新增源字段需同时更新字段映射、迁移/存储列及本文；新增表或用途调整需同步维护页用途、分类和更新时间登记。来源新增未登记字段时当前采集会拒绝发布，保留原始响应供核对，不会静默丢弃字段。
 
@@ -782,4 +782,4 @@ WHERE f.security_code='600150' AND f.trade_date='2025-12-31'
 ORDER BY f.version;
 ```
 
-本次表含索引84.4MiB、归档19.6MiB（含中断复用副本），不作为永久容量或每期全覆盖承诺。SQLite备份不含原文，完整迁移须复制公共来源目录并验证双哈希。来源/运行入口见[专项说明](data-sources/market-trade-snapshot.md)，结构见[迁移029](../quarterly_dashboard/migrations/029_market_trade_snapshot.sql)，映射见[字段字典](../quarterly_dashboard/resources/market_trade_snapshot_fields.json)，结果见[47期验收报告](../data/verification/reports/market-trade-snapshot-history-20261013.json)。
+本次表含索引84.4MiB、归档19.6MiB（含中断复用副本），不作为永久容量或每期全覆盖承诺。SQLite备份不含原文，完整迁移须复制公共来源目录并验证双哈希。来源/运行入口见[专项说明](data-sources/market-trade-snapshot.md)，结构见[迁移029](../stock_analysis/infrastructure/migrations/029_market_trade_snapshot.sql)，映射见[字段字典](../stock_analysis/domains/market/resources/market_trade_snapshot_fields.json)，结果见[47期验收报告](../data/verification/reports/market-trade-snapshot-history-20261013.json)。

@@ -1,11 +1,11 @@
 import copy
 import pytest
 
-from quarterly_dashboard.industry_financial_reader import required_periods
-from quarterly_dashboard.collection import archive_source,begin_batch,finish_batch
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.industries.industry_financial_reader import required_periods
+from stock_analysis.collection.collection import archive_source,begin_batch,finish_batch
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.infrastructure.storage import Database
 from industry_financial_fixture import publish_financials
 from test_industries import fixture_bundle
 
@@ -28,7 +28,7 @@ def test_all_industry_consumers_ignore_legacy_and_share_new_values(setup,monkeyp
     wrong=copy.deepcopy(bundle)
     for row in wrong['financials']:row.update(revenue=99999,parent_profit=99999,weighted_roe=99)
     service.import_bundle(wrong,capture_local=False)
-    monkeypatch.setattr('quarterly_dashboard.industry_service.latest_financial_rows',
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_service.latest_financial_rows',
                         lambda *a,**k:pytest.fail('legacy financial read'))
     result=service.read(code='300750',industry='630000',level=1,mode='ytd',period='2025-06-30')
     assert result['ranking'][0]['revenue']==53
@@ -182,7 +182,7 @@ def test_extended_history_periods_appear_in_industry_page(setup):
 
 def test_financial_validation_extended_without_extending_cap_scope():
     from datetime import date
-    from quarterly_dashboard.industry_updates import validate_request
+    from stock_analysis.domains.industries.industry_updates import validate_request
     validate_request('financial_period','2014-09-30',today=date(2026,10,9))
     with pytest.raises(ValueError):
         validate_request('financial_period','2013-12-31',today=date(2026,10,9))

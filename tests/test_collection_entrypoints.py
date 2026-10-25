@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard import industry_bulk, industry_financial_extensions
-from quarterly_dashboard import industry_cap_history, industry_performance_backfill, industry_sources, market_financial
+from stock_analysis.domains.industries import industry_bulk; from stock_analysis.domains.industries import industry_financial_extensions
+from stock_analysis.domains.industries import industry_cap_history; from stock_analysis.domains.industries import industry_performance_backfill; from stock_analysis.domains.industries import industry_sources; from stock_analysis.domains.market import market_financial
 
 
 @pytest.mark.parametrize(('entry', 'args', 'message'), [
@@ -35,7 +35,7 @@ def test_offline_financial_parser_remains_available():
 def test_legacy_classification_cli_prints_public_entry_guidance(tmp_path):
     repo = Path(__file__).resolve().parents[1]
     result = subprocess.run(
-        [sys.executable, '-m', 'quarterly_dashboard.industry_sources', str(tmp_path / 'unused')],
+        [sys.executable, '-m', 'stock_analysis.domains.industries.industry_sources', str(tmp_path / 'unused')],
         cwd=repo, capture_output=True, text=True, timeout=15,
     )
     assert result.returncode != 0

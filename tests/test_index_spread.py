@@ -4,10 +4,10 @@ import json
 import pytest
 import requests
 
-from quarterly_dashboard.index_read_service import IndexReadService
-from quarterly_dashboard.index_repository import publish
+from stock_analysis.domains.indices.index_read_service import IndexReadService
+from stock_analysis.domains.indices.index_repository import publish
 from test_index_prices import seed, point
-from quarterly_dashboard.index_prices import publish_prices
+from stock_analysis.domains.indices.index_prices import publish_prices
 from test_index_ui import index_server, db
 
 

@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from quarterly_dashboard.collection import (PacingPolicy, ProviderBlocked, RequestCollector,
+from stock_analysis.collection.collection import (PacingPolicy, ProviderBlocked, RequestCollector,
     begin_batch)
-from quarterly_dashboard.storage import Database
+from stock_analysis.infrastructure.storage import Database
 
 
 class Clock:

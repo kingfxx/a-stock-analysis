@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from experiments.source_probe.storage_upgrade_probe import financing_window
-from quarterly_dashboard.chips import chip_rows
-from quarterly_dashboard.sources import parse_daily_prices, symbol_for
+from stock_analysis.domains.stocks.chips import chip_rows
+from stock_analysis.domains.stocks.sources import parse_daily_prices, symbol_for
 
 SAMPLES = json.loads((Path(__file__).resolve().parents[1] / "docs" / "data-sources" /
                       "storage-upgrade-p0-samples.json").read_text(encoding="utf-8"))

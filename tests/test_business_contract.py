@@ -3,11 +3,11 @@ from threading import Event
 from uuid import uuid4
 
 import pytest
-from quarterly_dashboard import business_judgment as business
-from quarterly_dashboard.business_contract import source_catalog, report_schema, bind_report, check_schema, numbered_notes
-from quarterly_dashboard.analysis_service import AnalysisService
-from quarterly_dashboard.analysis_snapshot import encoded
-from quarterly_dashboard.ai_provider import ChatGPTProvider
+from stock_analysis.domains.research.assessment import business_judgment as business
+from stock_analysis.domains.research.assessment.business_contract import source_catalog, report_schema, bind_report, check_schema, numbered_notes
+from stock_analysis.domains.research.assessment.analysis_service import AnalysisService
+from stock_analysis.domains.research.assessment.analysis_snapshot import encoded
+from stock_analysis.domains.research.ai.ai_provider import ChatGPTProvider
 from test_business_judgment import db, result
 from test_ai_assessment import FakeProvider, StreamResponse, MemoryCredentials, wait_terminal
 
@@ -64,8 +64,8 @@ def test_annotation_offsets_bind_to_backend_number(db):
 
 
 def test_analysis_failure_preserves_research_without_repair_or_retry(db):
-    from quarterly_dashboard.business_contract import generate
-    from quarterly_dashboard.ai_provider import ProviderError
+    from stock_analysis.domains.research.assessment.business_contract import generate
+    from stock_analysis.domains.research.ai.ai_provider import ProviderError
     data,_,_,ledger,_=prepare(db)
     class Failing:
         calls=0
@@ -121,7 +121,7 @@ def test_eof_flush_requires_actual_success_terminal(tmp_path,terminal):
             event={'type':'response.'+terminal,'response':{'status':terminal,'output':[{'type':'message','content':[{'type':'output_text','text':'{}'}]}]}}
             if terminal=='delta_only':event={'type':'response.output_text.delta','delta':'{}'}
             yield b'data: '+json.dumps(event).encode()
-    from quarterly_dashboard.ai_provider import ProviderError
+    from stock_analysis.domains.research.ai.ai_provider import ProviderError
     stream=NoSeparator([])
     class Session:
         def post(self,*args,**kwargs):return stream

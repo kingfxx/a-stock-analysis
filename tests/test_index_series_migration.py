@@ -3,11 +3,11 @@ import sqlite3
 
 import pytest
 
-from quarterly_dashboard import storage
-from quarterly_dashboard.index_definitions import METRICS
-from quarterly_dashboard.index_repository import install_definitions, publish, read_indices
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.storage import Database, instance_lock
+from stock_analysis.infrastructure import storage
+from stock_analysis.domains.indices.index_definitions import METRICS
+from stock_analysis.domains.indices.index_repository import install_definitions, publish, read_indices
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.infrastructure.storage import Database, instance_lock
 from test_index_collection import source
 
 

@@ -1,8 +1,8 @@
 """Season-end market caps must use season-end prices and that report's shares."""
 
-from quarterly_dashboard.core import period_end_snapshots
-from quarterly_dashboard.price_projection import financial_prices
-from quarterly_dashboard.server import _financial_payload, REPORT_DATE_BASIS
+from stock_analysis.domains.financials.core import period_end_snapshots
+from stock_analysis.domains.stocks.price_projection import financial_prices
+from stock_analysis.http.server import _financial_payload, REPORT_DATE_BASIS
 
 
 def test_period_end_cap_is_independent_of_disclosure_and_adjusted_prices():

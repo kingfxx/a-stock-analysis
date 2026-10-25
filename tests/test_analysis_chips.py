@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from quarterly_dashboard.analysis_chips import joint_evidence, months_before
+from stock_analysis.domains.research.assessment.analysis_chips import joint_evidence, months_before
 
 PERIODS = ['2026-03-31', '2026-06-30']
 

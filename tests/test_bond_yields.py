@@ -7,14 +7,14 @@ from decimal import Decimal
 import pytest
 import requests
 
-from quarterly_dashboard import bond_yields as by
-from quarterly_dashboard.collection import Cancelled, ProviderBlocked, RequestCollector, encoded
-from quarterly_dashboard import index_collection as ic
-from quarterly_dashboard.index_collection import start_operation
-from quarterly_dashboard import index_price_derived, market_congestion
-from quarterly_dashboard.bond_yield_audit import audit as audit_bond_yields
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.market import bond_yields as by
+from stock_analysis.collection.collection import Cancelled, ProviderBlocked, RequestCollector, encoded
+from stock_analysis.domains.indices import index_collection as ic
+from stock_analysis.domains.indices.index_collection import start_operation
+from stock_analysis.domains.indices import index_price_derived; from stock_analysis.domains.market import market_congestion
+from stock_analysis.domains.market.bond_yield_audit import audit as audit_bond_yields
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture
@@ -183,7 +183,7 @@ def test_eastmoney_request_uses_shared_provider_state_and_healthy_probe_clears_c
     clock = Clock()
     denied, _, _ = http(db, [response(status=403)], clock)
     batch_op = operation(db)
-    from quarterly_dashboard.collection import begin_batch
+    from stock_analysis.collection.collection import begin_batch
     batch = begin_batch(db, batch_op, by.DATASET, 'eastmoney')
     with pytest.raises(ProviderBlocked):
         denied.get(batch, 'eastmoney', by.DATASET, by.URL, by.PARAMS, expect='json',

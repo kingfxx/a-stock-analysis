@@ -4,7 +4,7 @@ import pytest
 
 
 def calculator():
-    return importlib.import_module("quarterly_dashboard.roic")
+    return importlib.import_module("stock_analysis.domains.financials.roic")
 
 
 def period_values(**overrides):
@@ -89,7 +89,7 @@ def test_negative_adjusted_operating_profit_remains_a_negative_return():
 
 
 def reports_for_pipeline():
-    from quarterly_dashboard.core import DEBT_COMPONENTS
+    from stock_analysis.domains.financials.core import DEBT_COMPONENTS
     reports = []
     for year in (2024, 2025):
         for q, ending in enumerate(('03-31', '06-30', '09-30', '12-31'), 1):
@@ -103,14 +103,14 @@ def reports_for_pipeline():
 
 @pytest.mark.parametrize('period', ['quarter', 'ttm', 'year'])
 def test_roic_is_available_in_every_chart_period_without_hover_growth(period):
-    from quarterly_dashboard.core import build_period_rows, view_rows
+    from stock_analysis.domains.financials.core import build_period_rows, view_rows
     rows = view_rows(build_period_rows(reports_for_pipeline(), [], []), period)
     assert rows[-1]['roic'] == pytest.approx(17.28)
     assert 'roic' not in rows[-1]['yoy']
 
 
 def test_ttm_uses_window_tax_totals_and_same_quarter_capital_endpoints():
-    from quarterly_dashboard.core import build_period_rows, view_rows
+    from stock_analysis.domains.financials.core import build_period_rows, view_rows
     reports = reports_for_pipeline()
     reports[5]['profit_before_tax_ytd'] = 100
     reports[5]['income_tax_expense_ytd'] = 35
@@ -121,7 +121,7 @@ def test_ttm_uses_window_tax_totals_and_same_quarter_capital_endpoints():
 
 
 def test_annual_does_not_require_interior_quarters_but_ttm_does():
-    from quarterly_dashboard.core import build_period_rows, view_rows
+    from stock_analysis.domains.financials.core import build_period_rows, view_rows
     reports = [r for r in reports_for_pipeline() if r['period'].endswith('12-31')]
     rows = build_period_rows(reports, [], [])
     assert view_rows(rows, 'year')[-1]['roic'] == pytest.approx(17.28)
@@ -130,7 +130,7 @@ def test_annual_does_not_require_interior_quarters_but_ttm_does():
 
 @pytest.mark.parametrize('field', ['interest_expense_ytd', 'non_operating_interest_income_ytd', 'total_equity'])
 def test_pipeline_does_not_replace_missing_roic_inputs_with_zero(field):
-    from quarterly_dashboard.core import build_period_rows, view_rows
+    from stock_analysis.domains.financials.core import build_period_rows, view_rows
     reports = reports_for_pipeline()
     reports[-1][field] = None
     assert view_rows(build_period_rows(reports, [], []), 'year')[-1]['roic'] is None
@@ -138,7 +138,7 @@ def test_pipeline_does_not_replace_missing_roic_inputs_with_zero(field):
 
 @pytest.mark.parametrize('period', ['quarter', 'ttm', 'year'])
 def test_pipeline_preserves_both_extension_hooks(period):
-    from quarterly_dashboard.core import build_period_rows, view_rows
+    from stock_analysis.domains.financials.core import build_period_rows, view_rows
     reports = reports_for_pipeline()
     for r in reports:
         q = int(r['period'][5:7]) // 3

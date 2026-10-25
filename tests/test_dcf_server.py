@@ -4,10 +4,10 @@ import io
 import json
 from types import SimpleNamespace
 
-from quarterly_dashboard import server
-from quarterly_dashboard.fundamental_service import FundamentalService
-from quarterly_dashboard.price_service import PriceService
-from quarterly_dashboard.storage import Database
+from stock_analysis.http import server
+from stock_analysis.domains.financials.fundamental_service import FundamentalService
+from stock_analysis.domains.stocks.price_service import PriceService
+from stock_analysis.infrastructure.storage import Database
 
 
 def request(path):

@@ -1,10 +1,10 @@
 """v26 only adds transactional cache generations and registers maintenance metadata."""
 import sqlite3
 
-from quarterly_dashboard import storage
-from quarterly_dashboard.index_repository import publish
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.storage import Database,instance_lock
+from stock_analysis.infrastructure import storage
+from stock_analysis.domains.indices.index_repository import publish
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.infrastructure.storage import Database,instance_lock
 from test_index_collection import source
 
 

@@ -1,6 +1,6 @@
 import pytest
 
-from quarterly_dashboard.valuation import (
+from stock_analysis.domains.valuation.valuation import (
     fetch_dividend_events, fetch_industry_snapshot, fetch_valuation_series,
     merge_adjusted_prices, merge_dividend_yields, monthly_dividend_yields,
     monthly_valuation, valuation_summary,
@@ -46,8 +46,8 @@ def test_industry_snapshot_selects_average_not_median():
 @pytest.mark.parametrize('window,header,accepted', [('全部','市净率',True),
     ('近五年','市净率',False), ('全部','总市值',False)])
 def test_baidu_all_history_preserves_actual_window_and_validates_metric(window, header, accepted):
-    from quarterly_dashboard.valuation import fetch_valuation_indicator
-    from quarterly_dashboard.valuation_service import ValuationService
+    from stock_analysis.domains.valuation.valuation import fetch_valuation_indicator
+    from stock_analysis.domains.valuation.valuation_service import ValuationService
     class Session:
         def get(self, *args, **kwargs):
             return FakeResponse({'Result':[{'DisplayData':{'resultData':{'tplData':{'result':{

@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from quarterly_dashboard import index_collection as ic
-from quarterly_dashboard.collection import ProviderBlocked, finish_batch
-from quarterly_dashboard.index_repository import publish
+from stock_analysis.domains.indices import index_collection as ic
+from stock_analysis.collection.collection import ProviderBlocked, finish_batch
+from stock_analysis.domains.indices.index_repository import publish
 from test_index_collection import db, source, http, response
 
 

@@ -9,7 +9,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
-from quarterly_dashboard.storage import (
+from stock_analysis.infrastructure.storage import (
     Database, SyncKey, SyncResult, instance_lock, restore_backup, utc_now,
 )
 

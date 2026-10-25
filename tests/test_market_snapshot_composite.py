@@ -4,9 +4,9 @@ from datetime import datetime
 import pytest
 import requests
 
-from quarterly_dashboard.collection import RequestCollector, ProviderBlocked, begin_batch, archive_source, read_source
-from quarterly_dashboard.market_trade_snapshot import FIELDS, normalized, publish, publish_metric_patch
-from quarterly_dashboard.storage import Database
+from stock_analysis.collection.collection import RequestCollector, ProviderBlocked, begin_batch, archive_source, read_source
+from stock_analysis.domains.market.market_trade_snapshot import FIELDS, normalized, publish, publish_metric_patch
+from stock_analysis.infrastructure.storage import Database
 
 COMPOSITE='historical-composite-v1'
 

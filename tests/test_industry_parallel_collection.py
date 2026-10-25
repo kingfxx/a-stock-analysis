@@ -3,9 +3,9 @@ import threading
 
 import pytest
 
-from quarterly_dashboard import market_financial as mf
-from quarterly_dashboard.collection import ProviderBlocked, RequestCollector
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.market import market_financial as mf
+from stock_analysis.collection.collection import ProviderBlocked, RequestCollector
+from stock_analysis.infrastructure.storage import Database
 from test_market_financial import PERIOD, row
 
 

@@ -2,9 +2,17 @@
 
 更新日期：2026-09-30。本文说明当前实现的数据源、代码职责、数据存储，以及加载、更新与备份流程。功能概览、页面截图、启动方式和指标口径见 [README](../README.md)。
 
+## 代码目录整理（2026-10-25）
+
+主 Python 包已迁至 `stock_analysis/`，业务主题集中在 `domains/`，后端 HTTP 代码在 `http/`；仓库根 `web/` 为前端资源。公共采集在 `collection/`，SQLite/网络基础在 `infrastructure/`，维护在 `maintenance/`。航运专题位于 `domains/research/sectors/shipping/`。
+
+项目根路径统一从 `stock_analysis.paths.PROJECT_ROOT` 获取。数据仍保存在原 `data/`；SQL 迁移位于 `infrastructure/migrations/`，研究提示词在 `domains/research/assessment/prompts/`，资源随真实调用领域归档。目录迁移保持 SQL、提示词和资源字节不变。生成缓存不迁移。
+
+分阶段方案、逐文件映射、验证与后续职责拆分见 [目录整理计划](plans/20261025_代码目录结构整理/PLAN.md)。以下原有数据流程说明的业务语义保持，文件位置以迁移清单及实际源码为准。
+
 ## 当前数据源
 
-以下是**当前运行代码实际调用**的数据源；不是候选接口列表。数据源地址和字段映射分别定义在 [sources.py](../quarterly_dashboard/sources.py) 与 [valuation.py](../quarterly_dashboard/valuation.py)。
+以下是**当前运行代码实际调用**的数据源；不是候选接口列表。数据源地址和字段映射分别定义在 [sources.py](../stock_analysis/domains/stocks/sources.py) 与 [valuation.py](../stock_analysis/domains/valuation/valuation.py)。
 
 | 来源 | 实际获取的数据 | 在页面中的用途 | 实现入口 |
 |---|---|---|---|
@@ -40,20 +48,20 @@ PS(TTM)、ROIC、ROE、自由现金流、分红率、股息率及分位统计并
 |---|---|
 | [app.py](../app.py) | 命令行入口，解析 `--port`、`--open-browser`，启动本地服务。 |
 | [start_dashboard.bat](../start_dashboard.bat) | Windows 本机启动脚本，切换到仓库目录、运行 Python 并打开浏览器。 |
-| [quarterly_dashboard/server.py](../quarterly_dashboard/server.py) | 本地 HTTP 服务；组织财报、分红、估值、筹码和 `/api/prices`，使各异步接口使用固定价格版本。 |
-| [quarterly_dashboard/storage.py](../quarterly_dashboard/storage.py) | SQLite 连接、三版结构迁移、同步事务、实例锁、完整性检查和一致备份。 |
-| [quarterly_dashboard/update_service.py](../quarterly_dashboard/update_service.py) | 融资及股东来源事实、旧筹码 JSON 导入、增量更新和失败保留。 |
-| [quarterly_dashboard/price_service.py](../quarterly_dashboard/price_service.py) | 共享日价抓取、重叠/锚点核对、前复权版本发布、租约与清理。 |
-| [quarterly_dashboard/fundamental_service.py](../quarterly_dashboard/fundamental_service.py) | 新浪三表独立窗口/全量同步、旧缓存与手工覆盖合并、原始事实读取。 |
-| [quarterly_dashboard/dividend_service.py](../quarterly_dashboard/dividend_service.py) | 分红公告/除权窗口、未完成预案复查、事件身份与已实施现金查询。 |
-| [quarterly_dashboard/valuation_service.py](../quarterly_dashboard/valuation_service.py) | 百度多窗口观察、行业快照、旧月度兼容快照与覆盖元数据。 |
-| [quarterly_dashboard/price_projection.py](../quarterly_dashboard/price_projection.py) | 财务、估值和筹码图表的共享价格日期匹配。 |
-| [quarterly_dashboard/chips.py](../quarterly_dashboard/chips.py) | 筹码数据适配、完整分页检查、股东人数价格快照匹配、融资一年窗口和历史覆盖保护。 |
-| [quarterly_dashboard/network.py](../quarterly_dashboard/network.py) | 统一数据源 Session，默认直连，可通过 `DASHBOARD_USE_SYSTEM_PROXY=1` 启用系统／环境代理。 |
-| [quarterly_dashboard/sources.py](../quarterly_dashboard/sources.py) | 新浪／腾讯适配层：请求数据、解析数值、统一字段名称和利息费用符号、校正历史披露日期、分段获取行情。 |
-| [quarterly_dashboard/core.py](../quarterly_dashboard/core.py) | 财务纯计算：累计值拆季、连续四季度 TTM、年度视图、披露日快照、同比、利润率、ROE、债务／净现金、分红归属及年度分红率；调用 ROIC 纯函数。 |
-| [quarterly_dashboard/roic.py](../quarterly_dashboard/roic.py) | ROIC 纯计算与输入检查，保留 `excess_cash`、`non_operating_adjustments` 两个扩展口；不独立取数、不单独启动任务。 |
-| [quarterly_dashboard/valuation.py](../quarterly_dashboard/valuation.py) | 百度／东方财富适配与估值计算：原始观察、日／周／月聚合、PS、股息率、历史分位和同行对照。 |
+| [stock_analysis/http/server.py](../stock_analysis/http/server.py) | 本地 HTTP 服务；组织财报、分红、估值、筹码和 `/api/prices`，使各异步接口使用固定价格版本。 |
+| [stock_analysis/infrastructure/storage.py](../stock_analysis/infrastructure/storage.py) | SQLite 连接、三版结构迁移、同步事务、实例锁、完整性检查和一致备份。 |
+| [stock_analysis/domains/stocks/update_service.py](../stock_analysis/domains/stocks/update_service.py) | 融资及股东来源事实、旧筹码 JSON 导入、增量更新和失败保留。 |
+| [stock_analysis/domains/stocks/price_service.py](../stock_analysis/domains/stocks/price_service.py) | 共享日价抓取、重叠/锚点核对、前复权版本发布、租约与清理。 |
+| [stock_analysis/domains/financials/fundamental_service.py](../stock_analysis/domains/financials/fundamental_service.py) | 新浪三表独立窗口/全量同步、旧缓存与手工覆盖合并、原始事实读取。 |
+| [stock_analysis/domains/stocks/dividend_service.py](../stock_analysis/domains/stocks/dividend_service.py) | 分红公告/除权窗口、未完成预案复查、事件身份与已实施现金查询。 |
+| [stock_analysis/domains/valuation/valuation_service.py](../stock_analysis/domains/valuation/valuation_service.py) | 百度多窗口观察、行业快照、旧月度兼容快照与覆盖元数据。 |
+| [stock_analysis/domains/stocks/price_projection.py](../stock_analysis/domains/stocks/price_projection.py) | 财务、估值和筹码图表的共享价格日期匹配。 |
+| [stock_analysis/domains/stocks/chips.py](../stock_analysis/domains/stocks/chips.py) | 筹码数据适配、完整分页检查、股东人数价格快照匹配、融资一年窗口和历史覆盖保护。 |
+| [stock_analysis/infrastructure/network.py](../stock_analysis/infrastructure/network.py) | 统一数据源 Session，默认直连，可通过 `DASHBOARD_USE_SYSTEM_PROXY=1` 启用系统／环境代理。 |
+| [stock_analysis/domains/stocks/sources.py](../stock_analysis/domains/stocks/sources.py) | 新浪／腾讯适配层：请求数据、解析数值、统一字段名称和利息费用符号、校正历史披露日期、分段获取行情。 |
+| [stock_analysis/domains/financials/core.py](../stock_analysis/domains/financials/core.py) | 财务纯计算：累计值拆季、连续四季度 TTM、年度视图、披露日快照、同比、利润率、ROE、债务／净现金、分红归属及年度分红率；调用 ROIC 纯函数。 |
+| [stock_analysis/domains/financials/roic.py](../stock_analysis/domains/financials/roic.py) | ROIC 纯计算与输入检查，保留 `excess_cash`、`non_operating_adjustments` 两个扩展口；不独立取数、不单独启动任务。 |
+| [stock_analysis/domains/valuation/valuation.py](../stock_analysis/domains/valuation/valuation.py) | 百度／东方财富适配与估值计算：原始观察、日／周／月聚合、PS、股息率、历史分位和同行对照。 |
 | [web/index.html](../web/index.html) | 页面模板及前端 JS：股票搜索、A/B/C 选择、Plotly 图表、悬停详情、多轴零点对齐、后台加载状态及标签页选项保存。 |
 | [tests/](../tests/) | Python 回归测试，覆盖解析、财务周期、ROIC、分红率、缓存保护、后台加载和估值。 |
 | `tests/chart_hover.cjs`、`chart_axes.cjs`、`background_loading.cjs` | 用 Node.js 执行页面中的实际渲染／加载逻辑，检查悬停、零轴范围和异步更新；由 Python 测试调用。 |

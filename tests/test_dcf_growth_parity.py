@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard.dcf import calculate_dcf, calculate_growth_dcf
+from stock_analysis.domains.valuation.dcf import calculate_dcf, calculate_growth_dcf
 
 
 @pytest.mark.parametrize('base,stages,rate,terminal', [

@@ -15,9 +15,9 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from quarterly_dashboard.chips import DATA_URL, _fetch_chip_report
-from quarterly_dashboard.network import create_data_session
-from quarterly_dashboard.sources import TENCENT_URL, parse_daily_prices, symbol_for
+from stock_analysis.domains.stocks.chips import DATA_URL, _fetch_chip_report
+from stock_analysis.infrastructure.network import create_data_session
+from stock_analysis.domains.stocks.sources import TENCENT_URL, parse_daily_prices, symbol_for
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = ROOT / "docs" / "data-sources" / "storage-upgrade-p0-samples.json"

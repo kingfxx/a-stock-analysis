@@ -5,10 +5,10 @@ from urllib.parse import urlparse, parse_qs
 
 import pytest
 
-from quarterly_dashboard import server, market_congestion
-from quarterly_dashboard.index_prices import publish_prices, read_overlay
-from quarterly_dashboard.index_read_service import IndexReadService
-from quarterly_dashboard.index_repository import publish
+from stock_analysis.http import server; from stock_analysis.domains.market import market_congestion
+from stock_analysis.domains.indices.index_prices import publish_prices, read_overlay
+from stock_analysis.domains.indices.index_read_service import IndexReadService
+from stock_analysis.domains.indices.index_repository import publish
 from test_index_prices import db, seed, point
 
 

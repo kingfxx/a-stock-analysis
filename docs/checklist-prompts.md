@@ -1,6 +1,6 @@
 # 投资前定性 checklist 提示词
 
-版本：v11，2026-10-11。后台使用 `quarterly_dashboard/prompts/checklist_v11.txt`；历史任务保留原提示词版本。18项维持简短定性结论，其中产品盈利摘要、国内外收入、生命周期及竞争排名增强如下。
+版本：v11，2026-10-11。后台使用 `stock_analysis/domains/research/assessment/prompts/checklist_v11.txt`；历史任务保留原提示词版本。18项维持简短定性结论，其中产品盈利摘要、国内外收入、生命周期及竞争排名增强如下。
 
 ## 推荐使用方式
 

@@ -7,9 +7,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import requests
 
-from quarterly_dashboard.collection import ProviderBlocked, RequestCollector, begin_batch, encoded
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard import market_financial as mf
+from stock_analysis.collection.collection import ProviderBlocked, RequestCollector, begin_batch, encoded
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.domains.market import market_financial as mf
 from test_market_financial import row as financial_row, PERIOD
 
 

@@ -1,0 +1,55 @@
+# 前端文件迁移清单
+
+旧静态 URL 保持；完整哈希见 FRONTEND_MIGRATION.json。
+
+| 旧 web 相对路径 | 新 web 相对路径 |
+|---|---|
+| `ai-assessment.css` | `features/research/assessment/ai-assessment.css` |
+| `ai-assessment.js` | `features/research/assessment/ai-assessment.js` |
+| `ai-checklist.css` | `features/research/assessment/ai-checklist.css` |
+| `ai-checklist.js` | `features/research/assessment/ai-checklist.js` |
+| `business-judgment.js` | `features/research/assessment/business-judgment.js` |
+| `business-segment-aliases.js` | `features/financials/business-segment-aliases.js` |
+| `business-segment-names.js` | `features/financials/business-segment-names.js` |
+| `business-segments.css` | `features/financials/business-segments.css` |
+| `business-segments.js` | `features/financials/business-segments.js` |
+| `collection-progress.css` | `features/maintenance/collection-progress.css` |
+| `collection-progress.js` | `features/maintenance/collection-progress.js` |
+| `congestion.js` | `features/market/congestion.js` |
+| `datetime.js` | `shared/datetime.js` |
+| `dcf.css` | `features/valuation/dcf.css` |
+| `dcf.js` | `features/valuation/dcf.js` |
+| `dividend-forecast.css` | `features/valuation/dividend-forecast.css` |
+| `dividend-forecast.js` | `features/valuation/dividend-forecast.js` |
+| `financial-statements.css` | `features/financials/financial-statements.css` |
+| `financial-statements.js` | `features/financials/financial-statements.js` |
+| `index.html` | `pages/index.html` |
+| `indices.css` | `features/indices/indices.css` |
+| `indices.html` | `pages/indices.html` |
+| `indices.js` | `features/indices/indices.js` |
+| `industry.css` | `features/industries/industry.css` |
+| `industry.js` | `features/industries/industry.js` |
+| `investment-notes.css` | `features/notes/investment-notes.css` |
+| `investment-notes.js` | `features/notes/investment-notes.js` |
+| `maintenance.css` | `features/maintenance/maintenance.css` |
+| `maintenance.js` | `features/maintenance/maintenance.js` |
+| `research-layout.css` | `shared/research-layout.css` |
+| `research-sidebar.html` | `shared/research-sidebar.html` |
+| `samples/industry-summary.html` | `samples/industry-summary.html` |
+| `shipping-forecast.css` | `features/research/sectors/shipping/shipping-forecast.css` |
+| `shipping-forecast.html` | `pages/shipping-forecast.html` |
+| `shipping-forecast.js` | `features/research/sectors/shipping/shipping-forecast.js` |
+| `stock-cleanup.js` | `features/maintenance/stock-cleanup.js` |
+| `stock-picker.js` | `shared/stock-picker.js` |
+| `vendor/notes/codemirror.css` | `vendor/notes/codemirror.css` |
+| `vendor/notes/codemirror.js` | `vendor/notes/codemirror.js` |
+| `vendor/notes/footnote.js` | `vendor/notes/footnote.js` |
+| `vendor/notes/LICENSE-codemirror` | `vendor/notes/LICENSE-codemirror` |
+| `vendor/notes/LICENSE-footnote` | `vendor/notes/LICENSE-footnote` |
+| `vendor/notes/LICENSE-markdown-it` | `vendor/notes/LICENSE-markdown-it` |
+| `vendor/notes/LICENSE-purify` | `vendor/notes/LICENSE-purify` |
+| `vendor/notes/manifest.json` | `vendor/notes/manifest.json` |
+| `vendor/notes/markdown-it.js` | `vendor/notes/markdown-it.js` |
+| `vendor/notes/markdown-mode.js` | `vendor/notes/markdown-mode.js` |
+| `vendor/notes/purify.js` | `vendor/notes/purify.js` |
+| `vendor/notes/README.md` | `vendor/notes/README.md` |

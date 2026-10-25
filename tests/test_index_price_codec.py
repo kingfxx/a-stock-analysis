@@ -3,9 +3,9 @@ import sqlite3
 from datetime import date,timedelta
 
 import pytest
-from quarterly_dashboard.index_price_codec import PriceCodec,encode_day,decode_day,encode_time,decode_time
-from quarterly_dashboard.index_prices import publish_prices
-from quarterly_dashboard.maintenance import table_time
+from stock_analysis.domains.indices.index_price_codec import PriceCodec,encode_day,decode_day,encode_time,decode_time
+from stock_analysis.domains.indices.index_prices import publish_prices
+from stock_analysis.maintenance.maintenance import table_time
 from test_index_prices import db,seed,point,price_fact
 
 
@@ -91,7 +91,7 @@ def test_unknown_snapshot_members_survive_as_explicit_fallback(db):
 
 
 def test_numeric_history_does_not_expand_provenance(db,monkeypatch):
-    from quarterly_dashboard.index_prices import read_prices
+    from stock_analysis.domains.indices.index_prices import read_prices
     batch,sid,_=seed(db)
     with db.connection(write=True) as conn:publish_prices(conn,[point(batch,sid)])
     monkeypatch.setattr(PriceCodec,'decode_rows',lambda *a:pytest.fail('Numeric history must not expand provenance'))
@@ -101,7 +101,7 @@ def test_numeric_history_does_not_expand_provenance(db,monkeypatch):
 
 
 def test_backup_check_rejects_unknown_lineage_version(db):
-    from quarterly_dashboard.storage import StorageError
+    from stock_analysis.infrastructure.storage import StorageError
     batch,sid,_=seed(db)
     with db.connection(write=True) as conn:
         publish_prices(conn,[point(batch,sid)])
@@ -110,10 +110,10 @@ def test_backup_check_rejects_unknown_lineage_version(db):
 
 
 def test_failed_migration_rolls_back_and_can_resume_after_fix(tmp_path,monkeypatch):
-    from quarterly_dashboard import storage
-    from quarterly_dashboard.storage import Database
-    from quarterly_dashboard.index_prices import price_hash,DEFINITIONS,FIELDS
-    from quarterly_dashboard.collection import encoded
+    from stock_analysis.infrastructure import storage
+    from stock_analysis.infrastructure.storage import Database
+    from stock_analysis.domains.indices.index_prices import price_hash,DEFINITIONS,FIELDS
+    from stock_analysis.collection.collection import encoded
     database=Database(tmp_path/'old.sqlite3')
     with monkeypatch.context() as old:
         old.setattr(storage,'MIGRATIONS',tuple(m for m in storage.MIGRATIONS if m[0]<=37))

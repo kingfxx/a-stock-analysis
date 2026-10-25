@@ -8,8 +8,8 @@ from datetime import date, timedelta
 
 import pytest
 
-from quarterly_dashboard import storage
-from quarterly_dashboard.storage import (Database, StorageError, StaleSyncError, SyncKey,
+from stock_analysis.infrastructure import storage
+from stock_analysis.infrastructure.storage import (Database, StorageError, StaleSyncError, SyncKey,
                                          SyncResult, instance_lock, restore_backup, utc_now)
 
 
@@ -412,7 +412,7 @@ def test_daily_backup_retention_only_removes_owned_daily_files(db, tmp_path):
 
 def test_instance_lock_prevents_other_process_and_releases_after_exception(db):
     command = [sys.executable, "-c",
-               "from quarterly_dashboard.storage import instance_lock; import sys; "
+               "from stock_analysis.infrastructure.storage import instance_lock; import sys; "
                "exec('with instance_lock(sys.argv[1]):\\n print(\"acquired\")')", str(db.path)]
     with pytest.raises(RuntimeError):
         with instance_lock(db.path):
@@ -426,11 +426,11 @@ def test_instance_lock_prevents_other_process_and_releases_after_exception(db):
 
 
 def test_maintenance_cli_requires_no_runtime_dependencies(db, tmp_path):
-    result = subprocess.run([sys.executable, "-m", "quarterly_dashboard.storage", "check",
+    result = subprocess.run([sys.executable, "-m", "stock_analysis.infrastructure.storage", "check",
                              "--database", str(db.path)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["integrity"] == "ok"
-    result = subprocess.run([sys.executable, "-m", "quarterly_dashboard.storage", "backup",
+    result = subprocess.run([sys.executable, "-m", "stock_analysis.infrastructure.storage", "backup",
                              "--database", str(db.path), "--output", str(tmp_path / "cli.sqlite3")],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

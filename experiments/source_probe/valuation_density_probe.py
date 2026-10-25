@@ -7,7 +7,7 @@ from itertools import combinations
 from pathlib import Path
 
 from experiments.source_probe.p4_incremental_probe import Probe
-from quarterly_dashboard.valuation import BAIDU_URL, BAIDU_INDICATORS
+from stock_analysis.domains.valuation.valuation import BAIDU_URL, BAIDU_INDICATORS
 
 
 def main():

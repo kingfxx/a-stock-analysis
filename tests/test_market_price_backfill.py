@@ -3,10 +3,10 @@ import sqlite3
 
 import pytest
 
-from quarterly_dashboard.market_price_backfill import periods, positive, publish
-from quarterly_dashboard.maintenance import MaintenanceService, table_time
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard.stock_library import StockLibrary
+from stock_analysis.domains.market.market_price_backfill import periods, positive, publish
+from stock_analysis.maintenance.maintenance import MaintenanceService, table_time
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.domains.stocks.stock_library import StockLibrary
 
 
 @pytest.fixture
@@ -78,7 +78,7 @@ def test_quarters_and_invalid_prices():
 
 
 def test_preparation_preserves_missing_and_excludes_prelisting(tmp_path,monkeypatch):
-    from quarterly_dashboard import market_price_backfill as module
+    from stock_analysis.domains.market import market_price_backfill as module
     monkeypatch.setattr(module,'ROOT',tmp_path)
     folder=tmp_path/'data/verification/samples/prices';folder.mkdir(parents=True)
     inventory={'member_import_id':1,'calendar_sources':[],

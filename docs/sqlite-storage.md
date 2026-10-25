@@ -18,7 +18,7 @@ v37仅扩展既有`index_price_observations`，新增volume、amount、change_po
 | `field_lineage_json` | 固定格式2的位置数组，字段位图顺序固定；原始修订/字段来源差异、计算时来源/输入/修订/分母事实ID/version/计算时间均保留。空证据为`[]`，异常/撤回/未知成员显式`{"fallback":完整原证据}`，不丢失未识别信息 |
 | 索引 | 仅序列×日期唯一、日期×序列检索两项；移除被物理唯一覆盖的版本唯一和latest部分索引 |
 
-统一编解码在`quarterly_dashboard/index_price_codec.py`。源批次/取得时间通过来源ID恢复，估算父分母事实保留原修订行，不能就地修改已引用历史。格式2的公式/口径及14字段序号固定，改动必须升级协议/定义，不能修改常量使旧证据产生新解释。完整展开时批量加载父引用并缓存，日常图表仅读日期/点位；未变化估算直接检查紧凑依赖快照，不展开整套证据。
+统一编解码在`stock_analysis/domains/indices/index_price_codec.py`。源批次/取得时间通过来源ID恢复，估算父分母事实保留原修订行，不能就地修改已引用历史。格式2的公式/口径及14字段序号固定，改动必须升级协议/定义，不能修改常量使旧证据产生新解释。完整展开时批量加载父引用并缓存，日常图表仅读日期/点位；未变化估算直接检查紧凑依赖快照，不展开整套证据。
 
 新增只读View `index_price_observations_read`恢复ISO日期、hex hash、来源批次/取得时间和最新标记；其中`field_lineage_json`仍为内部紧凑结构，完整说明通过codec恢复。View不占业务存储，维护分类“指数数据”。物理表和View的维护时间依据均为解码后的真实updated_at及关联来源obtained_at，空表显示无数据，不用观察日替代。
 
@@ -320,7 +320,7 @@ ORDER BY f.observation_date DESC;
 
 来源取得时间为`collection_sources.obtained_at`，事实写入时间为`updated_at`；维护页取两者的真实最大时间。观察日不代替更新时间；空表显示暂无数据，缺少可用时间时显示未记录。重复检查时间及逐字段首末非空日见公共批次结果，不能通过事实行更新时间推断最近一次检查。
 
-年度闭区间分页执行、初始化清单、近期检查新鲜度及逐字段覆盖均保存在公共采集批次。GDP字段仅记实际非空观察，不套日度收益率的发布频率；尚无可靠中美发布日历，因此`coverage_status=unknown`不代表逐日完整，日历间隔也不能直接认定漏采。采集和恢复入口及限制见[指数页国债收益率采集](index-data-collection.md#中美国债收益率采集)。表结构和数值规则分别以[v39迁移](../quarterly_dashboard/migrations/039_sovereign_yields.sql)及[采集实现](../quarterly_dashboard/bond_yields.py)为准。
+年度闭区间分页执行、初始化清单、近期检查新鲜度及逐字段覆盖均保存在公共采集批次。GDP字段仅记实际非空观察，不套日度收益率的发布频率；尚无可靠中美发布日历，因此`coverage_status=unknown`不代表逐日完整，日历间隔也不能直接认定漏采。采集和恢复入口及限制见[指数页国债收益率采集](index-data-collection.md#中美国债收益率采集)。表结构和数值规则分别以[v39迁移](../stock_analysis/infrastructure/migrations/039_sovereign_yields.sql)及[采集实现](../stock_analysis/domains/market/bond_yields.py)为准。
 
 ## 3. 更新、缓存与价格一致性
 
@@ -398,7 +398,7 @@ ORDER BY f.observation_date DESC;
 
 ## 4. 数据库结构与事务保障
 
-迁移文件位于 `quarterly_dashboard/migrations/`：
+迁移文件位于 `stock_analysis/infrastructure/migrations/`：
 
 | 版本 | 文件 | 主要变化 |
 | --- | --- | --- |
@@ -452,14 +452,14 @@ journal 模式由所加载的 SQLite 运行库决定：`auto` 只有在代码认
 
 ## 6. 检查、手动备份与恢复
 
-以下命令在项目根目录执行。维护入口 `quarterly_dashboard.storage` 使用 Python 标准库；检查和在线备份可在后台运行时执行，初始化/迁移与正式库替换需要先停止同库后台。
+以下命令在项目根目录执行。维护入口 `stock_analysis.infrastructure.storage` 使用 Python 标准库；检查和在线备份可在后台运行时执行，初始化/迁移与正式库替换需要先停止同库后台。
 
 ```powershell
 # 核验结构、SQLite完整性、外键及业务来源关系，不更新数据源。
-python -m quarterly_dashboard.storage check
+python -m stock_analysis.infrastructure.storage check
 
 # 初始化或升级；同库后台运行时会被实例锁拒绝。
-python -m quarterly_dashboard.storage init
+python -m stock_analysis.infrastructure.storage init
 ```
 
 ### 6.1 创建独立手动备份
@@ -467,7 +467,7 @@ python -m quarterly_dashboard.storage init
 ```powershell
 $backupStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $manualBackup = "data/backups/manual-$backupStamp.sqlite3"
-python -m quarterly_dashboard.storage backup --output $manualBackup
+python -m stock_analysis.infrastructure.storage backup --output $manualBackup
 ```
 
 输出路径必须尚不存在，重复使用同名文件会失败。备份包含全部应用表及状态，不是单只股票的导出。
@@ -478,17 +478,17 @@ python -m quarterly_dashboard.storage backup --output $manualBackup
 
 ```powershell
 $restorePath = "data/verification/reports/storage/restored-$backupStamp.sqlite3"
-python -m quarterly_dashboard.storage restore --database $manualBackup --output $restorePath
+python -m stock_analysis.infrastructure.storage restore --database $manualBackup --output $restorePath
 
 # 与当前结构版本匹配时，执行完整检查。
-python -m quarterly_dashboard.storage check --database $restorePath
+python -m stock_analysis.infrastructure.storage check --database $restorePath
 ```
 
 恢复命令会锁住目标路径，并拒绝已有目标及其 SQLite 辅助文件，**不会覆盖或自动切换当前正式数据库**。备份本身使用与其历史结构匹配的检查；如果恢复的是旧版本，可在没有后台使用恢复库时运行：
 
 ```powershell
-python -m quarterly_dashboard.storage init --database $restorePath
-python -m quarterly_dashboard.storage check --database $restorePath
+python -m stock_analysis.infrastructure.storage init --database $restorePath
+python -m stock_analysis.infrastructure.storage check --database $restorePath
 ```
 
 正式切换需要另行执行：停止 8765 后台并确认退出 → 给当前正式库创建独立备份 → 核验恢复库 → 在没有活动连接的情况下替换正式文件 → 重启后台并确认页面、结构和数据读取正常。不要直接覆盖活动 `.sqlite3`，也不要遗漏 WAL 模式下尚未处理的辅助文件。
@@ -507,16 +507,16 @@ python -m quarterly_dashboard.storage check --database $restorePath
 
 | 内容 | 代码依据 |
 | --- | --- |
-| 表结构、索引与触发器 | [迁移目录](../quarterly_dashboard/migrations/) |
-| 迁移、连接、同步提交、检查、备份及恢复 | [storage.py](../quarterly_dashboard/storage.py) |
-| 启动顺序、页面缓存、各数据 API | [server.py](../quarterly_dashboard/server.py) |
-| 筹码事实、增量范围与备份触发 | [update_service.py](../quarterly_dashboard/update_service.py) |
-| 融资精简与沿用来源检查 | [financing_storage.py](../quarterly_dashboard/financing_storage.py) |
-| 共享价格、版本发布及租约清理 | [price_service.py](../quarterly_dashboard/price_service.py) |
-| 财报、分红与估值更新 | [fundamental_service.py](../quarterly_dashboard/fundamental_service.py)、[dividend_service.py](../quarterly_dashboard/dividend_service.py)、[valuation_service.py](../quarterly_dashboard/valuation_service.py) |
+| 表结构、索引与触发器 | [迁移目录](../stock_analysis/infrastructure/migrations/) |
+| 迁移、连接、同步提交、检查、备份及恢复 | [storage.py](../stock_analysis/infrastructure/storage.py) |
+| 启动顺序、页面缓存、各数据 API | [server.py](../stock_analysis/http/server.py) |
+| 筹码事实、增量范围与备份触发 | [update_service.py](../stock_analysis/domains/stocks/update_service.py) |
+| 融资精简与沿用来源检查 | [financing_storage.py](../stock_analysis/domains/stocks/financing_storage.py) |
+| 共享价格、版本发布及租约清理 | [price_service.py](../stock_analysis/domains/stocks/price_service.py) |
+| 财报、分红与估值更新 | [fundamental_service.py](../stock_analysis/domains/financials/fundamental_service.py)、[dividend_service.py](../stock_analysis/domains/stocks/dividend_service.py)、[valuation_service.py](../stock_analysis/domains/valuation/valuation_service.py) |
 | 图表范围、频率及刷新操作 | [web/index.html](../web/index.html) |
-| 全字段交易日快照、季度恢复与来源回放 | [market_trade_snapshot.py](../quarterly_dashboard/market_trade_snapshot.py)、[字段字典](../quarterly_dashboard/resources/market_trade_snapshot_fields.json) |
-| 公共来源归档、同源预算与冷却 | [collection.py](../quarterly_dashboard/collection.py) |
+| 全字段交易日快照、季度恢复与来源回放 | [market_trade_snapshot.py](../stock_analysis/domains/market/market_trade_snapshot.py)、[字段字典](../stock_analysis/domains/market/resources/market_trade_snapshot_fields.json) |
+| 公共来源归档、同源预算与冷却 | [collection.py](../stock_analysis/collection/collection.py) |
 
 历史实测参见 [P4/P5 验收](data-sources/p4-acceptance.md)、[融资存储精简验收](data-sources/financing-compaction-acceptance.md)。这些记录用于说明特定日期的测试结果，不应代替当前代码规则。
 

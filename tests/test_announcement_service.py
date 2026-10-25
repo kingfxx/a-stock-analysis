@@ -2,10 +2,10 @@
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from quarterly_dashboard.announcement_service import AnnouncementService
-from quarterly_dashboard.collection import archive_source, parsed_source
-from quarterly_dashboard.disclosure_dates import classify
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.stocks.announcement_service import AnnouncementService
+from stock_analysis.collection.collection import archive_source, parsed_source
+from stock_analysis.domains.stocks.disclosure_dates import classify
+from stock_analysis.infrastructure.storage import Database
 
 
 def item(title, published, code='601919', ident=None):
@@ -116,7 +116,7 @@ def test_old_cached_pending_dates_do_not_trigger_warning(tmp_path):
 
 
 def test_unchanged_tail_preserves_historical_missing_without_rechecking(tmp_path,monkeypatch):
-    import quarterly_dashboard.announcement_service as module
+    import stock_analysis.domains.stocks.announcement_service as module
     db,svc,reports=setup(tmp_path)
     reports.append({'period':'2021-12-31'})
     first=svc.update('601919',reports,allow_initial=True)

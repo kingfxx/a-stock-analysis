@@ -5,10 +5,10 @@ from datetime import date
 
 import pytest
 
-from quarterly_dashboard import storage
-from quarterly_dashboard.financing_storage import effective_fields
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult, instance_lock
-from quarterly_dashboard.update_service import ChipService, FINANCING_SOURCE
+from stock_analysis.infrastructure import storage
+from stock_analysis.domains.stocks.financing_storage import effective_fields
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, instance_lock
+from stock_analysis.domains.stocks.update_service import ChipService, FINANCING_SOURCE
 
 
 def legacy(tmp_path, monkeypatch, invalid=False):

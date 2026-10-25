@@ -1,13 +1,13 @@
 import json
 from uuid import uuid4
 import pytest
-from quarterly_dashboard.analysis_repository import AnalysisRepository
-from quarterly_dashboard.analysis_service import AnalysisService
-from quarterly_dashboard.checklist_snapshot import capture
-from quarterly_dashboard.checklist_validation import ITEMS,OUTPUT_VERSION,prompt,validate_output
-from quarterly_dashboard.company_report_service import CompanyReportService
-from quarterly_dashboard.report_backup import backup,restore
-from quarterly_dashboard.storage import Database,SyncKey,SyncResult
+from stock_analysis.domains.research.assessment.analysis_repository import AnalysisRepository
+from stock_analysis.domains.research.assessment.analysis_service import AnalysisService
+from stock_analysis.domains.research.assessment.checklist_snapshot import capture
+from stock_analysis.domains.research.assessment.checklist_validation import ITEMS,OUTPUT_VERSION,prompt,validate_output
+from stock_analysis.domains.research.reports.company_report_service import CompanyReportService
+from stock_analysis.domains.research.reports.report_backup import backup,restore
+from stock_analysis.infrastructure.storage import Database,SyncKey,SyncResult
 from test_ai_assessment import database,FakeProvider,service,wait_terminal
 
 
@@ -138,7 +138,7 @@ def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypa
     import re
     from http.server import ThreadingHTTPServer
     from threading import Thread
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
     playwright=pytest.importorskip('playwright.sync_api')
     item=checklist_service(database);item.repository.set_model('test-model')
     monkeypatch.setattr(server,'DATABASE_PATH',database.path)
@@ -249,7 +249,7 @@ def test_hash_directory_migration_preserves_cache_history_and_versioning(databas
 
 
 def test_discover_fulltext_titles_and_cached_report_state(database,monkeypatch,tmp_path):
-    from quarterly_dashboard import company_report_service as module
+    from stock_analysis.domains.research.reports import company_report_service as module
     from datetime import datetime,timezone
     class Response:
         def __init__(self,data):self.data=data

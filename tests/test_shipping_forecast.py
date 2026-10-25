@@ -3,14 +3,14 @@ from pathlib import Path
 import json
 import sqlite3
 import pytest
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard.collection import begin_batch,archive_source,parsed_source
-from quarterly_dashboard.shipping_sources import parse_sse,parse_mot,discover_mot,parse_throughput
-from quarterly_dashboard.shipping_forecast import (publish_rates,current_rates,months_for,rate_window,calculate,
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.collection.collection import begin_batch,archive_source,parsed_source
+from stock_analysis.domains.research.sectors.shipping.shipping_sources import parse_sse,parse_mot,discover_mot,parse_throughput
+from stock_analysis.domains.research.sectors.shipping.shipping_forecast import (publish_rates,current_rates,months_for,rate_window,calculate,
     defaults,save_version,read_version,model_context,read_forecast,read_trend)
-from quarterly_dashboard.collection_management import CollectionManagement,validate_params,TASKS
-from quarterly_dashboard.maintenance import DESCRIPTIONS,table_time
-from quarterly_dashboard import shipping_collection
+from stock_analysis.collection.collection_management import CollectionManagement,validate_params,TASKS
+from stock_analysis.maintenance.maintenance import DESCRIPTIONS,table_time
+from stock_analysis.domains.research.sectors.shipping import shipping_collection
 
 FIX=Path(__file__).parent/'fixtures/shipping'
 
@@ -235,7 +235,7 @@ def test_throughput_publication_month_and_negative_values():
 
 
 def test_formal_page_and_read_only_contract(db,monkeypatch):
-    from quarterly_dashboard.collection import RequestCollector
+    from stock_analysis.collection.collection import RequestCollector
     monkeypatch.setattr(RequestCollector,'get',lambda *a,**k:pytest.fail('GET不得采集'))
     payload=read_forecast(db,'2026Q3')
     assert not payload['coverage'] and payload['context']['model'] is None
@@ -245,7 +245,7 @@ def test_formal_page_and_read_only_contract(db,monkeypatch):
 
 
 def test_save_snapshot_and_stale_input(db,monkeypatch):
-    import quarterly_dashboard.shipping_forecast as module
+    import stock_analysis.domains.research.sectors.shipping.shipping_forecast as module
     context=dict(target='2026Q3',model_version=module.MODEL,input_hash='abc',anchor=dict(revenue=100,cost=70,pretax=20,profit=15),
         business=dict(international=80,unit_rmb=5000),model=dict(slope=2),anchor_window=dict(value=1000),target_window=dict(value=1200),history=[])
     monkeypatch.setattr(module,'model_context',lambda *a:deepcopy(context))
@@ -254,7 +254,7 @@ def test_save_snapshot_and_stale_input(db,monkeypatch):
     with db.connection(write=True) as conn:
         with pytest.raises(sqlite3.IntegrityError):conn.execute('UPDATE research_shipping_forecast_versions SET name=? WHERE id=?',('修改',id))
     original=read_version(db,id)
-    from quarterly_dashboard.shipping_forecast import delete_version
+    from stock_analysis.domains.research.sectors.shipping.shipping_forecast import delete_version
     assert delete_version(db,id)=={'deleted':id}
     with pytest.raises(ValueError,match='版本不存在'):read_version(db,id)
     with pytest.raises(ValueError,match='版本不存在'):delete_version(db,id)
@@ -264,7 +264,7 @@ def test_save_snapshot_and_stale_input(db,monkeypatch):
 
 
 def test_weekly_managed_incremental_and_refusal_stops_shared_source(db,monkeypatch):
-    from quarterly_dashboard.collection import ProviderBlocked
+    from stock_analysis.collection.collection import ProviderBlocked
     sent=[]
     class Collector:
         def __init__(self,db,**kwargs):self.db=db
@@ -297,7 +297,7 @@ def test_cancel_before_source_keeps_no_facts(db):
 
 
 def test_image_review_preserves_source_and_is_idempotent(db,tmp_path):
-    from quarterly_dashboard.shipping_image_review import import_review
+    from stock_analysis.domains.research.sectors.shipping.shipping_image_review import import_review
     b=begin_batch(db,'image-test','shipping.mot_rates','mot',domain='research_shipping')
     html=b'<title>2026\xe5\xb9\xb48\xe6\x9c\x88\xe4\xb8\xad\xe5\x9b\xbd\xe5\x87\xba\xe5\x8f\xa3\xe9\x9b\x86\xe8\xa3\x85\xe7\xae\xb1\xe8\xbf\x90\xe4\xbb\xb7\xe6\x8c\x87\xe6\x95\xb0</title><p>2026-09-03</p><img src="table.png">'
     hs=archive_source(db,b,'mot','shipping.mot_rates',dict(url='https://www.mot.gov.cn/month.html'),1,raw=html)
@@ -315,7 +315,7 @@ def test_image_review_preserves_source_and_is_idempotent(db,tmp_path):
 
 
 def test_formal_quarter_prepare_reuses_local_pdf_and_no_network(db,monkeypatch):
-    from quarterly_dashboard.company_report_service import CompanyReportService
+    from stock_analysis.domains.research.reports.company_report_service import CompanyReportService
     service=CompanyReportService(db)
     file=db.path.parent/'q1.pdf';file.write_bytes(b'%PDF-test')
     doc=service.import_report('601919','2026-03-31',file,url='https://static.cninfo.com.cn/q1.pdf')
@@ -326,8 +326,8 @@ def test_formal_quarter_prepare_reuses_local_pdf_and_no_network(db,monkeypatch):
 
 
 def test_monthly_recovery_logs_reused_segments_and_keeps_failed_history(db,monkeypatch):
-    from quarterly_dashboard.collection import finish_batch, RequestCollector
-    from quarterly_dashboard.shipping_sources import MOT
+    from stock_analysis.collection.collection import finish_batch, RequestCollector
+    from stock_analysis.domains.research.sectors.shipping.shipping_sources import MOT
     month='2026-08';scope=dict(mode='backfill',start=month+'-01',end=month+'-31')
     with db.connection(write=True) as c:old=shipping_collection.reserve(c,'shipping_monthly',scope)
     directory=f'<a href="rates.html">2026年8月中国出口集装箱运价指数</a><a href="analysis.html">2026年8月集装箱运输市场分析</a>'
@@ -360,7 +360,7 @@ def test_monthly_recovery_logs_reused_segments_and_keeps_failed_history(db,monke
 
 
 def test_reused_month_rejects_corrupt_archive_and_records_failure(db):
-    from quarterly_dashboard.collection import finish_batch
+    from stock_analysis.collection.collection import finish_batch
     b=begin_batch(db,'old','shipping.mot_rates','mot',scope=dict(url='https://www.mot.gov.cn/test.html'),domain='research_shipping')
     source=archive_source(db,b,'mot','shipping.mot_rates',dict(url='https://www.mot.gov.cn/test.html'),1,raw=b'original')
     parsed_source(db,source,fields=['verified']);finish_batch(db,b,'complete','partial')

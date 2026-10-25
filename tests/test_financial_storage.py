@@ -6,11 +6,11 @@ import sqlite3
 
 import pytest
 
-from quarterly_dashboard import storage
-from quarterly_dashboard.financial_storage import (
+from stock_analysis.infrastructure import storage
+from stock_analysis.domains.financials.financial_storage import (
     MAGIC, HEADER_BYTES, MAX_RAW_BYTES, compress_json, decompress_json, financial_row,
 )
-from quarterly_dashboard.storage import Database, StorageError, SyncKey, SyncResult, instance_lock
+from stock_analysis.infrastructure.storage import Database, StorageError, SyncKey, SyncResult, instance_lock
 
 
 RAW = '{"未知字段":[null,0,-3,"0.000000","--",""],"data":[],"rCurrency":"CNY"}'

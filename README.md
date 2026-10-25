@@ -1,4 +1,4 @@
-# A 股季度分析页面
+# A 股分析工具
 
 本地运行的 A 股分析工具，提供企业经营趋势、财务三表、估值、筹码、行业对比和投资 checklist。数据保存在本地 SQLite，支持独立刷新、备份与恢复。
 
@@ -85,3 +85,7 @@ python -m pytest tests -q
 自动测试使用隔离临时数据库。前端回归还需要 Node.js，部分真实浏览器测试需 Edge；测试端口须与日常后台分开。运行与项目维护约定见 [AGENTS.md](AGENTS.md)。
 
 - [中远海控利润预测：正式数据、三情景与版本复盘](docs/shipping-forecast.md)（601919经营趋势历史表下入口，来源采集统一在采集管理）。
+
+## 代码组织
+
+Python 主包为 `stock_analysis`：`domains/` 按业务主题组织，`http/` 处理后端 HTTP，`collection/` 提供公共采集，`infrastructure/` 提供数据库与网络基础，`maintenance/` 负责维护。前端资源位于仓库根 `web/`。启动命令保持 `python app.py --port 8765 --open-browser`。具体迁移阶段和映射见[目录整理计划](docs/plans/20261025_代码目录结构整理/PLAN.md)。

@@ -12,7 +12,7 @@
 
 ## 图片与本地资料
 
-图片先通过公共来源归档，再进行本地OCR与多结果校验。运行依赖见requirements-shipping-ocr.txt及quarterly_dashboard/resources/shipping_ocr.ps1；不安装时不能将未知图片静默判定完成。低置信、冲突或未知布局保留待核验，可显式导入核验JSON：image_source_id、html_source_id、month、published_on、verified、rows。verified须为true，每行route、annual、ytd、monthly、change；保留图片／正文配对和核验文件证据，事实引用真实图片来源。相同核验文件重放不新增事实，不扩大声明覆盖。
+图片先通过公共来源归档，再进行本地OCR与多结果校验。运行依赖见requirements-shipping-ocr.txt及stock_analysis/domains/research/sectors/shipping/resources/shipping_ocr.ps1；不安装时不能将未知图片静默判定完成。低置信、冲突或未知布局保留待核验，可显式导入核验JSON：image_source_id、html_source_id、month、published_on、verified、rows。verified须为true，每行route、annual、ytd、monthly、change；保留图片／正文配对和核验文件证据，事实引用真实图片来源。相同核验文件重放不新增事实，不扩大声明覆盖。
 
 既有研究资料导入为特定已核验Excel及研究快照的迁入器，需要data/verification/reports/ccfi-profit-lab及对应samples的本地研究文件。先校验Excel、14份PDF及逐页解析哈希，再复用正式company_reports存储；不是任意Excel导入器。原始Excel、日历推定和备注归档，转录／推定日期不冒充官方。原来源文件不随Git提交，资料迁移应包含公共归档及正式PDF。
 

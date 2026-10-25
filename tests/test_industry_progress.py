@@ -1,11 +1,11 @@
 import json
 
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.infrastructure.storage import Database
 
 
 def test_live_progress_is_atomically_merged_and_final_aggregation_survives(tmp_path,monkeypatch):
-    from quarterly_dashboard import industry_updates
+    from stock_analysis.domains.industries import industry_updates
 
     db=Database(tmp_path/'industry-progress.sqlite3');db.initialize()
     service=IndustryService(db,tmp_path/'industry-sources')

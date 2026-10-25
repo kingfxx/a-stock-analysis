@@ -2,7 +2,7 @@
 
 import argparse
 
-from quarterly_dashboard.server import serve
+from stock_analysis.http.server import serve
 
 
 if __name__ == "__main__":

@@ -6,9 +6,9 @@ from threading import Thread
 import pytest
 import requests
 
-from quarterly_dashboard import server
-from quarterly_dashboard.collection import encoded
-from quarterly_dashboard.index_repository import publish
+from stock_analysis.http import server
+from stock_analysis.collection.collection import encoded
+from stock_analysis.domains.indices.index_repository import publish
 from test_index_collection import db, source
 
 
@@ -72,7 +72,7 @@ def test_index_http_read_collect_cancel_and_cross_origin(index_server):
 
 
 def test_index_point_overlay_http_reports_selected_real_series(index_server):
-    from quarterly_dashboard.index_prices import publish_prices
+    from stock_analysis.domains.indices.index_prices import publish_prices
     from test_index_prices import point as index_point,seed as point_seed
     base,_,db=index_server
     batch,sid,code=point_seed(db)
@@ -110,7 +110,7 @@ def test_browser_cooldown_time_is_beijing_to_seconds(index_server):
 
 def test_browser_toggles_real_index_points_on_right_axis(index_server):
     playwright=pytest.importorskip('playwright.sync_api')
-    from quarterly_dashboard.index_prices import publish_prices
+    from stock_analysis.domains.indices.index_prices import publish_prices
     from test_index_prices import point as index_point,seed as point_seed
     base,_,db=index_server
     batch,sid,code=point_seed(db)
@@ -140,9 +140,9 @@ def test_browser_toggles_real_index_points_on_right_axis(index_server):
 
 def test_browser_overlay_follows_index_selection_and_legend_is_named_below_chart(index_server):
     playwright=pytest.importorskip('playwright.sync_api')
-    from quarterly_dashboard.collection import finish_batch
-    from quarterly_dashboard.index_prices import publish_prices
-    from quarterly_dashboard.index_repository import publish
+    from stock_analysis.collection.collection import finish_batch
+    from stock_analysis.domains.indices.index_prices import publish_prices
+    from stock_analysis.domains.indices.index_repository import publish
     from test_index_prices import point as index_point,seed as point_seed
     base,_,db=index_server
     batch,sid,code=point_seed(db)
@@ -250,8 +250,8 @@ def test_browser_index_sidebar_restores_shared_stock_picker(index_server):
 
 
 def test_index_views_match_stock_rules_and_preserve_raw_values():
-    from quarterly_dashboard.index_repository import index_valuation_views
-    from quarterly_dashboard.valuation import valuation_summary_observations
+    from stock_analysis.domains.indices.index_repository import index_valuation_views
+    from stock_analysis.domains.valuation.valuation import valuation_summary_observations
     rows = [dict(observation_date=f"2026-0{month}-09", frequency='daily',
                  pe_rolling=value, dividend_yield=0) for month, value in [(1, -2), (2, 10), (3, 20), (4, 30)]]
     views = index_valuation_views(rows)
@@ -269,7 +269,7 @@ def test_index_views_match_stock_rules_and_preserve_raw_values():
 
 
 def test_browser_industry_primary_and_secondary_selection(index_server):
-    from quarterly_dashboard.index_repository import catalog
+    from stock_analysis.domains.indices.index_repository import catalog
     base, calls, database = index_server
     with database.connection(write=True) as conn:
         for code, name, level, parent in [('sw:1','一级行业',1,None), ('sw:2','对应二级',2,'sw:1'), ('sw:3','待核对二级',2,None), ('sw:4','另一一级',1,None), ('sw:5','另一二级',2,'sw:4')]:
@@ -305,7 +305,7 @@ def test_browser_industry_primary_and_secondary_selection(index_server):
 
 
 def test_browser_metric_first_defaults_and_filtered_choices(index_server):
-    from quarterly_dashboard.index_repository import catalog
+    from stock_analysis.domains.indices.index_repository import catalog
     base, calls, database = index_server
     for provider, series, values in [
         ('legu','pb.ordinary',{'pb':1.2}), ('legu','pb.equal',{'pb':1.6}),
@@ -362,7 +362,7 @@ def test_browser_metric_first_defaults_and_filtered_choices(index_server):
 
 
 def test_current_taxonomy_mapping_is_unique_and_does_not_change_history(db):
-    from quarterly_dashboard.index_repository import catalog, read_indices
+    from stock_analysis.domains.indices.index_repository import catalog, read_indices
     with db.connection(write=True) as conn:
         conn.executemany('INSERT INTO sw_industries(code,name,level,parent_code) VALUES(?,?,?,?)',[
             ('110000','First',1,None), ('110100','Child',2,'110000'),
@@ -386,8 +386,8 @@ def test_current_taxonomy_mapping_is_unique_and_does_not_change_history(db):
 
 def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state(index_server):
     playwright=pytest.importorskip('playwright.sync_api')
-    from quarterly_dashboard.collection import encoded
-    from quarterly_dashboard.index_collection import start_operation
+    from stock_analysis.collection.collection import encoded
+    from stock_analysis.domains.indices.index_collection import start_operation
     base,_,db=index_server
     operation=start_operation(db,mode='incremental',providers=['csindex'])
     with db.connection(write=True) as conn:

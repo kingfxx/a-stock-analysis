@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard import dividend_forecast as forecast, server
-from quarterly_dashboard.dividend_service import DividendService, SOURCE as DIVIDEND_SOURCE
-from quarterly_dashboard.fundamental_service import SOURCE
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult
+from stock_analysis.domains.valuation import dividend_forecast as forecast; from stock_analysis.http import server
+from stock_analysis.domains.stocks.dividend_service import DividendService, SOURCE as DIVIDEND_SOURCE
+from stock_analysis.domains.financials.fundamental_service import SOURCE
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult
 from test_dcf_server import request
 
 

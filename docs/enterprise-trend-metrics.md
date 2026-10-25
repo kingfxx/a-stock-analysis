@@ -166,15 +166,15 @@ PE／PB／PS 的有效分位样本要求值为正，股息率允许零。负 PE 
 
 | 代码 | 职责 |
 |---|---|
-| [sources.py](../quarterly_dashboard/sources.py) | 新浪财报解析、字段别名、披露日期校正 |
-| [fundamental_service.py](../quarterly_dashboard/fundamental_service.py) | 财报事实读取、旧记录补充、覆盖字段应用 |
-| [core.py](../quarterly_dashboard/core.py) | 单季／年度／TTM、ROE、利润率、现金流、市值与同比 |
-| [roic.py](../quarterly_dashboard/roic.py) | ROIC 与投入资本纯计算 |
-| [price_projection.py](../quarterly_dashboard/price_projection.py) | 共享价格匹配至季末、披露日及筹码观察日 |
-| [dividend_service.py](../quarterly_dashboard/dividend_service.py) | 分红事件状态、每十股转每股及来源股本 |
-| [valuation.py](../quarterly_dashboard/valuation.py) | PS、股息率、周期聚合、分位和参考线 |
-| [valuation_service.py](../quarterly_dashboard/valuation_service.py) | 百度估值事实与同业快照读取／更新 |
-| [chips.py](../quarterly_dashboard/chips.py) | 东方财富筹码事实解析 |
+| [sources.py](../stock_analysis/domains/stocks/sources.py) | 新浪财报解析、字段别名、披露日期校正 |
+| [fundamental_service.py](../stock_analysis/domains/financials/fundamental_service.py) | 财报事实读取、旧记录补充、覆盖字段应用 |
+| [core.py](../stock_analysis/domains/financials/core.py) | 单季／年度／TTM、ROE、利润率、现金流、市值与同比 |
+| [roic.py](../stock_analysis/domains/financials/roic.py) | ROIC 与投入资本纯计算 |
+| [price_projection.py](../stock_analysis/domains/stocks/price_projection.py) | 共享价格匹配至季末、披露日及筹码观察日 |
+| [dividend_service.py](../stock_analysis/domains/stocks/dividend_service.py) | 分红事件状态、每十股转每股及来源股本 |
+| [valuation.py](../stock_analysis/domains/valuation/valuation.py) | PS、股息率、周期聚合、分位和参考线 |
+| [valuation_service.py](../stock_analysis/domains/valuation/valuation_service.py) | 百度估值事实与同业快照读取／更新 |
+| [chips.py](../stock_analysis/domains/stocks/chips.py) | 东方财富筹码事实解析 |
 | [index.html](../web/index.html) | 18 项菜单、图表单位、悬浮说明与用户选择 |
 
 调整指标时同步核对本文件、页面说明与上述实现；区分来源直接取数、程序推算、历史导入和人工覆盖，不把预期取数规则写成已实现行为。

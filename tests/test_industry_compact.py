@@ -1,11 +1,11 @@
 import copy
 import json
 
-from quarterly_dashboard.industry_compact import compact_financial_rows, fingerprint, prune_extension_predecessors
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.industry_sources import attach_financial_source, financial_rows
-from quarterly_dashboard.industry_storage import latest_financial_rows
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.industries.industry_compact import compact_financial_rows, fingerprint, prune_extension_predecessors
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.domains.industries.industry_sources import attach_financial_source, financial_rows
+from stock_analysis.domains.industries.industry_storage import latest_financial_rows
+from stock_analysis.infrastructure.storage import Database
 from test_industries import fixture_bundle
 
 

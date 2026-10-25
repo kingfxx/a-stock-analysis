@@ -3,8 +3,8 @@ import copy
 import pytest
 
 from industry_financial_fixture import PublishedIndustryService, publish_financials
-from quarterly_dashboard.industry_service import company_valuation
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.industries.industry_service import company_valuation
+from stock_analysis.infrastructure.storage import Database
 from test_industries import fixture_bundle
 
 
@@ -37,7 +37,7 @@ def test_quarter_end_valuation_same_date_and_ttm_across_modes(tmp_path):
     with db.connection(write=True) as conn:
         member_id=conn.execute('SELECT member_import_id FROM sw_imports ORDER BY id DESC LIMIT 1').fetchone()[0]
         conn.execute("INSERT INTO sw_cap_quarter_rosters VALUES('2025Q2','2025-06-30','current_constituents_backfill',?)",(member_id,))
-    from quarterly_dashboard.market_price_backfill import publish
+    from stock_analysis.domains.market.market_price_backfill import publish
     publish(db,{'member_import_id':member_id,'sources':[{'source':'bigquant:cn_stock_real_bar1d',
         'dataset':'cn_stock_real_bar1d','params':{},'file_path':'test.json.gz','content_hash':'b'*64,
         'obtained_at':'2026-10-10'}], 'rows':[{'security_code':'300750','exchange':'sz',

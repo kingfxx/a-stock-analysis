@@ -3,8 +3,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from quarterly_dashboard.disclosure_dates import apply_disclosure_dates, choose, classify
-from quarterly_dashboard.sources import normalize_report_dates
+from stock_analysis.domains.stocks.disclosure_dates import apply_disclosure_dates, choose, classify
+from stock_analysis.domains.stocks.sources import normalize_report_dates
 
 
 def _item(title, day, key="a1", **extra):
@@ -163,7 +163,7 @@ def test_retained_conflict_is_idempotent_and_normalization_preserves_final_date(
     assert normalize_report_dates(normalize_report_dates([retained])) == [retained]
 
 def test_directional_earnings_forecasts_are_not_formal_reports():
-    from quarterly_dashboard.disclosure_dates import classify, is_earnings_notice
+    from stock_analysis.domains.stocks.disclosure_dates import classify, is_earnings_notice
     from datetime import datetime
     for suffix in ('预增', '预减', '预盈', '预亏', '预告', '快报'):
         title = '中远海控2024年度业绩' + suffix + '公告'

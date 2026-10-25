@@ -2,8 +2,8 @@
 
 import pytest
 
-from quarterly_dashboard import server
-from quarterly_dashboard.valuation import (aggregate_valuation_rows,
+from stock_analysis.http import server
+from stock_analysis.domains.valuation.valuation import (aggregate_valuation_rows,
                                            valuation_observation_rows,
                                            valuation_summary_observations)
 

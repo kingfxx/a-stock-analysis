@@ -1,6 +1,6 @@
 import pytest
 
-from quarterly_dashboard import server
+from stock_analysis.http import server
 
 
 @pytest.fixture(autouse=True)

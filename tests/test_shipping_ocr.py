@@ -3,10 +3,10 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import pytest
-from quarterly_dashboard import shipping_ocr as ocr, shipping_collection
-from quarterly_dashboard.shipping_sources import MOT, monthly_points
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard.collection import archive_source
+from stock_analysis.domains.research.sectors.shipping import shipping_ocr as ocr; from stock_analysis.domains.research.sectors.shipping import shipping_collection
+from stock_analysis.domains.research.sectors.shipping.shipping_sources import MOT, monthly_points
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.collection.collection import archive_source
 
 FIX=Path(__file__).parent/'fixtures/shipping'
 
@@ -87,7 +87,7 @@ def test_managed_image_uses_actual_image_source_and_keeps_failed_evidence(tmp_pa
 
 
 def test_historical_analysis_without_disclosure_is_not_a_parse_failure():
-    from quarterly_dashboard.shipping_sources import parse_throughput,NoThroughputDisclosure
+    from stock_analysis.domains.research.sectors.shipping.shipping_sources import parse_throughput,NoThroughputDisclosure
     html='<title>2014年1月份中国出口集装箱运输市场分析报告</title><p>2014-02-10</p><div class="article-content">'+('本月航运市场分析，欧洲航线运价及市场需求。'*25)+'</div>'
     with pytest.raises(NoThroughputDisclosure):parse_throughput(html,'2014-01')
     # A truncated/login/wrong-month response must not become a successful empty disclosure.

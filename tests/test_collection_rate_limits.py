@@ -3,11 +3,11 @@ import json
 
 import pytest
 
-from quarterly_dashboard.collection import PacingPolicy, ProviderBlocked, RequestCollector, begin_batch
-from quarterly_dashboard.collection_management import CollectionManagement
-from quarterly_dashboard.collection_rate_limits import describe, fields, task_for_batch, validate
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.storage import Database
+from stock_analysis.collection.collection import PacingPolicy, ProviderBlocked, RequestCollector, begin_batch
+from stock_analysis.collection.collection_management import CollectionManagement
+from stock_analysis.collection.collection_rate_limits import describe, fields, task_for_batch, validate
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.infrastructure.storage import Database
 from test_collection_provider_pacing import Clock, Session, Response
 
 
@@ -122,7 +122,7 @@ def test_industry_tasks_and_cli_backfills_remain_distinct(management,action,expe
 
 
 def test_configuration_inventory_and_real_timestamp(management):
-    from quarterly_dashboard.maintenance import MaintenanceService, table_time
+    from stock_analysis.maintenance.maintenance import MaintenanceService, table_time
     db=management.db
     inventory=MaintenanceService(db).read()
     row=next(r for r in inventory['tables'] if r['name']=='collection_rate_limits')

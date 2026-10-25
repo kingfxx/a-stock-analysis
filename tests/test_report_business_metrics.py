@@ -1,7 +1,7 @@
 import json
 import pytest
-from quarterly_dashboard.report_business_metrics import business_metrics
-from quarterly_dashboard.checklist_validation import prompt
+from stock_analysis.domains.research.reports.report_business_metrics import business_metrics
+from stock_analysis.domains.research.assessment.checklist_validation import prompt
 from test_ai_assessment import database
 
 PROFIT = """2026年半年度分部信息
@@ -82,8 +82,8 @@ def test_new_prompt_retains_simple_schema_and_distinguishes_numeric_scope():
 
 def test_cached_excerpts_keep_both_reports_and_wrapped_ranking(database,tmp_path,monkeypatch):
     import pdfplumber
-    from quarterly_dashboard.company_report_service import CompanyReportService
-    from quarterly_dashboard.checklist_snapshot import capture
+    from stock_analysis.domains.research.reports.company_report_service import CompanyReportService
+    from stock_analysis.domains.research.assessment.checklist_snapshot import capture
     text=''
     class Page:
         def __init__(self,value):self.value=value
@@ -157,8 +157,8 @@ def test_main_business_bad_totals_missing_cost_or_column_order_rejected(text):
 
 def test_business_revenue_evidence_reaches_both_report_snapshots(database,tmp_path,monkeypatch):
     import pdfplumber
-    from quarterly_dashboard.company_report_service import CompanyReportService
-    from quarterly_dashboard.checklist_snapshot import capture
+    from stock_analysis.domains.research.reports.company_report_service import CompanyReportService
+    from stock_analysis.domains.research.assessment.checklist_snapshot import capture
     text=''
     class Page:
         def extract_text(self):return text
@@ -335,7 +335,7 @@ def test_ambiguous_joined_columns_rejected_instead_of_skipping_amounts():
 
 def test_historical_display_repair_preserves_snapshot():
     import copy
-    from quarterly_dashboard.report_business_metrics import product_display_corrections
+    from stock_analysis.domains.research.reports.report_business_metrics import product_display_corrections
     old={'revenue_mix':{'period':'2025-12-31','rows':[{'name':'客车产品3,622,876.432,712,654.55'}]}}
     snapshot={'evidence':[{'id':'report.page','metric':'report_excerpt','value':[{'text':JOINED_AMOUNTS,'business_metrics':old}]}]}
     saved=copy.deepcopy(snapshot)
@@ -349,7 +349,7 @@ def test_historical_display_repair_preserves_snapshot():
 def test_wrapped_labels_and_percentage_fragments_from_saved_report():
     import copy,json
     from pathlib import Path
-    from quarterly_dashboard.report_business_metrics import product_display_corrections
+    from stock_analysis.domains.research.reports.report_business_metrics import product_display_corrections
     sample=json.loads((Path(__file__).parent/'fixtures/checklist-601766-table-source.json').read_text(encoding='utf-8'))
     snapshot={'evidence':sample['evidence']}
     original=copy.deepcopy(snapshot)

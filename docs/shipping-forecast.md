@@ -22,7 +22,7 @@
 
 ## 资料迁入及正式财报
 
-一次性迁入通过 `quarterly_dashboard.shipping_import` 或采集管理「航运采集 → 既有研究资料导入」显式执行，选择原Excel路径，按Excel与研究快照哈希核验，复用14份PDF及逐页解析。此入口是既有研究版本的迁入器，不支持未经重新核验的任意Excel排版或变更文件。原始Excel、日历推定和备注保存在公共归档，图中转录与推定周日期不标成官方历史。正式读取不依赖verification目录。
+一次性迁入通过 `stock_analysis.domains.research.sectors.shipping.shipping_import` 或采集管理「航运采集 → 既有研究资料导入」显式执行，选择原Excel路径，按Excel与研究快照哈希核验，复用14份PDF及逐页解析。此入口是既有研究版本的迁入器，不支持未经重新核验的任意Excel排版或变更文件。原始Excel、日历推定和备注保存在公共归档，图中转录与推定周日期不标成官方历史。正式读取不依赖verification目录。
 
 财报原件按哈希复用/迁入company_reports，解析注册 `ccfi_research_pages_v1`，业务指标注册 `ccfi-business-v1`，证据页及原币种/单位保留。原研究及来源样本不删除。未来指定单份季度报告由页面明确「准备此期正式报告与业务表」执行，CompanyReportService.prepare_period用本地已核验正式公告（包括Q1/Q3）定位PDF，经公共cninfo请求器获取、校验、解析，再提取业务表。没有公告或业务表不能推定成功，不触发模型。既有annual/interim准备流程不扩大自动授权。
 

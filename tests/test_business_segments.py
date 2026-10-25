@@ -6,11 +6,11 @@ from decimal import Decimal
 import pytest
 import requests
 
-from quarterly_dashboard import business_segment_service as module
-from quarterly_dashboard.business_segment_service import BusinessSegmentService, ten_year_floor, parse_rows
-from quarterly_dashboard.collection import RequestCollector
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.financials import business_segment_service as module
+from stock_analysis.domains.financials.business_segment_service import BusinessSegmentService, ten_year_floor, parse_rows
+from stock_analysis.collection.collection import RequestCollector
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.infrastructure.storage import Database
 
 
 def item(period='2025-12-31', name='饮料', value=100, **extra):
@@ -193,9 +193,9 @@ def test_transaction_rollback_and_source_foreign_key(tmp_path, monkeypatch):
 
 
 def test_cleanup_all_revisions(tmp_path, monkeypatch):
-    from quarterly_dashboard.stock_library import StockLibrary
-    from quarterly_dashboard.stock_cleanup import StockCleanupService
-    from quarterly_dashboard.database_restore import RequestGate
+    from stock_analysis.domains.stocks.stock_library import StockLibrary
+    from stock_analysis.maintenance.stock_cleanup import StockCleanupService
+    from stock_analysis.maintenance.database_restore import RequestGate
     db, svc, session = setup(tmp_path, monkeypatch)
     for value in (100, 200, 300):
         session.rows[0]['MAIN_BUSINESS_INCOME'] = value
@@ -216,9 +216,9 @@ def test_cleanup_all_revisions(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('mode', ['normal', 'segment_failure', 'financial_failure'])
 def test_financial_integration_is_independent(tmp_path, monkeypatch, mode):
-    from quarterly_dashboard import server
-    from quarterly_dashboard.fundamental_service import FundamentalService
-    from quarterly_dashboard.announcement_service import AnnouncementService
+    from stock_analysis.http import server
+    from stock_analysis.domains.financials.fundamental_service import FundamentalService
+    from stock_analysis.domains.stocks.announcement_service import AnnouncementService
     from test_announcement_server_integration import _seed_legacy
     db = Database(tmp_path / 'stock.sqlite3')
     root = tmp_path / 'fundamentals'
@@ -246,7 +246,7 @@ def test_financial_integration_is_independent(tmp_path, monkeypatch, mode):
 
 def test_read_api_never_updates(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
     db, svc, session = setup(tmp_path, monkeypatch)
     svc.update('605499')
     monkeypatch.setattr(server, 'services', lambda: (SimpleNamespace(db=db),))
@@ -293,7 +293,7 @@ def test_rank_change_is_not_business_revision_and_sources_immutable(tmp_path, mo
 
 def test_loading_considers_mainop_failure_quiet_period(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
     db, svc, session = setup(tmp_path, monkeypatch)
     db.ensure_instrument('605499', '东鹏饮料')
     monkeypatch.setattr(server, 'services', lambda: (SimpleNamespace(db=db),))

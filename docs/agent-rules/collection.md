@@ -4,7 +4,7 @@
 
 ## 公共集采设计与接入规则
 
-- **以后新增或改造批量采集，统一复用 `quarterly_dashboard/collection.py` 的公共来源归档、请求调度及 `collection_batches / collection_sources / collection_provider_state`，不各自实现批次追溯和限速。** 指数接入参考 `index_collection.py`；实际机制见 `docs/index-data-collection.md`。既有财务／价格采集尚未全部接入，不能把本规则描述为旧流程已统一；旧历史迁移另定范围，不因新增采集自动迁移或改写旧数据。
+- **以后新增或改造批量采集，统一复用 `stock_analysis/collection/collection.py` 的公共来源归档、请求调度及 `collection_batches / collection_sources / collection_provider_state`，不各自实现批次追溯和限速。** 指数接入参考 `index_collection.py`；实际机制见 `docs/index-data-collection.md`。既有财务／价格采集尚未全部接入，不能把本规则描述为旧流程已统一；旧历史迁移另定范围，不因新增采集自动迁移或改写旧数据。
 - 职责分层：一次用户启动是一个 operation；按日期段／报告期／名单范围／行业层级划分可独立校验、提交和恢复的 batch；每次实际请求及每次重试是一个 source。operation 管启动、取消、进度、互斥及最终汇总，batch 管分段执行和覆盖，source 管参数、响应及解析证据。当前 `index_collection_operations` 是指数任务控制表；其他领域优先复用适用的现有控制层，确需统一时再设计公共 operation，不为每个接口新增一套任务表。operation 汇总可来自批次，不重复存储原始响应。
 - 公共批次明确登记 `domain/dataset/source_system`、`operation_id`、范围和范围参数、频率、名单版本（适用时）、触发方式、解析及定义版本、真实开始／结束时间。幂等键和恢复判断必须包含实际业务范围及口径，不能只凭开始日期或任务名称跳过不同名单、层级、接口或定义的任务。
 - 每次请求（成功、失败、拒绝、重试）集中登记来源：真实提供方、脱敏请求参数、批次、请求标识、尝试序号、HTTP／请求／解析状态、错误、实际取得时间、原始文件和哈希。原始响应在数据库旁 `collection_sources/` 原子归档，分别保存 HTTP 解码后原文 SHA256 与压缩存储文件 SHA256；先保留证据再发布事实。无响应时允许文件／哈希为空；未知参数、时间和旧历史不能编造。缓存复用保留原采集时间和复用关系，不冒充新请求。迁移／备份恢复必须同时考虑原始文件，SQLite 备份不包含它们。

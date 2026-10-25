@@ -6,18 +6,18 @@ from uuid import uuid4
 
 import pytest
 import requests
-from quarterly_dashboard import business_judgment as business, server
-from quarterly_dashboard.analysis_service import AnalysisService
-from quarterly_dashboard.analysis_snapshot import encoded
-from quarterly_dashboard.analysis_repository import AnalysisRepository
-from quarterly_dashboard.ai_provider import ChatGPTProvider, PLAN_SCOPE, ProviderError
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.research.assessment import business_judgment as business; from stock_analysis.http import server
+from stock_analysis.domains.research.assessment.analysis_service import AnalysisService
+from stock_analysis.domains.research.assessment.analysis_snapshot import encoded
+from stock_analysis.domains.research.assessment.analysis_repository import AnalysisRepository
+from stock_analysis.domains.research.ai.ai_provider import ChatGPTProvider, PLAN_SCOPE, ProviderError
+from stock_analysis.infrastructure.storage import Database
 from test_ai_assessment import FakeProvider, MemoryCredentials, StreamResponse, wait_terminal
 
 
 @pytest.fixture
 def db(tmp_path,monkeypatch):
-    monkeypatch.setattr('quarterly_dashboard.industry_position.collect',lambda *args:None)
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_position.collect',lambda *args:None)
     item = Database(tmp_path/'isolated.sqlite3'); item.initialize()
     item.ensure_instrument('600900', '测试公司'); item.ensure_instrument('601919', '中远海控')
     return item
@@ -153,7 +153,7 @@ def test_validation_refuses_untraceable_or_inconsistent_output(db, fault):
 
 def test_shared_worker_dispatches_both_types_and_keeps_history_separate(db):
     # Legacy task uses its own synthetic input; new module works without local finance.
-    from quarterly_dashboard.analysis_validation import prompt
+    from stock_analysis.domains.research.assessment.analysis_validation import prompt
     provider=Provider(); provider.release.clear()
     old=AnalysisService(db,provider, snapshotter=business.capture, prompt_factory=prompt, validator=lambda text,data:{'summary':'旧类型测试'})
     new=service(db,provider,shared=old)
@@ -276,7 +276,7 @@ def test_browser_generation_history_evidence_and_layout(db):
                 elif path=='/api/business-judgment':
                     data=item.overview('601919')
                     if data.get('report'):
-                        from quarterly_dashboard.industry_position import parse
+                        from stock_analysis.domains.industries.industry_position import parse
                         sample=json.loads((root/'tests/fixtures/alphaliner-top100-20261010.json').read_text(encoding='utf-8'))
                         data['report']['result']['industry_position']=parse(sample,captured_at='2026-10-10T04:00:00+00:00')
                     if active[0]:data['active']=active[0]
@@ -474,7 +474,7 @@ def test_supplied_local_report_url_is_not_misclassified_as_unretrieved():
 
 def test_public_industry_rpc_sample_and_generation_persistence(db,monkeypatch):
     from pathlib import Path
-    from quarterly_dashboard.industry_position import parse,PAGE
+    from stock_analysis.domains.industries.industry_position import parse,PAGE
     raw=json.loads((Path(__file__).resolve().parents[1]/'tests/fixtures/alphaliner-top100-20261010.json').read_text(encoding='utf-8'))
     value=parse(raw,captured_at='2026-10-10T04:00:00+00:00')
     assert value['company']=={'rank':4,'name':'COSCO Group','teu':3670793,'share_pct':10.6}
@@ -483,7 +483,7 @@ def test_public_industry_rpc_sample_and_generation_persistence(db,monkeypatch):
     value['response_sha256']='a'*64
     evidence={'id':'industry.position','metric':'industry_position','source':PAGE,'observed_on':'2026-10-10','value':value}
     calls=[]
-    monkeypatch.setattr('quarterly_dashboard.industry_position.collect',lambda *args:calls.append(1) or evidence)
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_position.collect',lambda *args:calls.append(1) or evidence)
     class WithIndustry(Provider):
         def infer(self,*args,**kwargs):
             output=super().infer(*args,**kwargs);data=args[3]
@@ -501,7 +501,7 @@ def test_public_industry_rpc_sample_and_generation_persistence(db,monkeypatch):
 
 
 def test_invalid_industry_ranking_is_not_accepted():
-    from quarterly_dashboard.industry_position import parse
+    from stock_analysis.domains.industries.industry_position import parse
     payload=[{'action':'top100','type':'rpc','method':'getTop100Table','result':[
         {'rank':1,'operator':'COSCO Group','totalTeu':1,'percent':10.6}]*5}]
     with pytest.raises(ValueError):parse(payload,captured_at='2026-10-10T04:00:00+00:00')
@@ -543,7 +543,7 @@ def test_business_json_accepts_only_complete_object_or_fence(db,wrapper):
 
 @pytest.mark.parametrize('text',['说明\n{}','{} {}','```json\n{}','{"code":"601919",}','{"code":'])
 def test_business_json_rejects_prose_truncation_and_syntax_errors(db,text):
-    from quarterly_dashboard.analysis_validation import ReportValidationError
+    from stock_analysis.domains.research.assessment.analysis_validation import ReportValidationError
     with pytest.raises(ReportValidationError,match='不是有效 JSON') as caught:
         business.validate(text,business.capture(db,'601919')['input'])
     assert caught.value.diagnostic['format_error']['line']>=1
@@ -751,8 +751,8 @@ def test_ambiguous_duplicate_source_id_remains_rejected(db):
 
 def test_annual_bargaining_is_read_without_checklist_and_reserved_before_budget(db,tmp_path,monkeypatch):
     import pdfplumber
-    from quarterly_dashboard.company_report_service import CompanyReportService
-    from quarterly_dashboard.analysis_snapshot import digest
+    from stock_analysis.domains.research.reports.company_report_service import CompanyReportService
+    from stock_analysis.domains.research.assessment.analysis_snapshot import digest
     text='600900 2025 年度报告\n主要销售客户及主要供应商情况\n前五名客户销售额5380132.68万元，占年度销售总额35.40%；前五名供应商采购额6293907.69万元，占年度采购总额47.37%；其中关联方占年度采购总额42.49%。\n'+('年度说明 '*150)
     class Page:
         def extract_text(self):return text

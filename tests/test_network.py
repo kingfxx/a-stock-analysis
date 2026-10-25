@@ -1,6 +1,6 @@
 import requests
 
-from quarterly_dashboard.network import create_data_session
+from stock_analysis.infrastructure.network import create_data_session
 
 
 def test_default_session_ignores_environment_and_windows_proxies(monkeypatch):

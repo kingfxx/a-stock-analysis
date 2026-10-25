@@ -36,7 +36,7 @@ v30未新增表，交易快照用途扩展为东财原始值及独立历史合�
 - 数据更新时间取已有采集、写入或关联批次时间，页面逐表说明字段依据。报告期不会当作更新时间；缺少时间记录显示「未记录」，空表显示「暂无数据」。删除记录等未留时间的操作不能从这些字段中推断。
 - 同时显示当前数据库路径、结构版本、SQLite 版本、日志模式、最近备份与备份目录总大小。备份时间来自文件修改时间；原始响应、PDF 和备份文件不计入 SQLite 表大小。
 
-统计读取使用只读连接，表格首列、表头固定；窄屏在表格内横向滚动。用途说明维护在 `quarterly_dashboard/maintenance.py` 的 `DESCRIPTIONS`；新增表尚未登记时显示「尚未登记用途」。
+统计读取使用只读连接，表格首列、表头固定；窄屏在表格内横向滚动。用途说明维护在 `stock_analysis/maintenance/maintenance.py` 的 `DESCRIPTIONS`；新增表尚未登记时显示「尚未登记用途」。
 
 本次验收资料位于 `data/verification/reports/maintenance_20261004/`。
 
@@ -52,7 +52,7 @@ Schema v18 新增 `market_financial_income`、`market_financial_balance`、`mark
 
 Schema v32 重建四张财务事实表，以可空旧引用列加公共引用列兼容历史和新采集；逐列保留历史事实及旧来源 ID。新公共来源文件仍位于数据库旁 `collection_sources/`，SQLite 维护大小不含文件内容。财务事实表的实际采集时间继续读取行内 `obtained_at`，公共请求时间可由公共来源 `obtained_at` 对照；`sw_memberships` 时间依据包括关联的 `sw_imports.obtained_at`、旧 listing source 或新 `collection_sources.obtained_at`。版本迁移本身不会采集数据或重标来源。
 
-- [ ] 在 `quarterly_dashboard/maintenance.py` 的 `DESCRIPTIONS` 登记用途和分类；表改名或用途变更时同步更新。
+- [ ] 在 `stock_analysis/maintenance/maintenance.py` 的 `DESCRIPTIONS` 登记用途和分类；表改名或用途变更时同步更新。
 - [ ] 核对 `TIME_COLUMNS`、`PARENT_TIMES` 或 `table_time` 中的更新时间依据，明确实际字段或关联批次；无适用记录时说明原因并显示「未记录」，不使用报告期或交易日替代。
 - [ ] 在隔离数据库迁移后核对统计接口／维护页的表发现、用途、分类、记录数、大小和更新时间显示；特殊时间规则检查空表及缺值，并更新相关文档。
 

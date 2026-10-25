@@ -1,0 +1,892 @@
+[
+  {
+    "old": "quarterly_dashboard/__init__.py",
+    "new": "stock_analysis/__init__.py",
+    "sha256": "f6220e7653cf0c499c251bc0b1d6401e6eb7bd525e52fcfbc93b8fb2aa3582ca"
+  },
+  {
+    "old": "quarterly_dashboard/ai_provider.py",
+    "new": "stock_analysis/domains/research/ai/ai_provider.py",
+    "sha256": "d9661fba0b1b3001af7f88b1522ddeed3fe37abd4141c854fdba106a6c47ef54"
+  },
+  {
+    "old": "quarterly_dashboard/analysis_chips.py",
+    "new": "stock_analysis/domains/research/assessment/analysis_chips.py",
+    "sha256": "d098a5180347e6821c8a49b2d4b9a0d111f85f57790901b335f8b7e51849d962"
+  },
+  {
+    "old": "quarterly_dashboard/analysis_facts.py",
+    "new": "stock_analysis/domains/research/assessment/analysis_facts.py",
+    "sha256": "ef91663b296431562b44863861e83aadfa1fcc89500e48998cd99d7266eef7d8"
+  },
+  {
+    "old": "quarterly_dashboard/analysis_repository.py",
+    "new": "stock_analysis/domains/research/assessment/analysis_repository.py",
+    "sha256": "0d9ef47ee283aadfee0244b868270b651e7a37239a3c34c1172e289f930783f5"
+  },
+  {
+    "old": "quarterly_dashboard/analysis_service.py",
+    "new": "stock_analysis/domains/research/assessment/analysis_service.py",
+    "sha256": "48d134b3f1620d8823ebc4ead42c594564385c89cb437ba8e74fc632dd2946e0"
+  },
+  {
+    "old": "quarterly_dashboard/analysis_snapshot.py",
+    "new": "stock_analysis/domains/research/assessment/analysis_snapshot.py",
+    "sha256": "695de1fc5d3dac9597931daf01718094540893e41793d56767f7321fa6efc6b3"
+  },
+  {
+    "old": "quarterly_dashboard/analysis_validation.py",
+    "new": "stock_analysis/domains/research/assessment/analysis_validation.py",
+    "sha256": "36186383210434d386cd051539fe3b7e303c7f088153050a46a4acab45d30339"
+  },
+  {
+    "old": "quarterly_dashboard/announcement_service.py",
+    "new": "stock_analysis/domains/stocks/announcement_service.py",
+    "sha256": "da656246ebf272e6c89db8faeac02bf5e453982ee7e94b7e5fbe97864e14fd5c"
+  },
+  {
+    "old": "quarterly_dashboard/announcement_sources.py",
+    "new": "stock_analysis/domains/stocks/announcement_sources.py",
+    "sha256": "048c359735450b8081dfe4179f037521c003227de95b45970f5d79ddceb006df"
+  },
+  {
+    "old": "quarterly_dashboard/bigquant_sdk.py",
+    "new": "stock_analysis/domains/market/bigquant_sdk.py",
+    "sha256": "75768c9753b37843db4cbb09bc36a2eabdb3e96de9479bc25f5394a693f2a4f3"
+  },
+  {
+    "old": "quarterly_dashboard/bond_yield_audit.py",
+    "new": "stock_analysis/domains/market/bond_yield_audit.py",
+    "sha256": "3b7005b688c43527a2d43c2d25547d0270b978bf70f1110f76fa1d9dc63bf54a"
+  },
+  {
+    "old": "quarterly_dashboard/bond_yields.py",
+    "new": "stock_analysis/domains/market/bond_yields.py",
+    "sha256": "1b66857ec6adf88f34ab50235ff7afd216483bd6f4fbb7713d08e2ec8cf3695c"
+  },
+  {
+    "old": "quarterly_dashboard/business_contract.py",
+    "new": "stock_analysis/domains/research/assessment/business_contract.py",
+    "sha256": "f68a7918cae1fd822f320f705f97e7a4d6b6718736bdd531f170c9f1b7aa7480"
+  },
+  {
+    "old": "quarterly_dashboard/business_judgment.py",
+    "new": "stock_analysis/domains/research/assessment/business_judgment.py",
+    "sha256": "9677e03ea1e8cf1f2c3b6ac1a8fef817f0b1a5ee5f8a5ff3e181e52dc2e2eff7"
+  },
+  {
+    "old": "quarterly_dashboard/business_segment_service.py",
+    "new": "stock_analysis/domains/financials/business_segment_service.py",
+    "sha256": "7a96aa41ec149a26b3d01e6f6edda3f6267bdc979309ab9bd2272e0df8883417"
+  },
+  {
+    "old": "quarterly_dashboard/checklist_product_math.py",
+    "new": "stock_analysis/domains/research/assessment/checklist_product_math.py",
+    "sha256": "e80cb0ae0311923d9b8d44b404dcce203779abd0aa46787868807fc509eea4b9"
+  },
+  {
+    "old": "quarterly_dashboard/checklist_snapshot.py",
+    "new": "stock_analysis/domains/research/assessment/checklist_snapshot.py",
+    "sha256": "fe7fdc89676ddfce63bf7c0c2ec550466933ad6ebf3270369934d4d698a5251e"
+  },
+  {
+    "old": "quarterly_dashboard/checklist_validation.py",
+    "new": "stock_analysis/domains/research/assessment/checklist_validation.py",
+    "sha256": "fefaae18ec59f559163cdd11e5289fb65bb6165338fd8377f5d4c5b9a03f0e6f"
+  },
+  {
+    "old": "quarterly_dashboard/checklist_valuation.py",
+    "new": "stock_analysis/domains/research/assessment/checklist_valuation.py",
+    "sha256": "697d1a41d879edc25c0c6fead54ccb20c75026bde98dbc7bdc9ea993cf5b7819"
+  },
+  {
+    "old": "quarterly_dashboard/chips.py",
+    "new": "stock_analysis/domains/stocks/chips.py",
+    "sha256": "0dddf1e30682e32fd1fea91fa405a10bc56e8c77f90b4999d45d0b732728a401"
+  },
+  {
+    "old": "quarterly_dashboard/collection.py",
+    "new": "stock_analysis/collection/collection.py",
+    "sha256": "7ead232592328eef76df9b0e06392eb2daabe5e88ff014ba48df7219115cf876"
+  },
+  {
+    "old": "quarterly_dashboard/collection_management.py",
+    "new": "stock_analysis/collection/collection_management.py",
+    "sha256": "4aa23f5cde3314026962ddf045da9f780a8e907de79e395d754c56e92e95d897"
+  },
+  {
+    "old": "quarterly_dashboard/collection_rate_limits.py",
+    "new": "stock_analysis/collection/collection_rate_limits.py",
+    "sha256": "c3bb6b88131f12a0e04083f91af1d1e9f71619e297da2a9cd3d34d1e3c547d7b"
+  },
+  {
+    "old": "quarterly_dashboard/collection_schedule.py",
+    "new": "stock_analysis/collection/collection_schedule.py",
+    "sha256": "c8563573c23eeb45a306e35ec4872bab99513ae122f8a438c31bf9e9cea223eb"
+  },
+  {
+    "old": "quarterly_dashboard/company_report_service.py",
+    "new": "stock_analysis/domains/research/reports/company_report_service.py",
+    "sha256": "25ef24e88d81ba18bca55be855061592f6065b5be95c9e8529a9cbf1afe0c67c"
+  },
+  {
+    "old": "quarterly_dashboard/core.py",
+    "new": "stock_analysis/domains/financials/core.py",
+    "sha256": "ec5e22349f2e9649ab2580df67d1cdaf4a262554a9f0ec17a39806003dd65d2c"
+  },
+  {
+    "old": "quarterly_dashboard/database_restore.py",
+    "new": "stock_analysis/maintenance/database_restore.py",
+    "sha256": "21cad4997e6bf8fc42663dc450c6f6f19e032dce1287c52d061d397f5990b1bd"
+  },
+  {
+    "old": "quarterly_dashboard/dcf.py",
+    "new": "stock_analysis/domains/valuation/dcf.py",
+    "sha256": "b1454e5ee6bd80cbea57e26ef558af941795b27ba63eb0d79853b0e3573babd4"
+  },
+  {
+    "old": "quarterly_dashboard/disclosure_dates.py",
+    "new": "stock_analysis/domains/stocks/disclosure_dates.py",
+    "sha256": "58d431221b2493eed4f118606660a1a9c78f84228d68422e8a269f2b4ec81b74"
+  },
+  {
+    "old": "quarterly_dashboard/dividend_forecast.py",
+    "new": "stock_analysis/domains/valuation/dividend_forecast.py",
+    "sha256": "5fd968f6323813d4e1203d09b2d99cc4db1fe3288f9219e0c4bcd9ff772b5fb4"
+  },
+  {
+    "old": "quarterly_dashboard/dividend_service.py",
+    "new": "stock_analysis/domains/stocks/dividend_service.py",
+    "sha256": "37ba9e142945916c9f045abd07b675f8b4b215b1fec7d0496cd5eb550ed3e9ed"
+  },
+  {
+    "old": "quarterly_dashboard/financial_storage.py",
+    "new": "stock_analysis/domains/financials/financial_storage.py",
+    "sha256": "20539cf235d63a0c3b615542c9001f07f21275632f474d675afbf4f212e071b0"
+  },
+  {
+    "old": "quarterly_dashboard/financing_storage.py",
+    "new": "stock_analysis/domains/stocks/financing_storage.py",
+    "sha256": "0aa14417b78be73d70fc2b086eab4421bed2de24f3ccfcff7ce776aa9c917c0a"
+  },
+  {
+    "old": "quarterly_dashboard/fundamental_service.py",
+    "new": "stock_analysis/domains/financials/fundamental_service.py",
+    "sha256": "8bc228b53de112ec72e14ffb195b277f2a20379e7bf0c6d9e8f12c708f5db2c1"
+  },
+  {
+    "old": "quarterly_dashboard/index_collection.py",
+    "new": "stock_analysis/domains/indices/index_collection.py",
+    "sha256": "e1b15df8d71314252938eef34bb908b612ff1b99d3593bf24a6561a7d246be52"
+  },
+  {
+    "old": "quarterly_dashboard/index_definitions.py",
+    "new": "stock_analysis/domains/indices/index_definitions.py",
+    "sha256": "6625c9863874add945624fbb6d83e1009390cc34a5166f3078d4991ed898b664"
+  },
+  {
+    "old": "quarterly_dashboard/index_note_snapshots.py",
+    "new": "stock_analysis/domains/notes/index_note_snapshots.py",
+    "sha256": "496ab4c6df44dd611b892101fb7c7743fb0d809a022467999fe855d608fc1c2f"
+  },
+  {
+    "old": "quarterly_dashboard/index_price_audit.py",
+    "new": "stock_analysis/domains/indices/index_price_audit.py",
+    "sha256": "1cadeabbd5dd31725aad5497a373cd58997a0b4a2585c10dd6e3e8a37101b1cd"
+  },
+  {
+    "old": "quarterly_dashboard/index_price_codec.py",
+    "new": "stock_analysis/domains/indices/index_price_codec.py",
+    "sha256": "de81dfcd01f9483df7c8bcc49b2b5f8461340512f4a6602095e4b214138a793b"
+  },
+  {
+    "old": "quarterly_dashboard/index_price_derived.py",
+    "new": "stock_analysis/domains/indices/index_price_derived.py",
+    "sha256": "6ca2aa17029131cb2ca8967e8afbcef26202a031d895d26c94d5af53cff43464"
+  },
+  {
+    "old": "quarterly_dashboard/index_price_replay.py",
+    "new": "stock_analysis/domains/indices/index_price_replay.py",
+    "sha256": "1db444c241020bb3dcbd576af8d8e3085fe3ec148bc626db358da25c2a4bcfa6"
+  },
+  {
+    "old": "quarterly_dashboard/index_prices.py",
+    "new": "stock_analysis/domains/indices/index_prices.py",
+    "sha256": "46a4edea4566d59489f969059fc8588063b7d3704f26cb5953ffd5d8a0e981cc"
+  },
+  {
+    "old": "quarterly_dashboard/index_probe_import.py",
+    "new": "stock_analysis/domains/indices/index_probe_import.py",
+    "sha256": "c6114cf5651843f598f93165b522c5866eee6e00d08281cf57ed60aebf4adb94"
+  },
+  {
+    "old": "quarterly_dashboard/index_read_service.py",
+    "new": "stock_analysis/domains/indices/index_read_service.py",
+    "sha256": "7c5f8c713230f47ebe20f6c704a3a2a13b31f68ffd8deb6bd210cb22469e96fd"
+  },
+  {
+    "old": "quarterly_dashboard/index_repository.py",
+    "new": "stock_analysis/domains/indices/index_repository.py",
+    "sha256": "6fdeb357ed7330c0816e04bc3ade82420b26a8dc6e08ded29b8d811617e2efb2"
+  },
+  {
+    "old": "quarterly_dashboard/industry_bulk.py",
+    "new": "stock_analysis/domains/industries/industry_bulk.py",
+    "sha256": "323c02365a0e97ecd46be92f196f416cd32ef447d749b97d7caf5578f0cc3a57"
+  },
+  {
+    "old": "quarterly_dashboard/industry_cap_compact.py",
+    "new": "stock_analysis/domains/industries/industry_cap_compact.py",
+    "sha256": "a67b29ee009e7969473fe8e8a7e1cf79a88a8b15fc5e61f2f2bf176f189be84e"
+  },
+  {
+    "old": "quarterly_dashboard/industry_cap_history.py",
+    "new": "stock_analysis/domains/industries/industry_cap_history.py",
+    "sha256": "7bcad69ff9cfdea10c1c5ef58454ed0a7e7c4aef9b8181e5987da06c5489a299"
+  },
+  {
+    "old": "quarterly_dashboard/industry_cap_summary.py",
+    "new": "stock_analysis/domains/industries/industry_cap_summary.py",
+    "sha256": "1c26e9679456d073c188cfdef32ef8d242fe2d0be6290d9f16c43d57aac92ea7"
+  },
+  {
+    "old": "quarterly_dashboard/industry_compact.py",
+    "new": "stock_analysis/domains/industries/industry_compact.py",
+    "sha256": "d785655514fb272f24f850363c832087476ca4bc63194967bf0eac324c083d2c"
+  },
+  {
+    "old": "quarterly_dashboard/industry_financial_extensions.py",
+    "new": "stock_analysis/domains/industries/industry_financial_extensions.py",
+    "sha256": "c73f794c8f8e8568e432e06527b0502e034e356d9479c75dcd3919b58d84d889"
+  },
+  {
+    "old": "quarterly_dashboard/industry_financial_reader.py",
+    "new": "stock_analysis/domains/industries/industry_financial_reader.py",
+    "sha256": "ca29ebbda44faca1d7691fd413e4a05b7022558bdd601fd4489a3d3ce8d7c1a6"
+  },
+  {
+    "old": "quarterly_dashboard/industry_memberships.py",
+    "new": "stock_analysis/domains/industries/industry_memberships.py",
+    "sha256": "05072414dab0e5dcc419fa05bde2be2605d859ceb7cbff46dbe7f0f3371181ea"
+  },
+  {
+    "old": "quarterly_dashboard/industry_performance.py",
+    "new": "stock_analysis/domains/industries/industry_performance.py",
+    "sha256": "658ba9ce1de9f94b34a526683cadceb9c56e3a282362eb884fcc1869af47291f"
+  },
+  {
+    "old": "quarterly_dashboard/industry_performance_backfill.py",
+    "new": "stock_analysis/domains/industries/industry_performance_backfill.py",
+    "sha256": "78debb0156aca7253fcc42b36430c595f7f0d02b0027d034f7ece052b88a8af1"
+  },
+  {
+    "old": "quarterly_dashboard/industry_position.py",
+    "new": "stock_analysis/domains/industries/industry_position.py",
+    "sha256": "aa091419522fa1a7ac50b86416f6255ea14fdaa592e81ede5e1b0afc983b996a"
+  },
+  {
+    "old": "quarterly_dashboard/industry_prices.py",
+    "new": "stock_analysis/domains/industries/industry_prices.py",
+    "sha256": "a4d30d4da85de9249ca7a17290fe7c761f83dd6a3b114c4c16f9a4b53256c939"
+  },
+  {
+    "old": "quarterly_dashboard/industry_service.py",
+    "new": "stock_analysis/domains/industries/industry_service.py",
+    "sha256": "070685a54411186bb02d788ef607f4d6ec2db6167c8bd63dbb8146c4f98ccae7"
+  },
+  {
+    "old": "quarterly_dashboard/industry_snapshot.py",
+    "new": "stock_analysis/domains/industries/industry_snapshot.py",
+    "sha256": "4e25889b76298ddcd3a631c2ae4b69dd4b87a46578584bfff153c695b6ecc25a"
+  },
+  {
+    "old": "quarterly_dashboard/industry_sources.py",
+    "new": "stock_analysis/domains/industries/industry_sources.py",
+    "sha256": "4a023709f10d24f76dc955ff92580791032f7a29304143cfe7a373d1a0169162"
+  },
+  {
+    "old": "quarterly_dashboard/industry_storage.py",
+    "new": "stock_analysis/domains/industries/industry_storage.py",
+    "sha256": "edf9e70d8ca1dc1518e2d06e25b854d81eaf7ca4be3ac4c60fe046e71413ca4b"
+  },
+  {
+    "old": "quarterly_dashboard/industry_updates.py",
+    "new": "stock_analysis/domains/industries/industry_updates.py",
+    "sha256": "8629f36f649e47811cada60627feebc6835b978ca6f6459fe7e86d7015209714"
+  },
+  {
+    "old": "quarterly_dashboard/institution_forecast.py",
+    "new": "stock_analysis/domains/valuation/institution_forecast.py",
+    "sha256": "30591e346a00234b96defdba8ec461a3e3b040e1fca0fb226e675cdb85c28b1c"
+  },
+  {
+    "old": "quarterly_dashboard/investment_notes.py",
+    "new": "stock_analysis/domains/notes/investment_notes.py",
+    "sha256": "c926925bd24d5ee06ea6f0365d2e195a3683556f2e8119711e259ff574ab9589"
+  },
+  {
+    "old": "quarterly_dashboard/maintenance.py",
+    "new": "stock_analysis/maintenance/maintenance.py",
+    "sha256": "fe6a68a8a847d5b9787cc4d944a9787df80a7ddb097da0a411f59119fabf65db"
+  },
+  {
+    "old": "quarterly_dashboard/market_congestion.py",
+    "new": "stock_analysis/domains/market/market_congestion.py",
+    "sha256": "dd7eeab15dd4c89f2db023241e56cedb8e50847c765cf08c050bc8d11213b64f"
+  },
+  {
+    "old": "quarterly_dashboard/market_congestion_backfill.py",
+    "new": "stock_analysis/domains/market/market_congestion_backfill.py",
+    "sha256": "6e2df328ccf52d2ff7266d9a52989753966d501e89cb487706b8fb8224bee118"
+  },
+  {
+    "old": "quarterly_dashboard/market_financial.py",
+    "new": "stock_analysis/domains/market/market_financial.py",
+    "sha256": "05bf742b9bc65b46a83f72f46eecd622ca026b64d823b1e38ec202c244d1c58c"
+  },
+  {
+    "old": "quarterly_dashboard/market_financial_backfill.py",
+    "new": "stock_analysis/domains/market/market_financial_backfill.py",
+    "sha256": "542982b3bc0e087b0c6ce94e82af58e540d9af75c815cb632f619dd60bb75ac2"
+  },
+  {
+    "old": "quarterly_dashboard/market_price_backfill.py",
+    "new": "stock_analysis/domains/market/market_price_backfill.py",
+    "sha256": "231f6a06a6a087adc79d4a196fc647956a9e3ca59aadb0cbbcc6fa03259a1c3c"
+  },
+  {
+    "old": "quarterly_dashboard/market_snapshot_backfill.py",
+    "new": "stock_analysis/domains/market/market_snapshot_backfill.py",
+    "sha256": "b6e2b68822e8ac56095e972e61e9eeaa1c3e5835a53931b48cd3d4408a369fdf"
+  },
+  {
+    "old": "quarterly_dashboard/market_suspended_price.py",
+    "new": "stock_analysis/domains/market/market_suspended_price.py",
+    "sha256": "3cf53de84e67540da9132527b44e8fa08da2365b868c7d1fe59f968586a719a4"
+  },
+  {
+    "old": "quarterly_dashboard/market_trade_snapshot.py",
+    "new": "stock_analysis/domains/market/market_trade_snapshot.py",
+    "sha256": "a0b31b7f2124b27283002fb9022cee082fc1413541b75ccc73a1794e9e45152b"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/001_initial.sql",
+    "new": "stock_analysis/infrastructure/migrations/001_initial.sql",
+    "sha256": "55167de4174c65665907fdc8dfce03edf899a094d38c83e5a16bb36433b4feee"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/002_shared_data.sql",
+    "new": "stock_analysis/infrastructure/migrations/002_shared_data.sql",
+    "sha256": "3f07b85a28bed83fd7ea562feab234e0818a87ec236abf6da2a90caca05469b2"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/003_p4_facts.sql",
+    "new": "stock_analysis/infrastructure/migrations/003_p4_facts.sql",
+    "sha256": "129381e2f82633b1371482401817fa5b6fb7069332c13ae7b457e35c824a5510"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/004_financing_compact.sql",
+    "new": "stock_analysis/infrastructure/migrations/004_financing_compact.sql",
+    "sha256": "7a675246238f10fed0e9cc43c644ff28192fa65ba168b0ccf75e5abe19055f2d"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/005_stock_library.sql",
+    "new": "stock_analysis/infrastructure/migrations/005_stock_library.sql",
+    "sha256": "3070a353c94db88ef0fd32d1c2314346781dca5ea978723ca5e1e147b86a2665"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/006_stock_member_order.sql",
+    "new": "stock_analysis/infrastructure/migrations/006_stock_member_order.sql",
+    "sha256": "1fc65b03493fd8778521d3312ad9784db7d76b83d6f4f04a91be23c62fcbfb39"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/007_ai_assessments.sql",
+    "new": "stock_analysis/infrastructure/migrations/007_ai_assessments.sql",
+    "sha256": "740e87afbac22fa33476a361afd6e16a3b36ebbcdb7745f25a9fb6161379c4dc"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/008_checklists.sql",
+    "new": "stock_analysis/infrastructure/migrations/008_checklists.sql",
+    "sha256": "06dafc61bab9d1785727d7a62b47e3a5916b7b3012e860fc461dc7cf59e36314"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/009_sw_industries.sql",
+    "new": "stock_analysis/infrastructure/migrations/009_sw_industries.sql",
+    "sha256": "272f1c77e549fc941e8bf0bd9e01a37d797dec309fbe45b3c8e7ca84de68a8f3"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/010_sw_quarter_updates.sql",
+    "new": "stock_analysis/infrastructure/migrations/010_sw_quarter_updates.sql",
+    "sha256": "59ac3fa34fcafb8316d4328bb63f1d1c16ff65518834b986adae838b7f6e7303"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/011_sw_financial_extensions.sql",
+    "new": "stock_analysis/infrastructure/migrations/011_sw_financial_extensions.sql",
+    "sha256": "37d7e6a7bffdf18cf279b7627d4a931a2dd0174a25a57017fcbd68497e4a66dd"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/012_sw_financial_provenance.sql",
+    "new": "stock_analysis/infrastructure/migrations/012_sw_financial_provenance.sql",
+    "sha256": "9ec3483fc9238474afa2c3e16336a48e738497881aba0a15f70b6999efd612dc"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/013_sw_cap_provenance.sql",
+    "new": "stock_analysis/infrastructure/migrations/013_sw_cap_provenance.sql",
+    "sha256": "322fb82a10319cff0ff78050b52b16d436151b4b416a7a538b70c90c8b055f94"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/014_sw_listing_dates.sql",
+    "new": "stock_analysis/infrastructure/migrations/014_sw_listing_dates.sql",
+    "sha256": "a6da57437094cbba7a334cb21f75dbec15c0a14801d86a0b5651b962913f9c76"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/015_stock_unfollowed.sql",
+    "new": "stock_analysis/infrastructure/migrations/015_stock_unfollowed.sql",
+    "sha256": "f1347271f1b17074ad1ae248f88e2c2646436ae3aa4ceda36661c31ef8eb3851"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/016_stock_cleanup.sql",
+    "new": "stock_analysis/infrastructure/migrations/016_stock_cleanup.sql",
+    "sha256": "2b1cb94abec49ec48f4de40d7bac175778d2b7f115b779cbc9f42858e64fa803"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/017_sw_performance.sql",
+    "new": "stock_analysis/infrastructure/migrations/017_sw_performance.sql",
+    "sha256": "b1181ebb8bc0f6f9479402755399b053720ff095efc8e525fdeabe0259cf0b51"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/018_market_financial_statements.sql",
+    "new": "stock_analysis/infrastructure/migrations/018_market_financial_statements.sql",
+    "sha256": "fed9ff9c5175cc5fa03f5e593089bd980e3b7fcaac31d1a80b160e26af3d2c5d"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/019_market_financial_performance.sql",
+    "new": "stock_analysis/infrastructure/migrations/019_market_financial_performance.sql",
+    "sha256": "6e7b7d49ef1fd831010a5ec618af80bcf76db7c974ce8d9140e33eabd35c2617"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/020_industry_financial_view.sql",
+    "new": "stock_analysis/infrastructure/migrations/020_industry_financial_view.sql",
+    "sha256": "e1a469d91557cf424878311b67af9ffcad8d5b3426a25771b55edb28c1fe2d2f"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/021_market_quarterly_prices.sql",
+    "new": "stock_analysis/infrastructure/migrations/021_market_quarterly_prices.sql",
+    "sha256": "c5c49ca63b6a278d94e79e19dbc34bdba8f46544f73a3251a1ade6e9eca88858"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/022_industry_bps.sql",
+    "new": "stock_analysis/infrastructure/migrations/022_industry_bps.sql",
+    "sha256": "52239408a8f2c6876704fc22812c1a71c7194a8977ec535c4f0d2504227c2b10"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/023_collection_metadata.sql",
+    "new": "stock_analysis/infrastructure/migrations/023_collection_metadata.sql",
+    "sha256": "a7b668e57735fc8f09e3f98ca8351c9092cb6ebdd38692615c6ef9dd8b30c039"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/024_index_valuations.sql",
+    "new": "stock_analysis/infrastructure/migrations/024_index_valuations.sql",
+    "sha256": "9e68cfa318d23b11dba1523f7a9ae3ef6f93464a1889fbc993d78ec7a8617b83"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/025_index_valuation_series.sql",
+    "new": "stock_analysis/infrastructure/migrations/025_index_valuation_series.sql",
+    "sha256": "a69c47b7acb4caad2d9c4488f900c390eb846b6aa6b59846985b7690f52943fe"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/026_index_read_revisions.sql",
+    "new": "stock_analysis/infrastructure/migrations/026_index_read_revisions.sql",
+    "sha256": "8d2ccab6c36e47058174476158e8b3c65d20004f2501b4d0ea961973deace831"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/027_index_prices.sql",
+    "new": "stock_analysis/infrastructure/migrations/027_index_prices.sql",
+    "sha256": "ab0d7898fd8ab6022c3f6793860a8e8f49056a151fefdc9d20c010a0d984362e"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/028_index_price_read_revisions.sql",
+    "new": "stock_analysis/infrastructure/migrations/028_index_price_read_revisions.sql",
+    "sha256": "99ec9e1fe70154f19bc5ae853d642117735a4e2aec7ffa9a54b562d58a5e28b6"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/029_market_trade_snapshot.sql",
+    "new": "stock_analysis/infrastructure/migrations/029_market_trade_snapshot.sql",
+    "sha256": "6893cb6f05582150873c84e2e291f73b4ced811c828269448968b7d0a1086904"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/030_composite_market_cap.sql",
+    "new": "stock_analysis/infrastructure/migrations/030_composite_market_cap.sql",
+    "sha256": "aaa2c830a6f6cf081357f4c88a9aebac7cf512cd27b01655cce6f26ef1652ae5"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/031_suspended_market_cap.sql",
+    "new": "stock_analysis/infrastructure/migrations/031_suspended_market_cap.sql",
+    "sha256": "02bfbe52915e34552cf1f81dc0a87cb7fb91ab5788f24307afb1819643d4af71"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/032_financial_public_sources.sql",
+    "new": "stock_analysis/infrastructure/migrations/032_financial_public_sources.sql",
+    "sha256": "062c6d2917ef38d72bd0398e5f003411b51033d6efa790e4d9e41f9bc5dfc594"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/033_stock_announcement_metadata.sql",
+    "new": "stock_analysis/infrastructure/migrations/033_stock_announcement_metadata.sql",
+    "sha256": "ab2f815337794315c9889cb3d4cbb656fb96e1d74ac35d7ed101dde750c092c7"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/034_business_segments.sql",
+    "new": "stock_analysis/infrastructure/migrations/034_business_segments.sql",
+    "sha256": "2c0d7c9db75db969f69d81560598aedcd37c288fb9f284492bbb48ae78811a74"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/035_financial_json_compression.sql",
+    "new": "stock_analysis/infrastructure/migrations/035_financial_json_compression.sql",
+    "sha256": "63f36c927816b5943605e13923226a3f0795ca0653534da8ef280d3aeee93c75"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/036_market_congestion.sql",
+    "new": "stock_analysis/infrastructure/migrations/036_market_congestion.sql",
+    "sha256": "b380cfcc107aee7038c8da9bac6c925c76bac230c2f9fe547a715a493db1eb07"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/037_index_price_market_fields.sql",
+    "new": "stock_analysis/infrastructure/migrations/037_index_price_market_fields.sql",
+    "sha256": "0a87f805825c9ee76eab7ff3afca822a9f914f0c74fbb715b3cdb243538051ae"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/038_compact_index_prices.sql",
+    "new": "stock_analysis/infrastructure/migrations/038_compact_index_prices.sql",
+    "sha256": "9758774b7e2740835eb98cf9230f5d7546d4012c4fd1b7eb8656c2cb6ef2a7cd"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/039_sovereign_yields.sql",
+    "new": "stock_analysis/infrastructure/migrations/039_sovereign_yields.sql",
+    "sha256": "61086b55beae78c25299d46c4a9385334ca1333142897c46248eb294937e0133"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/040_collection_management.sql",
+    "new": "stock_analysis/infrastructure/migrations/040_collection_management.sql",
+    "sha256": "4395f951e89b6e7c05763abe316f88671fd2f937f28d5ce72f9e323e81d95f44"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/041_shipping_research.sql",
+    "new": "stock_analysis/infrastructure/migrations/041_shipping_research.sql",
+    "sha256": "68d167772b0d36b4544f494fe2e23b004f6d46ff00184056966fe508fe08ba0a"
+  },
+  {
+    "old": "quarterly_dashboard/migrations/042_collection_rate_limits.sql",
+    "new": "stock_analysis/infrastructure/migrations/042_collection_rate_limits.sql",
+    "sha256": "aa08471356273c91a593dc7c7c6dfc0e73e86e5f125b6c984ef1260bdf8c2b39"
+  },
+  {
+    "old": "quarterly_dashboard/network.py",
+    "new": "stock_analysis/infrastructure/network.py",
+    "sha256": "e3c773ea85be909cae8c7bd03a6956f64363cfd5fde39f15a90047cd9c4ca186"
+  },
+  {
+    "old": "quarterly_dashboard/note_snapshots.py",
+    "new": "stock_analysis/domains/notes/note_snapshots.py",
+    "sha256": "3ef293bbe6003024c108928ca03d8bd0a6c2c41e434970624c3f90b8179f2359"
+  },
+  {
+    "old": "quarterly_dashboard/price_projection.py",
+    "new": "stock_analysis/domains/stocks/price_projection.py",
+    "sha256": "315d379c311f1b82431189a0be90e9b245716b13dd8332bc44bbe1dcd4f01a6e"
+  },
+  {
+    "old": "quarterly_dashboard/price_service.py",
+    "new": "stock_analysis/domains/stocks/price_service.py",
+    "sha256": "e71f36bf474e0abcdee80a39717cd2eb76046c82096bc1efef693fc3d3c181fd"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_capabilities.draft.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_capabilities.draft.txt",
+    "sha256": "40e4e82d6d7923b4f3e8f35a7771d4bf0f95153dab402dddcd967ee6c697b6a3"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_combined.draft.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_combined.draft.txt",
+    "sha256": "fd0a7c902e3e6fae55346b9950aacd7a139fbc5a95ae123b69f6d0e4bf6c35d0"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_five_forces.draft.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_five_forces.draft.txt",
+    "sha256": "ab49e1495d98450768dfaaa98d1efffe4637a803ac44d1cfb135869da4fc9a3d"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_industry_position.draft.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_industry_position.draft.txt",
+    "sha256": "23cb3bdf9e341c775afba25efbd0ab2c3c2de0ca1eb58c25603392967380747e"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_universal.draft.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_universal.draft.txt",
+    "sha256": "a1f0beed3f404de8e5ba780f3030d8b3d32b5b8d3c382c5289a8e5edc10d4786"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v10.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v10.txt",
+    "sha256": "b825012222c57f428968f91bb53ecf421fc6177e9ff6f6d6edf7a0eb5f52d68b"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v11.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v11.txt",
+    "sha256": "a1f0beed3f404de8e5ba780f3030d8b3d32b5b8d3c382c5289a8e5edc10d4786"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v12.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v12.txt",
+    "sha256": "7a4398e58d4bdc5bf3d6d1be55ad7662b689f1d82c4052cba29ee3aa57830fec"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v13.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v13.txt",
+    "sha256": "b9b4acc1b73647b462af1f6418baa6be48c4232c157af5cd9edaa31e7c9c72c0"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v14.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v14.txt",
+    "sha256": "1c880bbb5672502725c9c66c8485921ca98fa27ef5eeacb241270faf2e8155ad"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v15.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v15.txt",
+    "sha256": "2e2c89f1ce4dac702acc29d2714cadc1de6c9b4e7a5b329b3560a1da1efd416f"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v6.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v6.txt",
+    "sha256": "3cb61a3188b18453750b0bb1ef28401f47110b2ab98e9b17682b1fbebab733f3"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v7.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v7.txt",
+    "sha256": "adbae22db3d2cf0980349e9fc54bd81918ffec8182fab7f6b650dc142c3ec1a8"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v8.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v8.txt",
+    "sha256": "9512763eb5cb924fdaabaf7af2d88970971623be7439fef6067d9e07a8a21ced"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_judgment_v9.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_judgment_v9.txt",
+    "sha256": "b69cb58e0fa4c455d1771b52d3e576e353a8b6fffc828cb2bbadf81d6aa99720"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/business_retrieval_v1.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/business_retrieval_v1.txt",
+    "sha256": "91077017c12157fab444b7cc29d16e6caa2086aa98f95829256393656f627ef5"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v1.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v1.txt",
+    "sha256": "b896e11546d078bb78573d5dd73a38dae279dc3c78eddf707a7773ffe5a654f9"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v10.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v10.txt",
+    "sha256": "abd6a27db1539fbe4ff798e2e9389917ee6f12fa2d395bbacc1c0c83629dc8a1"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v11.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v11.txt",
+    "sha256": "6044544bc400bbfe0ef6966d7b1eabd84c9186ca6fb2ef5ffa19b2b120afe043"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v2.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v2.txt",
+    "sha256": "29bf0d784d69bbc93e73b5539371e6427a63beb7143707daf59f79b6062693a3"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v3.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v3.txt",
+    "sha256": "e1a8f9d32515eeb5c13451814b5420058792d4f12ede7941135fa475f6a070be"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v4.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v4.txt",
+    "sha256": "e5715be78c3edf6f865c4ea44cdd09029b8d5619b22465b501f270c943d7325e"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v5.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v5.txt",
+    "sha256": "857d348a9d46f9ae02794af482ae339f0d2f9245017fc0fc485c18834299cfa1"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v6.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v6.txt",
+    "sha256": "986f571c0f0efad764be426d1f05e4278910486316b84ee09879c0a6b53c6577"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v7.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v7.txt",
+    "sha256": "1a77f5a1cca407fa8a87444c1a5dab6ae1b4e1eb65bea37a6903e750b5831692"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v8.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v8.txt",
+    "sha256": "7c725b252fd3a29c5775ebcdf3ff8108de4e4a16539857f253752b9f6b9771af"
+  },
+  {
+    "old": "quarterly_dashboard/prompts/checklist_v9.txt",
+    "new": "stock_analysis/domains/research/assessment/prompts/checklist_v9.txt",
+    "sha256": "7d459681092fc5106f189e6bd23ed857faae6430266f4abec32276197e7e8d9e"
+  },
+  {
+    "old": "quarterly_dashboard/report_backup.py",
+    "new": "stock_analysis/domains/research/reports/report_backup.py",
+    "sha256": "9bc8f455c1e2921fc7b51873fafec98bfacac24b5cd5edbd96af2fcab903a2fc"
+  },
+  {
+    "old": "quarterly_dashboard/report_business_metrics.py",
+    "new": "stock_analysis/domains/research/reports/report_business_metrics.py",
+    "sha256": "83b33b673dfe1380005701dadbba8cf12bee8f2f6ed6e40bd86324c872a02e77"
+  },
+  {
+    "old": "quarterly_dashboard/research_reports.py",
+    "new": "stock_analysis/domains/research/reports/research_reports.py",
+    "sha256": "61a96a0334ee1e95e1ef8bd5f0f4c57fab3bc142dc9e901dcf20dae2c1f470f7"
+  },
+  {
+    "old": "quarterly_dashboard/resources/market_financial_fields.json",
+    "new": "stock_analysis/domains/market/resources/market_financial_fields.json",
+    "sha256": "47c06b850559c601e4f58257f5bf2d202c8b39b45041aebaead222ccae08ea10"
+  },
+  {
+    "old": "quarterly_dashboard/resources/market_snapshot_composite_definition.json",
+    "new": "stock_analysis/domains/market/resources/market_snapshot_composite_definition.json",
+    "sha256": "2c3d4ab960196e4761b5f1521d95a138cf517d882d24bce5bc40180d7ba1d9d7"
+  },
+  {
+    "old": "quarterly_dashboard/resources/market_trade_snapshot_fields.json",
+    "new": "stock_analysis/domains/market/resources/market_trade_snapshot_fields.json",
+    "sha256": "b294f977ab6e4eccccf19508530b23794b2a9ca1e388db87e85b7def9d25c49f"
+  },
+  {
+    "old": "quarterly_dashboard/resources/shipping_ocr.ps1",
+    "new": "stock_analysis/domains/research/sectors/shipping/resources/shipping_ocr.ps1",
+    "sha256": "62241d562258cd9abafe3b3373bb60cfac9a8e81eeb4bf121ece1d804a8f60d0"
+  },
+  {
+    "old": "quarterly_dashboard/resources/sina_index_history.js",
+    "new": "stock_analysis/domains/indices/resources/sina_index_history.js",
+    "sha256": "d04e72fafc5a09d97bc8aab80c39d2afd247d1680563ad8716a8cef0cbbb178d"
+  },
+  {
+    "old": "quarterly_dashboard/resources/sina_trade_calendar.js",
+    "new": "stock_analysis/domains/indices/resources/sina_trade_calendar.js",
+    "sha256": "4cefcc7a8287edf0dfefaa200f55124a30f692ee51a83195872e00c9cb86f5b4"
+  },
+  {
+    "old": "quarterly_dashboard/resources/sina_trade_calendar.LICENSE",
+    "new": "stock_analysis/domains/indices/resources/sina_trade_calendar.LICENSE",
+    "sha256": "8e67eb875b2fc2be7fa34a1733a9926f71428cb469573da2b22403e85755442c"
+  },
+  {
+    "old": "quarterly_dashboard/resources/sws_intermediate.pem",
+    "new": "stock_analysis/domains/industries/resources/sws_intermediate.pem",
+    "sha256": "2182efcbf5b27c34ba8901fae4715a6c6bdc54d9e186adc7b43523ce2e9176c1"
+  },
+  {
+    "old": "quarterly_dashboard/roic.py",
+    "new": "stock_analysis/domains/financials/roic.py",
+    "sha256": "02cfd5597ae6169d681d282a5a4244bcd035af5046df11c59cf1a3b61e74e3ee"
+  },
+  {
+    "old": "quarterly_dashboard/server.py",
+    "new": "stock_analysis/http/server.py",
+    "sha256": "590a255444bd3cfeeba130a47ab1da2cd8bf4f4687bbdfaedf8f23523127e8ff"
+  },
+  {
+    "old": "quarterly_dashboard/shipping_collection.py",
+    "new": "stock_analysis/domains/research/sectors/shipping/shipping_collection.py",
+    "sha256": "470063b57d156017c2dcffa2c9cc8ec7fd0de4073c9dea6def49fdb2891c9dfa"
+  },
+  {
+    "old": "quarterly_dashboard/shipping_forecast.py",
+    "new": "stock_analysis/domains/research/sectors/shipping/shipping_forecast.py",
+    "sha256": "9828996c90b8d2f901ba3e0356cc677d044b52079975ea838af6e43468be817f"
+  },
+  {
+    "old": "quarterly_dashboard/shipping_image_review.py",
+    "new": "stock_analysis/domains/research/sectors/shipping/shipping_image_review.py",
+    "sha256": "2cf31a3fbe18488703a404dc66b0d1efd98b72664fce7b3dc1240e915e3575a8"
+  },
+  {
+    "old": "quarterly_dashboard/shipping_import.py",
+    "new": "stock_analysis/domains/research/sectors/shipping/shipping_import.py",
+    "sha256": "174b2ef9cc6fbba3192e4a8560f2971a73f6ee3372646322076a8d42e1f44359"
+  },
+  {
+    "old": "quarterly_dashboard/shipping_ocr.py",
+    "new": "stock_analysis/domains/research/sectors/shipping/shipping_ocr.py",
+    "sha256": "c25af09a427b644522dcd56685981a74f5a69ef899ab0dee39d37d9dd6b03dba"
+  },
+  {
+    "old": "quarterly_dashboard/shipping_report_metrics.py",
+    "new": "stock_analysis/domains/research/sectors/shipping/shipping_report_metrics.py",
+    "sha256": "7f46c9df98f9ea7ef5adff63085a2be020385c5b0d4a110770f150aeadb25d92"
+  },
+  {
+    "old": "quarterly_dashboard/shipping_sources.py",
+    "new": "stock_analysis/domains/research/sectors/shipping/shipping_sources.py",
+    "sha256": "30078863093e40aa5e26d5c126f754d6ecbcae784ff6b068ac9e4822ab0de5dc"
+  },
+  {
+    "old": "quarterly_dashboard/sources.py",
+    "new": "stock_analysis/domains/stocks/sources.py",
+    "sha256": "431e92f22df30822c7d0974aa2f8eef6783d48a0fbdc9c9860c5ad8cd317ccc1"
+  },
+  {
+    "old": "quarterly_dashboard/sqlite_sizes.py",
+    "new": "stock_analysis/maintenance/sqlite_sizes.py",
+    "sha256": "e7243de370362240a6668e1106eb65af475799bba835e1ee30cdc4aa22f9d876"
+  },
+  {
+    "old": "quarterly_dashboard/statements.py",
+    "new": "stock_analysis/domains/financials/statements.py",
+    "sha256": "760d07c53f5ec5b4b1f9668cb5fd816a01ad5a183d0019b0538408d3eeea6c96"
+  },
+  {
+    "old": "quarterly_dashboard/stock_cleanup.py",
+    "new": "stock_analysis/maintenance/stock_cleanup.py",
+    "sha256": "908b4356ee3902d8018ad2f9bd20173c2682fcffd3ad3459dc5af4a83ee41a58"
+  },
+  {
+    "old": "quarterly_dashboard/stock_collection.py",
+    "new": "stock_analysis/domains/stocks/stock_collection.py",
+    "sha256": "1badd91e644d5fea3d872ecadf126870c1e6ae7615b7eed33e1d202034444eac"
+  },
+  {
+    "old": "quarterly_dashboard/stock_library.py",
+    "new": "stock_analysis/domains/stocks/stock_library.py",
+    "sha256": "6495af902b7564bdc8c857e7e359e7c2fa25706620028b841a8c36799b12f4d4"
+  },
+  {
+    "old": "quarterly_dashboard/storage.py",
+    "new": "stock_analysis/infrastructure/storage.py",
+    "sha256": "4a2e390101a619ac209612ab220fb23146ba3908a440d94caf86ac5997c7ed8a"
+  },
+  {
+    "old": "quarterly_dashboard/update_service.py",
+    "new": "stock_analysis/domains/stocks/update_service.py",
+    "sha256": "d4f186cd1788e727fe205e2d6845b1d5c277861fd3c15478c1da3b303b7d7c2a"
+  },
+  {
+    "old": "quarterly_dashboard/valuation.py",
+    "new": "stock_analysis/domains/valuation/valuation.py",
+    "sha256": "5d1119b1c919c3d87c682cd6c7e68d00ae88cbd8ebceb3bee85cb62e0bbf4ee2"
+  },
+  {
+    "old": "quarterly_dashboard/valuation_service.py",
+    "new": "stock_analysis/domains/valuation/valuation_service.py",
+    "sha256": "c2d3eb47b7831032518e17582b74a2acb88b821d85913726b53c20b90a581bac"
+  },
+  {
+    "old": "quarterly_dashboard/valuation_transport.py",
+    "new": "stock_analysis/domains/valuation/valuation_transport.py",
+    "sha256": "220c54c6a38780fdab7dcc0d7b620212d3033b0ae53f3ff77573becae6faf10f"
+  }
+]

@@ -4,8 +4,8 @@ from copy import deepcopy
 from datetime import date,timedelta
 import requests
 from test_collection_management_ui import live
-from quarterly_dashboard import shipping_forecast as forecast
-from quarterly_dashboard.collection import begin_batch,archive_source
+from stock_analysis.domains.research.sectors.shipping import shipping_forecast as forecast
+from stock_analysis.collection.collection import begin_batch,archive_source
 
 
 def seed(db,monkeypatch):

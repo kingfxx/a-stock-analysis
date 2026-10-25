@@ -10,8 +10,8 @@ from pypdf import PdfReader
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard.collection import RequestCollector, begin_batch, finish_batch, parsed_source
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.collection.collection import RequestCollector, begin_batch, finish_batch, parsed_source
 
 OUT=ROOT/'data/verification/samples/ccfi-profit-lab'
 

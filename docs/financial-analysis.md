@@ -51,4 +51,4 @@
 
 资产与负债＋权益、现金期初加净变动与期末余额进行勾稽，超出舍入容差时显示差额。瀑布必要输入缺失时显示待补并保留明细，不以零补成完整瀑布。
 
-实现文件：`quarterly_dashboard/statements.py`、`web/financial-statements.js`、`web/financial-statements.css`；回归：`tests/test_statements.py`、`tests/statements_ui.cjs`、`tests/statements_browser.cjs`。
+实现文件：`stock_analysis/domains/financials/statements.py`、`web/financial-statements.js`、`web/financial-statements.css`；回归：`tests/test_statements.py`、`tests/statements_ui.cjs`、`tests/statements_browser.cjs`。

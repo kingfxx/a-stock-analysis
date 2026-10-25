@@ -1,6 +1,6 @@
 import copy
 import json
-from quarterly_dashboard.financial_storage import decompress_json
+from stock_analysis.domains.financials.financial_storage import decompress_json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -12,13 +12,13 @@ from uuid import uuid4
 import pytest
 import requests
 
-from quarterly_dashboard import server
-from quarterly_dashboard.analysis_snapshot import capture, digest, encoded, changes, SnapshotError
-from quarterly_dashboard.analysis_repository import AnalysisRepository
-from quarterly_dashboard.analysis_validation import prompt, validate_output, OUTPUT_VERSION, DIMENSIONS
-from quarterly_dashboard.analysis_service import AnalysisService
-from quarterly_dashboard.ai_provider import ChatGPTProvider, WindowsCredentials, ProviderError, PLAN_SCOPE, STREAM_ERRORS
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult, utc_now, restore_backup
+from stock_analysis.http import server
+from stock_analysis.domains.research.assessment.analysis_snapshot import capture, digest, encoded, changes, SnapshotError
+from stock_analysis.domains.research.assessment.analysis_repository import AnalysisRepository
+from stock_analysis.domains.research.assessment.analysis_validation import prompt, validate_output, OUTPUT_VERSION, DIMENSIONS
+from stock_analysis.domains.research.assessment.analysis_service import AnalysisService
+from stock_analysis.domains.research.ai.ai_provider import ChatGPTProvider, WindowsCredentials, ProviderError, PLAN_SCOPE, STREAM_ERRORS
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, utc_now, restore_backup
 
 
 @pytest.fixture
@@ -175,7 +175,7 @@ def test_global_queue_limit_idempotency_and_cross_stock_relation(database):
 
 
 def test_migration_preserves_facts_and_groups_and_prebackup(database,tmp_path,monkeypatch):
-    from quarterly_dashboard import storage
+    from stock_analysis.infrastructure import storage
     old=storage.MIGRATIONS
     monkeypatch.setattr(storage,'MIGRATIONS',tuple(m for m in old if m[0]<7))
     previous=Database(tmp_path/'version6.sqlite3'); previous.initialize()
@@ -199,9 +199,9 @@ def test_windows_backup_does_not_require_hardlinks(database,tmp_path,monkeypatch
     def unavailable(*args): raise OSError('Hard links unavailable on this volume')
     monkeypatch.setattr(os,'link',unavailable)
     backup=database.backup(tmp_path/'no-hardlink.sqlite3')
-    from quarterly_dashboard import storage
+    from stock_analysis.infrastructure import storage
     assert Database(backup).check()['schema_version']==storage.MIGRATIONS[-1][0]
-    from quarterly_dashboard.storage import StorageError
+    from stock_analysis.infrastructure.storage import StorageError
     with pytest.raises(StorageError): database.backup(backup)
 
 
@@ -528,7 +528,7 @@ def test_http_cross_site_token_host_history_and_no_model_reads(database,monkeypa
 @pytest.mark.parametrize('missing_component',[False,True])
 @pytest.mark.parametrize('period',['2025-12-31','2026-06-30'])
 def test_snapshot_debt_matches_dashboard_with_empty_reported_components(database, missing_component, period):
-    from quarterly_dashboard.core import DEBT_COMPONENTS
+    from stock_analysis.domains.financials.core import DEBT_COMPONENTS
     with database.connection(write=True) as conn:
         stored=conn.execute("SELECT period,raw_json FROM financial_reports WHERE period=?",(period,)).fetchone()
         report=json.loads(decompress_json(stored['raw_json']))
@@ -549,7 +549,7 @@ def test_snapshot_debt_matches_dashboard_with_empty_reported_components(database
 
 @pytest.mark.parametrize('fault,field',[('unknown','thesis.core_judgment.evidence_ids'),('missing','thesis.core_judgment.evidence_ids'),('too_many','thesis.core_judgment.evidence_ids'),('wrong_number','fact_claims[0]'),('wrong_direction','fact_claims[0]'),('profit_as_loss','report.prose')])
 def test_report_rejects_actionable_reference_and_fact_errors(database,fault,field):
-    from quarterly_dashboard.analysis_validation import ReportValidationError
+    from stock_analysis.domains.research.assessment.analysis_validation import ReportValidationError
     data=snapshot(database)['input']; result=valid_result(data)
     if fault=='unknown': result['thesis']['core_judgment']['evidence_ids']=['financial.quarter.2026-06-30.profit']
     if fault=='missing': result['thesis']['core_judgment']['evidence_ids']=[]
@@ -594,7 +594,7 @@ def test_industry_placeholder_is_not_complete_classification(database,name,known
 
 
 def test_explicit_latest_margin_direction_is_checked_without_rejecting_hypothesis(database):
-    from quarterly_dashboard.analysis_validation import ReportValidationError
+    from stock_analysis.domains.research.assessment.analysis_validation import ReportValidationError
     data=snapshot(database)['input'];result=valid_result(data)
     fact=next(e for e in data['evidence'] if e['metric']=='calculated_fact' and e['field']=='gross_margin' and e['period_type']=='quarter' and e['comparison']=='qoq')
     fact['value']=-4.3;fact['direction']='down'

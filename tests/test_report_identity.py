@@ -1,7 +1,7 @@
 import pytest
 
-from quarterly_dashboard.company_report_service import CompanyReportService
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.research.reports.company_report_service import CompanyReportService
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.mark.parametrize('year,kind,code,summary,valid', [

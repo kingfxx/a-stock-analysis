@@ -36,7 +36,7 @@
 
 <a id="指数点位存储与归档复用"></a>
 
-实现为 `quarterly_dashboard/index_prices.py`，历史导入为 `quarterly_dashboard/index_price_replay.py`。点位与估值分表，复用 `index_identities / index_catalog / index_provider_codes`，不进入个股价格表。宽基、申万行业、策略和后续主题指数共享结构；分类及层级继续由目录管理。
+实现为 `stock_analysis/domains/indices/index_prices.py`，历史导入为 `stock_analysis/domains/indices/index_price_replay.py`。点位与估值分表，复用 `index_identities / index_catalog / index_provider_codes`，不进入个股价格表。宽基、申万行业、策略和后续主题指数共享结构；分类及层级继续由目录管理。
 
 ### 表与口径
 
@@ -98,7 +98,7 @@
 ### 历史回放
 
 ```powershell
-python -m quarterly_dashboard.index_price_replay --start 2016-10-11 --end 2026-10-09
+python -m stock_analysis.domains.indices.index_price_replay --start 2016-10-11 --end 2026-10-09
 ```
 
 只读取成功批次、解析通过且双哈希校验通过的已有响应，不执行网络请求。范围取调用范围与原成功批次范围交集；不迁移旧采集表。申万按原批次复核分页总数、跨页重复后发布；中证排除休市行和请求边界复制占位；缺值不填补。
@@ -125,7 +125,7 @@ v27最初新增的三个点位表归入「指数数据」。定义表按 `update
 只读验收命令：
 
 ```powershell
-python -m quarterly_dashboard.index_price_audit --report data/verification/reports/index-points-audit.json
+python -m stock_analysis.domains.indices.index_price_audit --report data/verification/reports/index-points-audit.json
 ```
 
 核对原始文件双哈希、逐点位值及真实取得时间；相同重叠来源允许复用已保留的相同业务版本。审计同时输出按类别／提供方／频率的范围与逐字段有效数、外键和完整性、维护页新表统计。零网络请求。2026-10-11隔离真实归档演练共回放298个原批次、352335条点位，二次回放全部跳过；原估值内容哈希未变。详细验收在 `data/verification/reports/2026-10-11-index-points-rehearsal-*.json`。
@@ -180,13 +180,13 @@ python -m quarterly_dashboard.index_price_audit --report data/verification/repor
 | `ps_ttm` | `index_valuation_observations.ps_ttm` | 当前无已确认dataset/raw field | 倍数，不推导替代 | — | 无来源值，保持NULL |
 | `dividend_yield` | `index_valuation_observations.dividend_yield` | 中证 `index.cs.dashboard` / `indexValuation.dp`；`index.cs.indicator` / `indicator-xls.dp1/dp2`；申万 `index.sw.analysis` / `index_analysis_report.dp` | 百分数，2.5即2.5%；中证dp1/dp2分别总股本/计算股本 | 中证/申万日频 | 口径序列分开，来源空值留NULL |
 
-估值序列身份为指数×提供方×序列×频率×定义版本，具体口径差异（利润期间、统计方法、股本口径）保存在定义正文中。只有定义明确支持的字段才进入该序列；有效零/负值按定义保留，不能用相似名称字段填补`pe_dynamic`、`ps`或`ps_ttm`。定义文件 `quarterly_dashboard/index_definitions.py` 是当前映射的实现依据。
+估值序列身份为指数×提供方×序列×频率×定义版本，具体口径差异（利润期间、统计方法、股本口径）保存在定义正文中。只有定义明确支持的字段才进入该序列；有效零/负值按定义保留，不能用相似名称字段填补`pe_dynamic`、`ps`或`ps_ttm`。定义文件 `stock_analysis/domains/indices/index_definitions.py` 是当前映射的实现依据。
 
 指数分析页另有独立[大盘拥挤度区块](#大盘拥挤度采集与查询)：首次API历史+HTML近期，日更仅HTML、只写数据库；复用本页operation与公共legu预算，默认保守策略，不套指数估值专属提速。原估值按钮省略datasets时仍执行原任务，不自动附加该指标。图中所选宽基点位只读现有点位库。
 
 从v27起，中证历史、申万分析和乐咕PE/PB响应中的点位同步写入独立点位表，不增加来源请求；已归档响应也可手动离线回放并保留原采集时间及来源。v37扩展中证与申万的点位定义，新增字段映射见[行情字段表](#field-mapping)；乐咕继续保留月频；回放方案见[指数点位存储](#指数点位存储与归档复用)。
 
-实现入口 `quarterly_dashboard/index_collection.py`，迁移 v23/v24/v25/v26。日常后台初始化先备份再迁移；不修改旧财务／价格采集元数据、文件或事实外键。主页“指数分析”打开 `/indices`，进入页面只读本地数据；采集操作统一从后台维护的采集管理触发。
+实现入口 `stock_analysis/domains/indices/index_collection.py`，迁移 v23/v24/v25/v26。日常后台初始化先备份再迁移；不修改旧财务／价格采集元数据、文件或事实外键。主页“指数分析”打开 `/indices`，进入页面只读本地数据；采集操作统一从后台维护的采集管理触发。
 
 ### 来源与口径
 
@@ -246,10 +246,10 @@ python -m quarterly_dashboard.index_price_audit --report data/verification/repor
 历史轮换每次核对一个较早月份；季度盘点读本地范围与批次汇总，需要全窗口重查可显式指定范围。这些是手动入口，未创建定时任务。
 
 ```powershell
-python -m quarterly_dashboard.index_collection --mode full
-python -m quarterly_dashboard.index_collection --mode incremental
-python -m quarterly_dashboard.index_collection --mode review
-python -m quarterly_dashboard.index_collection --mode audit --start 2018-06-01 --end 2018-06-30
+python -m stock_analysis.domains.indices.index_collection --mode full
+python -m stock_analysis.domains.indices.index_collection --mode incremental
+python -m stock_analysis.domains.indices.index_collection --mode review
+python -m stock_analysis.domains.indices.index_collection --mode audit --start 2018-06-01 --end 2018-06-30
 ```
 
 后台先初始化最新结构，CLI不在运行后台旁迁移schema。页面可查看进度／停止；重启只恢复没有活跃操作锁的中断任务，不自动请求来源。
@@ -336,7 +336,7 @@ v26新增 `index_read_revisions` 单行版本记录；v28增加`index_price_obse
 
 <a id="大盘拥挤度采集与查询"></a>
 
-实现：`quarterly_dashboard/market_congestion.py`、迁移v36。指数分析页 `/indices` 在估值区块下方提供独立趋势图。
+实现：`stock_analysis/domains/market/market_congestion.py`、迁移v36。指数分析页 `/indices` 在估值区块下方提供独立趋势图。
 
 图表“成交额”开关可叠加全A成交额（亿元），使用同日有效值并按网页表格、API、自算补值的顺序取值；日频显示当日金额，周／月频汇总该周期内有效日金额，缺值不补。该线使用独立纵轴，不改变拥挤度、分位或宽基指数点位。
 
@@ -422,7 +422,7 @@ v26新增 `index_read_revisions` 单行版本记录；v28增加`index_price_obse
 
 <a id="maintenance-and-acceptance"></a>
 
-行情v38重建紧凑点位事实，不增加业务表，维护分类仍为“指数数据”，逻辑真实时间为关联来源obtained_at及解码updated_at；新增列、来源、定义版本和派生估算均可从点位事实及source/batch追溯。拥挤度表与日程表的用途、分类和真实时间见[拥挤度存储说明](#congestion-storage)。维护页统计、隔离测试、原始归档双哈希复核及历史点位上线验收记录见[行情维护与历史验收](#point-maintenance)、[估值验证](#valuation-verification)和[拥挤度验证](#congestion-verification)。正式回放定向只读审计使用`python -m quarterly_dashboard.index_price_audit --report data/verification/reports/index-price-targeted.json`：SQL汇总行情行数/物理唯一/来源关联及逐字段覆盖，每序列首中末抽样核验来源双哈希、字段真实时间、同行估算父依赖及公式；成交额/占比覆盖分别给出原始有效与估算有效条数；不重复历史全量逐来源审计、不扫描未变表hash。已有全量审计报告仅作为未变来源/单位的历史证据，新单行模型通过须有本次迁移和幂等验证；发现异常再扩大对应分段。覆盖状态按序列/字段分别核验，任务完成不等于历史全覆盖。
+行情v38重建紧凑点位事实，不增加业务表，维护分类仍为“指数数据”，逻辑真实时间为关联来源obtained_at及解码updated_at；新增列、来源、定义版本和派生估算均可从点位事实及source/batch追溯。拥挤度表与日程表的用途、分类和真实时间见[拥挤度存储说明](#congestion-storage)。维护页统计、隔离测试、原始归档双哈希复核及历史点位上线验收记录见[行情维护与历史验收](#point-maintenance)、[估值验证](#valuation-verification)和[拥挤度验证](#congestion-verification)。正式回放定向只读审计使用`python -m stock_analysis.domains.indices.index_price_audit --report data/verification/reports/index-price-targeted.json`：SQL汇总行情行数/物理唯一/来源关联及逐字段覆盖，每序列首中末抽样核验来源双哈希、字段真实时间、同行估算父依赖及公式；成交额/占比覆盖分别给出原始有效与估算有效条数；不重复历史全量逐来源审计、不扫描未变表hash。已有全量审计报告仅作为未变来源/单位的历史证据，新单行模型通过须有本次迁移和幂等验证；发现异常再扩大对应分段。覆盖状态按序列/字段分别核验，任务完成不等于历史全覆盖。
 
 ### 2026-10-18 同行补值验收
 
@@ -435,7 +435,7 @@ v26新增 `index_read_revisions` 单行版本记录；v28增加`index_price_obse
 
 国债在组合更新中使用独立工作线程和独立HTTP Session，与中证、乐咕、申万三路并行，从任务开始即可执行，不等待指数日历和衍生计算。国债与指数各自记录进度，任一路失败不阻断其他来源；统一等待各路结束后合并请求数、重试数、冷却状态和最终结果。停止仍读取同一operation取消标记，已提交分段保留，跨进程operation锁覆盖全部分支；注入自定义采集器的测试／工具调用保留确定性串行路径。
 
-Eastmoney标识共享公共`eastmoney`预算，使用并发1、至少10秒间隔加随机等待、滚动60秒最多5次和20次后额外休息60—120秒；它不继承中证/申万/乐咕指数提速策略。中国与美国新鲜度分别按上海、纽约本地日期核对，参考各自昨日并留24小时迟到宽限；有效检查6小时内可复用，字段仍滞后或为空时1小时后重查。GDP按实际非空日期记覆盖，不纳入日度收益率新鲜度。发布时点、字段检查及年度覆盖均在公共batch result中可追溯；任务完成不等于逐字段每日完整。只读覆盖/溯源报告可运行`python -m quarterly_dashboard.bond_yield_audit --database <数据库路径> --output <报告路径>`，核对来源双哈希、分页声明、原文与事实双向值匹配、日期间隔、维护大小/时间及查询/分段写入耗时；日期间隔只报告日历天数，不推断节假日缺行。页面读取不触发网络请求，不自动运行日程。完整实施计划与验收记录见[国债收益率采集计划](plans/20261020_bond_yield_collection/PLAN.md)。
+Eastmoney标识共享公共`eastmoney`预算，使用并发1、至少10秒间隔加随机等待、滚动60秒最多5次和20次后额外休息60—120秒；它不继承中证/申万/乐咕指数提速策略。中国与美国新鲜度分别按上海、纽约本地日期核对，参考各自昨日并留24小时迟到宽限；有效检查6小时内可复用，字段仍滞后或为空时1小时后重查。GDP按实际非空日期记覆盖，不纳入日度收益率新鲜度。发布时点、字段检查及年度覆盖均在公共batch result中可追溯；任务完成不等于逐字段每日完整。只读覆盖/溯源报告可运行`python -m stock_analysis.domains.market.bond_yield_audit --database <数据库路径> --output <报告路径>`，核对来源双哈希、分页声明、原文与事实双向值匹配、日期间隔、维护大小/时间及查询/分段写入耗时；日期间隔只报告日历天数，不推断节假日缺行。页面读取不触发网络请求，不自动运行日程。完整实施计划与验收记录见[国债收益率采集计划](plans/20261020_bond_yield_collection/PLAN.md)。
 
 
 ## 股债利差展示

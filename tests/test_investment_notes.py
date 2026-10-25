@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from quarterly_dashboard.investment_notes import InvestmentNotes, NoteConflict, digest
+from stock_analysis.domains.notes.investment_notes import InvestmentNotes, NoteConflict, digest
 
 
 def save(notes, text, *, base=None):
@@ -69,7 +69,7 @@ def test_stale_tab_and_deleted_file_require_explicit_resolution(tmp_path):
 
 
 def test_atomic_replace_failure_keeps_original(tmp_path, monkeypatch):
-    from quarterly_dashboard import investment_notes as module
+    from stock_analysis.domains.notes import investment_notes as module
     notes = InvestmentNotes(tmp_path)
     base = save(notes, 'old')
     replace = module.os.replace
@@ -149,7 +149,7 @@ def test_external_markdown_association_and_resource_boundary(tmp_path):
 
 
 def test_http_notes_session_auth_conflict_and_no_database_writes(tmp_path, monkeypatch):
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
     monkeypatch.setattr(server, 'DATABASE_PATH', tmp_path / 'unused.sqlite3')
     httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
     thread = Thread(target=httpd.serve_forever, daemon=True); thread.start()
@@ -182,9 +182,9 @@ def test_http_notes_session_auth_conflict_and_no_database_writes(tmp_path, monke
 
 
 def test_notes_in_real_browser(tmp_path, monkeypatch):
-    from quarterly_dashboard import server
-    from quarterly_dashboard.storage import Database
-    from quarterly_dashboard import note_snapshots
+    from stock_analysis.http import server
+    from stock_analysis.infrastructure.storage import Database
+    from stock_analysis.domains.notes import note_snapshots
     edge = shutil.which('msedge') or r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
     node = shutil.which('node')
     if not Path(edge).is_file() or not node:

@@ -13,10 +13,10 @@ from pathlib import Path
 
 import requests
 
-from quarterly_dashboard.dividend_service import DividendService
-from quarterly_dashboard.fundamental_service import FundamentalService
-from quarterly_dashboard.storage import DEFAULT_DATABASE, Database, restore_backup
-from quarterly_dashboard.valuation_service import ValuationService
+from stock_analysis.domains.stocks.dividend_service import DividendService
+from stock_analysis.domains.financials.fundamental_service import FundamentalService
+from stock_analysis.infrastructure.storage import DEFAULT_DATABASE, Database, restore_backup
+from stock_analysis.domains.valuation.valuation_service import ValuationService
 
 
 ROOT = Path(__file__).resolve().parent.parent

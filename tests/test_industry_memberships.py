@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard import industry_memberships as members
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.industry_updates import cap_roster
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard.collection import begin_batch,archive_source,parsed_source
+from stock_analysis.domains.industries import industry_memberships as members
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.domains.industries.industry_updates import cap_roster
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.collection.collection import begin_batch,archive_source,parsed_source
 from test_industries import fixture_bundle
 
 
@@ -149,7 +149,7 @@ def test_bad_szse_payload_is_archived_then_fails_without_publication(service,tmp
 
 
 def test_sse_denial_uses_shared_provider_cooldown(service,tmp_path):
-    from quarterly_dashboard.collection import PacingPolicy,ProviderBlocked,RequestCollector
+    from stock_analysis.collection.collection import PacingPolicy,ProviderBlocked,RequestCollector
     class DeniedSession:
         def mount(self,*args,**kwargs):pass
         def get(self,*args,**kwargs):return RecordedResponse(b'<html>denied</html>',403,'text/html')
@@ -173,7 +173,7 @@ def test_sws_xls_health_rejects_html_and_corrupt_workbooks():
 @pytest.mark.parametrize('body,clears_cooldown',[('valid',True),('invalid',False)])
 def test_szse_xlsx_response_health_controls_expired_cooldown(service,body,clears_cooldown):
     from datetime import datetime
-    from quarterly_dashboard.collection import PacingPolicy,ProviderBlocked,RequestCollector
+    from stock_analysis.collection.collection import PacingPolicy,ProviderBlocked,RequestCollector
     class Clock:
         value=10000
         def time(self):return self.value
@@ -407,7 +407,7 @@ def test_maintenance_purpose_and_times_for_empty_and_populated_tables(service):
 
 
 def test_finance_and_cap_tasks_share_one_daily_check(service,monkeypatch):
-    from quarterly_dashboard import industry_updates, market_financial, market_trade_snapshot
+    from stock_analysis.domains.industries import industry_updates; from stock_analysis.domains.market import market_financial; from stock_analysis.domains.market import market_trade_snapshot
     bundle=fixture_bundle()
     for i in range(3997):
         bundle['members'].append({**bundle['members'][0],'stock_code':f'600{i:03d}'})

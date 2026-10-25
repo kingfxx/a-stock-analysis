@@ -1,5 +1,5 @@
 import pytest
-from quarterly_dashboard.analysis_facts import financial_facts
+from stock_analysis.domains.research.assessment.analysis_facts import financial_facts
 
 
 def row(day,values):

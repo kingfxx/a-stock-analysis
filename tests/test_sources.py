@@ -1,4 +1,4 @@
-from quarterly_dashboard.sources import (normalize_report_dates, parse_cash_flow_reports,
+from stock_analysis.domains.stocks.sources import (normalize_report_dates, parse_cash_flow_reports,
                                          parse_financial_reports, parse_monthly_prices, parse_stock_name)
 
 

@@ -2,9 +2,9 @@ import sqlite3
 
 import pytest
 
-from quarterly_dashboard.maintenance import MaintenanceService, table_time
-from quarterly_dashboard.sqlite_sizes import physical_sizes
-from quarterly_dashboard.storage import Database
+from stock_analysis.maintenance.maintenance import MaintenanceService, table_time
+from stock_analysis.maintenance.sqlite_sizes import physical_sizes
+from stock_analysis.infrastructure.storage import Database
 
 
 def test_fallback_reads_only_one_page_at_a_time(tmp_path):

@@ -4,11 +4,11 @@ import sqlite3
 import pytest
 import requests
 
-from quarterly_dashboard import market_trade_snapshot as m
-from quarterly_dashboard.collection import RequestCollector, begin_batch, read_source
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.maintenance import MaintenanceService
+from stock_analysis.domains.market import market_trade_snapshot as m
+from stock_analysis.collection.collection import RequestCollector, begin_batch, read_source
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.maintenance.maintenance import MaintenanceService
 
 
 @pytest.fixture

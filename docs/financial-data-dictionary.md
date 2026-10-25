@@ -114,7 +114,7 @@ ORDER BY f.period;
 |已实施现金分红|来自 dividend_events，独立于四表；按归属期汇总估算|
 |披露日市值 / 股价|来自价格表和报告期股本，独立于 gjzb 比率；历史市值为估算|
 
-代码依据：[sources.py](../quarterly_dashboard/sources.py)、[fundamental_service.py](../quarterly_dashboard/fundamental_service.py)、[core.py](../quarterly_dashboard/core.py)、[roic.py](../quarterly_dashboard/roic.py)。
+代码依据：[sources.py](../stock_analysis/domains/stocks/sources.py)、[fundamental_service.py](../stock_analysis/domains/financials/fundamental_service.py)、[core.py](../stock_analysis/domains/financials/core.py)、[roic.py](../stock_analysis/domains/financials/roic.py)。
 
 ## 6. 四表完整科目清单
 

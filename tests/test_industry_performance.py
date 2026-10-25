@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from quarterly_dashboard.industry_performance import attach_performance
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.industry_snapshot import export
-from quarterly_dashboard.industry_storage import latest_financial_rows
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.industries.industry_performance import attach_performance
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.domains.industries.industry_snapshot import export
+from stock_analysis.domains.industries.industry_storage import latest_financial_rows
+from stock_analysis.infrastructure.storage import Database
 from test_industries import fixture_bundle
 
 

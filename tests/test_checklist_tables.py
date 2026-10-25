@@ -1,7 +1,7 @@
 import copy
 import json
 import pytest
-from quarterly_dashboard.checklist_validation import validate_output, prompt
+from stock_analysis.domains.research.assessment.checklist_validation import validate_output, prompt
 from test_checklist import result
 
 
@@ -75,7 +75,7 @@ def test_valid_table_source_is_merged_into_parent_item():
 
 
 def test_unknown_table_source_reports_item_table_and_bad_id():
-    from quarterly_dashboard.analysis_validation import ReportValidationError
+    from stock_analysis.domains.research.assessment.analysis_validation import ReportValidationError
     data,out,table=payload()
     table['evidence_ids']=['nonexistent-page']
     with pytest.raises(ReportValidationError) as error:

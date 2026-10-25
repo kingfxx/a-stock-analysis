@@ -1,8 +1,8 @@
 import pytest
 import re
 
-from quarterly_dashboard import note_snapshots as snapshots
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.notes import note_snapshots as snapshots
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture

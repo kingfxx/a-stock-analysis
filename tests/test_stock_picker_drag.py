@@ -9,9 +9,9 @@ from threading import Thread
 
 import pytest
 
-from quarterly_dashboard import server
-from quarterly_dashboard.stock_library import StockLibrary
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult
+from stock_analysis.http import server
+from stock_analysis.domains.stocks.stock_library import StockLibrary
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult
 
 
 @pytest.mark.parametrize('script,expected', [

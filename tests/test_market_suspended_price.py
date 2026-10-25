@@ -1,9 +1,9 @@
 import pytest
 
-from quarterly_dashboard.market_suspended_price import validate_reference
-from quarterly_dashboard.collection import begin_batch,archive_source
-from quarterly_dashboard.market_trade_snapshot import normalized,FIELDS,publish
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.market.market_suspended_price import validate_reference
+from stock_analysis.collection.collection import begin_batch,archive_source
+from stock_analysis.domains.market.market_trade_snapshot import normalized,FIELDS,publish
+from stock_analysis.infrastructure.storage import Database
 
 def anchor():return dict(instrument='000001.SZ',price_date='2015-03-20',target_date='2015-03-31',pre_close=10,anchor_close=10,anchor_total_shares=100)
 def events():return [dict(change_date='2015-01-01',total_shares=100)]

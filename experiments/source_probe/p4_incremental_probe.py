@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from quarterly_dashboard.network import create_data_session
-from quarterly_dashboard.sources import SINA_URL, symbol_for
-from quarterly_dashboard.valuation import BAIDU_URL, BAIDU_INDICATORS, DIVIDEND_URL
+from stock_analysis.infrastructure.network import create_data_session
+from stock_analysis.domains.stocks.sources import SINA_URL, symbol_for
+from stock_analysis.domains.valuation.valuation import BAIDU_URL, BAIDU_INDICATORS, DIVIDEND_URL
 
 
 class Probe:

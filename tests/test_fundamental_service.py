@@ -3,18 +3,18 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from quarterly_dashboard.fundamental_service import FundamentalService, SOURCE
-from quarterly_dashboard.price_projection import financial_prices
-from quarterly_dashboard.core import build_period_rows
-from quarterly_dashboard.sources import normalize_report_dates
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult
+from stock_analysis.domains.financials.fundamental_service import FundamentalService, SOURCE
+from stock_analysis.domains.stocks.price_projection import financial_prices
+from stock_analysis.domains.financials.core import build_period_rows
+from stock_analysis.domains.stocks.sources import normalize_report_dates
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult
 
 
 def test_cache_timestamp_tracks_successful_financial_commits(tmp_path, monkeypatch):
     db = Database(tmp_path / "facts.sqlite3")
     db.initialize()
     now = [datetime.now(timezone.utc).isoformat()]
-    monkeypatch.setattr("quarterly_dashboard.storage.utc_now", lambda: now[0])
+    monkeypatch.setattr("stock_analysis.infrastructure.storage.utc_now", lambda: now[0])
     failed_types = set()
 
     def fetch(code, kind, num, page):
@@ -312,14 +312,14 @@ def test_existing_three_statements_backfill_key_indicators_in_same_table(tmp_pat
 
     service = FundamentalService(db, tmp_path, fetch_page=fetch)
     with monkeypatch.context() as context:
-        context.setattr("quarterly_dashboard.fundamental_service.REPORT_TYPES", ("lrb", "fzb", "llb"))
+        context.setattr("stock_analysis.domains.financials.fundamental_service.REPORT_TYPES", ("lrb", "fzb", "llb"))
         service.update("601919")
     calls.clear()
     result = service.update("601919")
     assert not result["warnings"]
     assert calls == [("gjzb", 200, 1)]
     identity = db.ensure_instrument("601919")
-    from quarterly_dashboard.fundamental_service import SOURCE
+    from stock_analysis.domains.financials.fundamental_service import SOURCE
     saved = db.financial_reports(identity, SOURCE, "gjzb")
     assert len(saved) == 1
     assert json.loads(saved[0]["raw_json"]) == raw_indicator
@@ -337,7 +337,7 @@ def test_existing_three_statements_backfill_key_indicators_in_same_table(tmp_pat
 
 
 def test_failed_or_incomplete_key_indicators_preserve_saved_json(tmp_path):
-    from quarterly_dashboard.fundamental_service import SOURCE
+    from stock_analysis.domains.financials.fundamental_service import SOURCE
     db = Database(tmp_path / "facts.sqlite3")
     db.initialize()
     mode = ["ok"]

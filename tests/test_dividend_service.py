@@ -3,8 +3,8 @@
 import pytest
 import json
 
-from quarterly_dashboard.dividend_service import DividendService
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.stocks.dividend_service import DividendService
+from stock_analysis.infrastructure.storage import Database
 
 
 def _event(proposal, *, status="董事会预案通过", ex_date=None, cash=4.4):

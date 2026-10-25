@@ -7,11 +7,11 @@ import sqlite3
 import pytest
 import requests
 
-from quarterly_dashboard import market_financial as mf
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.collection import RequestCollector,archive_source,begin_batch as begin_collection_batch,parsed_source
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.market import market_financial as mf
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.collection.collection import RequestCollector,archive_source,begin_batch as begin_collection_batch,parsed_source
+from stock_analysis.infrastructure.storage import Database
 from test_industries import fixture_bundle
 
 PERIOD = '2025-06-30'
@@ -85,7 +85,7 @@ def test_migration_inventory_empty_and_populated(db):
 
 
 def test_v32_rebuild_preserves_legacy_rows_and_adds_disjoint_public_references(tmp_path, monkeypatch):
-    from quarterly_dashboard import storage
+    from stock_analysis.infrastructure import storage
     path=tmp_path/'pre-v32.sqlite3'
     db=Database(path)
     latest=storage.MIGRATIONS
@@ -111,7 +111,7 @@ def test_v32_rebuild_preserves_legacy_rows_and_adds_disjoint_public_references(t
             assert conn.execute(f"SELECT count(*) FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL",(table,)).fetchone()[0]==2
         assert conn.execute('SELECT count(*) FROM market_financial_industry').fetchone()[0]==1
         assert conn.execute('PRAGMA foreign_key_check').fetchall()==[]
-    from quarterly_dashboard.collection import archive_source,begin_batch
+    from stock_analysis.collection.collection import archive_source,begin_batch
     public_batch=begin_batch(db,'op','market.financial.income','eastmoney',start='2025-06-30',end='2025-06-30')
     public_source=archive_source(db,public_batch,'eastmoney','market.financial.income',{'url':'https://new.test'},1,raw=b'{}')
     with db.connection(write=True) as conn:
@@ -194,7 +194,7 @@ def test_public_financial_reuses_hash_verified_same_day_pages_across_operations(
         income_source=conn.execute("SELECT s.id,s.file_path FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id "
             "WHERE b.operation_id='operation:explicit-recheck' AND s.dataset='market.financial.income'").fetchone()
     # Simulate a verified completed archive whose page-one total no longer matches its archived page set.
-    from quarterly_dashboard.collection import read_source
+    from stock_analysis.collection.collection import read_source
     raw,_=read_source(db,income_source['id'])
     payload=json.loads(raw);payload['result'].update(count=501,pages=2)
     changed=json.dumps(payload).encode();stored=gzip.compress(changed,mtime=0)
@@ -211,7 +211,7 @@ def test_public_financial_reuses_hash_verified_same_day_pages_across_operations(
 
 def test_public_financial_never_mixes_pages_from_different_batches(db):
     from datetime import datetime,timezone
-    from quarterly_dashboard.collection import finish_batch
+    from stock_analysis.collection.collection import finish_batch
     stamp='2026-10-14T02:00:00+00:00'
     original_batch_ids={}
     for dataset,spec in mf.FIELDS.items():
@@ -398,7 +398,7 @@ def test_legacy_dataset_collector_is_disabled():
 def test_recovery_fails_only_unfinished_batches(db):
     batch, _ = save(db, datasets())
     interrupted = mf.begin_batch(db, PERIOD)
-    from quarterly_dashboard.collection import finish_batch
+    from stock_analysis.collection.collection import finish_batch
     with db.connection(write=True) as conn:
         run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) "
             "VALUES('financial_period',? ,0,'2026-10-14','running')",(PERIOD,)).lastrowid
@@ -423,7 +423,7 @@ def test_recovery_fails_only_unfinished_batches(db):
 
 
 def test_daily_button_collects_once_without_legacy_reads_or_writes(db, tmp_path, monkeypatch):
-    from quarterly_dashboard import industry_updates, industry_memberships
+    from stock_analysis.domains.industries import industry_updates; from stock_analysis.domains.industries import industry_memberships
     service = IndustryService(db, tmp_path/'industry-sources')
     bundle = fixture_bundle()
     existing = {r['stock_code'] for r in bundle['members']}
@@ -459,7 +459,7 @@ def test_daily_button_collects_once_without_legacy_reads_or_writes(db, tmp_path,
         imports = conn.execute('SELECT count(*) FROM sw_imports').fetchone()[0]
     def failed(database,operation_id,period,request_collector,progress,**kwargs):
         data=prepared_public_datasets(database,operation_id,period)
-        from quarterly_dashboard.collection import finish_batch
+        from stock_analysis.collection.collection import finish_batch
         cashflow=next(item for item in data if item['dataset']=='cashflow')
         finish_batch(database,cashflow['collection_batch_id'],'failed',error='现金流量表失败')
         raise ValueError('现金流量表失败')
@@ -473,7 +473,7 @@ def test_daily_button_collects_once_without_legacy_reads_or_writes(db, tmp_path,
 
 
 def test_explicit_history_range():
-    from quarterly_dashboard.market_financial_backfill import periods
+    from stock_analysis.domains.market.market_financial_backfill import periods
     assert periods('2025-09-30', '2026-06-30') == ['2025-09-30', '2025-12-31', '2026-03-31', '2026-06-30']
     assert len(periods('2014-09-30','2016-06-30'))==8
     with pytest.raises(ValueError):
@@ -500,7 +500,7 @@ def test_performance_all_fields_zero_negative_and_announcement_revision(db):
 
 
 def test_history_updates_only_new_four_tables_and_skip_requires_all_columns(db,tmp_path,monkeypatch):
-    from quarterly_dashboard import market_financial_backfill as history
+    from stock_analysis.domains.market import market_financial_backfill as history
     IndustryService(db).import_bundle(fixture_bundle(),capture_local=False)
     before=history.legacy_fingerprint(db)
     data=datasets()

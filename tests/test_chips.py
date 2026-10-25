@@ -3,8 +3,8 @@ from datetime import date
 
 import pytest
 
-from quarterly_dashboard import server
-from quarterly_dashboard.chips import chip_payload, chip_rows, fetch_chip_records, shareholder_price_snapshots
+from stock_analysis.http import server
+from stock_analysis.domains.stocks.chips import chip_payload, chip_rows, fetch_chip_records, shareholder_price_snapshots
 
 
 def holder(day="2026-06-30", count=10000):
@@ -169,7 +169,7 @@ def test_successful_refresh_keeps_backup_and_old_dates(chip_cache, monkeypatch):
     monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [holder(), holder("2026-09-15", 9000)])
     result = server.load_chart_data("600887", "shareholders", True)
     assert result["stored_count"] == 2
-    from quarterly_dashboard.storage import Database
+    from stock_analysis.infrastructure.storage import Database
     with Database(original).connection() as conn:
         assert conn.execute("SELECT count(*) FROM shareholder_observations").fetchone()[0] == 1
     with db.connection() as conn:

@@ -22,8 +22,8 @@ from time import perf_counter_ns
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from quarterly_dashboard import server  # noqa: E402
-from quarterly_dashboard.storage import Database  # noqa: E402
+from stock_analysis.http import server  # noqa: E402
+from stock_analysis.infrastructure.storage import Database  # noqa: E402
 
 
 def main() -> None:

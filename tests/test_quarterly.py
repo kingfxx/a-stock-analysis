@@ -1,4 +1,4 @@
-from quarterly_dashboard.core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
+from stock_analysis.domains.financials.core import build_period_rows, disclosure_reference_snapshots, disclosure_snapshots, view_rows
 
 
 def test_quarterly_differences_and_ttm_require_contiguous_reports():
@@ -227,7 +227,7 @@ def test_ytd_uses_reported_values_without_requiring_prior_quarters():
 
 
 def test_financial_payload_includes_ytd_view():
-    from quarterly_dashboard.server import _financial_payload, REPORT_DATE_BASIS
+    from stock_analysis.http.server import _financial_payload, REPORT_DATE_BASIS
     payload = _financial_payload({"code": "600000", "report_date_basis": REPORT_DATE_BASIS,
                                   "reports": [{"period": "2025-06-30", "profit_ytd": 123}]})
     assert set(payload['views']) == {'quarter', 'ytd', 'year', 'ttm'}

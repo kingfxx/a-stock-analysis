@@ -3,10 +3,10 @@ import re
 
 import pytest
 
-from quarterly_dashboard import server
-from quarterly_dashboard.fundamental_service import FundamentalService
-from quarterly_dashboard.stock_library import StockLibrary
-from quarterly_dashboard.storage import Database
+from stock_analysis.http import server
+from stock_analysis.domains.financials.fundamental_service import FundamentalService
+from stock_analysis.domains.stocks.stock_library import StockLibrary
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture(autouse=True)

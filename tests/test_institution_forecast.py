@@ -4,10 +4,10 @@ import json
 import pytest
 import requests
 
-from quarterly_dashboard.institution_forecast import parse_forecast, fetch_institution_forecast
-from quarterly_dashboard.collection import RequestCollector, ProviderBlocked
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard import server
+from stock_analysis.domains.valuation.institution_forecast import parse_forecast, fetch_institution_forecast
+from stock_analysis.collection.collection import RequestCollector, ProviderBlocked
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.http import server
 from test_stock_collection import Clock, Session, expired_provider_cooldown
 from test_dcf_server import request
 

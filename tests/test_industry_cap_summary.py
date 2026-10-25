@@ -2,12 +2,12 @@ import json
 
 import pytest
 
-from quarterly_dashboard.collection import archive_source, begin_batch
-from quarterly_dashboard.industry_cap_summary import aggregate_quarter, current_aggregation_versions
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.industry_updates import perform
-from quarterly_dashboard.market_trade_snapshot import FIELDS, normalized, publish
-from quarterly_dashboard.storage import Database
+from stock_analysis.collection.collection import archive_source, begin_batch
+from stock_analysis.domains.industries.industry_cap_summary import aggregate_quarter, current_aggregation_versions
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.domains.industries.industry_updates import perform
+from stock_analysis.domains.market.market_trade_snapshot import FIELDS, normalized, publish
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture
@@ -139,7 +139,7 @@ def test_task_entrypoint_keeps_published_cap_aggregation_current_and_visible(db,
     add_snapshot(db,'000002','sz',200)
     service=IndustryService(db)
 
-    from quarterly_dashboard import industry_memberships, market_trade_snapshot
+    from stock_analysis.domains.industries import industry_memberships; from stock_analysis.domains.market import market_trade_snapshot
     monkeypatch.setattr(industry_memberships,'ensure_daily_memberships',
                         lambda *args,**kwargs:{'warning':None})
 
@@ -190,7 +190,7 @@ def test_failed_task_entrypoint_preserves_already_published_aggregation(db,monke
     add_snapshot(db,'000002','sz',200)
     service=IndustryService(db)
 
-    from quarterly_dashboard import industry_memberships, market_trade_snapshot
+    from stock_analysis.domains.industries import industry_memberships; from stock_analysis.domains.market import market_trade_snapshot
     monkeypatch.setattr(industry_memberships,'ensure_daily_memberships',
                         lambda *args,**kwargs:{'warning':None})
 

@@ -9,8 +9,8 @@ from threading import Thread
 
 import pytest
 
-from quarterly_dashboard.database_restore import RestoreManager, RequestGate, digest
-from quarterly_dashboard.storage import Database, StorageError, instance_lock, MIGRATIONS
+from stock_analysis.maintenance.database_restore import RestoreManager, RequestGate, digest
+from stock_analysis.infrastructure.storage import Database, StorageError, instance_lock, MIGRATIONS
 
 
 def setup_db(tmp_path):
@@ -42,7 +42,7 @@ def test_restore_keeps_rollback_backup_and_replaces_only_sqlite(tmp_path):
 
 
 def test_old_schema_upgraded_in_copy_and_original_unchanged(tmp_path,monkeypatch):
-    from quarterly_dashboard import storage
+    from stock_analysis.infrastructure import storage
     migrations=storage.MIGRATIONS
     monkeypatch.setattr(storage,'MIGRATIONS',migrations[:12])
     old=Database(tmp_path/'old.sqlite3');old.initialize()
@@ -109,7 +109,7 @@ def test_staged_file_change_and_publish_failure_keep_current(tmp_path,monkeypatc
     def failed_publish(source,target):
         if target==db.path:raise OSError('replace failure')
         return original_replace(source,target)
-    monkeypatch.setattr('quarterly_dashboard.database_restore.os.replace',failed_publish)
+    monkeypatch.setattr('stock_analysis.maintenance.database_restore.os.replace',failed_publish)
     with instance_lock(db.path):assert manager.execute()['phase']=='failed'
     assert digest(db.path)==before
 
@@ -127,7 +127,7 @@ def test_failure_after_publish_rolls_back(tmp_path,monkeypatch):
 
 
 def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch):
-    from quarterly_dashboard import server
+    from stock_analysis.http import server
     db,backup,_=setup_db(tmp_path)
     monkeypatch.setattr(server,'DATABASE_PATH',db.path)
     for name in ('_SERVICES','_AI_SERVICES','_INDUSTRY_SERVICES','_MAINTENANCE_SERVICES','_DATA_LOCKS'):

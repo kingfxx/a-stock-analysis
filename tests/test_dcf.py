@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from quarterly_dashboard.dcf import (calculate_beta, calculate_debt_cost, calculate_effective_tax,
+from stock_analysis.domains.valuation.dcf import (calculate_beta, calculate_debt_cost, calculate_effective_tax,
                                      sum_interest_bearing_debt, read_risk_free_rate, calculate_dcf, calculate_growth_dcf, discount_cash_flows,
                                      forecast_standard, forecast_three_stage, estimate_wacc,
                                      read_dcf, _growth_recommendation)
-from quarterly_dashboard.fundamental_service import SOURCE
-from quarterly_dashboard.storage import Database, SyncKey, SyncResult
+from stock_analysis.domains.financials.fundamental_service import SOURCE
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult
 
 
 def test_constant_cash_flow_and_terminal_year_eleven():
@@ -217,7 +217,7 @@ def test_interest_bearing_debt_sum_reports_partial_fields_without_zero_filling()
 
 def test_auto_wacc_uses_annual_interest_tax_latest_interim_debt_and_same_day_market_cap(facts,monkeypatch):
     import json
-    from quarterly_dashboard import dcf
+    from stock_analysis.domains.valuation import dcf
     six=('SHORTTERMBORR','SHORTTERMBDSPAYA','DUENONCLIAB','LONGBORR','BDSPAYA','LEASELIAB')
     def balance(values): return raw('fzb',list(zip(six,six,values)))
     identity=facts.ensure_instrument('600519','测试企业')
@@ -344,7 +344,7 @@ def test_extreme_share_count_rejects_overflow():
 
 
 def test_market_definition_preference_missing_shares_and_newer_price(facts,tmp_path,monkeypatch):
-    from quarterly_dashboard.price_service import PriceService
+    from stock_analysis.domains.stocks.price_service import PriceService
     monkeypatch.setattr(PriceService,'read',lambda *a,**k:[dict(date='2026-08-31',close=90)])
     with facts.connection(write=True) as conn:
         conn.execute("INSERT INTO collection_batches(id,operation_id,domain,dataset,source_system,trigger_type,status,started_at) VALUES (1,'test','market','snapshot','test','manual','complete','2026-01-01')")

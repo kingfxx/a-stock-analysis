@@ -10,12 +10,12 @@ from datetime import date, datetime, timezone
 import pytest
 import requests
 
-from quarterly_dashboard import index_collection as ic
-from quarterly_dashboard.collection import (Cancelled, ProviderBlocked, RequestCollector, archive_source, begin_batch,
+from stock_analysis.domains.indices import index_collection as ic
+from stock_analysis.collection.collection import (Cancelled, ProviderBlocked, RequestCollector, archive_source, begin_batch,
     digest, encoded, finish_batch, parsed_source, read_source, retry_after)
-from quarterly_dashboard.index_repository import catalog, install_definitions, publish, read_indices
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.indices.index_repository import catalog, install_definitions, publish, read_indices
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.infrastructure.storage import Database
 
 
 @pytest.fixture

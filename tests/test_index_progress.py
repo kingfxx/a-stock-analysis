@@ -4,10 +4,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from quarterly_dashboard.collection import encoded
-from quarterly_dashboard.index_collection import OperationProgress,start_operation
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard import index_collection as ic
+from stock_analysis.collection.collection import encoded
+from stock_analysis.domains.indices.index_collection import OperationProgress,start_operation
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.domains.indices import index_collection as ic
 
 
 @pytest.fixture

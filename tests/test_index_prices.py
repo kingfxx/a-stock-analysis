@@ -3,15 +3,15 @@ import sqlite3
 
 import pytest
 
-from quarterly_dashboard.collection import archive_source, begin_batch, finish_batch, parsed_source
-from quarterly_dashboard.index_collection import publish_segment
-from quarterly_dashboard.index_prices import parse_prices, publish_prices, read_overlay, read_prices
-from quarterly_dashboard.index_repository import catalog
-from quarterly_dashboard.index_price_replay import replay
-from quarterly_dashboard.maintenance import MaintenanceService
-from quarterly_dashboard.storage import Database
+from stock_analysis.collection.collection import archive_source, begin_batch, finish_batch, parsed_source
+from stock_analysis.domains.indices.index_collection import publish_segment
+from stock_analysis.domains.indices.index_prices import parse_prices, publish_prices, read_overlay, read_prices
+from stock_analysis.domains.indices.index_repository import catalog
+from stock_analysis.domains.indices.index_price_replay import replay
+from stock_analysis.maintenance.maintenance import MaintenanceService
+from stock_analysis.infrastructure.storage import Database
 from test_index_collection import response, http
-from quarterly_dashboard.index_price_codec import PriceCodec
+from stock_analysis.domains.indices.index_price_codec import PriceCodec
 
 
 def price_fact(conn,sql,params=()):
@@ -106,7 +106,7 @@ def test_atomic_price_failure_rolls_back_valuation_month(db):
 
 
 def test_future_sw_publication_waits_for_all_pages(db):
-    from quarterly_dashboard.index_collection import IndexCollector
+    from stock_analysis.domains.indices.index_collection import IndexCollector
     base=dict(swindexcode='801010',swindexname='industry',bargaindate='2026-10-09',pe=10,pb=2,dp=1,closeindex=2000)
     client,session,_=http(db,[response({'data':{'count':2,'results':[base]}}),response({'data':{'count':2,'results':[]}})])
     collector=IndexCollector(db,'test',request_collector=client,sw_page_size=1);collector.trading_days={'2026-10-09'}
@@ -143,7 +143,7 @@ def test_overlay_selects_one_daily_index_close_without_stitching(db):
 
 
 def test_industry_overlay_prefers_sws_and_price_updates_expire_chart_cache(db):
-    from quarterly_dashboard.index_read_service import IndexReadService
+    from stock_analysis.domains.indices.index_read_service import IndexReadService
     batch,sid,code=seed(db,provider='sws',code='801010',kind='industry',dataset='index.sw.analysis')
     rows=[{**point(batch,sid,code,provider='sws',key='analysis.points',observation_date=day,close=value)}
           for day,value in [('2026-10-08',2580),('2026-10-09',2600)]]
@@ -167,11 +167,11 @@ def test_archive_replay_no_network_idempotent_and_original_time(db,monkeypatch):
     # Fixed calendar decoder is independently tested; use a synthetic calendar for this replay test.
     cid=archive_source(db,cal,'sina','index.calendar',{},1,raw=b'calendar',response=response())
     parsed_source(db,cid);finish_batch(db,cal,'complete')
-    monkeypatch.setattr('quarterly_dashboard.index_collection.IndexCollector.decode_calendar',lambda self,text:{'2026-10-09'})
+    monkeypatch.setattr('stock_analysis.domains.indices.index_collection.IndexCollector.decode_calendar',lambda self,text:{'2026-10-09'})
     monkeypatch.setattr(requests.Session,'get',lambda *a,**k:pytest.fail('replay must not request sources'))
     first=replay(db,start='2026-10-09',end='2026-10-09')
     assert first['network_requests']==0 and first['results'][0]['price_counts']['inserted']==1
-    from quarterly_dashboard.index_price_audit import audit
+    from stock_analysis.domains.indices.index_price_audit import audit
     assert audit(db)['status']=='passed'
     second=replay(db,start='2026-10-09',end='2026-10-09')
     assert second['skipped_batches']==1 and not second['results']
@@ -195,7 +195,7 @@ def test_sina_archive_replay_uses_klc_decoder_without_payload_branch_leak(db,mon
     cal=begin_batch(db,'test','index.calendar','sina')
     cid=archive_source(db,cal,'sina','index.calendar',{},1,raw=b'calendar',response=response())
     parsed_source(db,cid);finish_batch(db,cal,'complete')
-    monkeypatch.setattr('quarterly_dashboard.index_collection.IndexCollector.decode_calendar',lambda self,text:{'2026-10-09'})
+    monkeypatch.setattr('stock_analysis.domains.indices.index_collection.IndexCollector.decode_calendar',lambda self,text:{'2026-10-09'})
     class Decoder:
         def eval(self,source):pass
         def call(self,name,text):return [dict(date='2026-10-09',open=99,high=102,low=98,close=101)]
@@ -208,7 +208,7 @@ def test_sina_archive_replay_uses_klc_decoder_without_payload_branch_leak(db,mon
 
 
 def test_replay_cancellation_keeps_first_segment_and_resume_skips_it(db,monkeypatch):
-    from quarterly_dashboard import index_price_replay as replay_module
+    from stock_analysis.domains.indices import index_price_replay as replay_module
     import requests
     for value in (101,102):
         batch,sid,_=seed(db,rows=[dict(indexCode='000300',tradeDate='20261009',open=100,high=value,low=99,close=value)])
@@ -216,7 +216,7 @@ def test_replay_cancellation_keeps_first_segment_and_resume_skips_it(db,monkeypa
     cal=begin_batch(db,'test','index.calendar','sina')
     calendar_source=archive_source(db,cal,'sina','index.calendar',{},1,raw=b'calendar',response=response())
     parsed_source(db,calendar_source);finish_batch(db,cal,'complete')
-    monkeypatch.setattr('quarterly_dashboard.index_collection.IndexCollector.decode_calendar',lambda self,text:{'2026-10-09'})
+    monkeypatch.setattr('stock_analysis.domains.indices.index_collection.IndexCollector.decode_calendar',lambda self,text:{'2026-10-09'})
     monkeypatch.setattr(requests.Session,'get',lambda *a,**k:pytest.fail('replay must stay offline'))
     original=replay_module.publish_segment;calls={'count':0}
     def cancel_after_commit(*args,**kwargs):
@@ -226,7 +226,7 @@ def test_replay_cancellation_keeps_first_segment_and_resume_skips_it(db,monkeypa
                 conn.execute("UPDATE index_collection_operations SET cancel_requested=1 WHERE status='running'")
         return result
     monkeypatch.setattr(replay_module,'publish_segment',cancel_after_commit)
-    from quarterly_dashboard.collection import Cancelled
+    from stock_analysis.collection.collection import Cancelled
     with pytest.raises(Cancelled):replay(db,start='2026-10-09',end='2026-10-09')
     monkeypatch.setattr(replay_module,'publish_segment',original)
     with db.connection() as conn:
@@ -251,7 +251,7 @@ def test_sws_replay_rejects_request_level_mismatch(db,monkeypatch):
     cal=begin_batch(db,'test','index.calendar','sina')
     calendar_source=archive_source(db,cal,'sina','index.calendar',{},1,raw=b'calendar',response=response())
     parsed_source(db,calendar_source);finish_batch(db,cal,'complete')
-    monkeypatch.setattr('quarterly_dashboard.index_collection.IndexCollector.decode_calendar',lambda self,text:{'2026-10-09'})
+    monkeypatch.setattr('stock_analysis.domains.indices.index_collection.IndexCollector.decode_calendar',lambda self,text:{'2026-10-09'})
     with pytest.raises(ValueError,match='明确层级'):
         replay(db,start='2026-10-09',end='2026-10-09')
 
@@ -276,7 +276,7 @@ def test_maintenance_empty_and_populated_times(db):
 
 
 def test_future_collection_writes_points_without_extra_requests(db):
-    from quarterly_dashboard.index_collection import IndexCollector
+    from stock_analysis.domains.indices.index_collection import IndexCollector
     raw=dict(indexCode='000300',indexNameCn='CSI300',tradeDate='20261009',peg=13,open=100,high=102,low=99,close=101)
     client,session,_=http(db,[response({'data':[raw]})])
     collector=IndexCollector(db,'test',request_collector=client);collector.trading_days={'2026-10-09'}
@@ -289,7 +289,7 @@ def test_future_collection_writes_points_without_extra_requests(db):
 
 
 def test_market_fields_mapping_partial_updates_and_constraints(db):
-    from quarterly_dashboard.index_prices import FIELDS, validate_values
+    from stock_analysis.domains.indices.index_prices import FIELDS, validate_values
     batch,sid,code=seed(db)
     raw=dict(indexCode='000300',tradeDate='20261009',open=100,high=102,low=99,close=101,
         tradingVol=123456, tradingValue=2.5, change=-1.25, changePct=-0.2, consNumber=300)
@@ -314,8 +314,8 @@ def test_market_fields_mapping_partial_updates_and_constraints(db):
 
 
 def test_derived_amount_ratio_tracks_parent_return_type_and_withdraws_missing_upstream(db):
-    from quarterly_dashboard import market_congestion as congestion
-    from quarterly_dashboard.index_price_derived import recompute
+    from stock_analysis.domains.market import market_congestion as congestion
+    from stock_analysis.domains.indices.index_price_derived import recompute
     batch,sid,_=seed(db,code='000680')
     rows,bad=parse_prices([dict(indexCode='000680',tradeDate='20261009',close=100,tradingValue=10)],provider='csindex',
         series_key='history.points',code_key='indexCode',date_key='tradeDate',start='2026-10-09',end='2026-10-09',
@@ -352,7 +352,7 @@ def test_derived_amount_ratio_tracks_parent_return_type_and_withdraws_missing_up
     def cancel_before_publish():
         checks['count']+=1
         return checks['count']>1
-    from quarterly_dashboard.collection import Cancelled
+    from stock_analysis.collection.collection import Cancelled
     with pytest.raises(Cancelled):recompute(db,'test',through='2026-10-09',cancelled=cancel_before_publish)
     with db.connection() as conn:
         assert conn.execute("SELECT count(*) FROM collection_batches WHERE dataset='index.price.derived'").fetchone()[0]==0
@@ -365,8 +365,8 @@ def test_derived_amount_ratio_tracks_parent_return_type_and_withdraws_missing_up
 
 
 def test_derived_recompute_checks_cancellation_by_chunks_not_per_fact(db):
-    from quarterly_dashboard import market_congestion as congestion
-    from quarterly_dashboard.index_price_derived import recompute
+    from stock_analysis.domains.market import market_congestion as congestion
+    from stock_analysis.domains.indices.index_price_derived import recompute
     batch,sid,_=seed(db)
     rows=[]
     with db.connection(write=True) as conn:
@@ -389,7 +389,7 @@ def test_derived_recompute_checks_cancellation_by_chunks_not_per_fact(db):
 
 
 def test_missing_response_key_inherits_previous_value_but_null_is_withdrawal(db):
-    from quarterly_dashboard.index_prices import parse_prices
+    from stock_analysis.domains.indices.index_prices import parse_prices
     first,sid,_=seed(db)
     rows,_=parse_prices([dict(indexCode='000300',tradeDate='20261009',close=100,tradingValue=2)],provider='csindex',
         series_key='history.points',code_key='indexCode',date_key='tradeDate',start='2026-10-09',end='2026-10-09',
@@ -412,8 +412,8 @@ def test_missing_response_key_inherits_previous_value_but_null_is_withdrawal(db)
 
 
 def test_sw_field_units_and_derived_amount_revision_are_independent(db):
-    from quarterly_dashboard import market_congestion as congestion
-    from quarterly_dashboard.index_price_derived import recompute
+    from stock_analysis.domains.market import market_congestion as congestion
+    from stock_analysis.domains.indices.index_price_derived import recompute
     batch,sid,_=seed(db,provider='sws',code='801010',kind='industry',dataset='index.sw.analysis')
     raw=dict(swindexcode='801010',bargaindate='2026-10-09',closeindex=2000,bargainamount=1.25,markup=-1.2,
         turnoverrate=120,bargainsumrate=0,meanprice=0,negotiablessharesum1=2.2,negotiablessharesum2=3.3)
@@ -462,9 +462,9 @@ def test_duplicate_new_source_keeps_row_and_field_provenance(db):
 
 
 def test_estimate_denominator_revision_withdrawal_and_official_priority(db):
-    from quarterly_dashboard import market_congestion as congestion
-    from quarterly_dashboard.index_price_derived import recompute
-    from quarterly_dashboard.index_prices import price_hash,DEFINITIONS,FIELDS
+    from stock_analysis.domains.market import market_congestion as congestion
+    from stock_analysis.domains.indices.index_price_derived import recompute
+    from stock_analysis.domains.indices.index_prices import price_hash,DEFINITIONS,FIELDS
     from test_market_congestion import seed as market_seed
     batch,sid,_=seed(db)
     with db.connection(write=True) as conn:publish_prices(conn,[point(batch,sid,amount=1_000_000_000)])
@@ -502,9 +502,9 @@ def test_estimate_denominator_revision_withdrawal_and_official_priority(db):
 
 
 def test_v36_migration_preserves_latest_id_and_is_immediately_idempotent(tmp_path,monkeypatch):
-    from quarterly_dashboard import storage
-    from quarterly_dashboard.collection import encoded
-    from quarterly_dashboard.index_prices import legacy_definition
+    from stock_analysis.infrastructure import storage
+    from stock_analysis.collection.collection import encoded
+    from stock_analysis.domains.indices.index_prices import legacy_definition
     db=Database(tmp_path/'upgrade.sqlite3')
     migrations=storage.MIGRATIONS
     with monkeypatch.context() as patch:
@@ -528,8 +528,8 @@ def test_v36_migration_preserves_latest_id_and_is_immediately_idempotent(tmp_pat
 
 
 def test_bigquant_gap_denominator_fallback_priority_and_roundtrip(db):
-    from quarterly_dashboard import market_congestion as m
-    from quarterly_dashboard.index_price_derived import recompute
+    from stock_analysis.domains.market import market_congestion as m
+    from stock_analysis.domains.indices.index_price_derived import recompute
     from test_market_congestion import seed as market_seed
     day='2026-07-31'
     b,s,_=seed(db)

@@ -10,10 +10,10 @@ from types import SimpleNamespace
 import pytest
 import requests
 
-from quarterly_dashboard.collection import (Cancelled, PacingPolicy, ProviderBlocked,
+from stock_analysis.collection.collection import (Cancelled, PacingPolicy, ProviderBlocked,
     RequestCollector, begin_batch, encoded)
-from quarterly_dashboard.storage import Database
-from quarterly_dashboard import index_collection as ic
+from stock_analysis.infrastructure.storage import Database
+from stock_analysis.domains.indices import index_collection as ic
 
 
 class Clock:

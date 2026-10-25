@@ -1,6 +1,6 @@
 """Publish explicit test observations through the real four-table writer."""
-from quarterly_dashboard import market_financial as mf
-from quarterly_dashboard.industry_service import IndustryService
+from stock_analysis.domains.market import market_financial as mf
+from stock_analysis.domains.industries.industry_service import IndustryService
 
 
 class PublishedIndustryService(IndustryService):

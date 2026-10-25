@@ -1,10 +1,10 @@
 """Historical MOT vocabulary, period/scope identity and offline failure recovery."""
 from pathlib import Path
 import pytest
-from quarterly_dashboard.shipping_sources import parse_throughput, NoThroughputDisclosure, MOT
-from quarterly_dashboard import shipping_collection
-from quarterly_dashboard.collection import RequestCollector, archive_source, begin_batch, finish_batch, parsed_source, reusable_source
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.research.sectors.shipping.shipping_sources import parse_throughput, NoThroughputDisclosure, MOT
+from stock_analysis.domains.research.sectors.shipping import shipping_collection
+from stock_analysis.collection.collection import RequestCollector, archive_source, begin_batch, finish_batch, parsed_source, reusable_source
+from stock_analysis.infrastructure.storage import Database
 
 FIX=Path(__file__).parent/'fixtures/shipping'
 

@@ -1,6 +1,6 @@
 import json
 
-from quarterly_dashboard import server
+from stock_analysis.http import server
 
 
 def test_existing_cache_gets_name_without_refetching_financial_data(tmp_path, monkeypatch):

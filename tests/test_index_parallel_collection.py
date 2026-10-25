@@ -6,10 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import requests
 
-from quarterly_dashboard.collection import RequestCollector, begin_batch, encoded
-from quarterly_dashboard.collection import PacingPolicy
-from quarterly_dashboard.index_collection import IndexCollector,start_operation
-from quarterly_dashboard.storage import Database
+from stock_analysis.collection.collection import RequestCollector, begin_batch, encoded
+from stock_analysis.collection.collection import PacingPolicy
+from stock_analysis.domains.indices.index_collection import IndexCollector,start_operation
+from stock_analysis.infrastructure.storage import Database
 
 
 class ConcurrentSession:
@@ -200,7 +200,7 @@ def test_policy_rejects_unapproved_concurrency_and_reports_index_exception(db):
 
 
 def test_legu_work_units_run_serially(db,monkeypatch):
-    from quarterly_dashboard import index_collection as ic
+    from stock_analysis.domains.indices import index_collection as ic
     operation=start_operation(db,providers=['legu'],start='2026-10-01',end='2026-10-15')
     collector=IndexCollector(db,operation)
     monkeypatch.setattr(ic,'LG_CODES',{'000016.SH':'上证50','000300.SH':'沪深300'})

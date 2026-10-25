@@ -1,0 +1,556 @@
+"""Read-only financial statement views over saved Sina facts; no source requests."""
+from __future__ import annotations
+
+import json
+from datetime import date
+
+from stock_analysis.domains.financials.fundamental_service import SOURCE
+from stock_analysis.domains.stocks.sources import _number, normalize_code
+from stock_analysis.domains.financials.financial_storage import decompress_json
+
+
+# Exact field codes matter: gjzb.BIZTOTCOST is total operating cost, despite its title.
+FIELDS = {
+    'assets': ('fzb', 'TOTASSET'), 'liabilities': ('fzb', 'TOTLIAB'),
+    'equity': ('fzb', 'RIGHAGGR'), 'cash': ('fzb', 'CURFDS'),
+    'receivables': ('fzb', 'ACCORECE'), 'inventory': ('fzb', 'INVE'),
+    'goodwill': ('fzb', 'GOODWILL'),
+    'revenue': ('lrb', 'BIZINCO'), 'total_revenue': ('lrb', 'BIZTOTINCO'),
+    'cost': ('lrb', 'BIZCOST'), 'total_cost': ('lrb', 'BIZTOTCOST'),
+    'operating_profit': ('lrb', 'PERPROFIT'), 'pretax': ('lrb', 'TOTPROFIT'),
+    'tax': ('lrb', 'INCOTAXEXPE'), 'net_profit': ('lrb', 'NETPROFIT'),
+    'parent_profit': ('lrb', 'PARENETP'), 'minority_profit': ('lrb', 'MINYSHARRIGH'),
+    'deducted_profit': ('ysb', 'NPCUT'),
+    'cfo': ('llb', 'MANANETR'), 'cfi': ('llb', 'INVNETCASHFLOW'),
+    'cff': ('llb', 'FINNETCFLOW'), 'fx': ('llb', 'CHGEXCHGCHGS'),
+    'cash_increase': ('llb', 'CASHNETR'), 'cash_start': ('llb', 'INICASHBALA'),
+    'cash_end': ('llb', 'FINALCASHBALA'), 'capex': ('llb', 'ACQUASSETCASH'),
+    'sale_cash': ('llb', 'LABORGETCASH'),
+    'sales_expense': ('lrb', 'SALESEXPE'), 'management_expense': ('lrb', 'MANAEXPE'),
+    'rd_expense': ('lrb', 'DEVEEXPE'), 'financial_expense': ('lrb', 'FINEXPE'),
+}
+DEBT = ('SHORTTERMBORR', 'SHORTTERMBDSPAYA', 'DUENONCLIAB', 'LONGBORR', 'BDSPAYA', 'LEASELIAB')
+BALANCE = ('CURFDS', 'PLAC', 'RECFINANC', 'NOTESACCORECE', 'PREP', 'INVE', 'OTHERCURRASSE', 'EQUIINVE',
+           'FIXEDASSECLEATOT', 'CONSPROGTOT', 'INTAASSET', 'GOODWILL',
+           'OTHERNONCASSE',
+           'SHORTTERMBORR', 'NOTESACCOPAYA', 'CONTRACTLIAB', 'ADVAPAYM',
+           'COPEWORKERSAL', 'TAXESPAYA', 'OTHERCURRELIABI', 'DUENONCLIAB', 'LONGBORR', 'BDSPAYA',
+           'LEASELIAB', 'OTHERNONCLIABI')
+FINANCIAL_BALANCE = ('CURFDS', 'CASHCENBANK', 'PLAC', 'FINCOSTSPAIDCASH', 'LENDANDLOANCUST',
+                     'LENDANDLOAN', 'LOANADVANCES', 'TRADFINASSET', 'HOLDINVEDUE', 'INVE',
+                     'CLIEDEPO', 'DEPOSIT', 'FDSBORR', 'BDSPAYA', 'TOTLIAB', 'TOTSHAREQUI')
+PROFIT = ('BIZTOTINCO', 'BIZINCO', 'BIZTOTCOST', 'BIZCOST', 'BIZTAX', 'SALESEXPE',
+          'MANAEXPE', 'DEVEEXPE', 'FINEXPE', 'OTHERINCO', 'INVEINCO', 'VALUECHGLOSS',
+          'CREDITIMPLOSSEPROFIT', 'ASSEIMPALOSSPROFIT', 'ASSETSDISLINCO', 'PERPROFIT',
+          'NONOREVE', 'NONOEXPE', 'TOTPROFIT', 'INCOTAXEXPE', 'NETPROFIT', 'PARENETP', 'MINYSHARRIGH')
+FINANCIAL_PROFIT = ('BIZINCO', 'NETINTEINCO', 'NETPOUNINCO', 'NETINVINCO', 'EARNPREM',
+                    'MANAEXPE', 'BIZTAX', 'ASSEIMPALOSS', 'PERPROFIT', 'TOTPROFIT',
+                    'INCOTAXEXPE', 'NETPROFIT', 'PARENETP', 'MINYSHARRIGH')
+CASH = ('LABORGETCASH', 'LABOPAYC', 'PAYWORKCASH', 'PAYTAX', 'BIZCASHINFL', 'BIZCASHOUTF',
+        'MANANETR', 'INVCASHINFL', 'ACQUASSETCASH', 'INVPAYC', 'INVCASHOUTF', 'INVNETCASHFLOW',
+        'RECEFROMLOAN', 'DEBTPAYCASH', 'DIVIPROFPAYCASH', 'FINCASHINFL', 'FINCASHOUTF',
+        'FINNETCFLOW', 'CHGEXCHGCHGS', 'CASHNETR', 'INICASHBALA', 'FINALCASHBALA')
+CASH_STOCKS = {'INICASHBALA': 'FINALCASHBALA', 'CASHOPENBALA': 'CASHFINALBALA',
+               'EQUOPENBALA': 'EQUFINALBALA', 'EQAOPENBALA':'EQUFINALBALA',
+               'CASHEQUIOPENBALA':'CASHEQUFINBALA'}
+CLOSING_CASH = {'FINALCASHBALA', 'CASHFINALBALA', 'EQUFINALBALA', 'CASHEQUFINBALA'}
+ALIASES = {'PERPROFIT':('OPERPROFIT',), 'INCOTAXEXPE':('INCOTAX',),
+           'PARENETP':('NETPARECOMPPROF',), 'CHGEXCHGCHGS':('EXCHCHGCASHEFFE',),
+           'CASHNETR':('CASHEQUINETINCR',), 'INICASHBALA':('CASHEQUIOPENBALA',),
+           'FINALCASHBALA':('CASHEQUFINBALA',), 'RIGHAGGR':('TOTSHAREQUI',)}
+LABELS = dict(zip(FIELDS, ('资产总额','负债总额','合并股东权益','货币资金','应收账款','存货','商誉',
+                         '营业收入','营业总收入','营业成本','营业总成本','营业利润','利润总额','所得税费用',
+                         '合并净利润','归母净利润','少数股东损益','扣非归母净利润',
+                         '经营净现金流','投资净现金流','筹资净现金流','汇率影响','现金净增加额',
+                         '期初现金及等价物','期末现金及等价物','Capex（资本支出）','销售收现',
+                         '销售费用','管理费用','研发费用','财务费用')))
+
+
+def previous_quarter(period):
+    year, month = int(period[:4]), int(period[5:7])
+    return f'{year}-{ {6:"03-31", 9:"06-30", 12:"09-30"}[month]}' if month != 3 else None
+
+
+def previous_report_period(period):
+    year, month = int(period[:4]), int(period[5:7])
+    if month == 3:
+        return f'{year-1}-12-31'
+    return f'{year}-{ {6:"03-31", 9:"06-30", 12:"09-30"}[month]}'
+
+
+def comparison_pct(current, previous):
+    current_value = current.get('value') if current else None
+    previous_value = previous.get('value') if previous else None
+    if current_value is None or previous_value is None or previous_value <= 0:
+        return None
+    return (current_value / previous_value - 1) * 100
+
+
+def compatible(a, b):
+    return bool(a and b and a.get('rCurrency') == b.get('rCurrency') == 'CNY'
+                and a.get('rType') == b.get('rType') and a.get('rType') == '合并期末')
+
+
+def items(raw):
+    """Deduplicate repeated groups, preserving zero and replacing an invalid duplicate."""
+    result = {}
+    for item in (raw or {}).get('data', []):
+        field = item.get('item_field')
+        if not field:
+            continue
+        key = (item.get('item_source'), field)
+        if key not in result or _number(result[key].get('item_value')) is None:
+            result[key] = item
+    return list(result.values())
+
+
+def find(raw, source, code):
+    for candidate in (code, *ALIASES.get(code, ())):
+        found = next((x for x in items(raw) if x.get('item_field') == candidate
+                      and x.get('item_source') == source and _number(x.get('item_value')) is not None), None)
+        if found:
+            return found
+    return None
+
+
+def unit(item):
+    if '每股' in item.get('item_title', '') or item.get('item_field') in {'BASICEPS', 'DILUTEDEPS'}:
+        return '元/股'
+    return '元'
+
+
+def extract(raw, item, kind, period, mode, reports):
+    value = _number(item.get('item_value'))
+    output = {'label': item.get('item_title', item['item_field']), 'field': item['item_field'],
+              'source': kind, 'item_source': item.get('item_source'), 'value': value,
+              'unit': unit(item), 'method': '直接取数', 'period': period,
+              'currency': raw.get('rCurrency'), 'scope': raw.get('rType'), 'reason': None}
+    if raw.get('rCurrency') != 'CNY' or raw.get('rType') != '合并期末':
+        output.update(value=None, reason='币种或合并范围未经确认')
+    elif mode == 'quarter' and kind != 'fzb' and int(period[5:7]) != 3:
+        if output['unit'] != '元':
+            output.update(value=None, reason='每股指标不按累计值差分')
+        elif item['item_field'] not in CLOSING_CASH:
+            prior_period = previous_quarter(period)
+            prior = reports.get(prior_period, {}).get(kind)
+            prior_code = CASH_STOCKS.get(item['item_field'], item['item_field'])
+            prior_item = find(prior, item.get('item_source'), prior_code)
+            if value is None or not compatible(raw, prior) or prior_item is None:
+                output.update(value=None, reason=f'缺少同口径 {prior_period} 有效值')
+            else:
+                earlier = _number(prior_item['item_value'])
+                output.update(value=earlier if item['item_field'] in CASH_STOCKS else value - earlier,
+                              method='上季末余额' if item['item_field'] in CASH_STOCKS else '本期累计 − 上季累计',
+                              baseline_period=prior_period, baseline_field=prior_code,
+                              inputs=([extract(prior,prior_item,kind,prior_period,'ytd',reports)]
+                                      if item['item_field'] in CASH_STOCKS else
+                                      [extract(raw,item,kind,period,'ytd',reports),
+                                       extract(prior,prior_item,kind,prior_period,'ytd',reports)]))
+    if output['value'] is None and output['reason'] is None:
+        output['reason'] = '该报告期缺少有效值'
+    return output
+
+
+def missing(label, period, unit='元'):
+    return {'label': label, 'value': None, 'unit': unit, 'method': '待补',
+            'reason': '该报告期缺少适用资料', 'period': period, 'source': None, 'field': None}
+
+
+def calculated(label, inputs, formula, operation, period, unit='元'):
+    result = missing(label, period, unit)
+    result.update(method='自行计算', formula=formula, inputs=inputs)
+    if all(x['value'] is not None for x in inputs):
+        result['value'] = operation(*[x['value'] for x in inputs])
+        result['reason'] = None if result['value'] is not None else '分母非正，无法计算'
+    return result
+
+
+def metric(reports, period, key, mode, *, balance_first=False):
+    source, code = FIELDS[key]
+    if mode == 'quarter' and source != 'fzb' and period[5:] != '03-31' and key != 'cash_end':
+        current = metric(reports, period, key, 'ytd')
+        prior_period = previous_quarter(period)
+        previous = metric(reports, prior_period, 'cash_end' if key == 'cash_start' else key, 'ytd')
+        if current['value'] is None or previous['value'] is None:
+            return {**current, 'value':None, 'reason':f'缺少本期或同口径 {prior_period} 有效值'}
+        return {**current, 'value':previous['value'] if key == 'cash_start' else current['value'] - previous['value'],
+                'method':'上季末余额' if key == 'cash_start' else '本期累计 − 上季累计',
+                'baseline_period':prior_period, 'baseline_field':previous['field'],
+                'baseline_source':previous['source'], 'inputs':[current,previous], 'reason':None}
+    entry = reports.get(period, {})
+    # Only accept exact, applicable gjzb fields; never substitute similarly named totals.
+    for kind in ((source, 'gjzb') if balance_first else ('gjzb', source)):
+        raw = entry.get(kind)
+        if not raw:
+            continue
+        item = find(raw, source, code)
+        if item:
+            value = extract(raw, item, kind, period, 'ytd', reports)
+            if value['value'] is not None:
+                value['label'] = LABELS[key]
+                return value
+    return missing(LABELS[key], period)
+
+
+def roe_metric(reports, period, mode):
+    result = missing('ROE', period, '%')
+    result['note'] = ('采用归属于母公司股东的加权净资产收益率，包含非经常性损益；'
+        '直接使用所选期间披露值，不自行年化，不与摊薄或期初期末平均净资产估算值混用。')
+    if mode == 'quarter' and period[5:] != '03-31':
+        result['reason'] = '累计加权ROE不能直接差分为单季度ROE'
+        return result
+    raw = reports.get(period, {}).get('gjzb')
+    item = find(raw, 'zyb', 'ROEWEIGHTED')
+    if item:
+        value = extract(raw, item, 'gjzb', period, 'ytd', reports)
+        if value['value'] is not None:
+            return {**value, 'label':'ROE', 'unit':'%', 'note':result['note'],
+                    'formula':'直接读取新浪关键指标 ROEWEIGHTED（加权净资产收益率）。'}
+    result['reason'] = '缺少适用的加权ROE；三表余额无法准确还原加权净资产'
+    return result
+
+
+def summarize(reports, period, mode, financial):
+    values = {key: metric(reports, period, key, mode) for key in FIELDS}
+    values['roe'] = roe_metric(reports, period, mode)
+    values['capex']['note'] = '使用现金流量表字段 ACQUASSETCASH：购建固定资产、无形资产和其他长期资产支付的现金。'
+    values['gross_profit'] = calculated('毛利润', [values['revenue'], values['cost']],
+                                        '营业收入 − 营业成本', lambda r,c:r-c, period)
+    values['period_expenses'] = calculated('期间费用合计', [values[key] for key in (
+        'sales_expense','management_expense','rd_expense','financial_expense')],
+        '销售费用＋管理费用＋研发费用＋财务费用（保留正负号）', lambda *v:sum(v), period)
+    debt_inputs = []
+    for code, label in zip(DEBT, ('短期借款','应付短期债券','一年内到期的非流动负债','长期借款','应付债券','租赁负债')):
+        value = {**missing(label, period), 'field':code, 'item_source':'fzb'}
+        for kind in ('fzb', 'gjzb'):
+            raw = reports.get(period, {}).get(kind)
+            item = find(raw, 'fzb', code)
+            if item:
+                candidate = extract(raw, item, kind, period, 'ytd', reports)
+                if candidate['value'] is not None:
+                    value = {**candidate, 'label':label}
+                    break
+        debt_inputs.append(value)
+    values['debt'] = calculated('有息债务', debt_inputs,
+        '短期借款＋应付短期债券＋一年内到期的非流动负债＋长期借款＋应付债券＋租赁负债',
+        lambda *v: sum(v), period)
+    values['debt']['note'] = ('按同一期合并资产负债表期末余额计算，租赁负债为非流动部分；'
+        '一年内到期的非流动负债可能含无息项目，其他流动负债和长期应付款中的有息部分未纳入。优先资产负债表，缺值回退关键指标；仅汇总有效分项，缺项未计入合计且不代表为零。')
+    absent = [x['label'] for x in debt_inputs if x['value'] is None]
+    available = [x['value'] for x in debt_inputs if x['value'] is not None]
+    values['debt'].update(value=sum(available) if available else None,
+                          reason=None if available else '该报告期全部有息债务分项缺失')
+    if absent:
+        values['debt']['note'] += ' 未计入的缺项：' + '、'.join(absent) + '。'
+    values['debt']['missing_fields'] = [x['field'] for x in debt_inputs if x['value'] is None]
+    values['debt']['partial'] = bool(absent and available)
+    ratio = lambda a, b: a / b * 100 if b > 0 else None
+    for key, label, fields, formula, operation in (
+        ('leverage', '资产负债率', ['liabilities', 'assets'], '负债合计 ÷ 资产总计 × 100%', ratio),
+        ('gross_margin', '毛利率', ['revenue', 'cost'], '（营业收入 − 营业成本）÷ 营业收入 × 100%',
+         lambda r, c: (r-c)/r*100 if r > 0 else None),
+        ('parent_net_margin', '归母净利率', ['parent_profit', 'revenue'], '归母净利润 ÷ 营业收入 × 100%', ratio),
+        ('net_margin', '合并净利率', ['net_profit', 'revenue'], '合并净利润 ÷ 营业收入 × 100%', ratio),
+        ('cash_profit', '经营净现金／合并净利润', ['cfo', 'net_profit'], '经营净现金流 ÷ 合并净利润 × 100%', ratio),
+        ('cash_after_capex', '自由现金流', ['cfo', 'capex'], '经营活动产生的现金流量净额（MANANETR） − 购建固定资产、无形资产和其他长期资产支付的现金（ACQUASSETCASH）', lambda a,b:a-b),
+    ):
+        values[key] = calculated(label, [values[x] for x in fields], formula, operation, period,
+                                 '元' if key == 'cash_after_capex' else '%')
+    values['cash_after_capex']['note'] = '按经营现金流减资本支出口径计算；输入金额遵循所选累计／单季度期间，不等同于严格 FCFF／FCFE。'
+    values['debt_ratio'] = calculated('有息负债率',
+        [values['debt'], metric(reports, period, 'assets', 'ytd', balance_first=True)],
+        '有息债务（有效分项合计） ÷ 资产总额 × 100%', ratio, period, '%')
+    if values['debt']['partial']:
+        values['debt_ratio']['note'] = '有息债务存在未计入的缺项，分项及来源见下方明细。'
+    # Source percentages are applicable only in cumulative mode with the same definition.
+    for key, field in (('leverage','ASSLIABRT'), ('gross_margin','SGPMARGIN'), ('net_margin','SNPMARGINCONMS')):
+        if mode == 'quarter' and key != 'leverage':
+            continue
+        raw = reports.get(period, {}).get('gjzb')
+        item = find(raw, 'ysb', field)
+        derived = values[key]['value']
+        if item and compatible(raw, raw) and derived is not None and abs(_number(item['item_value']) - derived) < .02:
+            values[key] = {**extract(raw, item, 'gjzb', period, 'ytd', reports), 'label': values[key]['label'], 'unit':'%'}
+    if financial:
+        values['gross_margin'] = missing('毛利率（金融企业不适用）', period, '%')
+        values['cash_after_capex'] = missing('自由现金流（金融企业不适用）', period)
+    return values
+
+
+def cashflow_details(raw, full):
+    """Use source section order and subtotal boundaries, without summing child rows twice."""
+    definitions = {
+        'cfo': ('经营活动', 'BIZCASHINFL', 'BIZCASHOUTF', 'MANANETR'),
+        'cfi': ('投资活动', 'INVCASHINFL', 'INVCASHOUTF', 'INVNETCASHFLOW'),
+        'cff': ('筹资活动', 'FINCASHINFL', 'FINCASHOUTF', 'FINNETCFLOW'),
+    }
+    # Fallback only for sources without section headings; never guess from an amount's sign.
+    fields = {
+        'cfo': (('LABORGETCASH','TAXREFD','RECEOTHERBIZCASH','OTHERBIZGETCASH'),
+                ('LABOPAYC','PAYWORKCASH','PAYTAX','PAYACTICASH','PAYOTHERBIZCASH')),
+        'cfi': (('WITHINVGETCASH','INVERETUGETCASH','FIXEDASSETNETC','DISPFIXASSEGETCASH',
+                 'SUBSNETC','RECEINVCASH','REDUCASHPLED'),
+                ('ACQUASSETCASH','INVPAYC','SUBSPAYNETCASH','PAYINVECASH','INCRCASHPLED','LOANNETR')),
+        'cff': (('INVRECECASH','INCREQUIGETCASH','RECEFROMLOAN','LOANGETCASH','ISSBDRECECASH','RECEFINCASH'),
+                ('DEBTPAYCASH','DIVIPROFPAYCASH','FINRELACASH')),
+    }
+    by_field = {row['field']: row for row in full if row['item_source'] == 'llb'}
+    groups = {key: {'label': label, 'items': [], 'children': [],
+                    'inflow': by_field.get(in_code), 'outflow': by_field.get(out_code),
+                    'net': by_field.get(net_code), 'warnings': []}
+              for key, (label, in_code, out_code, net_code) in definitions.items()}
+    subtotals = {code: (key, direction) for key, (_, inc, out, _) in definitions.items()
+                 for code, direction in ((inc, 'inflow'), (out, 'outflow'))}
+    nets = {definition[3] for definition in definitions.values()}
+    parents = {'SUBSRECECASH':'INVRECECASH', 'SUBSPAYDIVID':'DIVIPROFPAYCASH',
+               'CUSTDEPO':'DEPONETR', 'FININSTDEPO':'DEPONETR',
+               'DEPOTOCENBANK':'TRADEPAYMNETR', 'DEPOTOOTHERBANKS':'TRADEPAYMNETR',
+               'INTEINCO':'CHARINTECASH', 'FEEINCO':'CHARINTECASH',
+               'PAYINTE':'PAYINTECASH', 'FEEPAYCASH':'PAYINTECASH',
+               'DIVIPROFGETCASH':'INVERETUGETCASH', 'BONDINTEGETCASH':'INVERETUGETCASH',
+               'EQUIINVPAYCASH':'PAYINVCASH', 'BDINVPAYCASH':'PAYINVCASH',
+               'INTEPAYCASH':'DIVIPROFPAYCASH'}
+    activity, direction, seen = None, 'inflow', set()
+    for item in raw.get('data', []):
+        code, title = item.get('item_field'), item.get('item_title', '')
+        if not code:
+            activity = next((key for key, definition in definitions.items() if definition[0] in title), None)
+            direction = 'inflow'
+            continue
+        if item.get('item_source') != 'llb':
+            continue
+        if code in subtotals:
+            activity, boundary = subtotals[code]
+            direction = 'outflow' if boundary == 'inflow' else None
+            continue
+        if code in nets:
+            activity, direction = None, None
+            continue
+        if code in seen or code not in by_field:
+            continue
+        seen.add(code)
+        fallback = next(((key, flow) for key, pair in fields.items()
+                         for codes, flow in zip(pair, ('inflow', 'outflow')) if code in codes), None)
+        key, flow = fallback or ((activity, direction) if activity and direction else (None, None))
+        if key is None:
+            continue
+        row = {**by_field[code], 'direction': flow}
+        row['signed_value'] = None if row['value'] is None else row['value'] * (-1 if flow == 'outflow' else 1)
+        subtotal = groups[key][flow]
+        denominator = subtotal['value'] if subtotal else None
+        row['share_pct'] = (row['value'] / denominator * 100 if row['value'] is not None
+                            and denominator is not None and denominator > 0 else None)
+        parent = by_field.get(parents.get(code))
+        child = (parent is not None and parent['value'] is not None) or title.lstrip().startswith(('其中', '加：其中', '减：其中'))
+        groups[key]['children' if child else 'items'].append(row)
+    for group in groups.values():
+        for flow in ('inflow', 'outflow'):
+            rows = [row for row in group['items'] if row['direction'] == flow]
+            total = group[flow]
+            if total and total['value'] is not None and rows:
+                available = [row['value'] for row in rows if row['value'] is not None]
+                if available and abs(sum(available) - total['value']) > max(1, abs(total['value']) * 1e-8):
+                    group['warnings'].append(('流入' if flow == 'inflow' else '流出') + '已展示条目与披露小计存在差额，请结合待补条目及原始报表核对。')
+    return groups
+
+
+def build_section(reports, period, mode, kind, financial):
+    raw = reports.get(period, {}).get(kind, {})
+    raw_items = items(raw)
+    full = [extract(raw, x, kind, period, mode, reports) for x in raw_items]
+    if kind == 'fzb':
+        sides, side = {}, 'assets'
+        liability_codes = set(DEBT) | {'NOTESACCOPAYA','NOTESPAYA','ACCOPAYA','CONTRACTLIAB',
+            'ADVAPAYM','COPEWORKERSAL','TAXESPAYA','OTHERCURRELIABI','OTHERNONCLIABI',
+            'CLIEDEPO','DEPOSIT','FDSBORR','TOTALCURRLIAB','TOTALNONCLIAB','TOTLIAB'}
+        equity_codes = {'RIGHAGGR','TOTSHAREQUI','PARESHARRIGH','MINYSHARRIGH','PAIDINCAPI',
+                        'CAPISURP','RESE','UNDIPROF','TREASTK','OCL','OTHEQUIN','GENERISKRESE'}
+        asset_codes = set(BALANCE[:BALANCE.index('SHORTTERMBORR')]) | {'TOTASSET','TOTCURRASSET','TOTALNONCASSETS',
+                                          'ACCORECE','NOTESRECE','FIXEDASSENET','CONSPROG'}
+        for item in raw.get('data', []):
+            field, title = item.get('item_field'), item.get('item_title', '')
+            if not field:
+                if '权益' in title: side = 'equity'
+                elif '负债' in title: side = 'liabilities'
+                elif '资产' in title: side = 'assets'
+                continue
+            actual = 'liabilities' if field in liability_codes else 'equity' if field in equity_codes else 'assets' if field in asset_codes else side
+            if field in {'TOTLIABSHAREQUI','SHARRIGHTOTAL'}: actual = None
+            sides[(item.get('item_source'),field)] = actual
+            if field == 'TOTASSET': side = 'liabilities'
+            elif field == 'TOTLIAB': side = 'equity'
+        for row in full:
+            row['balance_side'] = sides.get((row['item_source'],row['field']))
+    codes = (FINANCIAL_BALANCE if financial else BALANCE) if kind == 'fzb' else (
+        FINANCIAL_PROFIT if financial else PROFIT) if kind == 'lrb' else CASH
+    by_field = {x['field']: x for x in full}
+    selected = [next((by_field[c] for c in (code,*ALIASES.get(code,())) if c in by_field),
+                     missing(code, period)) for code in codes]
+    # Missing combined items can fall back to single items without double counting.
+    if kind == 'fzb' and not financial:
+        fallbacks = {'NOTESACCORECE':('NOTESRECE','ACCORECE'), 'FIXEDASSECLEATOT':('FIXEDASSENET',),
+                     'CONSPROGTOT':('CONSPROG',), 'NOTESACCOPAYA':('NOTESPAYA','ACCOPAYA')}
+        expanded = []
+        for code, item in zip(codes, selected):
+            expanded.extend([by_field[x] for x in fallbacks[code] if x in by_field]
+                            if code in fallbacks and item['value'] is None else [item])
+        selected = expanded
+        selected = [x for x in selected if x.get('source') is not None]
+    else:
+        selected = [x for x in selected if x.get('source') is not None]
+    return {'items': selected, 'full_items': full,
+            **({'cashflow_details': cashflow_details(raw, full)} if kind == 'llb' else {}),
+            'currency': raw.get('rCurrency'), 'scope': raw.get('rType'),
+            'data_source': raw.get('data_source'), 'audit': raw.get('is_audit'),
+            'available': bool(raw), 'warnings': [] if raw else ['该报告期尚未保存此表，请刷新财务数据。']}
+
+
+def waterfall(values, financial, period):
+    def delta(label, keys, operation, formula):
+        return calculated(label, [values[k] for k in keys], formula, operation, period)
+    if financial:
+        profit = [('营业收入', values['revenue'], 'absolute'),
+                  ('营业净支出及损益', delta('营业净支出及损益', ['operating_profit','revenue'], lambda a,b:a-b,
+                                          '营业利润 − 营业收入'), 'relative')]
+    else:
+        profit = [('营业总收入', values['total_revenue'], 'absolute'),
+                  ('营业总成本', delta('营业总成本', ['total_cost'], lambda c:-c,'−营业总成本'), 'relative'),
+                  ('其他营业损益（净额）', delta('其他营业损益（净额）', ['operating_profit','total_revenue','total_cost'],
+                                             lambda o,r,c:o-r+c,'营业利润 − 营业总收入 ＋ 营业总成本'), 'relative')]
+    profit += [('营业利润',values['operating_profit'],'absolute'),
+               ('营业外收支等净额',delta('营业外收支等净额',['pretax','operating_profit'],lambda a,b:a-b,'利润总额 − 营业利润'),'relative'),
+               ('利润总额',values['pretax'],'absolute'),
+               ('所得税费用',delta('所得税费用',['tax'],lambda t:-t,'−所得税费用'),'relative'),
+               ('其他净利润调整',delta('其他净利润调整',['net_profit','pretax','tax'],lambda n,p,t:n-p+t,'净利润 − 利润总额 ＋ 所得税费用'),'relative'),
+               ('合并净利润',values['net_profit'],'absolute')]
+    bridge = (
+        ('parent_profit', '少数股东损益归属', '归母净利润',
+         '归母净利润 − 合并净利润'),
+        ('deducted_profit', '非经常性损益净影响', '扣非归母净利润',
+         '扣非归母净利润 − 归母净利润'),
+    )
+    previous_key = 'net_profit'
+    for key, adjustment_label, total_label, formula in bridge:
+        start, end = values[previous_key], values[key]
+        if start['value'] is not None and end['value'] is not None:
+            if key == 'parent_profit':
+                reported = values['minority_profit']
+                if reported['value'] is not None:
+                    adjustment = calculated(adjustment_label, [reported], '−利润表字段 MINYSHARRIGH',
+                                            lambda minority: -minority, period)
+                    adjustment.update(source=reported.get('source'), item_source=reported.get('item_source'),
+                                      field=reported.get('field'), method='直接取数并取反')
+                    reconciliation = start['value'] + adjustment['value'] - end['value']
+                    if abs(reconciliation) > max(1, abs(end['value']) * 1e-8):
+                        adjustment['note'] = f'与归母净利润勾稽差额：{reconciliation:,.2f} 元'
+                else:
+                    adjustment = None
+            else:
+                adjustment = calculated(adjustment_label, [start, end], formula,
+                                        lambda before, after: after - before, period)
+            if adjustment:
+                profit.append((adjustment_label, adjustment, 'relative'))
+            profit.append((total_label, end, 'absolute'))
+        previous_key = key
+    cash = [(label,values[key],measure) for label,key,measure in (
+        ('期初现金及等价物','cash_start','absolute'),('经营净现金流','cfo','relative'),
+        ('投资净现金流','cfi','relative'),('筹资净现金流','cff','relative'),
+        ('汇率影响','fx','relative'),('期末现金及等价物','cash_end','absolute'))]
+    def serialize(rows):
+        return [{'label':label, 'value':x['value'], 'measure':measure, 'detail':x} for label,x,measure in rows
+                if not (label == '其他净利润调整' and x['value'] is not None and abs(x['value']) < .01)]
+    return {'lrb': serialize(profit), 'llb': serialize(cash)}
+
+
+def read_statements(db, code, *, period=None, mode='ytd', comparison='yoy'):
+    code = normalize_code(code)
+    if mode not in {'ytd','quarter'} or comparison not in {'yoy','previous','year_end'}:
+        raise ValueError('财务分析展示口径无效')
+    if period:
+        date.fromisoformat(period)
+        if period[5:] not in {'03-31','06-30','09-30','12-31'}:
+            raise ValueError('请选择季度报告期')
+    with db.connection() as conn:
+        instrument = conn.execute('SELECT id,name FROM instruments WHERE code=?',(code,)).fetchone()
+        rows = conn.execute('SELECT report_type,period,raw_json,obtained_at FROM financial_reports '
+                            'WHERE instrument_id=? AND source=? AND report_type IN (?,?,?,?) ORDER BY period',
+                            (instrument['id'], SOURCE,'gjzb','fzb','lrb','llb')).fetchall() if instrument else []
+    reports = {}
+    for row in rows:
+        if row['period'][5:] in {'03-31','06-30','09-30','12-31'}:
+            reports.setdefault(row['period'], {})[row['report_type']] = json.loads(decompress_json(row['raw_json']))
+    periods = sorted((p for p,r in reports.items() if any(k in r for k in ('fzb','lrb','llb'))), reverse=True)
+    period = period or (periods[0] if periods else None)
+    if period and period not in periods:
+        raise ValueError('所选报告期尚未保存三表')
+    financial = bool(instrument and any(x in (instrument['name'] or '') for x in ('银行','证券','保险','中国平安','中国人寿','中国太保','新华保险')))
+    result = {'code':code,'name':instrument['name'] if instrument else None,'periods':periods,
+              'period':period,'mode':mode,'comparison':comparison,'financial_company':financial,
+              'updated_at':max((x['obtained_at'] for x in rows),default=None),'sections':{},'observations':[]}
+    if not period:
+        return result
+    year = int(period[:4])
+    baseline = f'{year-1}{period[4:]}' if comparison == 'yoy' else f'{year-1}-12-31' if comparison == 'year_end' else (
+        previous_quarter(period) or f'{year-1}-12-31')
+    values = summarize(reports,period,mode,financial)
+    old_values = summarize(reports,baseline,mode,financial)
+    balance_keys = {'assets','equity','liabilities','cash','debt','debt_ratio','leverage'}
+    card_keys = {'assets','equity','leverage','liabilities','cash','debt','debt_ratio',
+                 'revenue','net_profit','parent_profit','deducted_profit','gross_margin',
+                 'parent_net_margin','roe','cfo','cfi','cff','cash_increase','cash_profit',
+                 'capex','cash_after_capex'}
+    year_ago = f'{int(period[:4])-1}{period[4:]}'
+    yoy_values = summarize(reports,year_ago,mode,financial)
+    current_balance_values = summarize(reports,period,'ytd',financial)
+    yoy_balance_values = summarize(reports,year_ago,'ytd',financial)
+    prior_period = previous_report_period(period)
+    qoq_current = summarize(reports,period,'quarter',financial)
+    qoq_previous = summarize(reports,prior_period,'quarter',financial)
+    qoq_balance_previous = summarize(reports,prior_period,'ytd',financial)
+    card_comparisons = {}
+    for key in card_keys:
+        yoy_current = current_balance_values if key in balance_keys else values
+        yoy_base = yoy_balance_values if key in balance_keys else yoy_values
+        qoq_current_values = current_balance_values if key in balance_keys else qoq_current
+        qoq_previous_values = qoq_balance_previous if key in balance_keys else qoq_previous
+        card_comparisons[key] = {
+            'yoy': comparison_pct(yoy_current.get(key),yoy_base.get(key)),
+            'qoq': None if key == 'roe' else comparison_pct(qoq_current_values.get(key),qoq_previous_values.get(key)),
+        }
+    charts = waterfall(values,financial,period)
+    result.update(baseline=baseline, values=values, baseline_values=old_values,
+                  card_comparisons=card_comparisons, charts=charts)
+    for kind in ('fzb','lrb','llb'):
+        # Flows always compare the same period window; year-end applies only to balances.
+        compare_period = baseline if comparison != 'year_end' or kind == 'fzb' else f'{year-1}{period[4:]}'
+        section = build_section(reports,period,mode,kind,financial)
+        section['baseline'] = compare_period
+        section['comparison_items'] = build_section(reports,compare_period,mode,kind,financial)['full_items']
+        if kind == 'lrb':
+            comparison_values = old_values if compare_period == baseline else summarize(reports,compare_period,mode,financial)
+            expense_keys = ('gross_profit','sales_expense','management_expense','rd_expense','financial_expense','period_expenses')
+            section['expense_analysis'] = {
+                'current': {key:values[key] for key in expense_keys},
+                'comparison': {key:comparison_values[key] for key in expense_keys}}
+        if kind != 'fzb' and mode == 'ytd' and comparison == 'previous':
+            section['warnings'].append('累计期间长度不同，变动额不代表单季环比；可切换单季度比较。')
+        result['sections'][kind] = section
+    for kind, keys, operation, label in (
+        ('fzb', ['assets','liabilities','equity'], lambda a,l,e:a-l-e, '资产与负债＋权益'),
+        ('llb', ['cash_start','cfo','cfi','cff','fx','cash_end'], lambda s,o,i,f,x,e:s+o+i+f+x-e,
+         '现金余额与活动净现金流')):
+        if all(values[key]['value'] is not None for key in keys):
+            difference = operation(*[values[key]['value'] for key in keys])
+            if abs(difference) > max(1, abs(values[keys[0]]['value']) * 1e-8):
+                result['sections'][kind]['warnings'].append(f'{label}勾稽差额 {difference:,.2f} 元，请核对修订与报表范围。')
+    result['baseline_values'] = old_values if comparison != 'year_end' else {
+        **old_values, **{k:v for k,v in summarize(reports,f'{year-1}{period[4:]}',mode,financial).items()
+                      if k not in {'assets','liabilities','equity','cash','receivables','inventory','goodwill','debt','debt_ratio','leverage'}}}
+    # Facts only, no model calls or investment verdicts.
+    for key in ('revenue','receivables','inventory','net_profit','cfo','capex'):
+        current = values[key]
+        old = metric(reports,f'{year-1}{period[4:]}',key,mode)
+        result['observations'].append({'key':key,'current':current,'baseline':old,
+            'growth_pct': (current['value']/old['value']-1)*100 if current['value'] is not None
+                         and old['value'] is not None and old['value'] > 0 else None})
+    return result

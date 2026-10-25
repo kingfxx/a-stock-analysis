@@ -2,9 +2,9 @@ import copy
 
 import pytest
 
-from quarterly_dashboard.industry_bulk import cap_rows, fetch_pages, publish, recent_quarters
-from quarterly_dashboard.industry_service import IndustryService
-from quarterly_dashboard.storage import Database
+from stock_analysis.domains.industries.industry_bulk import cap_rows, fetch_pages, publish, recent_quarters
+from stock_analysis.domains.industries.industry_service import IndustryService
+from stock_analysis.infrastructure.storage import Database
 from datetime import date
 from test_industries import fixture_bundle
 
@@ -17,7 +17,7 @@ def test_window_excludes_unfinished_quarter():
 
 
 def test_explicit_empty_is_cached_but_failure_is_not_empty(tmp_path, monkeypatch):
-    monkeypatch.setattr('quarterly_dashboard.industry_bulk.time.sleep', lambda n: None)
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_bulk.time.sleep', lambda n: None)
     class Empty:
         def get(self, *args, **kwargs):
             class Response:
@@ -34,9 +34,9 @@ def test_explicit_empty_is_cached_but_failure_is_not_empty(tmp_path, monkeypatch
 
 
 def test_pacer_rests_after_twenty_requests(monkeypatch):
-    from quarterly_dashboard.industry_bulk import RequestPacer
+    from stock_analysis.domains.industries.industry_bulk import RequestPacer
     sleeps = []
-    monkeypatch.setattr('quarterly_dashboard.industry_bulk.time.sleep', sleeps.append)
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_bulk.time.sleep', sleeps.append)
     pacer = RequestPacer(lambda m: None)
     for _ in range(21): pacer.before_request()
     assert sleeps.count(30) == 1
@@ -61,7 +61,7 @@ class Session:
 
 
 def test_paging_cache_and_reject_changed_total(tmp_path, monkeypatch):
-    monkeypatch.setattr('quarterly_dashboard.industry_bulk.time.sleep', lambda n: None)
+    monkeypatch.setattr('stock_analysis.domains.industries.industry_bulk.time.sleep', lambda n: None)
     session = Session()
     rows, files = fetch_pages(session, tmp_path, 'test', 'SECURITY_CODE', 'filter', lambda m: None)
     assert len(rows) == 501 and len(files) == session.calls == 2
