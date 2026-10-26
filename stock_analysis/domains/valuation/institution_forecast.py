@@ -9,7 +9,7 @@ import pandas as pd
 
 from stock_analysis.collection.collection import RequestCollector, begin_batch, finish_batch, parsed_source
 from stock_analysis.domains.valuation.dividend_forecast import finite
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 
 
 def parse_forecast(html, code, years):

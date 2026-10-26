@@ -3,7 +3,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 import math
 
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.domains.financials.fundamental_service import FundamentalService, SOURCE as FINANCIAL_SOURCE
 from stock_analysis.domains.stocks.dividend_service import DividendService
 from stock_analysis.domains.valuation.valuation_service import ValuationService

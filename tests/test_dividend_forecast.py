@@ -1,3 +1,4 @@
+from stock_analysis import application as app
 """Synthetic boundary cases and read-only isolated-store acceptance."""
 import json
 import shutil
@@ -302,7 +303,7 @@ def test_reader_legacy_dedup_future_exdate_and_identity_conflicts(store):
 
 
 def test_endpoint_and_assets_are_local_and_no_history_backtest(store,monkeypatch):
-    monkeypatch.setattr(server,'DATABASE_PATH',store.path)
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',store.path)
     status,headers,body=request('/api/dividend-forecast?code=601919')
     assert status==200 and headers['Cache-Control']=='no-store'
     assert json.loads(body)['methodology_version']==forecast.VERSION

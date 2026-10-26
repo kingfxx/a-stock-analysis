@@ -23,7 +23,8 @@ if sys.prefix != sys.base_prefix:
     sys.path.append(str(Path(sys.base_prefix)/'Lib/site-packages'))
 
 from stock_analysis.infrastructure.storage import Database, DEFAULT_DATABASE, instance_lock, utc_now
-from stock_analysis.domains.stocks.sources import TENCENT_URL, parse_price_history
+from stock_analysis.domains.stocks.sources import TENCENT_URL
+from stock_analysis.domains.stocks.source_parsers import parse_price_history
 from stock_analysis.infrastructure.network import create_data_session
 
 ROOT = PROJECT_ROOT

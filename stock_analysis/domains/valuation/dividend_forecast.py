@@ -12,7 +12,7 @@ from stock_analysis.domains.valuation.dcf import sum_interest_bearing_debt
 from stock_analysis.domains.financials.financial_storage import decompress_json
 from stock_analysis.domains.financials.fundamental_service import SOURCE
 from stock_analysis.domains.stocks.price_service import SOURCE as PRICE_SOURCE
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.domains.financials.statements import metric
 
 

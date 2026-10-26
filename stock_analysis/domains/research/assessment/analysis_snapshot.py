@@ -14,7 +14,7 @@ from stock_analysis.domains.stocks.dividend_service import DividendService
 from stock_analysis.domains.valuation.valuation_service import ValuationService
 from stock_analysis.domains.stocks.price_service import PriceService
 from stock_analysis.domains.valuation.valuation import valuation_summary_observations, merge_dividend_yields, monthly_dividend_yields
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.infrastructure.storage import utc_now
 from stock_analysis.domains.financials.financial_storage import financial_row
 

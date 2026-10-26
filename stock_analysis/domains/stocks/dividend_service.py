@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from stock_analysis.infrastructure.network import create_data_session
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult
 from stock_analysis.domains.stocks.stock_collection import begin_stock_batch, routed_stock_requests
 from stock_analysis.domains.stocks.sync_support import backup_before_update, data_lock, mark_failed, recently_checked, recent_sync_failure, sync_state

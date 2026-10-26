@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 from urllib.parse import quote
 
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 
 REPORT_ROOT = PROJECT_ROOT / 'data' / 'research_reports'
 

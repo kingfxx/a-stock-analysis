@@ -1,3 +1,4 @@
+from stock_analysis import application as app
 import copy
 import json
 from stock_analysis.domains.financials.financial_storage import decompress_json
@@ -493,7 +494,7 @@ def test_provider_requires_completed_stream(tmp_path,terminal,delta_only):
 
 def test_http_cross_site_token_host_history_and_no_model_reads(database,monkeypatch):
     item=service(database)
-    monkeypatch.setattr(server,'ai_service',lambda:item)
+    monkeypatch.setattr(app,'ai_service',lambda:item)
     http=ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     thread=Thread(target=http.serve_forever,daemon=True); thread.start()
     base=f'http://127.0.0.1:{http.server_port}'

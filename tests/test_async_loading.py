@@ -1,3 +1,7 @@
+from stock_analysis import application as app
+from stock_analysis.domains.stocks import data_service as data_module
+from stock_analysis.http import rendering
+from stock_analysis.domains.stocks import data_contracts as contracts
 import json
 import re
 import shutil
@@ -16,7 +20,7 @@ from stock_analysis.http import server
 
 @pytest.fixture(autouse=True)
 def no_unrelated_mainop_requests(monkeypatch):
-    monkeypatch.setattr(server.BusinessSegmentService, 'update',
+    monkeypatch.setattr(data_module.BusinessSegmentService, 'update',
                         lambda *args, **kwargs: {'sync': {}, 'warnings': []})
 
 
@@ -27,11 +31,11 @@ def payload(page):
 
 @pytest.fixture
 def cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "CACHE", tmp_path / "fundamentals")
-    monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
-    monkeypatch.setattr(server, "CHIP_CACHE", tmp_path / "chips")
-    server.CACHE.mkdir()
-    server.VALUATION_CACHE.mkdir()
+    monkeypatch.setattr(app.settings, "CACHE", tmp_path / "fundamentals")
+    monkeypatch.setattr(app.settings, "VALUATION_CACHE", tmp_path / "valuation")
+    monkeypatch.setattr(app.settings, "CHIP_CACHE", tmp_path / "chips")
+    app.settings.CACHE.mkdir()
+    app.settings.VALUATION_CACHE.mkdir()
     return tmp_path
 
 
@@ -39,11 +43,11 @@ def stock():
     return {"code": "601600", "name": "中国铝业", "reports": [
         {"period": "2025-12-31", "revenue_ytd": 100, "profit_ytd": 10}],
         "prices": {"raw": [], "qfq": []}, "updated_at": "2026-09-27",
-        "price_basis": "disclosure", "report_date_basis": server.REPORT_DATE_BASIS,
-        "price_reference_basis": server.PRICE_REFERENCE_BASIS,
-        "cash_flow_basis": server.CASH_FLOW_BASIS,
-        "financial_fields_basis": server.FINANCIAL_FIELDS_BASIS,
-        "dividend_basis": server.DIVIDEND_BASIS,
+        "price_basis": "disclosure", "report_date_basis": contracts.REPORT_DATE_BASIS,
+        "price_reference_basis": contracts.PRICE_REFERENCE_BASIS,
+        "cash_flow_basis": contracts.CASH_FLOW_BASIS,
+        "financial_fields_basis": contracts.FINANCIAL_FIELDS_BASIS,
+        "dividend_basis": contracts.DIVIDEND_BASIS,
         "dividend_events": [{"report_period": "2025-12-31", "date": "2026-06-01",
                              "per_share": 1, "total_shares": 100}]}
 
@@ -51,12 +55,12 @@ def stock():
 def forbid_network(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError("Initial page must never request external data")
-    monkeypatch.setattr(server.requests.Session, "request", forbidden)
+    monkeypatch.setattr(data_module.requests.Session, "request", forbidden)
 
 
 def test_first_visit_returns_shell_without_fetching_data(cache, monkeypatch):
     forbid_network(monkeypatch)
-    data = payload(server.render_page("601600", False))
+    data = payload(rendering.render_page("601600", False))
     assert data["code"] == "601600"
     assert data["views"] == {}
     assert data["loading"] == {"financial": True, "dividends": True, "valuation": True,
@@ -66,12 +70,12 @@ def test_first_visit_returns_shell_without_fetching_data(cache, monkeypatch):
 
 def test_initial_page_shows_stale_cache_and_schedules_only_missing_updates(cache, monkeypatch):
     forbid_network(monkeypatch)
-    (server.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
-    (server.VALUATION_CACHE / "601600.json").write_text(json.dumps({
+    (app.settings.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
+    (app.settings.VALUATION_CACHE / "601600.json").write_text(json.dumps({
         "rows": [{"date": "2026-08-31", "pe": 9}], "industry": {"pe": 12},
-        "basis": server.VALUATION_BASIS, "updated_on": "2000-01-01"}), encoding="utf-8")
+        "basis": contracts.VALUATION_BASIS, "updated_on": "2000-01-01"}), encoding="utf-8")
     before = {path: path.read_bytes() for path in cache.rglob("*.json")}
-    data = payload(server.render_page("601600", False))
+    data = payload(rendering.render_page("601600", False))
     assert data["views"]["year"][0]["profit"] == 10
     assert data["views"]["year"][0]["cash_dividend"] == 100
     assert data["valuation"]["views"]["10"]["pe"]["current"] == 9
@@ -82,42 +86,42 @@ def test_initial_page_shows_stale_cache_and_schedules_only_missing_updates(cache
 
 def test_stock_list_does_not_fetch_missing_names(cache, monkeypatch):
     forbid_network(monkeypatch)
-    path = server.CACHE / "601600.json"
+    path = app.settings.CACHE / "601600.json"
     path.write_text(json.dumps({"code": "601600"}), encoding="utf-8")
-    assert server.cached_stocks() == [{"code": "601600", "name": None}]
+    assert app.data.cached_stocks() == [{"code": "601600", "name": None}]
     assert "name" not in json.loads(path.read_text(encoding="utf-8"))
 
 
 def test_financial_endpoint_does_not_wait_for_dividend_or_valuation_source(cache, monkeypatch):
-    monkeypatch.setattr(server, "load_stock", lambda code, refresh=False: stock())
+    monkeypatch.setattr(app.data, "load_stock", lambda code, refresh=False: stock())
     def forbidden(*args, **kwargs):
         raise AssertionError("Financial data must not wait for the other sources")
-    monkeypatch.setattr(server, "load_dividends", forbidden)
-    monkeypatch.setattr(server, "load_valuation", forbidden)
-    data = server.load_chart_data("601600", "financial", False)
+    monkeypatch.setattr(app.data, "load_dividends", forbidden)
+    monkeypatch.setattr(app.data, "load_valuation", forbidden)
+    data = app.data.load_chart_data("601600", "financial", False)
     assert data["name"] == "中国铝业"
     assert data["views"]["year"][0]["profit"] == 10
 
 
 def test_valuation_endpoint_reads_reports_without_refetching_financials(cache, monkeypatch):
-    (server.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
+    (app.settings.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
     def load(code, reports, refresh=False):
         assert reports[0]["revenue_ytd"] == 100
         return {"rows": [{"date": "2026-08-31", "pe": 8}], "industry": {},
                 "updated_on": "2026-09-28", "warnings": []}
-    monkeypatch.setattr(server, "load_valuation", load)
-    monkeypatch.setattr(server, "load_stock", lambda *args: pytest.fail("finance refetched"))
-    data = server.load_chart_data("601600", "valuation", False)
+    monkeypatch.setattr(app.data, "load_valuation", load)
+    monkeypatch.setattr(app.data, "load_stock", lambda *args: pytest.fail("finance refetched"))
+    data = app.data.load_chart_data("601600", "valuation", False)
     assert data["views"]["10"]["pe"]["current"] == 8
 
 
 def test_dividend_endpoint_updates_financial_view_without_refetching_stock(cache, monkeypatch):
-    (server.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
-    monkeypatch.setattr(server, "load_stock", lambda *args: pytest.fail("finance refetched"))
-    monkeypatch.setattr(server, "load_dividends", lambda data, refresh=False: ([
+    (app.settings.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
+    monkeypatch.setattr(app.data, "load_stock", lambda *args: pytest.fail("finance refetched"))
+    monkeypatch.setattr(app.data, "load_dividends", lambda data, refresh=False: ([
         {"report_period": "2025-12-31", "date": "2026-06-01", "per_share": 2,
          "total_shares": 100}], []))
-    data = server.load_chart_data("601600", "dividends", False)
+    data = app.data.load_chart_data("601600", "dividends", False)
     assert data["views"]["year"][0]["cash_dividend"] == 200
 
 
@@ -127,18 +131,18 @@ def test_valuation_normalizes_reports_even_when_financial_migration_could_not_be
     data["reports"] = [
         {"period": "2020-12-31", "publish_date": "2022-04-22", "revenue_ytd": 100},
         {"period": "2021-12-31", "publish_date": "2023-03-10", "revenue_ytd": 200}]
-    (server.CACHE / "601600.json").write_text(json.dumps(data), encoding="utf-8")
+    (app.settings.CACHE / "601600.json").write_text(json.dumps(data), encoding="utf-8")
     def load(code, reports, refresh=False):
         assert reports[1]["publish_date"] == "2022-04-22"
         assert reports[1]["source_publish_date"] == "2023-03-10"
         return {"rows": [], "industry": {}, "warnings": []}
-    monkeypatch.setattr(server, "load_valuation", load)
-    server.load_chart_data("601600", "valuation")
+    monkeypatch.setattr(app.data, "load_valuation", load)
+    app.data.load_chart_data("601600", "valuation")
 
 
 @pytest.mark.parametrize("outcome", ["success", "failure", "empty", "partial"])
 def test_slow_dividend_fetch_does_not_block_financial_and_merges_latest_cache(cache, monkeypatch, outcome):
-    path = server.CACHE / "601600.json"
+    path = app.settings.CACHE / "601600.json"
     path.write_text(json.dumps(stock()), encoding="utf-8")
     started, release = Event(), Event()
     def fetch(*args):
@@ -156,15 +160,15 @@ def test_slow_dividend_fetch_does_not_block_financial_and_merges_latest_cache(ca
     def fresh_stock(*args):
         data = stock()
         data["reports"][0]["profit_ytd"] = 20
-        server._save_cache(path, data)
+        app.data._save_cache(path, data)
         return data
-    monkeypatch.setattr(server, "fetch_dividend_events", fetch)
-    monkeypatch.setattr(server, "load_stock", fresh_stock)
+    monkeypatch.setattr(data_module, "fetch_dividend_events", fetch)
+    monkeypatch.setattr(app.data, "load_stock", fresh_stock)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        dividends = pool.submit(server.load_chart_data, "601600", "dividends", True)
+        dividends = pool.submit(app.data.load_chart_data, "601600", "dividends", True)
         try:
             assert started.wait(2)
-            financial = pool.submit(server.load_chart_data, "601600", "financial")
+            financial = pool.submit(app.data.load_chart_data, "601600", "financial")
             assert financial.result(timeout=1)["views"]["year"][0]["profit"] == 20
         finally:
             release.set()
@@ -180,8 +184,8 @@ def test_slow_dividend_fetch_does_not_block_financial_and_merges_latest_cache(ca
 
 def test_refresh_url_still_shows_cache_before_network_work(cache, monkeypatch):
     forbid_network(monkeypatch)
-    (server.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
-    data = payload(server.render_page("601600", True))
+    (app.settings.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
+    data = payload(rendering.render_page("601600", True))
     assert data["views"]["year"][0]["profit"] == 10
     assert data["refresh_requested"] is True
 
@@ -189,7 +193,7 @@ def test_refresh_url_still_shows_cache_before_network_work(cache, monkeypatch):
 @pytest.mark.parametrize("code,section", [("../outside", "financial"), ("601600", "unknown")])
 def test_data_endpoint_rejects_invalid_code_or_section(cache, code, section):
     with pytest.raises(ValueError):
-        server.load_chart_data(code, section, False)
+        app.data.load_chart_data(code, section, False)
 
 
 def test_background_browser_loading_preserves_and_updates_charts_independently():
@@ -225,10 +229,10 @@ def http_server(cache):
 
 def test_live_routes_return_cache_page_and_independent_json(http_server, monkeypatch):
     forbid_network(monkeypatch)
-    (server.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
-    (server.VALUATION_CACHE / "601600.json").write_text(json.dumps({
+    (app.settings.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
+    (app.settings.VALUATION_CACHE / "601600.json").write_text(json.dumps({
         "rows": [{"date": "2026-08-31", "pe": 9}], "industry": {},
-        "basis": server.VALUATION_BASIS, "updated_on": server.date.today().isoformat()}), encoding="utf-8")
+        "basis": contracts.VALUATION_BASIS, "updated_on": data_module.date.today().isoformat()}), encoding="utf-8")
     with urlopen(http_server + "/?code=601600", timeout=5) as response:
         assert response.headers["Cache-Control"] == "no-store"
         assert payload(response.read().decode("utf-8"))["views"]["year"][0]["profit"] == 10
@@ -245,7 +249,7 @@ def test_live_routes_return_cache_page_and_independent_json(http_server, monkeyp
 def test_live_data_failure_returns_json_error_without_affecting_page(http_server, monkeypatch):
     def offline(*args):
         raise ValueError("source unavailable")
-    monkeypatch.setattr(server, "fetch_financial_reports", offline)
+    monkeypatch.setattr(data_module, "fetch_financial_reports", offline)
     with pytest.raises(HTTPError) as failure:
         urlopen(http_server + "/api/financial?code=601600", timeout=5)
     assert failure.value.code == 503
@@ -255,7 +259,7 @@ def test_live_data_failure_returns_json_error_without_affecting_page(http_server
 
 
 def test_live_shared_price_context_pins_all_consumers_and_rejects_missing_version(http_server, monkeypatch):
-    chips, prices = server.services()
+    chips, prices = app.data.services()
     days = ["2026-01-05", "2026-06-30", "2026-09-29"]
     rows = [dict(date=day, open=20, close=21, high=22, low=19, volume=100,
                  raw=[day,"20","21","22","19","100"]) for day in days]
@@ -264,15 +268,15 @@ def test_live_shared_price_context_pins_all_consumers_and_rejects_missing_versio
     version = prices.ensure("601600")["version"]
     stock_data = stock()
     stock_data["reports"][0]["publish_date"] = days[0]
-    (server.CACHE / "601600.json").write_text(json.dumps(stock_data), encoding="utf-8")
-    (server.VALUATION_CACHE / "601600.json").write_text(json.dumps({
-        "rows":[{"date":"2026-06-30","pe":9}],"basis":server.VALUATION_BASIS,
-        "updated_on":server.date.today().isoformat()}), encoding="utf-8")
-    server.FundamentalService(chips.db, server.CACHE).import_legacy("601600")
-    server.ValuationService(chips.db, server.VALUATION_CACHE).import_legacy("601600")
-    monkeypatch.setattr(server.FundamentalService, "_fetch_page", staticmethod(
+    (app.settings.CACHE / "601600.json").write_text(json.dumps(stock_data), encoding="utf-8")
+    (app.settings.VALUATION_CACHE / "601600.json").write_text(json.dumps({
+        "rows":[{"date":"2026-06-30","pe":9}],"basis":contracts.VALUATION_BASIS,
+        "updated_on":data_module.date.today().isoformat()}), encoding="utf-8")
+    data_module.FundamentalService(chips.db, app.settings.CACHE).import_legacy("601600")
+    data_module.ValuationService(chips.db, app.settings.VALUATION_CACHE).import_legacy("601600")
+    monkeypatch.setattr(data_module.FundamentalService, "_fetch_page", staticmethod(
         lambda *args: (_ for _ in ()).throw(ValueError("offline"))))
-    monkeypatch.setattr(server.ValuationService, "_fetch_indicator", staticmethod(
+    monkeypatch.setattr(data_module.ValuationService, "_fetch_indicator", staticmethod(
         lambda *args: (_ for _ in ()).throw(ValueError("offline"))))
     chips.fetcher = lambda code, section, source, **kw: (
         [dict(SCODE=code,DATE=days[-1],RZYE=100,SPJ=21)] if section == "financing" else
@@ -303,15 +307,15 @@ def test_live_shared_price_context_pins_all_consumers_and_rejects_missing_versio
 
 
 def test_bad_financial_json_does_not_hide_sqlite_chip_facts(cache):
-    chips, _ = server.services()
+    chips, _ = app.data.services()
     chips.fetcher = lambda code, section, source, **kw: [dict(SCODE=code,DATE="2026-09-29",RZYE=100,SPJ=20)]
     chips.update("601600", "financing")
-    path = server.CACHE / "601600.json"
+    path = app.settings.CACHE / "601600.json"
     path.write_text("broken JSON", encoding="utf-8")
-    page = server.render_page("601600", False)
+    page = rendering.render_page("601600", False)
     assert payload(page)["financing"]["stored_count"] == 1
     assert "fundamentals 缓存不可用" not in page
-    bundle = server.price_bundle("601600", version=0)
+    bundle = app.data.price_bundle("601600", version=0)
     assert bundle["financing"]["stored_count"] == 1
     assert "fundamentals 缓存不可用" not in " ".join(bundle["warnings"])
     assert path.read_text(encoding="utf-8") == "broken JSON"

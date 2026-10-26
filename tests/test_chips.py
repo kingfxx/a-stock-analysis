@@ -1,3 +1,7 @@
+from stock_analysis import application as app
+from stock_analysis.domains.stocks import chips as chips_module
+from stock_analysis.domains.stocks import data_service as data_module
+from stock_analysis.http import rendering
 import json
 from datetime import date
 
@@ -113,36 +117,36 @@ def test_zero_balances_and_negative_net_buy_are_valid_but_missing_prices_stay_mi
 
 @pytest.fixture
 def chip_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "CHIP_CACHE", tmp_path)
-    monkeypatch.setattr(server, "CACHE", tmp_path / "no-financial-data")
-    monkeypatch.setattr(server, "fetch_daily_prices", lambda *args: [
+    monkeypatch.setattr(app.settings, "CHIP_CACHE", tmp_path)
+    monkeypatch.setattr(app.settings, "CACHE", tmp_path / "no-financial-data")
+    monkeypatch.setattr(app.data, "fetch_daily_prices", lambda *args: [
         {"date": "2026-06-30", "close": 24}, {"date": "2026-09-15", "close": 25}])
-    chips, _ = server.services()
+    chips, _ = app.data.services()
     chips.fetcher = lambda code, section, source, **bounds: (
-        [] if source == "RPT_HOLDERNUM_DET" else server.fetch_chip_records(code, section, None))
+        [] if source == "RPT_HOLDERNUM_DET" else chips_module.fetch_chip_records(code, section, None))
     return tmp_path
 
 
 def test_chip_endpoint_is_independent_and_preserves_full_raw_daily_records(chip_cache, monkeypatch):
-    monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [margin("2024-01-01"), margin()])
-    monkeypatch.setattr(server, "load_stock", lambda *args: pytest.fail("finance should not be needed"))
-    result = server.load_chart_data("600887", "financing")
-    with server.services()[0].db.connection() as conn:
+    monkeypatch.setattr(chips_module, "fetch_chip_records", lambda *args: [margin("2024-01-01"), margin()])
+    monkeypatch.setattr(app.data, "load_stock", lambda *args: pytest.fail("finance should not be needed"))
+    result = app.data.load_chart_data("600887", "financing")
+    with app.data.services()[0].db.connection() as conn:
         stored = conn.execute("SELECT raw_json FROM financing_daily ORDER BY trade_date").fetchall()
     assert len(stored) == 2
     assert json.loads(stored[0][0])["RQMCL"] == 67900
     assert not (chip_cache / "financing" / "600887.json").exists()
     assert result["stored_count"] == 2
     assert len(result["rows"]) == 2
-    monkeypatch.setattr(server, "fetch_chip_records", lambda *args: pytest.fail("same-day cache must be reused"))
-    assert server.load_chart_data("600887", "financing")["stored_count"] == 2
+    monkeypatch.setattr(chips_module, "fetch_chip_records", lambda *args: pytest.fail("same-day cache must be reused"))
+    assert app.data.load_chart_data("600887", "financing")["stored_count"] == 2
 
 
 @pytest.mark.parametrize("outcome", ["missing_date", "missing_required", "empty", "failure"])
 def test_partial_refresh_does_not_overwrite_or_backup_good_cache(chip_cache, monkeypatch, outcome):
-    monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [margin("2026-09-28"), margin()])
-    server.load_chart_data("600887", "financing")
-    db = server.services()[0].db
+    monkeypatch.setattr(chips_module, "fetch_chip_records", lambda *args: [margin("2026-09-28"), margin()])
+    app.data.load_chart_data("600887", "financing")
+    db = app.data.services()[0].db
     with db.connection() as conn:
         original = [tuple(r) for r in conn.execute("SELECT * FROM financing_daily")]
     def fetch(*args):
@@ -153,8 +157,8 @@ def test_partial_refresh_does_not_overwrite_or_backup_good_cache(chip_cache, mon
         if outcome == "missing_date":
             return [margin()]
         return [margin("2026-09-28"), {**margin(), "RZYE": None}]
-    monkeypatch.setattr(server, "fetch_chip_records", fetch)
-    result = server.load_chart_data("600887", "financing", True)
+    monkeypatch.setattr(chips_module, "fetch_chip_records", fetch)
+    result = app.data.load_chart_data("600887", "financing", True)
     assert result["warnings"]
     assert result["stored_count"] == 2
     with db.connection() as conn:
@@ -162,12 +166,12 @@ def test_partial_refresh_does_not_overwrite_or_backup_good_cache(chip_cache, mon
 
 
 def test_successful_refresh_keeps_backup_and_old_dates(chip_cache, monkeypatch):
-    monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [holder()])
-    server.load_chart_data("600887", "shareholders")
-    db = server.services()[0].db
+    monkeypatch.setattr(chips_module, "fetch_chip_records", lambda *args: [holder()])
+    app.data.load_chart_data("600887", "shareholders")
+    db = app.data.services()[0].db
     original = db.backup(chip_cache / "before-refresh.sqlite3")
-    monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [holder(), holder("2026-09-15", 9000)])
-    result = server.load_chart_data("600887", "shareholders", True)
+    monkeypatch.setattr(chips_module, "fetch_chip_records", lambda *args: [holder(), holder("2026-09-15", 9000)])
+    result = app.data.load_chart_data("600887", "shareholders", True)
     assert result["stored_count"] == 2
     from stock_analysis.infrastructure.storage import Database
     with Database(original).connection() as conn:
@@ -203,11 +207,11 @@ def test_shareholders_merge_detail_only_dates_and_prefer_f10_values():
 
 
 def test_cached_chip_data_embeds_without_network_and_keeps_financial_loading_independent(chip_cache, monkeypatch):
-    monkeypatch.setattr(server, "VALUATION_CACHE", chip_cache / "valuation")
-    monkeypatch.setattr(server, "fetch_chip_records", lambda *args: [margin()])
-    server.load_chart_data("600887", "financing")
-    monkeypatch.setattr(server.requests.Session, "request", lambda *args, **kwargs: pytest.fail("page fetched network"))
-    page_html = server.render_page("600887", False)
+    monkeypatch.setattr(app.settings, "VALUATION_CACHE", chip_cache / "valuation")
+    monkeypatch.setattr(chips_module, "fetch_chip_records", lambda *args: [margin()])
+    app.data.load_chart_data("600887", "financing")
+    monkeypatch.setattr(data_module.requests.Session, "request", lambda *args, **kwargs: pytest.fail("page fetched network"))
+    page_html = rendering.render_page("600887", False)
     import re
     data = json.loads(re.search(r'<script id="payload" type="application/json">(.*?)</script>', page_html, re.S).group(1))
     assert data["financing"]["stored_count"] == 1

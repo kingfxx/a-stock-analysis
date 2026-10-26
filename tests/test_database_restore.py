@@ -1,3 +1,4 @@
+from stock_analysis import application as app
 import io
 import json
 import os
@@ -130,13 +131,13 @@ def test_failure_after_publish_rolls_back(tmp_path,monkeypatch):
 def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch):
     from stock_analysis.http import server
     db,backup,_=setup_db(tmp_path)
-    monkeypatch.setattr(server,'DATABASE_PATH',db.path)
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',db.path)
     for name in ('_SERVICES','_AI_SERVICES','_INDUSTRY_SERVICES','_MAINTENANCE_SERVICES','_DATA_LOCKS'):
-        monkeypatch.setattr(server,name,{})
+        monkeypatch.setattr(app.data if name in ('_SERVICES', '_DATA_LOCKS') else app, name, {})
     starts=[]
     def initialize(database,skip_legacy=False):
         database.initialize();database.check();starts.append(skip_legacy)
-    monkeypatch.setattr(server,'_initialize_runtime',initialize)
+    monkeypatch.setattr(app,'_initialize_runtime',initialize)
     real_server=server.ThreadingHTTPServer;instances=[]
     class TrackingServer(real_server):
         def __init__(self,*args):super().__init__(*args);instances.append(self)

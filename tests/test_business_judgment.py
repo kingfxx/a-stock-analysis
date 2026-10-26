@@ -1,3 +1,4 @@
+from stock_analysis import application as app
 import json
 import time
 from threading import Event, Thread
@@ -218,7 +219,7 @@ def test_provider_collects_page_actions_and_streamed_citations(tmp_path,kind):
 
 
 def test_business_http_no_inference_on_reads_and_csrf_protection(db,monkeypatch):
-    item=service(db);monkeypatch.setattr(server,'business_service',lambda:item);monkeypatch.setattr(server,'ai_service',lambda:item)
+    item=service(db);monkeypatch.setattr(app,'business_service',lambda:item);monkeypatch.setattr(app,'ai_service',lambda:item)
     http=ThreadingHTTPServer(('127.0.0.1',0),server.Handler);thread=Thread(target=http.serve_forever,daemon=True);thread.start()
     base=f'http://127.0.0.1:{http.server_port}'
     try:

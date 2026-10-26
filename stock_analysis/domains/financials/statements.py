@@ -5,7 +5,7 @@ import json
 from datetime import date
 
 from stock_analysis.domains.financials.fundamental_service import SOURCE
-from stock_analysis.domains.stocks.sources import _number, normalize_code
+from stock_analysis.domains.stocks.source_parsers import _number, normalize_code
 from stock_analysis.domains.financials.financial_storage import decompress_json
 
 

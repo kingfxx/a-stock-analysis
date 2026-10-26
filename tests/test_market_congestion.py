@@ -1,3 +1,5 @@
+from stock_analysis.http.routes import indices as index_routes
+from stock_analysis import application as app
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -237,8 +239,8 @@ def live(db,monkeypatch):
     with db.connection(write=True) as conn:
         catalog(conn,'cn:000001','上证指数','broad',provider='csindex',provider_code='000001')
         catalog(conn,'cn:000300','沪深300','broad',provider='csindex',provider_code='000300')
-    monkeypatch.setattr(server,'DATABASE_PATH',db.path)
-    calls=[];monkeypatch.setattr(server,'run_operation',lambda database,operation:calls.append(operation))
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',db.path)
+    calls=[];monkeypatch.setattr(index_routes,'run_operation',lambda database,operation:calls.append(operation))
     for port in (8768,*range(18760,18780)):
         try:web=ThreadingHTTPServer(('127.0.0.1',port),server.Handler);break
         except OSError:continue

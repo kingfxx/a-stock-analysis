@@ -10,7 +10,7 @@ from pathlib import Path
 from stock_analysis.domains.stocks.chips import _fetch_chip_report, _number, chip_rows, financing_window_start
 from stock_analysis.infrastructure.network import create_data_session
 from stock_analysis.domains.stocks.financing_storage import effective_fields, NUMERIC_FIELDS
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, utc_now
 from stock_analysis.domains.stocks.stock_collection import begin_stock_batch, routed_stock_requests
 

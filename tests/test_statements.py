@@ -1,3 +1,5 @@
+from stock_analysis import application as app
+from stock_analysis.http import rendering
 import json
 import os
 import shutil
@@ -223,8 +225,8 @@ def test_reject_invalid_options(facts,kwargs):
 
 
 def test_api_is_read_only_and_static_assets_are_served(facts,monkeypatch):
-    monkeypatch.setattr(server,'DATABASE_PATH',facts.path)
-    monkeypatch.setattr(server,'load_chart_data',lambda *a,**k:pytest.fail('source refresh called'))
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',facts.path)
+    monkeypatch.setattr(app.data,'load_chart_data',lambda *a,**k:pytest.fail('source refresh called'))
     httpd=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     thread=Thread(target=httpd.serve_forever,daemon=True);thread.start()
     try:
@@ -255,12 +257,12 @@ def test_financial_tabs_in_real_browser(facts,tmp_path,monkeypatch):
     edge=shutil.which('msedge') or r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
     node=shutil.which('node')
     if not Path(edge).is_file() or not node:pytest.skip('Edge and Node are needed')
-    monkeypatch.setattr(server,'DATABASE_PATH',facts.path)
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',facts.path)
     def page(code,refresh):
         payload={'code':code,'name':'测试企业','views':{},'warnings':[],'valuation':{'views':{}},
                  'loading':{},'price_version':1,'price_needs_update':False,'cached_stocks':[]}
-        return server.TEMPLATE.replace('__RESEARCH_SIDEBAR__',server.research_sidebar('stock')).replace('__PAYLOAD__',json.dumps(payload,ensure_ascii=False)).replace('__CODE__',code).replace('__ERROR__','')
-    monkeypatch.setattr(server,'render_page',page)
+        return rendering.TEMPLATE.replace('__RESEARCH_SIDEBAR__',rendering.research_sidebar('stock')).replace('__PAYLOAD__',json.dumps(payload,ensure_ascii=False)).replace('__CODE__',code).replace('__ERROR__','')
+    monkeypatch.setattr(rendering,'render_page',page)
     httpd=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     thread=Thread(target=httpd.serve_forever,daemon=True);thread.start()
     profile=tmp_path/'browser';browser=None

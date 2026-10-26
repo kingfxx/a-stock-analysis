@@ -1,3 +1,4 @@
+from stock_analysis import application as app
 from stock_analysis.http.assets import asset_path
 """HTTP/browser acceptance on an isolated database and explicit available port."""
 import json
@@ -17,7 +18,7 @@ from stock_analysis.infrastructure.storage import Database
 def live(tmp_path,monkeypatch):
     from stock_analysis.http import server
     db=Database(tmp_path/'ui.sqlite3');db.initialize()
-    monkeypatch.setattr(server,'DATABASE_PATH',db.path)
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',db.path)
     root=Path(__file__).resolve().parents[1]
     state={'storage':0,'collections':0,'running':False}
     original_read=CollectionManagement.read

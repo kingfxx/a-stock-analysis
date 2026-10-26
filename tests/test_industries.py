@@ -1,3 +1,5 @@
+from stock_analysis.domains.financials import payloads as financial_payloads
+from stock_analysis import application as app
 import copy
 import json
 
@@ -265,7 +267,7 @@ def test_api_read_validation_and_assets(service,monkeypatch):
     from http.server import ThreadingHTTPServer
     from threading import Thread
     import urllib.request
-    monkeypatch.setattr(server,'industry_service',lambda:service)
+    monkeypatch.setattr(app,'industry_service',lambda:service)
     service.import_bundle(fixture_bundle())
     http=ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     thread=Thread(target=http.serve_forever,daemon=True);thread.start()
@@ -352,13 +354,13 @@ def test_stock_financial_refresh_does_not_collect_or_change_industry_snapshot(se
             return {'reports':[]}
     class Dividends:
         def read(self,code):return []
-    monkeypatch.setattr(server,'DATABASE_PATH',service.db.path)
-    monkeypatch.setattr(server,'p4_services',lambda:(Fundamentals(),Dividends(),None))
-    monkeypatch.setattr(server,'industry_service',lambda:pytest.fail('stock refresh reached industry service'))
-    monkeypatch.setattr(server,'_financial_payload',lambda value:value)
-    monkeypatch.setattr(server,'_add_sqlite_missing_name',lambda db,value,**kwargs:value)
-    monkeypatch.setattr(server,'cached_stocks',lambda:[])
-    server.load_chart_data('300750','financial',True,full=True)
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',service.db.path)
+    monkeypatch.setattr(app.data,'p4_services',lambda:(Fundamentals(),Dividends(),None))
+    monkeypatch.setattr(app,'industry_service',lambda:pytest.fail('stock refresh reached industry service'))
+    monkeypatch.setattr(financial_payloads,'_financial_payload',lambda value:value)
+    monkeypatch.setattr(app.data,'_add_sqlite_missing_name',lambda db,value,**kwargs:value)
+    monkeypatch.setattr(app.data,'cached_stocks',lambda:[])
+    app.data.load_chart_data('300750','financial',True,full=True)
     # Reloading the service also remains fixed; this is not merely an in-memory cache.
     after=IndustryService(service.db).read(industry='630701',mode='ytd',period='2025-06-30')
     assert after['series']==before['series'] and after['market_series']==before['market_series']
@@ -494,12 +496,12 @@ def test_industry_api_requires_explicit_task_stock_routes_stay_separate(service,
     from urllib.error import HTTPError
     from stock_analysis.http import server
     calls=[]
-    monkeypatch.setattr(server,'industry_service',lambda:service)
+    monkeypatch.setattr(app,'industry_service',lambda:service)
     monkeypatch.setattr(service,'start_refresh',lambda *args,**kwargs:calls.append(args) or {'running':True})
     stock_calls=[]
-    monkeypatch.setattr(server,'load_chart_data',lambda code,section,refresh,**options:
+    monkeypatch.setattr(app.data,'load_chart_data',lambda code,section,refresh,**options:
                         stock_calls.append((code,section,refresh,options['full'])) or {})
-    monkeypatch.setattr(server,'price_bundle',lambda code,**options:stock_calls.append((code,'prices',options['refresh'],options['full'])) or {'valuation':{}})
+    monkeypatch.setattr(app.data,'price_bundle',lambda code,**options:stock_calls.append((code,'prices',options['refresh'],options['full'])) or {'valuation':{}})
     http=ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     thread=Thread(target=http.serve_forever,daemon=True);thread.start()
     try:

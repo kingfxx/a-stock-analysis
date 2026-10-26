@@ -1,3 +1,5 @@
+from stock_analysis import application as app
+from stock_analysis.http import rendering
 import json
 from uuid import uuid4
 import pytest
@@ -141,8 +143,8 @@ def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypa
     from stock_analysis.http import server
     playwright=pytest.importorskip('playwright.sync_api')
     item=checklist_service(database);item.repository.set_model('test-model')
-    monkeypatch.setattr(server,'DATABASE_PATH',database.path)
-    monkeypatch.setattr(server,'ai_service',lambda:item)
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',database.path)
+    monkeypatch.setattr(app,'ai_service',lambda:item)
     original_result=result
     def table_result(data):
         out=original_result(data)
@@ -159,14 +161,14 @@ def test_checklist_page_explicit_generation_history_and_mobile(database,monkeypa
         ]
         return out
     monkeypatch.setattr(__import__(__name__), 'result', table_result)
-    original=server.render_page
+    original=rendering.render_page
     def page_html(code,refresh):
         html=original(code,refresh)
         def replace(match):
             payload=json.loads(match[2]);payload['loading']={key:False for key in payload['loading']};payload['price_needs_update']=False
             return match[1]+json.dumps(payload,ensure_ascii=False)+match[3]
         return re.sub(r'(<script id="payload" type="application/json">)(.*?)(</script>)',replace,html)
-    monkeypatch.setattr(server,'render_page',page_html)
+    monkeypatch.setattr(rendering,'render_page',page_html)
     http=ThreadingHTTPServer(('127.0.0.1',0),server.Handler);thread=Thread(target=http.serve_forever,daemon=True);thread.start()
     base=f'http://127.0.0.1:{http.server_port}'
     try:

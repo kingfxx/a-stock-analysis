@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 from stock_analysis.domains.research.assessment.analysis_snapshot import digest, encoded, SnapshotError
 from stock_analysis.infrastructure.storage import utc_now
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.domains.research.assessment.analysis_validation import ReportValidationError
 
 OUTPUT_VERSION = 'business_judgment_v1'

@@ -5,7 +5,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.infrastructure.storage import utc_now
 
 _LOCKS, _LOCKS_GUARD = {}, Lock()

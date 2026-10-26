@@ -1,3 +1,4 @@
+from stock_analysis import application as app
 import hashlib
 import json
 from pathlib import Path
@@ -286,21 +287,21 @@ def test_cleanup_http_requires_origin_session_preview_and_confirmation(cleanup,m
     from urllib.error import HTTPError
     from stock_analysis.http import server
 
-    monkeypatch.setattr(server,'DATABASE_PATH',cleanup.db.path)
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',cleanup.db.path)
     httpd=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     httpd.request_gate=RequestGate();httpd.stock_cleanup=cleanup
     thread=Thread(target=httpd.serve_forever,daemon=True);thread.start()
     base=f'http://127.0.0.1:{httpd.server_port}'
-    def post(action,body,origin=base,token=server.LOCAL_SESSION_TOKEN):
+    def post(action,body,origin=base,token=app.LOCAL_SESSION_TOKEN):
         with urlopen(Request(base+('/api/maintenance/compact' if action=='compact' else '/api/maintenance/stock-cleanup/'+action),data=json.dumps(body).encode(),
                 headers={'Origin':origin,'X-Local-Session':token,'Content-Type':'application/json'}),timeout=10) as response:
             return json.load(response)
     try:
         with urlopen(base+'/api/maintenance/stock-cleanup',timeout=10) as response:
             assert json.load(response)['defaults']==['cache']
-        for origin,token in [('https://example.org',server.LOCAL_SESSION_TOKEN),(base,'bad')]:
+        for origin,token in [('https://example.org',app.LOCAL_SESSION_TOKEN),(base,'bad')]:
             with pytest.raises(HTTPError):post('preview',{'codes':['600900'],'categories':['cache']},origin,token)
-        for origin,token in [('https://example.org',server.LOCAL_SESSION_TOKEN),(base,'bad')]:
+        for origin,token in [('https://example.org',app.LOCAL_SESSION_TOKEN),(base,'bad')]:
             with pytest.raises(HTTPError):post('compact',{'confirm':'整理'},origin,token)
         with pytest.raises(HTTPError):post('compact',{'confirm':'yes'})
         assert post('compact',{'confirm':'整理'})['after_bytes']>0

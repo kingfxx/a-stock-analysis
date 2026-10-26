@@ -1,3 +1,5 @@
+from stock_analysis import application as app
+from stock_analysis.http import rendering
 """Browser acceptance against an isolated local server and simulated inference."""
 from pathlib import Path
 import json
@@ -16,7 +18,7 @@ from uuid import uuid4
 def test_ai_drawer_history_settings_keyboard_and_width(database, monkeypatch, tmp_path, fresh_cache):
     playwright = pytest.importorskip('playwright.sync_api')
     # Retained legacy renderer is tested explicitly; the production page uses checklist.
-    monkeypatch.setattr(server,'TEMPLATE',server.TEMPLATE.replace('ai-checklist','ai-assessment').replace('initAIChecklist','initAIAssessment'))
+    monkeypatch.setattr(rendering,'TEMPLATE',rendering.TEMPLATE.replace('ai-checklist','ai-assessment').replace('initAIChecklist','initAIAssessment'))
     item=service(database)
     import test_ai_assessment
     original_result=test_ai_assessment.valid_result
@@ -25,10 +27,10 @@ def test_ai_drawer_history_settings_keyboard_and_width(database, monkeypatch, tm
         result['dimensions']['chips']['evidence_ids']=['shareholders.price.latest_reports','financing.price.3m']
         return result
     monkeypatch.setattr(test_ai_assessment,'valid_result',result_with_chips)
-    monkeypatch.setattr(server,'DATABASE_PATH',database.path)
-    monkeypatch.setattr(server,'ai_service',lambda:item)
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',database.path)
+    monkeypatch.setattr(app,'ai_service',lambda:item)
     if fresh_cache:
-        original_render = server.render_page
+        original_render = rendering.render_page
         def cached_page(code, refresh):
             html = original_render(code, refresh)
             def replace_payload(match):
@@ -37,7 +39,7 @@ def test_ai_drawer_history_settings_keyboard_and_width(database, monkeypatch, tm
                 payload['price_needs_update'] = False
                 return match.group(1)+json.dumps(payload,ensure_ascii=False)+match.group(3)
             return re.sub(r'(<script id="payload" type="application/json">)(.*?)(</script>)',replace_payload,html)
-        monkeypatch.setattr(server,'render_page',cached_page)
+        monkeypatch.setattr(rendering,'render_page',cached_page)
     http=ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     thread=Thread(target=http.serve_forever,daemon=True); thread.start()
     base=f'http://127.0.0.1:{http.server_port}'

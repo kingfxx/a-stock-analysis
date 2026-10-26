@@ -1,3 +1,4 @@
+from stock_analysis import application as app
 import json
 from threading import Thread
 from urllib.request import Request, urlopen
@@ -121,7 +122,7 @@ def test_upgrade_from_v5_preserves_groups_members_and_previous_code_order(tmp_pa
 
 
 def test_group_http_routes_persist_and_reject_cross_site_writes(library, monkeypatch):
-    monkeypatch.setattr(server, 'DATABASE_PATH', library.db.path)
+    monkeypatch.setattr(app.settings, 'DATABASE_PATH', library.db.path)
     httpd = server.ThreadingHTTPServer(('127.0.0.1',0), server.Handler)
     thread = Thread(target=httpd.serve_forever, daemon=True); thread.start()
     base = f'http://127.0.0.1:{httpd.server_port}'
@@ -177,8 +178,8 @@ def test_unfollow_keeps_facts_and_files_and_restores_groups_after_reopen(library
     library.db.ensure_instrument('001309')  # A late update must not re-follow the stock.
     assert library.unfollowed() == saved and library.read()['recent'] == []
     assert StockLibrary(Database(library.db.path)).unfollowed() == saved
-    monkeypatch.setattr(server, 'DATABASE_PATH', library.db.path)
-    assert [s['code'] for s in server.cached_stocks()] == ['300750','600938']
+    monkeypatch.setattr(app.settings, 'DATABASE_PATH', library.db.path)
+    assert [s['code'] for s in app.data.cached_stocks()] == ['300750','600938']
     with library.db.connection() as conn:
         assert [tuple(row) for row in conn.execute('SELECT * FROM financial_reports')] == before
         assert [tuple(row) for row in conn.execute('SELECT * FROM instruments')] == instruments
@@ -232,9 +233,9 @@ def test_unfollowed_cannot_be_added_back_by_stale_group_request(library):
 
 
 def test_unfollowed_http_restore_and_update_guard(library, monkeypatch):
-    monkeypatch.setattr(server, 'DATABASE_PATH', library.db.path)
-    monkeypatch.setattr(server, 'price_bundle', lambda *a,**kw: pytest.fail('unfollowed stock requested prices'))
-    monkeypatch.setattr(server, 'load_chart_data', lambda *a,**kw: pytest.fail('unfollowed stock requested sources'))
+    monkeypatch.setattr(app.settings, 'DATABASE_PATH', library.db.path)
+    monkeypatch.setattr(app.data, 'price_bundle', lambda *a,**kw: pytest.fail('unfollowed stock requested prices'))
+    monkeypatch.setattr(app.data, 'load_chart_data', lambda *a,**kw: pytest.fail('unfollowed stock requested sources'))
     httpd = server.ThreadingHTTPServer(('127.0.0.1',0), server.Handler)
     thread = Thread(target=httpd.serve_forever, daemon=True); thread.start()
     base = f'http://127.0.0.1:{httpd.server_port}'

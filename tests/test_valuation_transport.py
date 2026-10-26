@@ -1,3 +1,4 @@
+from stock_analysis.domains.valuation import payloads as valuation_payloads
 import copy
 import json
 from pathlib import Path
@@ -22,7 +23,7 @@ def test_chart_transport_round_trip_preserves_all_metrics_frequencies_and_metada
              pe_date=day, pb_date=day, ps_date=day) for i,day in enumerate(dates)]}
     raw = [{'date':day,'close':20+i} for i,day in enumerate(dates)]
     qfq = [{'date':day,'close':10+i} for i,day in enumerate(dates[:-1])]
-    payload = server._p4_valuation_payload(data, raw=raw, qfq=qfq,
+    payload = valuation_payloads._p4_valuation_payload(data, raw=raw, qfq=qfq,
                                            events=[{'date':'2026-07-15','per_share':1}])
     original = copy.deepcopy(payload)
     compact = compact_valuation(payload)

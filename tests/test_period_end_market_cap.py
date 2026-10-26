@@ -2,7 +2,8 @@
 
 from stock_analysis.domains.financials.core import period_end_snapshots
 from stock_analysis.domains.stocks.price_projection import financial_prices
-from stock_analysis.http.server import _financial_payload, REPORT_DATE_BASIS
+from stock_analysis.domains.financials.payloads import _financial_payload
+from stock_analysis.domains.stocks.data_contracts import REPORT_DATE_BASIS
 
 
 def test_period_end_cap_is_independent_of_disclosure_and_adjusted_prices():

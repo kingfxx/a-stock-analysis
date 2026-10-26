@@ -1,0 +1,61 @@
+{
+  "pure_functions": [
+    "_number",
+    "_first",
+    "_financing_interest_income",
+    "_date",
+    "normalize_report_dates",
+    "parse_financial_reports",
+    "parse_adjusted_profit_reports",
+    "parse_cash_flow_reports",
+    "parse_monthly_prices",
+    "parse_daily_prices",
+    "normalize_code",
+    "symbol_for",
+    "parse_stock_name",
+    "parse_price_history",
+    "price_equal"
+  ],
+  "new_pure_validators": [
+    "parse_financial_report_page",
+    "validate_financial_history",
+    "parse_cash_flow_history"
+  ],
+  "request_functions": [
+    "fetch_stock_name",
+    "fetch_financial_report_page",
+    "fetch_financial_reports",
+    "fetch_cash_flow_reports",
+    "fetch_monthly_prices",
+    "fetch_daily_prices",
+    "fetch_price_history"
+  ],
+  "compatibility_exports": [
+    "_number",
+    "_first",
+    "_financing_interest_income",
+    "_date",
+    "normalize_report_dates",
+    "parse_financial_reports",
+    "parse_adjusted_profit_reports",
+    "parse_cash_flow_reports",
+    "parse_monthly_prices",
+    "parse_daily_prices",
+    "normalize_code",
+    "symbol_for",
+    "parse_stock_name",
+    "parse_price_history",
+    "price_equal",
+    "PROFIT_KEYS",
+    "ADJUSTED_PROFIT_KEYS",
+    "SHARE_KEYS",
+    "EQUITY_KEYS",
+    "TOTAL_EQUITY_KEYS",
+    "CASH_FLOW_KEYS",
+    "CAPEX_KEYS",
+    "DEBT_FIELDS",
+    "parse_financial_report_page",
+    "validate_financial_history",
+    "parse_cash_flow_history"
+  ]
+}

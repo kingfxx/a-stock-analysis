@@ -1,3 +1,5 @@
+from stock_analysis import application as app
+from stock_analysis.domains.stocks import data_service as data_module
 import pytest
 
 from stock_analysis.http import server
@@ -10,13 +12,13 @@ def test_startup_imports_legacy_datasets_without_rewriting_json_or_network(tmp_p
     legacy.parent.mkdir()
     legacy.write_bytes(b'{"code":"000001","reports":[]}')
     original = legacy.read_bytes()
-    monkeypatch.setattr(server, "DATABASE_PATH", database)
-    monkeypatch.setattr(server, "CACHE", legacy.parent)
-    monkeypatch.setattr(server, "CHIP_CACHE", tmp_path / "chips")
-    monkeypatch.setattr(server, "VALUATION_CACHE", tmp_path / "valuation")
+    monkeypatch.setattr(app.settings, "DATABASE_PATH", database)
+    monkeypatch.setattr(app.settings, "CACHE", legacy.parent)
+    monkeypatch.setattr(app.settings, "CHIP_CACHE", tmp_path / "chips")
+    monkeypatch.setattr(app.settings, "VALUATION_CACHE", tmp_path / "valuation")
     def no_network(*args, **kwargs):
         pytest.fail("Database startup must not request sources")
-    monkeypatch.setattr(server.requests.Session, "request", no_network)
+    monkeypatch.setattr(data_module.requests.Session, "request", no_network)
     events = []
     class FakeServer:
         def __init__(self, *args):
@@ -40,7 +42,7 @@ def test_startup_imports_legacy_datasets_without_rewriting_json_or_network(tmp_p
 
 def test_startup_failure_closes_bound_port_and_releases_database_lock(tmp_path, monkeypatch):
     database = tmp_path / "stock_analysis.sqlite3"
-    monkeypatch.setattr(server, "DATABASE_PATH", database)
+    monkeypatch.setattr(app.settings, "DATABASE_PATH", database)
     events = []
     class FakeServer:
         def __init__(self, *args):
@@ -50,7 +52,7 @@ def test_startup_failure_closes_bound_port_and_releases_database_lock(tmp_path, 
         def server_close(self):
             events.append("closed")
     monkeypatch.setattr(server, "ThreadingHTTPServer", FakeServer)
-    monkeypatch.setattr(server.Database, "initialize", lambda self: (_ for _ in ()).throw(StorageError("disk unavailable")))
+    monkeypatch.setattr(data_module.Database, "initialize", lambda self: (_ for _ in ()).throw(StorageError("disk unavailable")))
     with pytest.raises(StorageError, match="disk unavailable"):
         server.serve()
     assert events == ["bound", "closed"]
@@ -60,7 +62,7 @@ def test_startup_failure_closes_bound_port_and_releases_database_lock(tmp_path, 
 
 def test_another_instance_is_rejected_before_binding_http(tmp_path, monkeypatch):
     database = tmp_path / "stock_analysis.sqlite3"
-    monkeypatch.setattr(server, "DATABASE_PATH", database)
+    monkeypatch.setattr(app.settings, "DATABASE_PATH", database)
     monkeypatch.setattr(server, "ThreadingHTTPServer", lambda *args: pytest.fail("Duplicate instance must not bind"))
     with instance_lock(database):
         with pytest.raises(StorageError, match="Another application"):

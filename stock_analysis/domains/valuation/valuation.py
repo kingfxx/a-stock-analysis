@@ -8,7 +8,8 @@ from datetime import date, timedelta
 import requests
 
 from stock_analysis.domains.valuation.calculations import (_finite_number, _positive, _nonnegative, cash_dividend_per_share_365, monthly_dividend_yields, daily_dividend_yield_observations, merge_dividend_yields, merge_adjusted_prices, monthly_valuation, _percentile, _standard_deviation_benchmark, valuation_summary, valuation_observation_rows, aggregate_valuation_rows, valuation_summary_observations)
-from stock_analysis.domains.stocks.sources import fetch_daily_prices, normalize_code, symbol_for
+from stock_analysis.domains.stocks.sources import fetch_daily_prices
+from stock_analysis.domains.stocks.source_parsers import normalize_code, symbol_for
 
 
 BAIDU_URL = "https://gushitong.baidu.com/opendata"

@@ -8,7 +8,7 @@ from stock_analysis.domains.research.assessment.analysis_snapshot import capture
 from stock_analysis.domains.research.assessment.analysis_repository import AnalysisRepository, ACTIVE
 from stock_analysis.domains.research.assessment.analysis_validation import validate_output, prompt, ReportValidationError
 from stock_analysis.domains.research.ai.ai_provider import ProviderError, redact_diagnostic
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 
 
 class AnalysisService:

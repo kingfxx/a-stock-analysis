@@ -1,3 +1,4 @@
+from stock_analysis.domains.valuation import payloads as valuation_payloads
 """Display aggregation must retain real observation dates and stable percentiles."""
 
 import pytest
@@ -107,7 +108,7 @@ def test_price_overlay_distinguishes_whole_week_closure_from_missing_trading_day
         "2026-02-13", "2026-02-24", "2026-02-27")]
     qfq = [{"date": "2026-02-13", "close": 13.87},
            {"date": "2026-02-27", "close": 14.57}]
-    response = server._p4_valuation_payload(data, raw=raw, qfq=qfq)
+    response = valuation_payloads._p4_valuation_payload(data, raw=raw, qfq=qfq)
     views = response["views"]["3"]["pe"]["rows_by_frequency"]
     weekly = {row["date"]: row for row in views["week"]}
     assert weekly["2026-02-15"]["qfq_close"] == 13.87
@@ -117,7 +118,7 @@ def test_price_overlay_distinguishes_whole_week_closure_from_missing_trading_day
     daily = {row["date"]: row for row in views["day"]}
     assert daily["2026-02-24"]["qfq_close"] is None
     assert daily["2026-02-24"]["qfq_no_trades"] is False
-    unknown_trades = server._p4_valuation_payload(data, qfq=qfq)
+    unknown_trades = valuation_payloads._p4_valuation_payload(data, qfq=qfq)
     assert all("qfq_no_trades" not in row for row in
                unknown_trades["views"]["3"]["pe"]["rows_by_frequency"]["week"])
 
@@ -131,7 +132,7 @@ def test_sparse_valuation_dates_use_independent_period_end_prices(metric):
     qfq = [{"date": "2026-09-04", "close": -2},
            {"date": "2026-09-11", "close": 0},
            {"date": "2026-09-30", "close": 3}]
-    response = server._p4_valuation_payload(data, raw=raw, qfq=qfq)
+    response = valuation_payloads._p4_valuation_payload(data, raw=raw, qfq=qfq)
     summary = response["views"]["5"][metric]
     weekly = summary["rows_by_frequency"]["week"]
     assert [(row["qfq_close"], row["qfq_close_date"]) for row in weekly] == [
@@ -150,7 +151,7 @@ def test_period_end_price_missing_on_known_trade_does_not_use_earlier_close():
     data = {"observation_rows": [{"date": "2026-09-30", "pe": 10}]}
     raw = [{"date": "2026-09-29", "close": 10}, {"date": "2026-09-30", "close": 11}]
     qfq = [{"date": "2026-09-29", "close": 9}]
-    response = server._p4_valuation_payload(data, raw=raw, qfq=qfq)
+    response = valuation_payloads._p4_valuation_payload(data, raw=raw, qfq=qfq)
     for frequency in ("day", "week", "month"):
         row = response["views"]["3"]["pe"]["rows_by_frequency"][frequency][0]
         assert row["qfq_close"] is None
@@ -162,7 +163,7 @@ def test_yield_summary_uses_last_yield_observation_when_baidu_has_a_later_month(
     data={'rows':[{'date':'2026-09-30','pe':19.29},{'date':'2026-10-01','pb':3.23}]}
     raw=[{'date':'2026-08-31','close':28.09},{'date':'2026-09-30','close':28.54}]
     events=[{'date':'2026-07-15','per_share':1}]
-    result=server._p4_valuation_payload(data,raw=raw,events=events)
+    result=valuation_payloads._p4_valuation_payload(data,raw=raw,events=events)
     for years in ('3','5','10'):
         summary=result['views'][years]['dividend_yield']
         assert summary['current']==pytest.approx(1/28.54*100)
@@ -183,7 +184,7 @@ def test_negative_pe_ranges_keep_raw_values_and_do_not_change_chart_or_percentil
     rows = valuation_observation_rows(series, [])
     assert rows[2]["pe"] is None and rows[2]["pe_raw"] == -144.76
     baseline = [{key: value for key, value in row.items() if key != "pe_raw"} for row in rows]
-    payload = server._p4_valuation_payload({"observation_rows": rows})
+    payload = valuation_payloads._p4_valuation_payload({"observation_rows": rows})
     for years in (3, 5, 10):
         summary = payload["views"][str(years)]["pe"]
         assert summary["negative_pe_ranges"] == [{"start": "2025-08-22", "end": "2026-02-27"}]

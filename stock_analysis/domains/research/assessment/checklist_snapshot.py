@@ -6,7 +6,7 @@ import json
 import math
 from stock_analysis.domains.research.assessment.analysis_snapshot import digest, SnapshotError
 from stock_analysis.infrastructure.storage import utc_now
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.domains.valuation.valuation import valuation_summary_observations
 from stock_analysis.domains.financials.fundamental_service import FundamentalService
 from stock_analysis.domains.financials.core import build_period_rows, view_rows

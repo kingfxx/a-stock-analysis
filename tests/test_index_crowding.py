@@ -1,3 +1,4 @@
+from stock_analysis.http import rendering
 """Crowding reads existing daily amount ratios and uses the actual page scripts."""
 import json
 from pathlib import Path
@@ -58,7 +59,7 @@ def test_browser_crowding_switch_statistics_gaps_and_valuation(db):
         url=urlparse(request.request.url);path=url.path;query=parse_qs(url.query)
         calls.append(path)
         if path=='/indices':
-            body=(root/'web/pages/indices.html').read_text(encoding='utf-8').replace('__RESEARCH_SIDEBAR__',server.research_sidebar('indices'))
+            body=(root/'web/pages/indices.html').read_text(encoding='utf-8').replace('__RESEARCH_SIDEBAR__',rendering.research_sidebar('indices'))
             request.fulfill(body=body,content_type='text/html');return
         if path=='/api/indices/catalog':body=reader.catalog()
         elif path=='/api/indices/status':body=reader.status()

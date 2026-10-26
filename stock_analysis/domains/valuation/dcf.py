@@ -13,7 +13,7 @@ from statistics import median, pstdev
 from stock_analysis.domains.financials.core import build_period_rows, view_rows
 from stock_analysis.domains.financials.fundamental_service import FundamentalService, SOURCE
 from stock_analysis.domains.stocks.price_service import PriceService
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.domains.financials.statements import metric
 from stock_analysis.domains.financials.financial_storage import decompress_json
 

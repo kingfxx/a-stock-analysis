@@ -1,3 +1,5 @@
+from stock_analysis.http.routes import indices as index_routes
+from stock_analysis import application as app
 """Read-only browser and HTTP acceptance on an isolated ephemeral loopback port."""
 import json
 from http.server import ThreadingHTTPServer
@@ -16,11 +18,11 @@ from test_index_collection import db, source
 def index_server(db,monkeypatch):
     batch,sid,row=source(db)
     with db.connection(write=True) as conn:publish(conn,[row])
-    monkeypatch.setattr(server,'DATABASE_PATH',db.path)
+    monkeypatch.setattr(app.settings,'DATABASE_PATH',db.path)
     calls=[]
     def runner(database,operation):
         calls.append(operation)
-    monkeypatch.setattr(server,'run_operation',runner)
+    monkeypatch.setattr(index_routes,'run_operation',runner)
     # Windows ephemeral allocation can choose Chromium-blocked ports such as 6667.
     for port in (8766,8768,*range(18760,18780)):
         try:

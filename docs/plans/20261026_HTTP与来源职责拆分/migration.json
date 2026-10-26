@@ -1,0 +1,314 @@
+{
+  "routes": [
+    [
+      "GET",
+      "parsed.path == '/api/shipping-trend'",
+      "shipping",
+      1365
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/shipping-forecast'",
+      "shipping",
+      1377
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/notes' or parsed.path.startswith('/api/notes/')",
+      "notes",
+      1387
+    ],
+    [
+      "GET",
+      "parsed.path.startswith('/vendor/notes/')",
+      "pages",
+      1389
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/business-segments'",
+      "stocks",
+      1399
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/stock-announcements'",
+      "stocks",
+      1408
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/maintenance/collections/operation'",
+      "maintenance",
+      1433
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/maintenance/collections/evidence'",
+      "maintenance",
+      1440
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/maintenance/collections'",
+      "maintenance",
+      1449
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/indices/congestion'",
+      "indices",
+      1455
+    ],
+    [
+      "GET",
+      "parsed.path in {'/api/indices/catalog', '/api/indices/status', '/api/indices/chart', '/api/indices/price', '/api/indices/crowding', '/api/indices/industry-crowding', '/api/indices/equity-bond-spread'}",
+      "indices",
+      1463
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/indices'",
+      "indices",
+      1489
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/indices/source'",
+      "indices",
+      1499
+    ],
+    [
+      "GET",
+      "parsed.path in {'/indices', '/indices.js', '/indices.css', '/congestion.js'}",
+      "pages",
+      1507
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/research-reports'",
+      "research",
+      1520
+    ],
+    [
+      "GET",
+      "parsed.path.startswith('/research-reports/')",
+      "research",
+      1527
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/maintenance/backups'",
+      "maintenance",
+      1543
+    ],
+    [
+      "GET",
+      "parsed.path.startswith('/api/ai/') or parsed.path == '/api/analysis' or parsed.path.startswith('/api/analysis/') or (parsed.path == '/api/business-judgment') or parsed.path.startswith('/api/business-judgment/')",
+      "research",
+      1550
+    ],
+    [
+      "GET",
+      "parsed.path == '/auth/callback'",
+      "research",
+      1553
+    ],
+    [
+      "GET",
+      "parsed.path == '/plotly.min.js'",
+      "pages",
+      1557
+    ],
+    [
+      "GET",
+      "parsed.path == '/stock-picker.js'",
+      "pages",
+      1560
+    ],
+    [
+      "GET",
+      "parsed.path == '/samples/industry-summary.html'",
+      "pages",
+      1563
+    ],
+    [
+      "GET",
+      "parsed.path in {'/datetime.js', '/research-layout.css', '/ai-assessment.js', '/ai-assessment.css', '/ai-checklist.js', '/ai-checklist.css', '/business-judgment.js', '/financial-statements.js', '/financial-statements.css', '/business-segments.js', '/business-segments.css', '/business-segment-aliases.js', '/business-segment-names.js', '/industry.js', '/industry.css', '/maintenance.js', '/maintenance.css', '/collection-progress.js', '/collection-progress.css', '/investment-notes.js', '/investment-notes.css', '/stock-cleanup.js', '/dcf.js', '/dcf.css', '/dividend-forecast.js', '/dividend-forecast.css', '/shipping-forecast.js', '/shipping-forecast.css'}",
+      "shipping",
+      1566
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/stock-groups'",
+      "stocks",
+      1572
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/maintenance/unfollowed'",
+      "maintenance",
+      1575
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/maintenance/stock-cleanup'",
+      "maintenance",
+      1578
+    ],
+    [
+      "GET",
+      "parsed.path == '/'",
+      "pages",
+      1586
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/maintenance/storage'",
+      "maintenance",
+      1594
+    ],
+    [
+      "GET",
+      "parsed.path in {'/api/industry', '/api/industry/status'}",
+      "industries",
+      1607
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/institution-forecast'",
+      "stocks",
+      1620
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/dividend-forecast'",
+      "stocks",
+      1630
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/dcf'",
+      "stocks",
+      1642
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/dcf/wacc'",
+      "stocks",
+      1652
+    ],
+    [
+      "GET",
+      "parsed.path == '/api/statements'",
+      "stocks",
+      1663
+    ],
+    [
+      "GET",
+      "parsed.path in {'/api/financial', '/api/dividends', '/api/valuation', '/api/shareholders', '/api/financing', '/api/prices'}",
+      "stocks",
+      1675
+    ],
+    [
+      "POST",
+      "path in {'/api/shipping-forecast/save', '/api/shipping-forecast/prepare-report', '/api/shipping-forecast/delete'}",
+      "shipping",
+      1246
+    ],
+    [
+      "POST",
+      "path.startswith('/api/notes/')",
+      "notes",
+      1272
+    ],
+    [
+      "POST",
+      "path in {'/api/maintenance/compact', '/api/maintenance/stock-cleanup/preview', '/api/maintenance/stock-cleanup/execute'}",
+      "maintenance",
+      1274
+    ],
+    [
+      "POST",
+      "path in {'/api/maintenance/restore/upload', '/api/maintenance/restore/preview', '/api/maintenance/restore/confirm', '/api/maintenance/restore/cancel'}",
+      "maintenance",
+      1276
+    ],
+    [
+      "POST",
+      "path.startswith('/api/ai/') or path == '/api/analysis' or path.startswith('/api/analysis/') or (path == '/api/business-judgment') or path.startswith('/api/business-judgment/')",
+      "research",
+      1278
+    ],
+    [
+      "POST",
+      "path.startswith('/api/maintenance/collections/')",
+      "maintenance",
+      1295
+    ],
+    [
+      "POST",
+      "path == '/api/indices/congestion/schedule'",
+      "indices",
+      1312
+    ],
+    [
+      "POST",
+      "path in {'/api/indices/collect', '/api/indices/cancel'}",
+      "indices",
+      1314
+    ],
+    [
+      "POST",
+      "path == '/api/industry/refresh'",
+      "industries",
+      1342
+    ],
+    [
+      "POST",
+      "path == '/api/maintenance/unfollowed'",
+      "maintenance",
+      1346
+    ]
+  ],
+  "data_methods": [
+    "_add_missing_name",
+    "_add_sqlite_missing_name",
+    "_consumer_cache",
+    "_disclosure_prices",
+    "_financial_with_announcement_state",
+    "_keep_old",
+    "_migrate_cached",
+    "_missing_old_values",
+    "_missing_price_snapshots",
+    "_missing_valuation_history",
+    "_needs_dividends",
+    "_needs_financial",
+    "_read_cache",
+    "_save_cache",
+    "cached_stocks",
+    "fetch_daily_prices",
+    "fetch_dividend_yields",
+    "fetch_monthly_prices",
+    "import_p4_legacy",
+    "load_chart_data",
+    "load_chips",
+    "load_dividends",
+    "load_stock",
+    "load_valuation",
+    "p4_loading",
+    "p4_services",
+    "price_bundle",
+    "services",
+    "shared_projection"
+  ],
+  "application_functions": [
+    "_clear_runtime_services",
+    "_initialize_runtime",
+    "_restore_activity",
+    "_runtime_worker_activity",
+    "ai_service",
+    "business_service",
+    "industry_service"
+  ]
+}

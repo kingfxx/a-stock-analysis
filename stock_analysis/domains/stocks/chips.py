@@ -6,7 +6,7 @@ import math
 from bisect import bisect_right
 from datetime import date
 
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 
 
 DATA_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"

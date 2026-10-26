@@ -1,3 +1,6 @@
+from stock_analysis import application as app
+from stock_analysis.maintenance import database_restore
+from stock_analysis.http import rendering
 """Exercise trusted mouse/touch input in Edge against an isolated stock library."""
 import json
 import os
@@ -39,17 +42,17 @@ def test_stock_picker_drag_with_real_browser(tmp_path, monkeypatch, script, expe
         db.complete_sync(run,SyncResult(1,'2025-12-31','2025-12-31','2025-12-31'),lambda conn:db.upsert_financial_reports(
             conn,key,run,[{'period':'2025-12-31','raw_json':{'revenue_ytd':100,'profit_ytd':20}}]))
         cache = tmp_path/'fundamentals'/'000001.json';cache.parent.mkdir();cache.write_text('{"cache":1}',encoding='utf-8')
-    monkeypatch.setattr(server, 'DATABASE_PATH', db.path)
+    monkeypatch.setattr(app.settings, 'DATABASE_PATH', db.path)
     def page(code, refresh):
         data = library.read()
         payload = {'code':code,'views':{},'warnings':[],'valuation':{'views':{}},'loading':{},
                    'price_version':1,'price_needs_update':False,'stock_library':data,'unfollowed':library.is_unfollowed(code),
                    'cached_stocks':[{'code':stock['code'],'name':stock['name']} for stock in data['stocks']]}
-        return server.TEMPLATE.replace('__RESEARCH_SIDEBAR__',server.research_sidebar('stock')).replace('__PAYLOAD__',json.dumps(payload,ensure_ascii=False)).replace('__CODE__',code).replace('__ERROR__','')
-    monkeypatch.setattr(server, 'render_page', page)
+        return rendering.TEMPLATE.replace('__RESEARCH_SIDEBAR__',rendering.research_sidebar('stock')).replace('__PAYLOAD__',json.dumps(payload,ensure_ascii=False)).replace('__CODE__',code).replace('__ERROR__','')
+    monkeypatch.setattr(rendering, 'render_page', page)
     httpd = server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
-    httpd.restore_manager = server.RestoreManager(db)
-    httpd.request_gate = server.RequestGate()
+    httpd.restore_manager = database_restore.RestoreManager(db)
+    httpd.request_gate = database_restore.RequestGate()
     thread = Thread(target=httpd.serve_forever,daemon=True);thread.start()
     profile = tmp_path/'browser'
     browser = None

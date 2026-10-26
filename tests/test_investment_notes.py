@@ -1,3 +1,5 @@
+from stock_analysis import application as app
+from stock_analysis.http import rendering
 import json
 import os
 import shutil
@@ -150,7 +152,7 @@ def test_external_markdown_association_and_resource_boundary(tmp_path):
 
 def test_http_notes_session_auth_conflict_and_no_database_writes(tmp_path, monkeypatch):
     from stock_analysis.http import server
-    monkeypatch.setattr(server, 'DATABASE_PATH', tmp_path / 'unused.sqlite3')
+    monkeypatch.setattr(app.settings, 'DATABASE_PATH', tmp_path / 'unused.sqlite3')
     httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
     thread = Thread(target=httpd.serve_forever, daemon=True); thread.start()
     base = f'http://127.0.0.1:{httpd.server_port}'
@@ -171,7 +173,7 @@ def test_http_notes_session_auth_conflict_and_no_database_writes(tmp_path, monke
         with pytest.raises(HTTPError) as error:
             request('/api/notes/document', command, settings['session_token'], 'PUT')
         assert error.value.code == 409
-        assert not server.DATABASE_PATH.exists()
+        assert not app.settings.DATABASE_PATH.exists()
         assert request('/api/notes')['items'][0]['code'] == '300750'
         for path, body in [('/api/notes/history?code=300750', None), ('/api/notes/recovery', {'code': '300750', 'content': 'draft'})]:
             with pytest.raises(HTTPError) as removed:
@@ -190,7 +192,7 @@ def test_notes_in_real_browser(tmp_path, monkeypatch):
     if not Path(edge).is_file() or not node:
         pytest.skip('Edge and Node are needed')
     db = Database(tmp_path / 'isolated.sqlite3'); db.initialize(); db.ensure_instrument('300750', '测试企业')
-    monkeypatch.setattr(server, 'DATABASE_PATH', db.path)
+    monkeypatch.setattr(app.settings, 'DATABASE_PATH', db.path)
     reports = [{'period': p, 'profit_ytd': v * 1e8, 'revenue_ytd': v * 10e8}
                for p, v in [('2025-03-31', 10), ('2025-06-30', 30), ('2026-03-31', 20), ('2026-06-30', 40)]]
     monkeypatch.setattr(note_snapshots.FundamentalService, 'read', lambda *a: {'reports': reports, 'name': '测试企业'})
@@ -211,9 +213,9 @@ def test_notes_in_real_browser(tmp_path, monkeypatch):
         payload = {'code': code, 'name': '测试企业', 'views': {}, 'warnings': [], 'valuation': {'views': {}},
                    'loading': {}, 'price_version': 0, 'price_needs_update': False, 'cached_stocks': []}
         payload['valuation']['views'] = valuation_views
-        return (server.TEMPLATE.replace('__RESEARCH_SIDEBAR__', server.research_sidebar('stock'))
+        return (rendering.TEMPLATE.replace('__RESEARCH_SIDEBAR__', rendering.research_sidebar('stock'))
                 .replace('__PAYLOAD__', json.dumps(payload, ensure_ascii=False)).replace('__CODE__', code).replace('__ERROR__', ''))
-    monkeypatch.setattr(server, 'render_page', page)
+    monkeypatch.setattr(rendering, 'render_page', page)
     httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
     thread = Thread(target=httpd.serve_forever, daemon=True); thread.start()
     browser = None; profile = tmp_path / 'browser'

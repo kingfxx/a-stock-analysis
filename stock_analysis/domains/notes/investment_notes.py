@@ -15,7 +15,7 @@ import tempfile
 import time
 from threading import RLock
 
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 
 MAX_DOCUMENT = 2 * 1024 * 1024
 

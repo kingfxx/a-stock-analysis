@@ -1,3 +1,4 @@
+from stock_analysis.http.routes import stocks as stock_routes
 from datetime import datetime
 import json
 
@@ -81,10 +82,10 @@ def test_recovery_rejects_non_forecast_html(tmp_path):
 
 
 def test_api_no_store_and_errors(monkeypatch):
-    monkeypatch.setattr(server,'fetch_institution_forecast',lambda db,code:dict(code=code,rows=[]))
+    monkeypatch.setattr(stock_routes,'fetch_institution_forecast',lambda db,code:dict(code=code,rows=[]))
     status,headers,body=request('/api/institution-forecast?code=600887')
     assert status==200 and headers['Cache-Control']=='no-store'
     assert json.loads(body)['code']=='600887'
     def fail(*args):raise ValueError('未识别预测表')
-    monkeypatch.setattr(server,'fetch_institution_forecast',fail)
+    monkeypatch.setattr(stock_routes,'fetch_institution_forecast',fail)
     assert request('/api/institution-forecast?code=bad')[0]==400

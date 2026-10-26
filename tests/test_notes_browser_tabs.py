@@ -1,3 +1,4 @@
+from stock_analysis.http import rendering
 import json
 
 import pytest
@@ -21,9 +22,9 @@ def test_unified_note_tabs_from_both_pages(index_server, monkeypatch, tmp_path):
     def stock_page(code, refresh):
         payload = dict(code=code, name='平安银行', views={}, valuation={'views': {}}, loading={},
                        warnings=[], price_version=0, price_needs_update=False, cached_stocks=[])
-        return (server.TEMPLATE.replace('__RESEARCH_SIDEBAR__', server.research_sidebar('stock'))
+        return (rendering.TEMPLATE.replace('__RESEARCH_SIDEBAR__', rendering.research_sidebar('stock'))
                 .replace('__PAYLOAD__', json.dumps(payload, ensure_ascii=False)).replace('__CODE__', code).replace('__ERROR__', ''))
-    monkeypatch.setattr(server, 'render_page', stock_page)
+    monkeypatch.setattr(rendering, 'render_page', stock_page)
 
     with playwright.sync_playwright() as p:
         browser = p.chromium.launch(channel='msedge', headless=True)

@@ -12,7 +12,7 @@
 
 ## 当前数据源
 
-以下是**当前运行代码实际调用**的数据源；不是候选接口列表。数据源地址和字段映射分别定义在 [sources.py](../stock_analysis/domains/stocks/sources.py) 与 [valuation.py](../stock_analysis/domains/valuation/valuation.py)。
+以下是**当前运行代码实际调用**的数据源；不是候选接口列表。来源请求定义在 [sources.py](../stock_analysis/domains/stocks/sources.py) 与 [valuation.py](../stock_analysis/domains/valuation/valuation.py)，新浪／腾讯字段映射和纯解析在 [source_parsers.py](../stock_analysis/domains/stocks/source_parsers.py)。
 
 | 来源 | 实际获取的数据 | 在页面中的用途 | 实现入口 |
 |---|---|---|---|
@@ -48,7 +48,12 @@ PS(TTM)、ROIC、ROE、自由现金流、分红率、股息率及分位统计并
 |---|---|
 | [app.py](../app.py) | 命令行入口，解析 `--port`、`--open-browser`，启动本地服务。 |
 | [start_dashboard.bat](../start_dashboard.bat) | Windows 本机启动脚本，切换到仓库目录、运行 Python 并打开浏览器。 |
-| [stock_analysis/http/server.py](../stock_analysis/http/server.py) | 本地 HTTP 服务；组织财报、分红、估值、筹码和 `/api/prices`，使各异步接口使用固定价格版本。 |
+| [stock_analysis/http/server.py](../stock_analysis/http/server.py) | 本地 HTTP 协议、鉴权与恢复门禁，以及启动入口；按原顺序分发至 http/routes。 |
+| [stock_analysis/http/routes/](../stock_analysis/http/routes/) | 航运、笔记、维护、研究、指数、行业、个股及页面资源路由；保留 URL、参数、响应和错误契约。 |
+| [stock_analysis/application.py](../stock_analysis/application.py) | 应用服务组装、共享缓存与锁、初始化及恢复清理；路径配置来自 infrastructure/app_settings.py。 |
+| [stock_analysis/domains/stocks/data_service.py](../stock_analysis/domains/stocks/data_service.py) | 显式接收路径配置的个股数据服务；加载及刷新编排、旧缓存兼容、公告列表、共享价格版本和页面初始数据，不依赖 HTTP。 |
+| [stock_analysis/domains/financials/payloads.py](../stock_analysis/domains/financials/payloads.py)、[valuation/payloads.py](../stock_analysis/domains/valuation/payloads.py) | 从已有财务/估值事实组装展示数据；不读取 HTML，不启动请求。 |
+| [stock_analysis/http/rendering.py](../stock_analysis/http/rendering.py) | 模板加载、公共侧栏、页面插值及 JSON 安全嵌入；页面初始业务数据由 data_service 提供。 |
 | [stock_analysis/infrastructure/storage.py](../stock_analysis/infrastructure/storage.py) | SQLite 连接、版本迁移执行、同步事务、实例锁、完整性检查和一致备份。 |
 | [stock_analysis/domains/stocks/update_service.py](../stock_analysis/domains/stocks/update_service.py) | 融资及股东来源事实、旧筹码 JSON 导入、增量更新和失败保留。 |
 | [stock_analysis/domains/stocks/price_service.py](../stock_analysis/domains/stocks/price_service.py) | 共享日价抓取、重叠/锚点核对、前复权版本发布、租约与清理。 |
@@ -58,13 +63,13 @@ PS(TTM)、ROIC、ROE、自由现金流、分红率、股息率及分位统计并
 | [stock_analysis/domains/stocks/price_projection.py](../stock_analysis/domains/stocks/price_projection.py) | 财务、估值和筹码图表的共享价格日期匹配。 |
 | [stock_analysis/domains/stocks/chips.py](../stock_analysis/domains/stocks/chips.py) | 筹码数据适配、完整分页检查、股东人数价格快照匹配、融资一年窗口和历史覆盖保护。 |
 | [stock_analysis/infrastructure/network.py](../stock_analysis/infrastructure/network.py) | 统一数据源 Session，默认直连，可通过 `DASHBOARD_USE_SYSTEM_PROXY=1` 启用系统／环境代理。 |
-| [stock_analysis/domains/stocks/sources.py](../stock_analysis/domains/stocks/sources.py) | 新浪／腾讯适配层：请求数据、解析数值、统一字段名称和利息费用符号、校正历史披露日期、分段获取行情。 |
+| [stock_analysis/domains/stocks/sources.py](../stock_analysis/domains/stocks/sources.py) | 新浪／腾讯请求适配、分段获取及跨响应复权校验；继续导出原解析名称供已有调用者兼容。 |
+| [stock_analysis/domains/stocks/source_parsers.py](../stock_analysis/domains/stocks/source_parsers.py) | 纯解析、数值/字段映射、历史披露日期校正及响应完整性校验；可离线执行，不依赖 requests、SQLite 或 HTTP。 |
 | [stock_analysis/domains/financials/core.py](../stock_analysis/domains/financials/core.py) | 财务纯计算：累计值拆季、连续四季度 TTM、年度视图、披露日快照、同比、利润率、ROE、债务／净现金、分红归属及年度分红率；调用 ROIC 纯函数。 |
 | [stock_analysis/domains/financials/roic.py](../stock_analysis/domains/financials/roic.py) | ROIC 纯计算与输入检查，保留 `excess_cash`、`non_operating_adjustments` 两个扩展口；不独立取数、不单独启动任务。 |
 | [stock_analysis/domains/valuation/valuation.py](../stock_analysis/domains/valuation/valuation.py) | 百度／东方财富来源适配，并保留估值计算的原导出；纯计算实现已移至 calculations.py。 |
 | [web/pages/index.html](../web/pages/index.html) | 页面模板及前端 JS：股票搜索、A/B/C 选择、Plotly 图表、悬停详情、多轴零点对齐、后台加载状态及标签页选项保存。 |
 | [runtime.py](../stock_analysis/runtime.py) | 本机监听器、单一采集调度器、退出与恢复重载生命周期；由 HTTP 入口传入业务组装回调。 |
-| [rendering.py](../stock_analysis/http/rendering.py) | 公共研究侧栏的纯模板渲染。 |
 | [calculations.py](../stock_analysis/domains/valuation/calculations.py) | 估值、股息率、聚合和分位纯计算，不请求来源或连接数据库。 |
 | [sync_support.py](../stock_analysis/domains/stocks/sync_support.py) | 个股数据共享同步状态、审计周期、锁与日备份辅助。 |
 | [tests/](../tests/) | Python 回归测试，覆盖解析、财务周期、ROIC、分红率、缓存保护、后台加载和估值。 |
@@ -73,7 +78,7 @@ PS(TTM)、ROIC、ROE、自由现金流、分红率、股息率及分位统计并
 | [experiments/source_probe/](../experiments/source_probe/) | 独立数据源实验，不是生产页面的调用路径。 |
 | [requirements.txt](../requirements.txt)、[.gitignore](../.gitignore)、[LICENSE](../LICENSE) | 运行依赖版本、本地数据忽略规则、项目许可证。 |
 
-页面的数据流为：`来源适配 → SQLite 各模块事实与共享价格 → 计算与日期匹配 → 页面 JSON → Plotly 图表`。页面先读已保存事实，再在后台协调价格版本和过期模块的独立更新。财报字段映射在 `sources.py`，计算公式在 `core.py`／`roic.py`／`domains/valuation/calculations.py`，图表交互在 `web/pages/index.html`。
+页面的数据流为：`来源适配 → SQLite 各模块事实与共享价格 → 计算与日期匹配 → 页面 JSON → Plotly 图表`。页面先读已保存事实，再在后台协调价格版本和过期模块的独立更新。财报字段映射在 `source_parsers.py`，计算公式在 `core.py`／`roic.py`／`domains/valuation/calculations.py`，图表交互在 `web/pages/index.html`。
 
 ## 数据存储方式
 

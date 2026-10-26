@@ -1,8 +1,8 @@
+from stock_analysis import application as app
 """DCF endpoint uses stored data without refresh or provider calls."""
 
 import io
 import json
-from types import SimpleNamespace
 
 from stock_analysis.http import server
 from stock_analysis.domains.financials.fundamental_service import FundamentalService
@@ -12,16 +12,17 @@ from stock_analysis.infrastructure.storage import Database
 
 def request(path):
     statuses, headers = [], {}
-    handler = SimpleNamespace(path=path, wfile=io.BytesIO(),
-                              send_response=statuses.append,
-                              send_header=lambda key, value: headers.update({key: value}),
-                              end_headers=lambda: None)
+    handler = server.Handler.__new__(server.Handler)
+    handler.__dict__.update(path=path, wfile=io.BytesIO(),
+                            send_response=statuses.append,
+                            send_header=lambda key, value: headers.update({key: value}),
+                            end_headers=lambda: None)
     server.Handler._do_GET(handler)
     return statuses[0], headers, handler.wfile.getvalue()
 
 
 def test_dcf_route_reads_isolated_store_without_updates(tmp_path, monkeypatch):
-    db = Database(server.DATABASE_PATH)
+    db = Database(app.settings.DATABASE_PATH)
     db.initialize()
     db.ensure_instrument('600887', '伊利股份')
     def forbidden(*args, **kwargs):
@@ -55,7 +56,7 @@ def test_dcf_assets_served():
 def test_wacc_route_reads_local_yield_without_network(monkeypatch):
     import requests
     from test_bond_yields import collect_year, response, payload, raw_row
-    db=Database(server.DATABASE_PATH);db.initialize()
+    db=Database(app.settings.DATABASE_PATH);db.initialize()
     db.ensure_instrument('600887','伊利股份')
     collect_year(db,[response(payload([raw_row('2026-10-05',EMM00166466='1.678')]))])
     def forbidden(*args,**kwargs):raise AssertionError('WACC must use local data only')

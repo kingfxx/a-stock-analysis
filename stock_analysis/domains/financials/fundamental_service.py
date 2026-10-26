@@ -8,9 +8,8 @@ from datetime import date
 from pathlib import Path
 
 from stock_analysis.infrastructure.network import create_data_session
-from stock_analysis.domains.stocks.sources import (PROFIT_KEYS, fetch_financial_report_page, normalize_code,
-                      normalize_report_dates, parse_cash_flow_reports,
-                      parse_financial_reports, parse_adjusted_profit_reports)
+from stock_analysis.domains.stocks.sources import fetch_financial_report_page
+from stock_analysis.domains.stocks.source_parsers import PROFIT_KEYS, normalize_code, normalize_report_dates, parse_cash_flow_reports, parse_financial_reports, parse_adjusted_profit_reports
 from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, utc_now
 from stock_analysis.domains.stocks.stock_collection import begin_stock_batch, routed_stock_requests
 from stock_analysis.domains.stocks.disclosure_dates import apply_disclosure_dates

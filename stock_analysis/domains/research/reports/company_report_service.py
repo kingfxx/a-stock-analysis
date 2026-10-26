@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import requests
 from stock_analysis.infrastructure.storage import utc_now
 from stock_analysis.domains.research.reports.report_business_metrics import business_metrics
-from stock_analysis.domains.stocks.sources import normalize_code
+from stock_analysis.domains.stocks.source_parsers import normalize_code
 
 PARSER_VERSION = "pdfplumber_pages_v1"
 EXTRACTION_VERSION = "checklist_topics_v11"

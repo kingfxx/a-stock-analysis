@@ -1,3 +1,6 @@
+from stock_analysis import application as app
+from stock_analysis.domains.stocks import data_service as data_module
+from stock_analysis.domains.stocks import data_contracts as contracts
 import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -409,14 +412,14 @@ def test_price_bundle_projects_market_cap_without_qfq(db, monkeypatch):
     data={'code':'688825','reports':[
         {'period':'2026-03-31','publish_date':'2026-07-09','shares':100,'revenue_ytd':10,'profit_ytd':1},
         {'period':'2026-06-30','publish_date':'2026-08-29','shares':100,'revenue_ytd':30,'profit_ytd':3}],
-        'report_date_basis':server.REPORT_DATE_BASIS}
+        'report_date_basis':contracts.REPORT_DATE_BASIS}
     raw=[{'date':'2026-08-28','close':58.6}]
-    monkeypatch.setattr(server,'services',lambda:(
+    monkeypatch.setattr(app.data,'services',lambda:(
         SimpleNamespace(cached=lambda *args:{}),SimpleNamespace(version_info=lambda *args:{})))
-    monkeypatch.setattr(server,'shared_projection',lambda *args,**kwargs:(None,raw,[]))
-    monkeypatch.setattr(server,'p4_services',lambda:(SimpleNamespace(read=lambda *args:data,db=db),
+    monkeypatch.setattr(app.data,'shared_projection',lambda *args,**kwargs:(None,raw,[]))
+    monkeypatch.setattr(app.data,'p4_services',lambda:(SimpleNamespace(read=lambda *args:data,db=db),
         SimpleNamespace(read=lambda *args:[]),SimpleNamespace(read=lambda *args:{})))
-    bundle=server.price_bundle('688825',version=0)
+    bundle=app.data.price_bundle('688825',version=0)
     rows=bundle['financial']['views']['quarter']
     assert rows[-1]['market_cap']==5860
     assert rows[-1]['qfq_price'] is None
@@ -698,14 +701,14 @@ def test_raw_price_overlap_gap_retries_full_once(db):
 def test_p4_page_ignores_old_dividend_and_industry_audit_dates(db, monkeypatch):
     from types import SimpleNamespace
     from stock_analysis.infrastructure.storage import utc_now
-    monkeypatch.setattr(server, "services", lambda: (SimpleNamespace(db=db), None))
+    monkeypatch.setattr(app.data, "services", lambda: (SimpleNamespace(db=db), None))
     db.ensure_instrument('600887', '伊利股份')
     def state(db, key):
         return {"checked_at": utc_now(), "next_full_audit_at":
             "2000-01-01T00:00:00+00:00" if key.dataset in {"industry", "dividends"}
             else "2099-01-01T00:00:00+00:00"}
-    monkeypatch.setattr(server, "sync_state", state)
-    assert server.p4_loading("600887") == {"financial": False, "dividends": False, "valuation": False}
+    monkeypatch.setattr(data_module, "sync_state", state)
+    assert app.data.p4_loading("600887") == {"financial": False, "dividends": False, "valuation": False}
 
 
 @pytest.mark.parametrize("span, expected_counts", [(1, [1]), (20, [26]), (650, [640, 40])])

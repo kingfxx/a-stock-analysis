@@ -1,3 +1,5 @@
+from stock_analysis.domains.stocks import data_service as data_module
+from stock_analysis import application as app
 """Isolated MAINOP sync tests; no real source requests or daily database writes."""
 import json
 from datetime import date, datetime, timedelta, timezone
@@ -223,9 +225,9 @@ def test_financial_integration_is_independent(tmp_path, monkeypatch, mode):
     db = Database(tmp_path / 'stock.sqlite3')
     root = tmp_path / 'fundamentals'
     _seed_legacy(db, root)
-    monkeypatch.setattr(server, 'DATABASE_PATH', db.path)
-    monkeypatch.setattr(server, 'CACHE', root)
-    monkeypatch.setattr(server, 'VALUATION_CACHE', tmp_path / 'valuation')
+    monkeypatch.setattr(app.settings, 'DATABASE_PATH', db.path)
+    monkeypatch.setattr(app.settings, 'CACHE', root)
+    monkeypatch.setattr(app.settings, 'VALUATION_CACHE', tmp_path / 'valuation')
     def financial(self, code, **kwargs):
         if mode == 'financial_failure': raise ValueError('financial offline')
         return self.read(code)
@@ -238,7 +240,7 @@ def test_financial_integration_is_independent(tmp_path, monkeypatch, mode):
         return {'sync': {'status': 'success'}, 'warnings': []}
     monkeypatch.setattr(BusinessSegmentService, 'update', segment)
     for refresh, full in ((False, False), (True, False), (True, True)):
-        result = server.load_chart_data('601919', 'financial', refresh, full=full)
+        result = app.data.load_chart_data('601919', 'financial', refresh, full=full)
         assert result['views']['quarter'][0]['revenue'] == 100000000
         assert result['business_segment_sync']['status'] == ('failed' if mode == 'segment_failure' else 'success')
     assert calls == [{'refresh': False, 'full': False}, {'refresh': True, 'full': False}, {'refresh': True, 'full': True}]
@@ -249,10 +251,12 @@ def test_read_api_never_updates(tmp_path, monkeypatch):
     from stock_analysis.http import server
     db, svc, session = setup(tmp_path, monkeypatch)
     svc.update('605499')
-    monkeypatch.setattr(server, 'services', lambda: (SimpleNamespace(db=db),))
+    monkeypatch.setattr(app.data, 'services', lambda: (SimpleNamespace(db=db),))
     monkeypatch.setattr(BusinessSegmentService, 'update', lambda *a, **k: pytest.fail('read triggered update'))
     output = {}
-    handler = SimpleNamespace(path='/api/business-segments?code=605499', _ai_reply=lambda body: output.update(body))
+    handler = server.Handler.__new__(server.Handler)
+    handler.path = '/api/business-segments?code=605499'
+    handler._ai_reply = lambda body: output.update(body)
     server.Handler._do_GET(handler)
     assert len(output['periods']) == 1
     assert len(session.calls) == 1
@@ -296,13 +300,13 @@ def test_loading_considers_mainop_failure_quiet_period(tmp_path, monkeypatch):
     from stock_analysis.http import server
     db, svc, session = setup(tmp_path, monkeypatch)
     db.ensure_instrument('605499', '东鹏饮料')
-    monkeypatch.setattr(server, 'services', lambda: (SimpleNamespace(db=db),))
+    monkeypatch.setattr(app.data, 'services', lambda: (SimpleNamespace(db=db),))
     now = datetime.now(timezone.utc)
     def state(database, key):
         if key.dataset == 'business_segments': return {}
         return {'checked_at': now.isoformat(), 'next_full_audit_at': (now+timedelta(days=180)).isoformat()}
-    monkeypatch.setattr(server, 'sync_state', state)
-    monkeypatch.setattr(server, 'recent_sync_failure', lambda db, key: None)
-    assert server.p4_loading('605499')['financial'] is True
-    monkeypatch.setattr(server, 'recent_sync_failure', lambda db, key: {'error': 'failed'})
-    assert server.p4_loading('605499')['financial'] is False
+    monkeypatch.setattr(data_module, 'sync_state', state)
+    monkeypatch.setattr(data_module, 'recent_sync_failure', lambda db, key: None)
+    assert app.data.p4_loading('605499')['financial'] is True
+    monkeypatch.setattr(data_module, 'recent_sync_failure', lambda db, key: {'error': 'failed'})
+    assert app.data.p4_loading('605499')['financial'] is False
