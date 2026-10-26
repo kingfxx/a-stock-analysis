@@ -39,3 +39,18 @@
 [data-task-rate-form]{border-top:1px solid var(--border,#36505b);padding-top:12px;margin-top:16px}
 [data-task-rate-form] .collection-fields{align-items:end}
 [data-task-rate-form] input{width:140px}
+[data-task="stocks"] fieldset{min-width:0;max-width:100%;display:flex;flex-wrap:wrap;gap:10px 18px;border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin:0;box-sizing:border-box;align-self:flex-end}
+[data-task="stocks"] fieldset legend{font-size:12px;color:var(--muted);max-width:100%;white-space:normal}
+[data-task="stocks"] fieldset label{display:flex;align-items:center;gap:6px;font-size:12px}
+[data-task="stocks"] fieldset input[type="checkbox"]{width:16px;height:16px;flex-shrink:0;margin:0}
+[data-task="stocks"] .collection-fields{row-gap:14px}
+[data-task="stocks"] .collection-fields>label:has(select),[data-task="stocks"] .collection-fields>label:has(input[name="codes"]){min-width:180px;max-width:240px}
+[data-task="stocks"] .collection-fields input:not([type="checkbox"]),[data-task="stocks"] .collection-fields select{font-size:13px;line-height:1.4;box-sizing:border-box}
+[data-task="stocks"] .collection-fields select{width:100%;min-height:36px}
+[data-task="stocks"] [data-stock-rule-select]{text-overflow:ellipsis}
+[data-task="stocks"] [data-task-run] fieldset{flex:1 1 540px}
+[data-task="stocks"] .stock-run-actions{display:flex;gap:12px;flex-basis:100%;align-items:center}
+[data-task="stocks"] [data-stock-weekday][hidden],[data-task="stocks"] [data-stock-monthday][hidden]{display:none!important}
+.stock-schedule-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid var(--line);font-size:13px;color:var(--muted);line-height:1.8}
+.stock-schedule-row small{display:block}.stock-rule-actions{display:flex;gap:8px;flex-shrink:0}.stock-rule-actions button{font:inherit;padding:6px 12px}
+@media(max-width:600px){.stock-schedule-row{align-items:flex-start;flex-direction:column}[data-task="stocks"] .collection-fields>label{max-width:100%}[data-task="stocks"] fieldset{flex-basis:100%}}

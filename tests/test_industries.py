@@ -499,15 +499,18 @@ def test_industry_api_requires_explicit_task_stock_routes_stay_separate(service,
     monkeypatch.setattr(app,'industry_service',lambda:service)
     monkeypatch.setattr(service,'start_refresh',lambda *args,**kwargs:calls.append(args) or {'running':True})
     stock_calls=[]
-    monkeypatch.setattr(app.data,'load_chart_data',lambda code,section,refresh,**options:
-                        stock_calls.append((code,section,refresh,options['full'])) or {})
-    monkeypatch.setattr(app.data,'price_bundle',lambda code,**options:stock_calls.append((code,'prices',options['refresh'],options['full'])) or {'valuation':{}})
+    from stock_analysis.http.routes import stocks as stock_routes
+    monkeypatch.setattr(stock_routes,'read_cached_chart',lambda data,code,section,version:
+                        stock_calls.append((code,section,version)) or {'valuation':{}})
     http=ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
     thread=Thread(target=http.serve_forever,daemon=True);thread.start()
     try:
         root=f'http://127.0.0.1:{http.server_port}'
         for section in ('financial','valuation','dividends','shareholders','financing','prices'):
-            with urlopen(root+f'/api/{section}?code=300750&refresh=1&full=1') as response:assert response.status==200
+            with urlopen(root+f'/api/{section}?code=300750') as response:assert response.status==200
+            with pytest.raises(HTTPError) as err:
+                urlopen(root+f'/api/{section}?code=300750&refresh=1&full=1')
+            assert err.value.code==503
         assert len(stock_calls)==6 and not calls
         for command in ({'action':'refresh_pilot'},{'action':'cap_quarter','target':'2026Q3','code':'300750'}):
             with pytest.raises(HTTPError) as err:

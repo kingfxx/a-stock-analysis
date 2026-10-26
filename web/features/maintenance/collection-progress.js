@@ -1,6 +1,6 @@
 /* Shared collector progress: counts remain distinct from rows and coverage. */
 (()=>{'use strict';
-const labels={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所',mot:'交通运输部',user_excel:'本地研究资料',cninfo:'巨潮资讯',local:'本地'};
+const labels={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所',mot:'交通运输部',user_excel:'本地研究资料',cninfo:'巨潮资讯',local:'本地'};
 function renderDataCounts(summary,list,result){
 for(const counts of result.data_counts||[]){
  const item=document.createElement('li');
@@ -31,7 +31,8 @@ if(!work||!Number.isInteger(work.total)){
 const processed=(work.success||0)+(work.skipped||0)+(work.failed||0)+(work.cancelled||0),total=work.total;
 if(total===0)summary.textContent=work.phase==='planning'?'正在统计本轮采集任务…':'本轮没有需要采集的任务（0/0）。';
 else summary.textContent=`已处理 ${processed}/${total} 项；已采集成功 ${work.success||0} 项，已跳过 ${work.skipped||0} 项，失败 ${work.failed||0} 项，已停止 ${work.cancelled||0} 项，进行中 ${work.running||0} 项，待执行 ${work.pending||0} 项。`;
-summary.textContent+=' 计数单位为独立采集任务，不代表数据行数或覆盖完整性。';
+summary.textContent+=` 计数单位为${work.unit||'独立采集任务'}，不代表数据行数或覆盖完整性。`;
+if(Number.isInteger(result.network_requests))summary.textContent+=` HTTP请求 ${result.network_requests} 次（含已记录重试）。`;
 for(const [provider,counts] of Object.entries(work.providers||{})){const item=document.createElement('li'),done=(counts.success||0)+(counts.skipped||0)+(counts.failed||0)+(counts.cancelled||0);let text=`${labels[provider]||provider}：已处理 ${done}/${counts.total} 项（成功 ${counts.success||0}，跳过 ${counts.skipped||0}，失败 ${counts.failed||0}，已停止 ${counts.cancelled||0}，进行中 ${counts.running||0}，待执行 ${counts.pending||0}）`;
 if(counts.current)text+=`；当前：${counts.current}`;item.textContent=text;list.append(item);}
 const current=work.current;if(operation.status==='running'&&current&&current.message&&!Object.values(work.providers||{}).some(item=>item.current)){

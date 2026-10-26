@@ -14,12 +14,28 @@ from stock_analysis.domains.valuation.dcf import read_dcf, build_auto_wacc
 from stock_analysis.domains.valuation.dividend_forecast import read_dividend_forecast
 from stock_analysis.domains.valuation.institution_forecast import fetch_institution_forecast
 from stock_analysis.domains.stocks.stock_library import StockLibrary
+from stock_analysis.domains.stocks.cached_charts import read as read_cached_chart
 from stock_analysis.domains.valuation.valuation_transport import compact_valuation
 from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis import application as app
 
 
 class StocksRoutes:
+
+    def _get_stock_collection(self, parsed):
+        if parsed.path != '/api/stock-collection':
+            return False
+        try:
+            code = normalize_code(parse_qs(parsed.query).get('code', ['601919'])[0])
+            self._ai_reply(app.stock_collections().page_status(code))
+        except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
+            self._ai_reply({'error': str(exc)}, 400)
+        return True
+
+    def _command_stock_collection(self, command):
+        if not isinstance(command, dict) or set(command) - {'initial', 'params'} or type(command.get('initial', False)) is not bool:
+            raise ValueError('个股采集请求无效')
+        return app.stock_collections().start(command.get('params', {}), initial=command.get('initial', False))
 
     def _get_business_segments(self, parsed):
         if parsed.path == '/api/business-segments':
@@ -150,11 +166,9 @@ class StocksRoutes:
                 version = int(query[version_key][0]) if version_key in query else None
                 if version is not None and version < 0:
                     raise ValueError("价格版本无效")
-                if parsed.path == "/api/prices":
-                    data = app.data.price_bundle(code, refresh=query.get("refresh") == ["1"], full=query.get("full") == ["1"], version=version)
-                else:
-                    data = app.data.load_chart_data(code, parsed.path.rsplit("/", 1)[-1], query.get("refresh") == ["1"],
-                                           price_version=version, full=query.get("full") == ["1"])
+                if query.get('refresh') == ['1'] or query.get('full') == ['1']:
+                    raise ValueError('读取接口不再采集，请使用个股采集操作')
+                data = read_cached_chart(app.data, code, parsed.path.rsplit('/', 1)[-1], version)
             except PriceVersionUnavailable as exc:
                 status, data = 409, {"error": str(exc), "price_version_expired": True}
             except (requests.RequestException, ValueError, KeyError, TypeError, OSError, StorageError, sqlite3.DatabaseError) as exc:

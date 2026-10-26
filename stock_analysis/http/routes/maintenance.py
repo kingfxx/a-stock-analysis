@@ -6,7 +6,6 @@ import sqlite3
 from threading import Thread
 from urllib.parse import parse_qs, unquote
 from stock_analysis.infrastructure.storage import Database, StorageError
-from stock_analysis.collection.collection_management import CollectionManagement
 from stock_analysis.maintenance.database_restore import MAX_UPLOAD
 from stock_analysis.domains.stocks.stock_library import StockLibrary
 from stock_analysis.maintenance.stock_cleanup import StockCleanupService
@@ -76,7 +75,7 @@ class MaintenanceRoutes:
         if parsed.path=='/api/maintenance/collections/operation':
             try:
                 query=parse_qs(parsed.query)
-                self._ai_reply(CollectionManagement(Database(app.settings.DATABASE_PATH),app.industry_service()).detail(query.get('task_key',[''])[0],query.get('operation_ref',[''])[0]))
+                self._ai_reply(app.collection_management().detail(query.get('task_key',[''])[0],query.get('operation_ref',[''])[0]))
             except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
                 self._ai_reply({'error':str(exc)},400)
             return True
@@ -97,7 +96,7 @@ class MaintenanceRoutes:
     def _get_maintenance_collections(self, parsed):
         if parsed.path=='/api/maintenance/collections':
             try:
-                self._ai_reply(CollectionManagement(Database(app.settings.DATABASE_PATH),app.industry_service()).read())
+                self._ai_reply(app.collection_management().read())
             except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
                 self._ai_reply({'error':str(exc)},400)
             return True
@@ -164,7 +163,7 @@ class MaintenanceRoutes:
     def _post_maintenance_collections(self, path, command):
         if not isinstance(command, dict) or set(command) - {'task_key', 'params', 'schedule', 'provider', 'settings'}:
             raise ValueError('采集管理请求无效')
-        management = CollectionManagement(Database(app.settings.DATABASE_PATH), app.industry_service())
+        management = app.collection_management()
         key = command.get('task_key')
         if path.endswith('/run'):
             if set(command) - {'task_key', 'params'}:

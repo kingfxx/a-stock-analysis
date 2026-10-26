@@ -42,6 +42,8 @@ def compact_database(db, validate):
         conn.close()
 
 DESCRIPTIONS={
+ 'stock_collection_operations':('运行与配置','个股整次刷新范围、触发方式、运行/停止状态；不存业务数据或响应'),
+ 'stock_collection_items':('运行与配置','个股运行固定成员及数据项工作状态；来源由公共批次父引用追溯'),
  'research_shipping_rate_points':('行业研究','CCFI/SCFI周月综合及航线事实、统计区间、来源质量与真实修订'),
  'research_shipping_report_metrics':('行业研究','海控正式财报累计收入和箱量、范围、单位及解析页引用'),
  'research_shipping_forecast_versions':('行业研究','海控目标季度模型和三情景不可改写快照，含输入版本及训练截止'),

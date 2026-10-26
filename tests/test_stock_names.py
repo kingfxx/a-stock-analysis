@@ -39,7 +39,8 @@ def test_missing_name_is_backfilled_asynchronously_and_searchable_without_report
     monkeypatch.setattr(data_module.requests.Session,'request',lambda *args,**kwargs: pytest.fail('page read requested network'))
     page = rendering.render_page('600900',False)
     payload = json.loads(re.search(r'<script id="payload" type="application/json">(.*?)</script>',page,re.S).group(1))
-    assert payload['loading']['financial'] is True
+    assert payload['loading']['financial'] is False
+    assert payload['collection']['needs_initial'] is False
     before = service.read('600900')
     calls = []
     monkeypatch.setattr(data_module,'fetch_stock_name',lambda code,session: calls.append(code) or '长江电力')

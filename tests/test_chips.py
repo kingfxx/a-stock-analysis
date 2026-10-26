@@ -216,5 +216,5 @@ def test_cached_chip_data_embeds_without_network_and_keeps_financial_loading_ind
     data = json.loads(re.search(r'<script id="payload" type="application/json">(.*?)</script>', page_html, re.S).group(1))
     assert data["financing"]["stored_count"] == 1
     assert data["loading"]["financing"] is False
-    assert data["loading"]["financial"] is True
-    assert data["loading"]["shareholders"] is True
+    assert data["loading"]["financial"] is False
+    assert data["loading"]["shareholders"] is False

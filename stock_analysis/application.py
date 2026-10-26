@@ -32,6 +32,15 @@ _MAINTENANCE_SERVICES = {}
 
 LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
 
+def stock_collections():
+    from stock_analysis.domains.stocks.collection_operations import StockCollections
+    return StockCollections(Database(settings.DATABASE_PATH), data)
+
+
+def collection_management(db=None):
+    from stock_analysis.collection.collection_management import CollectionManagement
+    return CollectionManagement(db or Database(settings.DATABASE_PATH), industry_service(), stock_collections())
+
 def industry_service():
     with _SERVICE_LOCK:
         key = str(Path(settings.DATABASE_PATH).resolve())
@@ -91,7 +100,8 @@ def _runtime_worker_activity():
 
 def _restore_activity():
     with Database(settings.DATABASE_PATH).connection() as conn:
-        index_running=bool(conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone())
+        index_running=bool(conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone()
+                           or conn.execute("SELECT 1 FROM stock_collection_operations WHERE status='running'").fetchone())
     return index_running or _runtime_worker_activity()
 
 def _clear_runtime_services():

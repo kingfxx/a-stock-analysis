@@ -71,7 +71,8 @@ def save(conn, key, provider, settings):
     settings = validate(settings, concurrency_cap(key, provider))
     # Same write transaction as configuration save and operation reservations.
     if (conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running' LIMIT 1").fetchone()
-            or conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running' LIMIT 1").fetchone()):
+            or conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running' LIMIT 1").fetchone()
+            or conn.execute("SELECT 1 FROM stock_collection_operations WHERE status='running' LIMIT 1").fetchone()):
         raise ValueError('有采集任务正在运行，请待结束后保存限速设置')
     stamp = utc_now()
     conn.execute('INSERT INTO collection_rate_limits VALUES(?,?,?,?) ON CONFLICT(task_key,provider) DO UPDATE SET '
@@ -81,8 +82,10 @@ def save(conn, key, provider, settings):
 
 
 def task_for_batch(conn, batch_id, provider):
-    batch = conn.execute('SELECT domain,dataset,operation_id FROM collection_batches WHERE id=?', (batch_id,)).fetchone()
-    if not batch or batch['domain'] == 'stock':
+    batch = conn.execute('SELECT domain,dataset,operation_id,scope_json FROM collection_batches WHERE id=?', (batch_id,)).fetchone()
+    if batch and batch['domain'] == 'stock':
+        return 'stocks' if json.loads(batch['scope_json']).get('batch_pacing') else None
+    if not batch:
         return None
     operation = batch['operation_id'] or ''
     if operation.startswith('sw_update_runs:'):

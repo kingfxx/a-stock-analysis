@@ -67,7 +67,8 @@
     .refresh:hover { color:var(--ink); }
     button.refresh { background:transparent; font-weight:400; white-space:nowrap; }
     button.refresh:disabled { opacity:.5; cursor:wait; }
-    .context { display:flex; gap:24px; flex-wrap:wrap; margin:21px 0 25px; color:var(--muted); font-size:13px; }
+    .context { display:flex; gap:12px 16px; flex-wrap:wrap; align-items:center; margin:21px 0 25px; color:var(--muted); font-size:13px; }
+    .context > span { white-space:nowrap; }
     .context strong { color:var(--ink); font-weight:600; }
     .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
     .panel-head { display:flex; align-items:end; justify-content:space-between; flex-wrap:wrap; gap:18px; padding:24px 27px 18px; border-bottom:1px solid var(--line); }
@@ -263,7 +264,7 @@
         <label for="code">股票代码</label>
         <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
         <button type="submit">查看</button>
-        <a id="refresh" class="refresh" href="#" title="刷新当前股票；批量采集统一在后台维护的采集管理">刷新数据</a>
+        <a id="refresh" class="refresh" href="#" title="刷新当前股票；批量采集统一在后台维护的采集管理">手动刷新</a>
         <button id="full-audit" class="refresh" type="button">全量刷新</button>
       </form>
     </div>
@@ -272,6 +273,7 @@
     <span class="context-stock">标的 <strong id="stock-code"></strong></span>
     <span>最新报告期 <strong id="latest-period">—</strong></span>
     <span>本地缓存更新 <strong id="updated">—</strong></span>
+    <span id="stock-collection-status" role="status"></span>
   </div>
   <div id="error" class="error hide">__ERROR__</div>
   <div id="warnings"></div>
@@ -1357,136 +1359,90 @@
     renderWarnings();
     if (renderCharts && typeof Plotly !== 'undefined') render();
   }
-  async function requestSection(section, force, full = false) {
-    const requestCode = state.code;
-    const hasCache = section === 'valuation'
-      ? Object.keys(state.valuation?.views || {}).length > 0
-      : ['shareholders','financing'].includes(section) ? Boolean(state[section]?.stored_count)
-      : Object.keys(state.views || {}).length > 0;
-    sectionStatus(section, hasCache ? '显示已有数据，后台更新中…' : '正在加载…');
-    try {
-      const response = await fetch('/api/' + section + '?code=' + encodeURIComponent(requestCode) +
-        (force ? '&refresh=1' : '') + (full ? '&full=1' : '') +
-        (Object.hasOwn(state, 'price_version') ? '&price_version=' + (state.price_version || 0) : ''), {cache:'no-store'});
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || '请求失败');
-      if (state.code !== requestCode) return false;
-      if (section === 'valuation') {
-        expandValuationPayload(data);
-        if (Object.hasOwn(state, 'price_version') && !state.price_version) {
-          for (const [years, metrics] of Object.entries(data.views || {})) for (const [metric, summary] of Object.entries(metrics)) {
-            const oldSummary = state.valuation?.views?.[years]?.[metric];
-            const frequencyRows = [['legacy', summary.rows || []], ...Object.entries(summary.rows_by_frequency || {})];
-            for (const [frequency, rows] of frequencyRows) {
-              const oldRows = frequency === 'legacy' ? oldSummary?.rows || []
-                : oldSummary?.rows_by_frequency?.[frequency] || [];
-              const rowKey = row => frequency === 'legacy' ? row.date.slice(0,7) : row.date;
-              const previous = new Map(oldRows.map(row => [rowKey(row),row]));
-              for (let index = 0; index < rows.length; index++) {
-                // A transported point may be shared by several ranges/frequencies.
-                const row = rows[index] = {...rows[index]};
-                for (const key of Object.keys(row).filter(key => key.startsWith('qfq_'))) delete row[key];
-                for (const [key,value] of Object.entries(previous.get(rowKey(row)) || {})) if (key.startsWith('qfq_')) row[key] = value;
-              }
-            }
+  function applyValuation(data, priceVersion) {
+    data = expandValuationPayload(data);
+    if (!priceVersion) {
+      for (const [years, metrics] of Object.entries(data.views || {})) for (const [metric, summary] of Object.entries(metrics)) {
+        const oldSummary = state.valuation?.views?.[years]?.[metric];
+        for (const [frequency, rows] of [['legacy', summary.rows || []], ...Object.entries(summary.rows_by_frequency || {})]) {
+          const oldRows = frequency === 'legacy' ? oldSummary?.rows || [] : oldSummary?.rows_by_frequency?.[frequency] || [];
+          const rowKey = row => frequency === 'legacy' ? row.date.slice(0,7) : row.date;
+          const previous = new Map(oldRows.map(row => [rowKey(row),row]));
+          for (let index = 0; index < rows.length; index++) {
+            const row = rows[index] = {...rows[index]};
+            for (const key of Object.keys(row).filter(key => key.startsWith('qfq_'))) delete row[key];
+            for (const [key,value] of Object.entries(previous.get(rowKey(row)) || {})) if (key.startsWith('qfq_')) row[key] = value;
           }
         }
-        state.valuation = data;
-        if (typeof Plotly !== 'undefined') renderValuation();
-      } else if (['shareholders','financing'].includes(section)) {
-        state[section] = data;
-        if (typeof Plotly !== 'undefined') renderChips(section);
-      } else {
-        if (section === 'dividends') data.warnings = [...new Set([...(state.warnings || []), ...(data.warnings || [])])];
-        applyFinancial(data);
       }
-      sectionStatus(section, data.warnings?.length ? '更新未全部完成，已显示可用数据，请留意提示。' : '');
-      window.dispatchEvent(new CustomEvent('dividend-forecast-facts', {detail:{code:requestCode}}));
-      return true;
-    } catch (exception) {
-      if (state.code !== requestCode) return false;
-      sectionStatus(section, '加载失败，' + (hasCache ? '保留已有数据。' : '可点击“刷新数据”重试。') + ' ' + exception.message);
-      return false;
     }
-  }
-  async function requestPrices(force, full, version) {
-    const requestCode = state.code;
-    const versionQuery = version === undefined ? '' : '&version=' + version;
-    const response = await fetch('/api/prices?code=' + encodeURIComponent(requestCode) + versionQuery +
-      (force ? '&refresh=1' : '') + (full ? '&full=1' : ''), {cache:'no-store'});
-    const data = await response.json();
-    if (state.code !== requestCode) return null;
-    if (response.status === 409 && version !== undefined) return requestPrices(false, false);
-    if (!response.ok) throw new Error(data.error || '价格获取失败');
-    return state.code === requestCode ? data : null;
+    state.valuation = data;
   }
   function applyPriceBundle(data) {
     if (!data) return;
     state.price_version = data.price_version;
     if (Object.keys(data.financial?.views || {}).length) applyFinancial(data.financial, true, false);
-    if (Object.keys(data.valuation?.views || {}).length) state.valuation = expandValuationPayload(data.valuation);
+    if (Object.keys(data.valuation?.views || {}).length) applyValuation(data.valuation, data.price_version);
     for (const section of ['shareholders','financing']) {
       state[section] = {...data[section], warnings:[...new Set([...(state[section]?.warnings || []), ...(data[section]?.warnings || [])])]};
     }
     if (typeof Plotly !== 'undefined') { render(); renderValuation(); renderChips('shareholders'); renderChips('financing'); }
   }
+  function collectionStatus(info) {
+    const node = document.getElementById('stock-collection-status');
+    const operation = info?.operation;
+    const checks = (info?.checks || []).map(row => row.checked_at).filter(Boolean).sort();
+    node.textContent = operation?.status === 'running' ? '采集中，可在后台维护查看进度或停止。'
+      : operation?.error ? operation.error + '；可手动刷新或在采集管理继续失败部分。'
+      : '本地数据 · 最近检查：' + (checks.at(-1) ? new Date(checks.at(-1)).toLocaleString() : '未记录');
+  }
   async function loadDashboard(force = false, full = false) {
     if (state.unfollowed) { renderFollowState(); return; }
     if (dashboardUpdating) return;
-    const coordinated = Object.hasOwn(state, 'price_version');
-    if (!force && !full && !Object.values(state.loading).some(Boolean) &&
-        !(coordinated && state.price_needs_update)) {
+    const initial = !force && Boolean(state.collection?.needs_initial);
+    const active = state.collection?.operation?.status === 'running';
+    if (!force && !initial && !active) {
+      collectionStatus(state.collection);
       for (const section of Object.keys(sectionNames)) sectionStatus(section);
       return;
     }
     dashboardUpdating = true;
-    window.dispatchEvent(new CustomEvent('dashboard-data-state', {detail:{code:state.code, updating:true}}));
+    const requestCode = state.code;
     const refresh = document.getElementById('refresh');
     const fullRefresh = document.getElementById('full-audit');
     fullRefresh.disabled = true;
     refresh.setAttribute('aria-disabled', 'true');
     refresh.textContent = '更新中…';
-    const requestCode = state.code;
-    const prices = coordinated && (force || state.price_needs_update)
-      ? requestPrices(force, full).catch(exception => {
-        if (state.code === requestCode) document.getElementById('prices-status').textContent = '股价更新失败，保留已有版本。' + exception.message;
-        return null;
-      }) : Promise.resolve(null);
-    const hasReports = Boolean(state.views?.quarter?.length);
-    const needsFinancial = force || state.loading.financial;
-    const needsValuation = force || state.loading.valuation;
-    const financial = needsFinancial ? requestSection('financial', force, full) : Promise.resolve(true);
-    if (!needsFinancial) sectionStatus('financial');
-    const dividends = financial.then(ok => {
-      if (!ok) { sectionStatus('dividends', '财务加载失败，保留已有数据'); return; }
-      if (force || state.loading.dividends) return requestSection('dividends', force, full);
-      sectionStatus('dividends');
-    });
-    const valuation = !needsValuation ? Promise.resolve(sectionStatus('valuation'))
-      : !needsFinancial && hasReports ? requestSection('valuation', false)
-      : financial.then(ok => {
-        if (ok) return requestSection('valuation', force, full);
-        sectionStatus('valuation', '财务加载失败，保留已有数据');
-      });
-    const chips = ['shareholders','financing'].map(section => force || state.loading[section]
-      ? requestSection(section, force, full) : Promise.resolve(sectionStatus(section)));
+    window.dispatchEvent(new CustomEvent('dashboard-data-state', {detail:{code:state.code, updating:true}}));
     try {
-      const results = await Promise.all([financial, dividends, valuation, ...chips, prices]);
-      if (coordinated && requestCode === state.code) {
-        const initial = results.at(-1);
-        const bundle = await requestPrices(false, false, initial?.price_version || state.price_version || 0);
-        applyPriceBundle(bundle);
-        document.getElementById('prices-status').textContent =
-          [...new Set([...(initial?.warnings || []), ...(bundle?.warnings || [])])].join(' ');
+      if (force || initial) {
+        const response = await fetch('/api/stock-collection', {method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({initial, params:{codes:[requestCode], mode:full?'full':'incremental'}})});
+        const result = await response.json();
+        if (!response.ok) throw Error(result.error || '启动失败');
       }
-    } catch (exception) {
-      if (state.code === requestCode) document.getElementById('prices-status').textContent = '价格同步未完成，保留已展示数据。' + exception.message;
-    }
-    finally {
+      let info;
+      do {
+        const response = await fetch('/api/stock-collection?code=' + encodeURIComponent(requestCode), {cache:'no-store'});
+        info = await response.json();
+        if (!response.ok) throw Error(info.error || '读取状态失败');
+        if (state.code !== requestCode) return;
+        collectionStatus(info);
+        if (info.operation?.status === 'running') await new Promise(resolve => setTimeout(resolve, 3000));
+      } while (info.operation?.status === 'running');
+      state.collection = info;
+      const response = await fetch('/api/prices?code=' + encodeURIComponent(requestCode), {cache:'no-store'});
+      const bundle = await response.json();
+      if (!response.ok) throw Error(bundle.error || '读取缓存失败');
+      if (state.code !== requestCode) return;
+      applyPriceBundle(bundle);
+    } catch (error) {
+      document.getElementById('stock-collection-status').textContent = error.message;
+    } finally {
       dashboardUpdating = false;
-      window.dispatchEvent(new CustomEvent('dashboard-data-state', {detail:{code:state.code, updating:false}}));
       fullRefresh.disabled = false;
-      refresh.textContent = '刷新数据';
+      refresh.textContent = '手动刷新';
+      window.dispatchEvent(new CustomEvent('dashboard-data-state', {detail:{code:state.code, updating:false}}));
       renderFollowState();
     }
   }
@@ -1503,7 +1459,7 @@
   if (typeof Plotly !== 'undefined') { render(); renderValuation(); }
   if (typeof Plotly !== 'undefined') { renderChips('shareholders'); renderChips('financing'); }
   let notesDeferredDashboard = !document.getElementById('notes-panel').hidden;
-  if (!notesDeferredDashboard) loadDashboard(Boolean(state.refresh_requested));
+  if (!notesDeferredDashboard || state.collection?.needs_initial || state.collection?.operation?.status === 'running') loadDashboard(false);
   window.addEventListener('research-tab-changed', event => {
     if (notesDeferredDashboard && ['trend','business','statements'].includes(event.detail.tab)) {
       notesDeferredDashboard = false; loadDashboard(false);

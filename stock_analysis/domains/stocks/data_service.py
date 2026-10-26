@@ -724,6 +724,12 @@ class StockDataService:
         payload["stock_library"] = StockLibrary(self.services()[0].db).read() if Path(self.settings.DATABASE_PATH).exists() else {}
         payload["unfollowed"] = (StockLibrary(self.services()[0].db).is_unfollowed(code) if Path(self.settings.DATABASE_PATH).exists() else False)
         payload['valuation'] = compact_valuation(payload['valuation'])
+        from stock_analysis.domains.stocks.collection_operations import StockCollections
+        payload['collection'] = (StockCollections(self.services()[0].db, self).page_status(code)
+            if Path(self.settings.DATABASE_PATH).exists() else dict(needs_initial=True, operation=None, checks=[]))
+        payload['loading'] = dict.fromkeys(payload['loading'], False)
+        payload['price_needs_update'] = False
+        payload['refresh_requested'] = False
         return code, payload, error
 
     def read_announcements(self, code):

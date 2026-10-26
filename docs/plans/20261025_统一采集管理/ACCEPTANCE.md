@@ -90,3 +90,15 @@
 - 原拥挤度18:00、指数和国债21:00及原更新时间全部保留。自定义限速表为空，继续沿用原参数；当前指数和行业运行任务均0。没有再次重启后台。
 - 正式部署及只读页面验收已完成；真实保存自定义配置与下一次真实采集尚未在原库执行，其逻辑已在隔离库／模拟请求通过，不为了验收改用户参数或额外采集。日后首次实际使用可核对batch.scope_json的rate_limits快照。
 - 报告data/verification/reports/collection_rate_limits_deployed_20261025.json，常用只读复测工具data/verification/tools/collection_rate_limits_live_check.py；临时截图已清理。
+
+## 2026-10-27 个股统一管理验收
+
+- 行为：已有股票只读；首次幂等全量初始化；单股手动/全量走统一operation；分组定时默认关闭、保存不立即执行。普通增量不触发周期全量审计，恢复保留原数据项模式和定时原成员范围。
+- 存储：v43仅两张控制表；分组规则复用公共表，batch引用原sync run并记录父运行。事实缓存、价格版本与metadata_only不变，无新增响应正文/文件/哈希/BLOB。维护用途及真实更新时间已登记。
+- 测试：完整1666 passed，末轮补充42 passed；详情见PROGRESS。首次/失败/旧库升级/跨组复用/停止/恢复/拒绝冷却/读取价格版本绑定与浏览器入口均采用隔离库或模拟响应验证。
+- 部署：原库自动备份后升级v43，8765 PID43148运行；原日程/限速哈希及source/batch水位不变，新增个股operation/日程均为0。真实页面脚本错误0、storage读取0、窄屏无溢出；未为验收发真实采集请求。
+- 报告：[部署只读验收](../../../data/verification/reports/stock_collection_deployment_20261027.json)、[控制元数据占用](../../../data/verification/reports/stock_collection_storage_20261027.json)。日志：stock-management-release-20261027.log、stock-management-postreview-20261027.log；工具：verify_stock_collection_deployment.py、stock_collection_management_benchmark.py、restart_stock_collection_server.ps1。
+
+## 2026-10-27 多主题反馈验收
+
+相关89项及57项通过；同组多主题新增/编辑/删除、旧规则不覆盖、删除保留槽位、失效编辑拒绝及控件布局在隔离库与浏览器验证。原8765重启后PID42524；旧持仓19:00规则和配置哈希不变。实页1920/1440单行、手动字段偏差0px、分组框180×36px、390px无溢出、脚本错误0。来源/批次及stock operation前后不变，无真实采集。详见[反馈验收报告](../../../data/verification/reports/stock_collection_feedback_20261027.json)。

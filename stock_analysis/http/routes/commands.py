@@ -7,7 +7,7 @@ from stock_analysis.infrastructure.storage import StorageError
 
 
 def command_post(self, path):
-    if path not in {'/api/stock-groups', '/api/maintenance/unfollowed', '/api/industry/refresh', '/api/indices/collect', '/api/indices/cancel', '/api/indices/congestion/schedule', '/api/maintenance/collections/run', '/api/maintenance/collections/cancel', '/api/maintenance/collections/schedule', '/api/maintenance/collections/rate-limit'}:
+    if path not in {'/api/stock-collection', '/api/stock-groups', '/api/maintenance/unfollowed', '/api/industry/refresh', '/api/indices/collect', '/api/indices/cancel', '/api/indices/congestion/schedule', '/api/maintenance/collections/run', '/api/maintenance/collections/cancel', '/api/maintenance/collections/schedule', '/api/maintenance/collections/rate-limit'}:
         self.send_error(404)
         return
     status = 200
@@ -23,6 +23,8 @@ def command_post(self, path):
         command = json.loads(self.rfile.read(size).decode('utf-8'))
         if path.startswith('/api/maintenance/collections/'):
             data = self._post_maintenance_collections(path, command)
+        elif path == '/api/stock-collection':
+            data = self._command_stock_collection(command)
         elif path == '/api/indices/congestion/schedule':
             data = self._post_indices_congestion_schedule(path, command)
         elif path in {'/api/indices/collect', '/api/indices/cancel'}:

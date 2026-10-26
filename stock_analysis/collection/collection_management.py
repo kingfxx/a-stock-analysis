@@ -16,6 +16,7 @@ from stock_analysis.infrastructure.storage import utc_now
 
 ZONE = market_congestion.ZONE
 TASKS = {
+    'stocks': dict(name='个股采集', group='个股', providers=['sina','eastmoney','tencent','baidu','cninfo'], modes=['incremental','full','resume']),
     'shipping_research_import': dict(name='航运既有研究资料导入', group='航运研究', providers=['user_excel'], modes=['incremental'], manual_only=True),
     'shipping_image_review': dict(name='航运月度图片核验导入', group='航运研究', providers=['mot'], modes=['incremental'], manual_only=True),
     'shipping_weekly': dict(name='航运 CCFI / SCFI 周度', group='航运研究', providers=['sse'], modes=['incremental','review']),
@@ -45,6 +46,12 @@ def task(key):
 
 def validate_params(key, params, *, scheduled=False):
     spec = task(key)
+    if key == 'stocks':
+        from stock_analysis.domains.stocks.collection_operations import validate_params as validate_stock
+        result = validate_stock(params)
+        if scheduled and (result['mode'] != 'incremental' or 'group_id' not in result):
+            raise ValueError('个股定时仅支持分组增量')
+        return result
     if not isinstance(params, dict):
         raise ValueError('任务参数须为对象')
     allowed = {'mode','file'} if spec.get('manual_only') else {'mode', 'target'} if 'action' in spec else {'mode', 'providers', 'start', 'end'} if key == 'indices' else {'mode','start','end'} if key == 'shipping_monthly' else {'mode'}
@@ -145,8 +152,15 @@ def next_check(schedule, now):
 
 
 class CollectionManagement:
-    def __init__(self, db, industry):
+    def __init__(self, db, industry, stocks=None):
         self.db, self.industry = db, industry
+        if stocks is None:
+            from stock_analysis.domains.stocks.collection_operations import StockCollections
+            from stock_analysis.domains.stocks.data_service import StockDataService
+            from stock_analysis.infrastructure.app_settings import AppSettings
+            stocks = StockCollections(db, StockDataService(AppSettings(DATABASE_PATH=db.path,
+                CACHE=db.path.parent/'fundamentals', VALUATION_CACHE=db.path.parent/'valuation', CHIP_CACHE=db.path.parent/'chips')))
+        self.stocks = stocks
 
     def schedules(self, conn):
         result = {}
@@ -162,6 +176,9 @@ class CollectionManagement:
 
     def configure(self, key, command):
         task(key)
+        if key == 'stocks':
+            from stock_analysis.domains.stocks.collection_schedules import configure
+            return configure(self.db, command)
         if not isinstance(command, dict) or set(command) - {'enabled', 'local_time', 'rule', 'params'}:
             raise ValueError('定时配置参数无效')
         with self.db.connection(write=True) as conn:
@@ -189,6 +206,8 @@ class CollectionManagement:
 
     def reserve(self, conn, key, params):
         spec = task(key)
+        if key == 'stocks':
+            return self.stocks.reserve(conn, params)
         if key.startswith('shipping_'):
             return shipping_collection.reserve(conn,key,params)
         if 'action' in spec:
@@ -205,7 +224,9 @@ class CollectionManagement:
 
     def execute(self, key, params, ref):
         try:
-            if key.startswith('shipping_'):
+            if key == 'stocks':
+                self.stocks.run(ref)
+            elif key.startswith('shipping_'):
                 shipping_collection.run(self.db,ref)
             elif 'action' in task(key):
                 self.industry._refresh(TASKS[key]['action'], params['target'], params['mode'] == 'review', int(ref.split(':')[1]))
@@ -225,6 +246,8 @@ class CollectionManagement:
 
     def start(self, key, params):
         params = validate_params(key, params)
+        if key == 'stocks':
+            return self.stocks.start(params)
         with self.db.connection(write=True) as conn:
             ref = self.reserve(conn, key, params)
         Thread(target=self.execute, args=(key, params, ref), daemon=True, name='collection-' + key).start()
@@ -232,6 +255,8 @@ class CollectionManagement:
 
     def cancel(self, key):
         task(key)
+        if key == 'stocks':
+            return self.stocks.cancel()
         if 'action' in TASKS[key]:
             raise ValueError('此任务暂不提供用户停止；已提交分段保留，可在失败后按原范围重试')
         predicate, args = self._predicate(key)
@@ -261,6 +286,11 @@ class CollectionManagement:
         with self.db.connection() as conn:
             schedules = self.schedules(conn)
             for key, spec in TASKS.items():
+                if key == 'stocks':
+                    if self.stocks:
+                        from stock_analysis.domains.stocks.collection_schedules import task_summary
+                        items.append(task_summary(self.stocks, conn))
+                    continue
                 if 'action' in spec:
                     rows = [dict(r) for r in conn.execute('SELECT id,action,target,recheck,started_at,finished_at,status,error,' + RESULT_SUMMARY + ' AS result_json FROM sw_update_runs WHERE action=? ORDER BY id DESC LIMIT 20', (spec['action'],))]
                     for row in rows:
@@ -296,6 +326,8 @@ class CollectionManagement:
 
     def detail(self, key, ref):
         spec = task(key)
+        if key == 'stocks':
+            return self.stocks.detail(ref)
         if not isinstance(ref, str) or len(ref) > 100:
             raise ValueError('运行引用无效')
         with self.db.connection() as conn:
@@ -316,6 +348,8 @@ class CollectionManagement:
 
     def recover(self):
         # Called only under the server instance lock after domain recovery.
+        if self.stocks:
+            self.stocks.recover()
         with self.db.connection(write=True) as conn:
             conn.execute("UPDATE collection_schedule_slots SET status=CASE WHEN attempts<2 THEN 'pending' ELSE 'failed' END,"
                          "updated_at=?,error='后台中断；已提交分段保留，最多自动恢复一次' WHERE status='running'", (utc_now(),))
@@ -339,7 +373,12 @@ class CollectionManagement:
 
     def tick(self, *, now=None, stopped=lambda:False):
         now = now or datetime.now(ZONE)
+        if self.stocks:
+            from stock_analysis.domains.stocks.collection_schedules import tick
+            tick(self.stocks, now, stopped)
         for key in TASKS:
+            if key == 'stocks':
+                continue
             if stopped():
                 return
             # Congestion daily checks retain initialization, manual reuse,
@@ -429,6 +468,8 @@ class Scheduler:
 
     def close(self):
         self.stop_event.set()
+        if self.management.stocks:
+            self.management.stocks.cancel()
         with self.management.db.connection(write=True) as conn:
             conn.execute("UPDATE index_collection_operations SET cancel_requested=1 WHERE status='running' AND (operation_id IN "
                          "(SELECT operation_ref FROM collection_schedule_slots WHERE status='running') OR json_extract(scope_json,'$.trigger')='scheduled')")
@@ -437,3 +478,14 @@ class Scheduler:
         self.thread.join(timeout=90)
         if self.thread.is_alive():
             raise RuntimeError('统一采集尚未停止，不能关闭数据库')
+        if self.management.stocks:
+            import time
+            deadline = time.monotonic() + 60
+            while True:
+                with self.management.db.connection() as conn:
+                    active = conn.execute("SELECT 1 FROM stock_collection_operations WHERE status='running' LIMIT 1").fetchone()
+                if not active:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('个股采集尚未退出，不能关闭数据库')
+                time.sleep(.1)

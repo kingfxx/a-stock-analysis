@@ -243,68 +243,29 @@ assert.match(ui.element('valuation-note').textContent, /较早段观测较稀疏
   assert.equal(negativeUi.requests.length, 0);
 }
 
-// Delayed API responses render the current frequency, while responses from the old stock are ignored.
-(async () => {
+// Cached bundle updates retain the chosen display frequency and preserve unverified prices.
+{
+  const loadingSource = page.slice(page.indexOf('  function applyValuation('), page.indexOf('  function applyPriceBundle('));
   ui = fixture('3');
-  ui.context.state.code = '601600';
-  const pending = [];
-  ui.context.fetch = url => new Promise(resolve => pending.push({url,resolve}));
-  const loadingSource = page.slice(page.indexOf('  // Background data loading.'),
-    page.indexOf('  async function requestPrices('));
-  vm.runInContext(loadingSource, ui.context);
-  const request = () => vm.runInContext('requestSection("valuation", false)', ui.context);
-  const first = request();
-  assert.equal(pending.length, 1);
-  ui.change('valuation-frequency', 'week');
+  vm.runInContext(loadingSource,ui.context);
+  ui.change('valuation-frequency','week');
   const incoming = structuredClone(ui.context.state.valuation);
   incoming.views['3'].pe.rows_by_frequency.week[0].pe = 25;
-  pending.shift().resolve({ok:true,json:async () => incoming});
-  await first;
-  assert.equal(ui.plots.at(-1).traces[0].y[0], 25);
-  assert.equal(ui.plots.at(-1).traces[0].x[0], '2026-09-29');
-
-  const second = request();
-  assert.equal(pending.length, 1);
-  ui.context.state.code = '000001';
-  const plotCount = ui.plots.length;
-  const stale = structuredClone(incoming);
-  stale.views['3'].pe.rows_by_frequency.week[0].pe = 99;
-  pending.shift().resolve({ok:true,json:async () => stale});
-  await second;
-  assert.equal(ui.context.state.valuation.views['3'].pe.rows_by_frequency.week[0].pe, 25);
-  assert.equal(ui.plots.length, plotCount);
-
-  // An unverified price generation keeps the matching cached price in every frequency.
-  ui = fixture('3');
-  ui.context.state.code = '601600';
-  ui.context.state.price_version = 0;
-  const oldWeek = ui.context.state.valuation.views['3'].pe.rows_by_frequency.week[0];
-  oldWeek.qfq_close = 10;
-  const pricePending = [];
-  ui.context.fetch = url => new Promise(resolve => pricePending.push({url,resolve}));
-  vm.runInContext(loadingSource, ui.context);
-  const priceRequest = vm.runInContext('requestSection("valuation", false)', ui.context);
-  const fresh = structuredClone(ui.context.state.valuation);
-  fresh.views['3'].pe.rows_by_frequency.week[0].qfq_close = 99;
-  pricePending.shift().resolve({ok:true,json:async () => fresh});
-  await priceRequest;
-  assert.equal(ui.context.state.valuation.views['3'].pe.rows_by_frequency.week[0].qfq_close, 10);
-
-  // Legacy monthly caches retain their price when the latest source date shifts within a month.
-  ui = fixture('10');
-  ui.context.state.code = '601600';
-  ui.context.state.price_version = 0;
-  ui.context.state.valuation.views['10'].pe = {rows:[{date:'2026-08-30',pe:19,qfq_close:8}]};
-  const legacyPending = [];
-  ui.context.fetch = url => new Promise(resolve => legacyPending.push({url,resolve}));
-  vm.runInContext(loadingSource, ui.context);
-  const legacyRequest = vm.runInContext('requestSection("valuation", false)', ui.context);
-  const legacyFresh = {views:{'10':{pe:{rows:[{date:'2026-08-31',pe:20,qfq_close:99}]}}}};
-  legacyPending.shift().resolve({ok:true,json:async () => legacyFresh});
-  await legacyRequest;
-  assert.equal(ui.context.state.valuation.views['10'].pe.rows[0].qfq_close, 8);
-  console.log('Valuation frequency, persistence, observation dates, sparse hint and stale responses passed');
-})().catch(error => { console.error(error); process.exitCode = 1; });
+  ui.context.incoming = incoming;
+  vm.runInContext('applyValuation(incoming, 1); renderValuation();',ui.context);
+  assert.equal(ui.plots.at(-1).traces[0].y[0],25);
+  assert.equal(ui.plots.at(-1).traces[0].x[0],'2026-09-29');
+  ui.context.state.valuation.views['3'].pe.rows_by_frequency.week[0].qfq_close=10;
+  ui.context.incoming=structuredClone(ui.context.state.valuation);
+  ui.context.incoming.views['3'].pe.rows_by_frequency.week[0].qfq_close=99;
+  vm.runInContext('applyValuation(incoming, 0)',ui.context);
+  assert.equal(ui.context.state.valuation.views['3'].pe.rows_by_frequency.week[0].qfq_close,10);
+  ui=fixture('10');vm.runInContext(loadingSource,ui.context);
+  ui.context.state.valuation.views['10'].pe={rows:[{date:'2026-08-30',pe:19,qfq_close:8}]};
+  ui.context.incoming={views:{'10':{pe:{rows:[{date:'2026-08-31',pe:20,qfq_close:99}]}}}};
+  vm.runInContext('applyValuation(incoming, 0)',ui.context);
+  assert.equal(ui.context.state.valuation.views['10'].pe.rows[0].qfq_close,8);
+}
 
 // Benchmark switches use server statistics, persist, and leave display sampling and percentiles intact.
 {

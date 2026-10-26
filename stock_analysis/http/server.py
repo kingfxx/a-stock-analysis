@@ -7,7 +7,6 @@ import secrets
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
-from stock_analysis.collection.collection_management import CollectionManagement
 from stock_analysis import application as app
 from stock_analysis.http.routes import dispatch
 from stock_analysis.http.routes.shipping import ShippingRoutes
@@ -100,6 +99,6 @@ def serve(port: int=8765, open_browser: bool=False):
         port, open_browser, database_path=app.settings.DATABASE_PATH,
         handler=Handler, server_factory=ThreadingHTTPServer,
         initialize=app._initialize_runtime, activity_check=app._restore_activity,
-        management_factory=lambda db: CollectionManagement(db, app.industry_service()),
+        management_factory=app.collection_management,
         clear_state=app._clear_runtime_services, open_url=webbrowser.open,
     )

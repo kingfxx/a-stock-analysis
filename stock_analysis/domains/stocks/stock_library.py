@@ -79,6 +79,7 @@ class StockLibrary:
                 conn.execute("UPDATE stock_groups SET name=? WHERE id=?", (name(command.get("name")), identity))
             elif action == "delete":
                 identity = group_id(command.get("id"))
+                conn.execute("UPDATE collection_schedules SET enabled=0,updated_at=? WHERE task_key=? OR task_key LIKE ?", (utc_now(), f'stocks:{identity}', f'stocks:{identity}:%'))
                 conn.execute("DELETE FROM stock_groups WHERE id=?", (identity,))
                 conn.execute("UPDATE stock_picker_preferences SET selected_group='all' WHERE selected_group=?", (f"group:{identity}",))
             elif action == "reorder":

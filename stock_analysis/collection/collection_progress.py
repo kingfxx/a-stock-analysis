@@ -7,13 +7,19 @@ import json
 # in the explicit evidence endpoint. Missing counters remain unknown, never zero.
 FIELDS = ('inserted', 'new', 'revised', 'enriched', 'unchanged', 'published',
           'returned', 'rows', 'total', 'visible_points', 'price_counts',
-          'reused_batch_id', 'kind')
+          'reused_batch_id', 'kind', 'row_count')
 PROJECTION = 'json_object(' + ','.join(
     "'" + key + "',CASE WHEN json_type(result_json,'$." + key + "') IN ('true','false') "
     "THEN NULL ELSE json_extract(result_json,'$." + key + "') END" for key in FIELDS) + ')'
 INDEX_DATASETS = {'index.cs.history', 'index.cs.dashboard', 'index.cs.indicator',
                   'index.sw.analysis', 'index.legu.pe', 'index.legu.pb'}
 LABELS = {
+    'stock.financial.lrb': '利润表', 'stock.financial.fzb': '资产负债表', 'stock.financial.llb': '现金流量表',
+    'stock.financial.gjzb': '财务关键指标', 'stock.business_segments': '主营构成', 'stock.announcements': '公告元数据',
+    'stock.dividends': '分红', 'stock.shareholders': '股东人数', 'stock.financing': '融资融券',
+    'stock.prices_raw': '未复权价格', 'stock.prices_adjusted': '复权价格',
+    'stock.valuation.pe': 'PE', 'stock.valuation.pb': 'PB', 'stock.valuation.market_cap': '市值',
+    'stock.valuation.industry': '同行估值',
     'market.financial.income': '利润表', 'market.financial.balance': '资产负债表',
     'market.financial.cashflow': '现金流量表', 'market.financial.performance': '业绩指标',
     'market.trade_snapshot': '交易快照', 'bond_zh_us_rate': '国债收益率',
@@ -43,6 +49,8 @@ def normalize(batch, values, label):
     dataset = batch['dataset']
     if returned is None and (financial or dataset in {'market.trade_snapshot', 'market.legu.congestion', 'market.legu.congestion.page'}):
         returned = number(values.get('rows'))
+    if returned is None and dataset.startswith('stock.'):
+        returned = number(values.get('row_count'))
     if dataset == 'bond_zh_us_rate':
         returned = number(values.get('total'))
     if dataset in {'shipping.ccfi', 'shipping.scfi'}:

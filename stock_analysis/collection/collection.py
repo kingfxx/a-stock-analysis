@@ -149,6 +149,11 @@ def pacing_policy(provider, base, *, index_parallel=False, industry_profile=None
 def begin_batch(db, operation_id, dataset, provider, start=None, end=None, *, scope=None,
                 frequency=None, trigger='manual', idempotency_key=None, domain='market',
                 parser_version='index-v2', definition_version='v1', universe_version=None):
+    from stock_analysis.collection.execution_context import current_execution
+    execution = current_execution.get()
+    if execution:
+        scope = {**(scope or {}), **execution['scope']}
+        trigger = execution['trigger']
     with db.connection(write=True) as conn:
         scheduled=conn.execute("SELECT task_key,slot_key FROM collection_schedule_slots WHERE operation_ref=? AND status='running' LIMIT 1",
                                (operation_id,)).fetchone()
@@ -269,7 +274,9 @@ class RequestCollector:
         self.policy=policy or PacingPolicy()
         if self.policy.provider is not None:
             raise ValueError('提供方专属策略由RequestCollector按来源选择，不能作为全局policy')
-        self.cancelled=cancelled
+        from stock_analysis.collection.execution_context import current_execution
+        execution = current_execution.get()
+        self.cancelled = execution['cancelled'] if execution else cancelled
         self.clock=clock
         self.sleep=sleep
         self.uniform=uniform
@@ -663,6 +670,10 @@ class RequestCollector:
                 healthy_response=None, evidence_mode='archive', recovery_token=None, stock_fast=False,index_parallel=False,
                 industry_profile=None):
         method=method.upper()
+        from stock_analysis.collection.execution_context import current_execution
+        execution = current_execution.get()
+        if execution and execution.get('batch_pacing'):
+            stock_fast = False
         if method not in ('GET','POST'):
             raise ValueError('仅支持 GET/POST')
         if evidence_mode not in ('archive', 'metadata_only'):

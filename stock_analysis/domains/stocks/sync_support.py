@@ -66,6 +66,10 @@ def checked_today(state):
 
 
 def audit_due(state, dataset="prices_adjusted"):
+    from stock_analysis.collection.execution_context import current_execution
+    execution = current_execution.get()
+    if execution and execution['scope'].get('requested_mode') == 'incremental':
+        return False  # Composed incremental runs do not silently become periodic full audits.
     if dataset.split(":", 1)[0] not in AUDIT_DAYS:
         return False
     return not state.get("next_full_audit_at") or state["next_full_audit_at"] <= utc_now()

@@ -213,9 +213,9 @@
     let collectionBusy=false,collectionTimer=null,collectionTasks=[];
     const operationDetails=new Map();
     const collectionVisible=()=>!panel.hidden&&!el('maintenance-collection-panel').hidden&&!document.hidden;
-    const providerNames={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所 / 航运研究所',mot:'交通运输部'};
+    const providerNames={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',cninfo:'巨潮资讯',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所 / 航运研究所',mot:'交通运输部'};
     const progressMarkup='<div class="index-progress-details" role="status" aria-live="polite"><p data-progress-summary></p><ul data-progress-sources></ul></div>';
-    const modeNames={incremental:'增量更新／原范围续跑',review:'修订核对',full:'历史初始化／恢复全量',audit:'覆盖核查',backfill:'指定范围回填'};
+    const modeNames={resume:'继续失败部分',incremental:'增量更新／原范围续跑',review:'修订核对',full:'历史初始化／恢复全量',audit:'覆盖核查',backfill:'指定范围回填'};
     function providerMenu(task,selected,title){
       return `<details class="collection-provider-menu" data-provider-menu><summary><span>${title}</span><strong data-provider-selection>已选 ${selected.length} / ${task.providers.length} 项</strong></summary><div class="collection-provider-options">${task.providers.map(provider=>`<label><input type="checkbox" name="provider" value="${provider}" ${selected.includes(provider)?'checked':''}>${esc(providerNames[provider]||provider)} <small>${esc(provider)}</small></label>`).join('')}</div></details>`;
     }
@@ -243,6 +243,48 @@
         form.querySelector('button[type=submit]').disabled=collectionTasks.some(other=>other.running);
       }
     }
+    function taskConflict(left,right) {
+      if (!right) return false;
+      if (left.task_key==='stocks'||right.task_key==='stocks') return left.task_key===right.task_key;
+      return Boolean(left.action)===Boolean(right.action);
+    }
+    function stockFields(task, scheduled=false) {
+      return `<label>股票分组<select name="group_id" ${scheduled?'data-stock-schedule-group':''}><option value="">${scheduled?'请选择分组':'指定股票代码'}</option>${task.groups.map(group=>`<option value="${group.id}">${esc(group.name)}（${group.member_count??0}只）</option>`).join('')}</select></label>${scheduled?'':'<label>指定股票（逗号或空格分隔）<input name="codes" placeholder="601919 605499"></label>'}
+        <fieldset><legend>刷新数据（公告核验、估值需要已有财务报告期）</legend>${Object.entries(task.datasets).map(([value,label])=>`<label><input type="checkbox" name="dataset" value="${value}" checked>${esc(label)}</label>`).join('')}</fieldset>`;
+    }
+    const stockFrequencyNames={daily:'每日',weekly:'每周',monthly:'每月'};
+    function stockRuleLabel(task,rule) {
+      return `${rule.group_name} · ${rule.params.datasets.map(key=>task.datasets[key]).join('、')} · ${stockFrequencyNames[rule.rule.frequency]} ${rule.local_time}`;
+    }
+    function stockScheduleForm(task) {
+      return `<details data-stock-schedules><summary>分组自动检查</summary><form data-task-schedule>
+        <div class="collection-fields"><label>日程规则<select name="schedule_key" data-stock-rule-select><option value="">新增规则</option>${task.rules.map(rule=>`<option value="${esc(rule.task_key)}">${esc(stockRuleLabel(task,rule))}</option>`).join('')}</select></label>${stockFields(task,true)}</div>
+        <p>同一分组可添加多条规则，分别选择数据和刷新时间，例如财务每月、其他数据每天。保存不立即采集；关闭或删除只停止后续调度，已运行任务和历史保留。</p>
+        <div class="collection-fields"><label><input name="enabled" type="checkbox">启用自动检查</label><label>北京时间<input name="local_time" type="time" value="18:00" required></label>
+        <label>频率<select name="frequency" data-stock-frequency>${Object.entries(stockFrequencyNames).map(([value,label])=>`<option value="${value}">${label}</option>`).join('')}</select></label>
+        <label data-stock-weekday hidden>星期<select name="weekday">${['一','二','三','四','五','六','日'].map((day,index)=>`<option value="${index}">周${day}</option>`).join('')}</select></label>
+        <label data-stock-monthday hidden>月检查日（短月按月末）<input name="day" type="number" min="1" max="31" value="1"></label>
+        <button type="submit">保存规则</button></div><p data-stock-rule-edit-status>正在新增规则。</p>
+      </form></details>`;
+    }
+    function updateStockFrequency(form) {
+      form.querySelector('[data-stock-weekday]').hidden=form.elements.frequency.value!=='weekly';
+      form.querySelector('[data-stock-monthday]').hidden=form.elements.frequency.value!=='monthly';
+    }
+    function editStockRule(card,key) {
+      const task=collectionTasks.find(task=>task.task_key==='stocks'),form=card.querySelector('[data-task-schedule]');
+      const saved=task.rules.find(rule=>rule.task_key===key);
+      form.elements.schedule_key.value=saved?.task_key||'';
+      if(saved)form.elements.group_id.value=String(saved.params.group_id);
+      form.elements.enabled.checked=Boolean(saved?.enabled);
+      form.elements.local_time.value=saved?.local_time||'18:00';
+      form.elements.frequency.value=saved?.rule.frequency||'daily';
+      form.elements.weekday.value=saved?.rule.weekday??0;
+      form.elements.day.value=saved?.rule.day||1;
+      for(const input of form.querySelectorAll('[name=dataset]'))input.checked=!saved||saved.params.datasets.includes(input.value);
+      form.querySelector('[data-stock-rule-edit-status]').textContent=saved?'正在编辑已保存规则。':'正在新增规则；不会覆盖已保存的其他规则。';
+      updateStockFrequency(form);card.querySelector('[data-stock-schedules]').open=true;
+    }
     function taskForm(task){
       const key=task.task_key,schedule=task.schedule,rule=schedule.rule;
       const target=task.action?recentTargets(task)[0]:null;
@@ -251,19 +293,20 @@
         ${key==='shipping_monthly'?'<p>同一次采集自动处理 HTML 表格和图片，校验后发布月度指数及已披露的吞吐量。不确定的图片保留缺口，可在下方人工核验补正。</p>':''}
         ${key==='sovereign_yields'?'<p>本入口独立采集东方财富中美国债收益率。旧联合运行历史见指数采集，以下仅列国债独立运行。</p>':key==='indices'?'<p>本入口只采集所选指数来源；国债使用独立入口。所有批量采集统一在此管理。</p>':''}
         <form data-task-run><h4>手动采集</h4><div class="collection-fields"><label>模式<select name="mode">${task.modes.map(mode=>`<option value="${mode}">${esc(modeNames[mode])}</option>`).join('')}</select></label>
-        ${task.action?targetPicker(task,target,'manual'):''}${task.manual_only?'<label>本地文件路径<input name="file" required placeholder="Excel原件或已核验JSON"></label>':''}
+        ${key==='stocks'?stockFields(task):''}${task.action?targetPicker(task,target,'manual'):''}${task.manual_only?'<label>本地文件路径<input name="file" required placeholder="Excel原件或已核验JSON"></label>':''}
         ${key==='indices'||key==='shipping_monthly'?`${key==='indices'?providerMenu(task,task.providers,'提供方'):''}<label>起始日（可选）<input type="date" name="start"></label><label>结束日（可选）<input type="date" name="end"></label>`:''}
-        <button type="submit">运行所选范围…</button>${task.supports_cancel?'<button type="button" data-task-cancel>请求停止</button>':'<span>暂不提供用户停止；失败后可按原范围续跑。</span>'}</div></form>
-        ${task.manual_only?'<p>本地资料导入仅手动，不提供自动检查。</p>':`<details><summary>自动检查：${schedule.enabled?'已开启':'已关闭'} · 北京时间 ${esc(schedule.local_time)}</summary><form data-task-schedule>
+        ${key==='stocks'?'<div class="stock-run-actions">':''}<button type="submit">运行所选范围…</button>${task.supports_cancel?'<button type="button" data-task-cancel>请求停止</button>':'<span>暂不提供用户停止；失败后可按原范围续跑。</span>'}${key==='stocks'?'</div>':''}</div></form>
+        ${key==='stocks'?stockScheduleForm(task):task.manual_only?'<p>本地资料导入仅手动，不提供自动检查。</p>':`<details><summary>${key==='stocks'?'分组自动检查（选择分组编辑）':`自动检查：${schedule.enabled?'已开启':'已关闭'} · 北京时间 ${esc(schedule.local_time)}`}</summary><form data-task-schedule>
+        ${key==='stocks'?stockFields(task,true):''}
         <p>检查频率不等于数据频率。后台服务运行时自动检查，关闭网页不影响。服务晚启动时补做最近一次到期检查，多次漏跑合并为一次；例如18:00到期，次日09:00启动会补查前一次。首次保存启用从下一个计划时间开始，不立即采集。关闭仅阻止新调度，已运行任务继续。自动检查仅增量，财务／快照只检查所填目标。</p><div class="collection-fields">
-        <label><input name="enabled" type="checkbox" ${schedule.enabled?'checked':''}>启用自动检查</label><label>北京时间<input name="local_time" type="time" value="${esc(schedule.local_time)}" required></label>
+        <label><input name="enabled" type="checkbox" ${key!=='stocks'&&schedule.enabled?'checked':''}>启用自动检查</label><label>北京时间<input name="local_time" type="time" value="${esc(schedule.local_time)}" required></label>
         <label>频率<select name="frequency">${[['daily','每日'],['weekly','每周'],['monthly','每月']].map(([value,label])=>`<option value="${value}" ${rule.frequency===value?'selected':''}>${label}</option>`).join('')}</select></label>
         <label>星期（周规则）<select name="weekday">${['一','二','三','四','五','六','日'].map((day,index)=>`<option value="${index}" ${rule.weekday===index?'selected':''}>周${day}</option>`).join('')}</select></label>
         <label>月检查日（短月按月末）<input name="day" type="number" min="1" max="31" value="${rule.day||1}"></label>
         <label>月发布窗口起日（可选）<input name="window_start" type="number" min="1" max="31" value="${rule.window?.[0]||''}"></label><label>止日<input name="window_end" type="number" min="1" max="31" value="${rule.window?.[1]||''}"></label>
         ${task.action?targetPicker(task,schedule.params.target||target,'schedule'):''}
         ${key==='indices'?`${providerMenu(task,schedule.params.providers||task.providers,'自动检查来源')}`:''}
-        <button type="submit">保存定时设置</button></div></form></details>`}<details><summary>进度、最近20次运行及来源证据</summary><div data-task-history></div></details>${rateSettings(task)}</article>`;
+        <button type="submit">保存定时设置</button></div></form></details>`}${key==='stocks'?'<div data-stock-rules></div>':''}<details><summary>进度、最近20次运行及来源证据</summary><div data-task-history></div></details>${rateSettings(task)}</article>`;
     }
     function shippingModule(list){
       let module=list.querySelector('[data-shipping-module]');if(module)return module;
@@ -280,11 +323,29 @@
         let card=list.querySelector(`[data-task="${task.task_key}"]`);
         if(!card){const container=task.task_key.startsWith('shipping_')?list.querySelector(`[data-shipping-slot="${task.task_key}"]`):list;container.insertAdjacentHTML('beforeend',taskForm(task));card=container.lastElementChild;}
         updateRateForms(card,task);
+        if(task.task_key==='stocks') for(const select of card.querySelectorAll('select[name=group_id]')) {
+          const signature=JSON.stringify(task.groups);
+          if(select.dataset.groups!==signature) {
+            const selected=select.value;
+            select.innerHTML=`<option value="">${select.hasAttribute('data-stock-schedule-group')?'请选择分组':'指定股票代码'}</option>${task.groups.map(group=>`<option value="${group.id}">${esc(group.name)}（${group.member_count??0}只）</option>`).join('')}`;
+            select.value=[...select.options].some(option=>option.value===selected)?selected:'';
+            select.dataset.groups=signature;
+          }
+        }
+        if(task.task_key==='stocks') {
+          const selector=card.querySelector('[data-stock-rule-select]'),selected=selector.value;
+          const signature=JSON.stringify(task.rules.map(rule=>[rule.task_key,stockRuleLabel(task,rule)]));
+          if(selector.dataset.rules!==signature) {
+            selector.innerHTML='<option value="">新增规则</option>'+task.rules.map(rule=>`<option value="${esc(rule.task_key)}">${esc(stockRuleLabel(task,rule))}</option>`).join('');
+            selector.value=task.rules.some(rule=>rule.task_key===selected)?selected:'';selector.dataset.rules=signature;
+          }
+          card.querySelector('[data-stock-rules]').innerHTML='<h4>已保存分组日程</h4>'+(task.rules.map(rule=>`<div class="stock-schedule-row"><div><strong>${esc(rule.group_name)}</strong> · ${rule.enabled?'已启用':'已关闭'} · ${esc(stockFrequencyNames[rule.rule.frequency])}${rule.rule.frequency==='weekly'?'周'+['一','二','三','四','五','六','日'][rule.rule.weekday]:rule.rule.frequency==='monthly'?' '+rule.rule.day+'日':''} ${esc(rule.local_time)} · 下次 ${esc(date(rule.next_check))}<small>${esc(rule.params.datasets.map(key=>task.datasets[key]).join('、'))}</small></div><div class="stock-rule-actions"><button type="button" data-stock-edit-rule="${esc(rule.task_key)}">编辑</button><button type="button" data-stock-delete-rule="${esc(rule.task_key)}">删除</button></div></div>`).join('')||'<p>尚未保存；可为同一分组添加不同数据主题的规则。</p>');
+        }
         const previousRuns=new Set([...card.querySelectorAll('[data-run]')].map(node=>node.dataset.run));
         const opened=new Set([...card.querySelectorAll('[data-task-history] details[open]')].map(node=>node.dataset.run));
         const batchesOpen=Boolean(card.querySelector('[data-task-batches]')?.open);
         if(task.history[0]&&!previousRuns.has(task.history[0].operation_ref))opened.add(task.history[0].operation_ref);
-        const latest=task.history[0],blocked=collectionTasks.some(other=>other.running&&Boolean(other.action)===Boolean(task.action));
+        const latest=task.history[0],blocked=collectionTasks.some(other=>other.running&&taskConflict(other,task));
         card.querySelector('[data-task-status]').innerHTML=`<p><strong>${task.running?'运行中':latest?esc(({complete:'执行完成',failed:'失败',cancelled:'已停止',pending:'待恢复'})[latest.status]||latest.status):'尚无运行记录'}</strong> · 最近检查 ${esc(date(task.last_check))} · 最近执行成功 ${esc(date(task.last_success))}</p><p>最近分段覆盖：${esc(({unknown:'未知',partial:'部分',complete:'完整（仅分段）',empty:'来源为空'})[task.coverage]||task.coverage)}。${esc(task.coverage_note)}。${task.batches.length?`最近运行有 ${task.batches.length} 个分段。`:''}</p><p>自动检查${task.schedule.enabled?'已开启':'已关闭'} · 下次检查 ${esc(date(task.schedule.next_check))}</p>${task.cooldowns.filter(row=>row.cooldown_until).map(row=>`<p>来源 ${esc(row.source_system)} 冷却截止 ${esc(date(row.cooldown_until))} · ${esc(row.reason)}</p>`).join('')}${latest?.error?`<p class="collection-error">${esc(latest.error)}</p>`:''}`;
         card.querySelector('[data-task-run] button[type=submit]').disabled=blocked;
         const stop=card.querySelector('[data-task-cancel]');if(stop)stop.disabled=!task.running;
@@ -308,6 +369,17 @@
     }
     el('maintenance-collection-list').addEventListener('change',event=>{
       if(event.target.matches('[data-shipping-select]')){const module=event.target.closest('[data-shipping-module]');module.querySelectorAll('[data-shipping-view]').forEach(view=>{view.hidden=view.dataset.shippingView!==event.target.value;});return;}
+      if(event.target.matches('[data-stock-rule-select]')) {editStockRule(event.target.closest('[data-task]'),event.target.value);return;}
+      if(event.target.matches('[data-stock-frequency]')) {updateStockFrequency(event.target.form);return;}
+      if(event.target.matches('[data-stock-schedule-group]')) {
+        const form=event.target.form,task=collectionTasks.find(task=>task.task_key==='stocks');
+        const saved=task.rules.find(rule=>rule.task_key===form.elements.schedule_key.value);
+        if(saved&&saved.params.group_id!==Number(event.target.value)) {
+          form.elements.schedule_key.value='';form.elements.enabled.checked=false;
+          form.querySelector('[data-stock-rule-edit-status]').textContent='分组已改变，保存将新增规则，原规则保留。';
+        }
+        return;
+      }
       const rateForm=event.target.closest('[data-task-rate-form]');
       if(rateForm){
         rateForm.dataset.dirty='true';
@@ -340,19 +412,34 @@
         finally{button.disabled=collectionTasks.some(task=>task.running);}return;
       }
       const params={mode:isSchedule?'incremental':values.get('mode')};
+      if(key==='stocks') {
+        params.datasets=values.getAll('dataset');
+        if(values.get('group_id')) params.group_id=Number(values.get('group_id'));
+        else if(!isSchedule) params.codes=values.get('codes').split(/[,，\s]+/).filter(Boolean);
+      }
       if(values.has('target'))params.target=values.get('target').trim();if(values.has('file'))params.file=values.get('file').trim();
       if(key==='indices'||key==='shipping_monthly'){if(key==='indices')params.providers=values.getAll('provider');for(const field of ['start','end'])if(values.get(field))params[field]=values.get(field);}
-      const scopes={shipping_research_import:`按哈希复用已有研究Excel、14份正式报告及解析，文件：${params.file}。`,shipping_image_review:`发布明确核验的图片转录，保留图片及核验文件证据，文件：${params.file}。`,shipping_weekly:'官方可见CCFI全部航线及SCFI综合；只补当期和上期，不承诺历史完整。',shipping_monthly:`交通运输部月度指数及市场分析：${params.start||'2022-12'} 至 ${params.end||'最新'}。HTML表格与图片一起解析；校验未通过的图片保留缺口。`,market_financial:`全市场财务：全A股四表，报告期 ${params.target}。`,trade_snapshot:`季度交易快照：${params.target} 的季末交易日，完整分页校验后保存。`,indices:`指数估值与行情：${(params.providers||[]).map(provider=>providerNames[provider]||provider).join('、')}；${params.start||'按本地水位及所选模式'} 至 ${params.end||'最近已完成交易日'}。本入口不附带国债采集。`,market_congestion:'大盘拥挤度：乐咕来源。首次历史初始化包含API与HTML；后续更新只检查HTML。',sovereign_yields:'中美国债收益率：东方财富，独立运行；按本地水位补采，首次从2002年至今。'};
+      const scopes={stocks:`${params.group_id?'分组 '+collectionTasks.find(task=>task.task_key==='stocks').groups.find(group=>group.id===params.group_id)?.name:'股票 '+(params.codes||[]).join('、')}；数据：${(params.datasets||[]).map(key=>collectionTasks.find(task=>task.task_key==='stocks').datasets[key]).join('、')}。全量沿用各数据集建档历史范围，不下载正式财报。`,shipping_research_import:`按哈希复用已有研究Excel、14份正式报告及解析，文件：${params.file}。`,shipping_image_review:`发布明确核验的图片转录，保留图片及核验文件证据，文件：${params.file}。`,shipping_weekly:'官方可见CCFI全部航线及SCFI综合；只补当期和上期，不承诺历史完整。',shipping_monthly:`交通运输部月度指数及市场分析：${params.start||'2022-12'} 至 ${params.end||'最新'}。HTML表格与图片一起解析；校验未通过的图片保留缺口。`,market_financial:`全市场财务：全A股四表，报告期 ${params.target}。`,trade_snapshot:`季度交易快照：${params.target} 的季末交易日，完整分页校验后保存。`,indices:`指数估值与行情：${(params.providers||[]).map(provider=>providerNames[provider]||provider).join('、')}；${params.start||'按本地水位及所选模式'} 至 ${params.end||'最近已完成交易日'}。本入口不附带国债采集。`,market_congestion:'大盘拥挤度：乐咕来源。首次历史初始化包含API与HTML；后续更新只检查HTML。',sovereign_yields:'中美国债收益率：东方财富，独立运行；按本地水位补采，首次从2002年至今。'};
       const historyWarning=['full','backfill','audit'].includes(params.mode)?'历史初始化／回填或核查可能耗时较长。':'';
       if(!isSchedule&&!confirm(`确认运行${collectionTasks.find(task=>task.task_key===key).name}？\n模式：${modeNames[params.mode]}\n${scopes[key]}\n${historyWarning}已提交分段保留，缺失不补造。`))return;
       let command={task_key:key,params};
       if(isSchedule){const frequency=values.get('frequency'),rule={frequency};if(frequency==='weekly')rule.weekday=Number(values.get('weekday'));if(frequency==='monthly'){rule.day=Number(values.get('day'));if(values.get('window_start')||values.get('window_end'))rule.window=[Number(values.get('window_start')),Number(values.get('window_end'))];}command={task_key:key,schedule:{enabled:values.has('enabled'),local_time:values.get('local_time'),rule,params}};}
+      if(isSchedule&&key==='stocks')command.schedule.schedule_key=values.get('schedule_key')||null;
       const button=form.querySelector('button[type=submit]');button.disabled=true;
-      try{await collectionPost(isSchedule?'schedule':'run',command);if(isSchedule)form.closest('details').querySelector(':scope>summary').textContent=`自动检查：${values.has('enabled')?'已开启':'已关闭'} · 北京时间 ${values.get('local_time')}`;await loadCollections();}
+      try{const saved=await collectionPost(isSchedule?'schedule':'run',command);if(isSchedule&&key!=='stocks')form.closest('details').querySelector(':scope>summary').textContent=`自动检查：${values.has('enabled')?'已开启':'已关闭'} · 北京时间 ${values.get('local_time')}`;await loadCollections();if(isSchedule&&key==='stocks')editStockRule(card,saved.schedule_key);}
       catch(error){el('maintenance-collection-status').textContent=error.message;}
-      finally{button.disabled=!isSchedule&&collectionTasks.some(other=>other.running&&Boolean(other.action)===Boolean(collectionTasks.find(task=>task.task_key===key)?.action));}
+      finally{button.disabled=!isSchedule&&collectionTasks.some(other=>other.running&&taskConflict(other,collectionTasks.find(task=>task.task_key===key)));}
     });
     el('maintenance-collection-list').addEventListener('click',async event=>{
+      const edit=event.target.closest('[data-stock-edit-rule]');
+      if(edit){editStockRule(edit.closest('[data-task]'),edit.dataset.stockEditRule);return;}
+      const remove=event.target.closest('[data-stock-delete-rule]');
+      if(remove){
+        if(!confirm('删除这条定时规则？后续不再调度，已运行任务和历史记录保留。'))return;
+        const card=remove.closest('[data-task]'),key=remove.dataset.stockDeleteRule;
+        try{await collectionPost('schedule',{task_key:'stocks',schedule:{action:'delete',schedule_key:key}});await loadCollections();if(card.querySelector('[data-stock-rule-select]').value===key||!card.querySelector('[data-stock-rule-select]').value)editStockRule(card,'');}
+        catch(error){el('maintenance-collection-status').textContent=error.message;}return;
+      }
       const detail=event.target.closest('[data-operation-ref]');
       if(detail){
         detail.disabled=true;

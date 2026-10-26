@@ -12,6 +12,8 @@
 
 ## 当前数据源
 
+2026-10-27个股触发变更：页面GET只读缓存，首次新股初始化及手动刷新通过明确POST进入domains/stocks/collection_operations.py；分组日程由collection_schedules.py适配现有公共Scheduler和槽位。数据集仍调用原领域服务，公共execution_context传递父operation/item和取消回调，batch保留旧sync run身份。两张控制元数据表不保存业务数据或HTTP正文，详见[个股采集](stock-collection.md)。下文旧页面到期说明以此为准。
+
 以下是**当前运行代码实际调用**的数据源；不是候选接口列表。来源请求定义在 [sources.py](../stock_analysis/domains/stocks/sources.py) 与 [valuation.py](../stock_analysis/domains/valuation/valuation.py)，新浪／腾讯字段映射和纯解析在 [source_parsers.py](../stock_analysis/domains/stocks/source_parsers.py)。
 
 | 来源 | 实际获取的数据 | 在页面中的用途 | 实现入口 |

@@ -63,12 +63,12 @@ def test_first_visit_returns_shell_without_fetching_data(cache, monkeypatch):
     data = payload(rendering.render_page("601600", False))
     assert data["code"] == "601600"
     assert data["views"] == {}
-    assert data["loading"] == {"financial": True, "dividends": True, "valuation": True,
-                               "shareholders": True, "financing": True}
+    assert not any(data["loading"].values())
+    assert data["collection"]["needs_initial"] is True
     assert not list(cache.rglob("*.json"))
 
 
-def test_initial_page_shows_stale_cache_and_schedules_only_missing_updates(cache, monkeypatch):
+def test_initial_page_shows_stale_cache_without_scheduling_updates(cache, monkeypatch):
     forbid_network(monkeypatch)
     (app.settings.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
     (app.settings.VALUATION_CACHE / "601600.json").write_text(json.dumps({
@@ -79,8 +79,7 @@ def test_initial_page_shows_stale_cache_and_schedules_only_missing_updates(cache
     assert data["views"]["year"][0]["profit"] == 10
     assert data["views"]["year"][0]["cash_dividend"] == 100
     assert data["valuation"]["views"]["10"]["pe"]["current"] == 9
-    assert data["loading"] == {"financial": False, "dividends": False, "valuation": True,
-                               "shareholders": True, "financing": True}
+    assert not any(data["loading"].values())
     assert all(path.read_bytes() == contents for path, contents in before.items())
 
 
@@ -187,7 +186,7 @@ def test_refresh_url_still_shows_cache_before_network_work(cache, monkeypatch):
     (app.settings.CACHE / "601600.json").write_text(json.dumps(stock()), encoding="utf-8")
     data = payload(rendering.render_page("601600", True))
     assert data["views"]["year"][0]["profit"] == 10
-    assert data["refresh_requested"] is True
+    assert data["refresh_requested"] is False
 
 
 @pytest.mark.parametrize("code,section", [("../outside", "financial"), ("601600", "unknown")])
@@ -250,10 +249,9 @@ def test_live_data_failure_returns_json_error_without_affecting_page(http_server
     def offline(*args):
         raise ValueError("source unavailable")
     monkeypatch.setattr(data_module, "fetch_financial_reports", offline)
-    with pytest.raises(HTTPError) as failure:
-        urlopen(http_server + "/api/financial?code=601600", timeout=5)
-    assert failure.value.code == 503
-    assert "source unavailable" in json.load(failure.value)["error"]
+    # Offline sources cannot affect a cache-only GET.
+    with urlopen(http_server + "/api/financial?code=601600", timeout=5) as response:
+        assert json.load(response)["views"] == {}
     with urlopen(http_server + "/?code=601600", timeout=5) as response:
         assert payload(response.read().decode("utf-8"))["views"] == {}
 
