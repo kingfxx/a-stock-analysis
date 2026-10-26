@@ -76,3 +76,23 @@ v40保留collection_schedules五列，新增collection_schedule_rules（规则�
 后续历史航运解析修复中，用户明确允许重启原8765并恢复。2026-10-25已完成该次重启，正式库v42迁移随启动应用，前述“待后续允许重启”状态至此解除；航运原范围归档恢复成功，既有配置保留且航运自动检查仍关闭。记录见docs/plans/20261024_ccfi海控利润预测/ACCEPTANCE.md。
 
 2026-10-25后续：用户已自行重启8765，schema42原库迁移与只读实页验收完成；参数／定时前后不变，未为验收保存配置或启动采集。[部署验收](../data/verification/reports/collection_rate_limits_deployed_20261025.json)。
+
+## 公共入库数量模板
+
+采集管理的全部已注册任务、最近20次历史和当前进度共用 `collection_progress.py` 适配层及 `collection-progress.js` 展示模板。按提供方与数据项显示已记录写入、新增、修订、补全（有记录时）、未变化、返回／解析条数，以及复用／跳过分段数。正在运行时显示已记录的发布结果，不能代表最终覆盖完整性；没有计数的旧记录显示“未记录”，不推算为0。
+
+| 任务 | 统计依据／口径 |
+|---|---|
+| 指数估值与行情 | 公共发布分段的inserted/revised/unchanged及price_counts，估值和行情分开；不混入后续派生补算 |
+| 全市场财务四表 | 按四个接口分别显示new/revised/enriched/unchanged；实际写入=new+revised+enriched，published_count含未变化，不当成新写入 |
+| 季度交易快照 | 公共快照分段的inserted/revised/unchanged；跳过的旧快照本轮写入0，不能复制上轮计数 |
+| 拥挤度 | 按API／页面渠道显示发布计数，返回／解析条数取rows |
+| 国债收益率 | 按年度事实发布分段统计，返回条数取total；初始化发现请求和manifest不计为另一份事实写入 |
+| 航运周度／月度／资料导入 | 既有published是实际写入总数；旧记录不能区分新增、修订、未变化时对应项显示未记录。周度返回／解析条数取visible_points；复用分段本轮写入0 |
+| 航运图片核验导入 | 发布仍引用原图batch，本次运行从自身channels.published读取计数，避免拿旧batch总数冒充本次写入 |
+
+公共分段在SQLite中仅投影轻量计数字段后按运行、提供方和数据项汇总，覆盖运行的全部分段，不受公共分段展示100条上限影响；不扫描事实表、不读原始文件或改写旧记录。存在部分分段未记录写入数量时明确提示，已记录数量不冒充完整统计。新采集器使用公共batch的inserted/revised/unchanged（或明确的published写入总数）、returned计数即可接入模板；特殊字段／口径在适配层登记，前端不新增任务专属渲染。
+
+明确记录返回／解析0条时，摘要和黄色提示注明分段数及日期范围；失败的空响应也提示并保留失败状态。新增0、published=0、空覆盖状态、缺计数和复用旧分段都不能单独证明来源为空。未变化表示重复值，不是新写入。页面读取和统计不会触发来源采集，来源预算、定时和证据策略保持原规则。
+
+验证：[最初指数版本验收报告](../data/verification/reports/index_write_counts_20261026.json)，[统一模板验收报告](../data/verification/reports/collection_write_counts_20261026.json)，[只读复测工具](../data/verification/tools/verify_index_write_counts.py)。

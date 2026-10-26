@@ -11,6 +11,7 @@ from threading import Event, Thread
 from stock_analysis.domains.indices import index_collection; from stock_analysis.domains.market import market_congestion; from stock_analysis.domains.research.sectors.shipping import shipping_collection
 from stock_analysis.collection.collection import encoded
 from stock_analysis.collection.collection_schedule import latest_daily_date
+from stock_analysis.collection.collection_progress import attach_data_counts
 from stock_analysis.infrastructure.storage import utc_now
 
 ZONE = market_congestion.ZONE
@@ -33,7 +34,7 @@ TASKS = {
 # of source manifests, per-company failures and statement field counts.
 SUMMARY_FIELDS = ('message', 'network_requests', 'retries', 'scope_count', 'requested_count',
                   'returned_count', 'collection_progress', 'errors', 'channels', 'skipped')
-RESULT_SUMMARY = 'json_object(' + ','.join("'" + key + "',json_extract(result_json,'$." + key + "')" for key in SUMMARY_FIELDS) + ", 'work_progress',json_remove(json_extract(result_json,'$.work_progress'),'$.tasks'))"
+RESULT_SUMMARY = 'json_object(' + ','.join("'" + key + "',json_extract(result_json,'$." + key + "')" for key in SUMMARY_FIELDS) + ", 'snapshot',json_object('skipped',json_extract(result_json,'$.snapshot.skipped')), 'work_progress',json_remove(json_extract(result_json,'$.work_progress'),'$.tasks'))"
 
 
 def task(key):
@@ -273,6 +274,7 @@ class CollectionManagement:
                     row['result'] = json.loads(row.pop('result_json') or '{}')
                     if 'scope_json' in row:
                         row['scope'] = json.loads(row.pop('scope_json'))
+                attach_data_counts(conn, rows, spec['providers'])
                 latest = rows[0] if rows else None
                 batches = [dict(r) for r in conn.execute('SELECT id,dataset,source_system,status,coverage_status,scope_start,scope_end,started_at,finished_at,error '
                     'FROM collection_batches WHERE operation_id=? ORDER BY id DESC LIMIT 100', (latest['operation_ref'],))] if latest else []

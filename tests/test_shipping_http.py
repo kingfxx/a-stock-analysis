@@ -306,3 +306,53 @@ def test_weekly_forecast_without_overlapping_actual_profits(live,monkeypatch):
                 expect(page.locator('#trend-hover-card')).to_contain_text('亿元')
                 page.close()
         finally:browser.close()
+
+
+def test_scenario_profit_comparisons_and_edge_baselines(live,monkeypatch):
+    base,db,state,web=live;seed(db,monkeypatch)
+    from playwright.sync_api import sync_playwright,expect
+    session=requests.Session();session.trust_env=False
+    def fmt(value):return f'{value:,.2f}'.rstrip('0').rstrip('.')
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            for target,bases in [('2026Q3',(40,20)),('2026Q1',(40,20)),('2026Q3',(0,None)),('2026Q3',(-40,-20))]:
+                payload=session.get(base+'/api/shipping-forecast',params={'target':target},timeout=5).json()
+                year=int(target[:4]);quarter=int(target[-1]);labels=[f'{year-1}Q{quarter}',f'{year}Q{quarter-1}' if quarter>1 else f'{year-1}Q4']
+                for label,value in zip(labels,bases):
+                    row=next(r for r in payload['context']['history'] if r['label']==label)
+                    row['profit']=value
+                page=browser.new_page(viewport=dict(width=390,height=1000))
+                page.route(base+'/api/shipping-forecast?**',lambda route:route.fulfill(json=payload))
+                page.goto(base+'/?code=601919&tab=shipping-forecast')
+                expect(page.locator('.scenario')).to_have_count(3)
+                def check(key,extra=0):
+                    params=deepcopy(payload['defaults'][key]);params['extra']+=extra
+                    profit=forecast.calculate(payload['context'],params)['profit']
+                    rows=page.locator('#comparison-'+key+' .profit-comparison-row')
+                    assert rows.count()==2
+                    for index,(name,baseline) in enumerate(zip(('同比','环比'),bases)):
+                        row=rows.nth(index);text=row.inner_text();rate=row.locator('.profit-change')
+                        assert name+'：' in text and '比较期' in text and 'Q' not in text
+                        if baseline is None:
+                            assert '无法计算' in text and '未记录' in text
+                            assert row.get_attribute('title')=='比较期数据缺失'
+                        elif baseline==0:
+                            assert '无法计算' in text and '比较期 0 亿元' in text
+                            assert row.get_attribute('title')=='比较期为零，无法计算'
+                        else:
+                            change=(profit-baseline)/abs(baseline)*100
+                            assert rate.inner_text()==fmt(abs(change))+'%'
+                            assert '比较期 '+fmt(baseline)+' 亿元' in text
+                            direction='up' if change>0 else 'down' if change<0 else 'flat'
+                            assert direction in rate.get_attribute('class').split()
+                            expected_color={'up':'rgb(192, 57, 43)','down':'rgb(22, 128, 60)','flat':'rgb(82, 107, 120)'}[direction]
+                            assert rate.evaluate('e=>getComputedStyle(e).color')==expected_color
+                            if baseline<0:assert row.get_attribute('title')=='基期亏损，按绝对值计算'
+                    assert rows.nth(1).bounding_box()['y']>rows.nth(0).bounding_box()['y']
+                for key in ('bear','base','bull'):check(key)
+                page.locator('[data-case="base"][data-key="extra"]').fill(str(payload['defaults']['base']['extra']+10))
+                check('base',10)
+                assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                page.close()
+        finally:browser.close()

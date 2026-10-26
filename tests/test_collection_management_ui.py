@@ -215,6 +215,86 @@ def test_browser_reuses_index_progress_and_task_specific_confirmation(live):
                 assert conn.execute('SELECT count(*) FROM index_collection_operations').fetchone()[0]==1
         finally:browser.close()
 
+def test_browser_index_write_counts_and_zero_return_warning(live):
+    base,db,state,web=live
+    from playwright.sync_api import sync_playwright,expect
+    from stock_analysis.collection.collection import begin_batch,finish_batch
+    with db.connection(write=True) as conn:
+        conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at,result_json) VALUES('empty-test','incremental','{}','complete','2026-10-26',?)",
+                     (json.dumps({'work_progress':{'total':3,'success':3,'providers':{'sws':{'total':2,'success':2},'legu':{'total':1,'success':1}}}}),))
+    for level in (1,2):
+        batch=begin_batch(db,'empty-test','index.sw.analysis','sws','2026-10-26','2026-10-26',scope={'level':level})
+        finish_batch(db,batch,'complete','empty',result=dict(returned=0,inserted=0,revised=0,unchanged=0,price_counts=dict(inserted=0,revised=0,unchanged=0)))
+    batch=begin_batch(db,'empty-test','index.legu.pe','legu','2026-10-26','2026-10-26')
+    finish_batch(db,batch,'complete','unknown',result=dict(inserted=0,revised=1,unchanged=10,price_counts=dict(inserted=2,revised=0,unchanged=8)))
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/harness');card=page.locator('[data-task="indices"]')
+            card.locator(':scope > details').nth(1).locator('summary').first.click()
+            progress=card.locator('[data-run=empty-test]')
+            expect(progress.locator('[data-progress-summary]')).to_contain_text('申万宏源有 2 个分段返回 0 条，未更新数据')
+            expect(progress).to_contain_text('乐咕乐股 · 估值：已记录写入 1 条（新增 0 条、修订 1 条）；未变化 10 条')
+            expect(progress).to_contain_text('乐咕乐股 · 行情：已记录写入 2 条（新增 2 条、修订 0 条）；未变化 8 条')
+            expect(progress.locator('.collection-progress-warning')).to_have_count(1)
+            expect(progress.locator('.collection-progress-warning')).to_contain_text('2026-10-26—2026-10-26')
+            page.click('#maintenance-refresh')
+            expect(card.locator('.collection-progress-warning')).to_have_count(1)
+            assert state['storage']==0 and not errors
+        finally:browser.close()
+
+
+def test_browser_shared_write_template_for_other_collectors(live):
+    base,db,state,web=live
+    from playwright.sync_api import sync_playwright,expect
+    from stock_analysis.collection.collection import begin_batch,finish_batch
+    from stock_analysis.domains.industries.industry_service import IndustryService
+    manager=CollectionManagement(db,IndustryService(db))
+    cases=[
+        ('market_financial','market.financial.income','eastmoney',dict(rows=12,new=2,revised=3,enriched=1,unchanged=6),'利润表：已记录写入 6 条（新增 2 条、修订 3 条、补全 1 条）'),
+        ('trade_snapshot','market.trade_snapshot','eastmoney',dict(rows=10,inserted=2,revised=0,unchanged=8),'交易快照：已记录写入 2 条'),
+        ('market_congestion','market.legu.congestion.page','legu',dict(rows=30,inserted=1,revised=0,unchanged=29),'拥挤度页面：已记录写入 1 条'),
+        ('sovereign_yields','bond_zh_us_rate','eastmoney',dict(total=0),'国债收益率：已记录写入 未记录 条'),
+        ('shipping_weekly','shipping.ccfi','sse',dict(published=0,visible_points=26),'CCFI 周度：已记录写入 0 条（新增 未记录 条'),
+        ('shipping_monthly','shipping.mot_rates','mot',dict(published=8),'航运月度指数：已记录写入 8 条'),
+        ('shipping_research_import','shipping.excel','user_excel',dict(published=3),'研究资料指数导入：已记录写入 3 条'),
+        ('shipping_image_review',None,'mot',dict(published=4),'资料核验导入：已记录写入 4 条'),
+    ]
+    for key,dataset,provider,values,_ in cases:
+        with db.connection(write=True) as conn:
+            ref=manager.reserve(conn,key,dict(mode='full' if key=='market_congestion' else 'incremental',
+                target='2026-06-30' if key=='market_financial' else '2026Q2',file='review.json'))
+            if ref.startswith('sw_update_runs:'):
+                conn.execute("UPDATE sw_update_runs SET status='complete' WHERE id=?",(int(ref.split(':')[1]),))
+            else:
+                conn.execute("UPDATE index_collection_operations SET status='complete',result_json=? WHERE operation_id=?",
+                    (json.dumps({'channels':[values]} if dataset is None else {}),ref))
+        if dataset:
+            batch=begin_batch(db,ref,dataset,provider,'2026-10-26','2026-10-26')
+            finish_batch(db,batch,'complete','unknown',result=values)
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/harness')
+            expect(page.locator('[data-task=market_financial]')).to_have_count(1)
+            for key,_,_,_,text in cases:
+                if key.startswith('shipping_'):
+                    page.locator('[data-shipping-select]').select_option('shipping_monthly' if key=='shipping_image_review' else key)
+                    if key=='shipping_image_review':
+                        page.locator('[data-shipping-view=shipping_monthly] > details > summary').click()
+                card=page.locator('[data-task="'+key+'"]')
+                card.locator(':scope > details').nth(1).locator('summary').first.click()
+                expect(card.locator('[data-run]').first).to_contain_text(text)
+            bond=page.locator('[data-task=sovereign_yields]')
+            expect(bond.locator('.collection-progress-warning')).to_contain_text('返回 0 条')
+            weekly=page.locator('[data-task=shipping_weekly]')
+            expect(weekly.locator('.collection-progress-warning')).to_have_count(0)
+            assert not errors and state['storage']==0
+        finally:browser.close()
+
+
 def test_browser_latest_once_collapsed_batches_and_dropdown_multi_select(live):
     base,db,state,web=live
     from playwright.sync_api import sync_playwright,expect

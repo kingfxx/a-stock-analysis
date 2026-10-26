@@ -248,6 +248,126 @@ def test_list_projects_small_summary_and_detail_keeps_full_evidence(management):
     with pytest.raises(ValueError):management.detail('market_congestion',ref)
 
 
+def test_index_history_counts_publications_and_empty_returns_without_rewriting_history(management):
+    import json
+    from stock_analysis.collection.collection import begin_batch, finish_batch
+    with management.db.connection(write=True) as conn:
+        older=index_collection.start_operation(management.db,'incremental',['sws'],connection=conn)
+        conn.execute("UPDATE index_collection_operations SET status='complete',started_at='2026-10-25' WHERE operation_id=?",(older,))
+        latest=index_collection.start_operation(management.db,'incremental',['sws','legu'],connection=conn)
+        conn.execute("UPDATE index_collection_operations SET status='complete',started_at='2026-10-26' WHERE operation_id=?",(latest,))
+    def publish(ref,provider,result,coverage='unknown'):
+        batch=begin_batch(management.db,ref,'index.sw.analysis' if provider=='sws' else 'index.legu.pe',provider,
+                          '2026-10-26','2026-10-26')
+        finish_batch(management.db,batch,'complete',coverage,result=result)
+    publish(older,'sws',dict(inserted=31,revised=1,unchanged=0,returned=32,
+                           price_counts=dict(inserted=31,revised=0,unchanged=1)))
+    for _ in range(2):
+        publish(latest,'sws',dict(inserted=0,revised=0,unchanged=0,returned=0,
+                                price_counts=dict(inserted=0,revised=0,unchanged=0)),'empty')
+    publish(latest,'legu',dict(inserted=0,revised=2,unchanged=10,
+                             price_counts=dict(inserted=0,revised=0,unchanged=4)))
+    # A legacy batch without counters must not be interpreted as a zero response.
+    publish(latest,'legu',dict(message='legacy'),'empty')
+    payload=next(t for t in management.read()['tasks'] if t['task_key']=='indices')
+    runs={r['operation_ref']:r['result'] for r in payload['history']}
+    counts={(r['provider'],r['label']):r for r in runs[latest]['data_counts']}
+    sw=counts[('sws','估值')]
+    assert sw['written']==0 and sw['inserted']==0 and sw['revised']==0
+    assert sw['empty_returns']==2 and sw['empty_start']==sw['empty_end']=='2026-10-26'
+    assert counts[('sws','行情')]['written']==0
+    assert counts[('legu','估值')]['revised']==2 and counts[('legu','估值')]['unchanged']==10
+    assert counts[('legu','估值')]['empty_returns']==0
+    assert counts[('legu','估值')]['unrecorded_segments']==1
+    assert runs[older]['data_counts'][0]['inserted']==31
+    assert 'data_counts' not in management.detail('indices',latest)['result']
+    with management.db.connection() as conn:
+        assert all('data_counts' not in json.loads(r[0]) for r in conn.execute('SELECT result_json FROM index_collection_operations'))
+
+
+@pytest.mark.parametrize('key,dataset,provider,values,written', [
+    ('market_financial','market.financial.income','eastmoney',dict(rows=12,new=2,revised=3,enriched=1,unchanged=6,published_count=12),6),
+    ('trade_snapshot','market.trade_snapshot','eastmoney',dict(rows=12,inserted=2,revised=3,unchanged=7),5),
+    ('market_congestion','market.legu.congestion.page','legu',dict(rows=30,inserted=1,revised=2,unchanged=27),3),
+    ('sovereign_yields','bond_zh_us_rate','eastmoney',dict(total=11,inserted=1,revised=0,unchanged=10),1),
+    ('shipping_weekly','shipping.ccfi','sse',dict(visible_points=26,published=0),0),
+    ('shipping_monthly','shipping.mot_rates','mot',dict(published=8),8),
+    ('shipping_research_import','shipping.excel','user_excel',dict(published=233),233),
+])
+def test_shared_publication_counts_for_registered_collectors(management,key,dataset,provider,values,written):
+    from stock_analysis.collection.collection import begin_batch,finish_batch
+    params={'mode':'full' if key=='market_congestion' else 'incremental','target':'2026-06-30' if key=='market_financial' else '2026Q2'}
+    with management.db.connection(write=True) as conn:
+        ref=management.reserve(conn,key,params)
+        if ref.startswith('sw_update_runs:'):
+            conn.execute("UPDATE sw_update_runs SET status='complete' WHERE id=?",(int(ref.split(':')[1]),))
+        else:
+            conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(ref,))
+    batch=begin_batch(management.db,ref,dataset,provider,'2026-10-26','2026-10-26')
+    finish_batch(management.db,batch,'complete','unknown',result=values)
+    task=next(t for t in management.read()['tasks'] if t['task_key']==key)
+    counts=task['history'][0]['result']['data_counts'][0]
+    assert counts['provider']==provider and counts['written']==written
+    assert counts['empty_returns']==0  # published=0 can be an unchanged response.
+    if key.startswith('shipping_'):
+        assert counts['inserted'] is None and counts['revised'] is None
+    if key=='market_financial':
+        assert counts['enriched']==1 and counts['unchanged']==6
+
+
+def test_shared_counts_review_import_skip_empty_and_unknown(management):
+    import json
+    from stock_analysis.collection.collection import begin_batch,finish_batch
+    # Review publishes against an old image batch, so only this run's channels count.
+    with management.db.connection(write=True) as conn:
+        ref=management.reserve(conn,'shipping_image_review',{'mode':'incremental','file':'review.json'})
+        conn.execute("UPDATE index_collection_operations SET status='complete',result_json=? WHERE operation_id=?",
+                     (json.dumps({'channels':[{'published':4}]}),ref))
+    task=next(t for t in management.read()['tasks'] if t['task_key']=='shipping_image_review')
+    assert task['history'][0]['result']['data_counts'][0]['written']==4
+    with management.db.connection(write=True) as conn:
+        skipped=management.reserve(conn,'trade_snapshot',{'mode':'incremental','target':'2026Q2'})
+        conn.execute("UPDATE sw_update_runs SET status='complete',result_json=? WHERE id=?",
+                     (json.dumps({'snapshot':{'skipped':True,'inserted':999,'revised':99}}),int(skipped.split(':')[1])))
+    task=next(t for t in management.read()['tasks'] if t['task_key']=='trade_snapshot')
+    counts=task['history'][0]['result']['data_counts'][0]
+    assert counts['written']==0 and counts['inserted'] is None and counts['reused_segments']==1
+    with management.db.connection(write=True) as conn:
+        ref=management.reserve(conn,'sovereign_yields',{'mode':'incremental'})
+        conn.execute("UPDATE index_collection_operations SET status='failed' WHERE operation_id=?",(ref,))
+    batch=begin_batch(management.db,ref,'bond_zh_us_rate','eastmoney','2026-10-26','2026-10-26')
+    finish_batch(management.db,batch,'failed','empty',result={'total':0,'empty':True})
+    task=next(t for t in management.read()['tasks'] if t['task_key']=='sovereign_yields')
+    counts=task['history'][0]['result']['data_counts'][0]
+    assert counts['empty_returns']==1 and counts['written'] is None
+    with management.db.connection(write=True) as conn:
+        ref=management.reserve(conn,'shipping_weekly',{'mode':'incremental'})
+        conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(ref,))
+    task=next(t for t in management.read()['tasks'] if t['task_key']=='shipping_weekly')
+    assert all(c['written'] is None and c['empty_returns']==0 for c in task['history'][0]['result']['data_counts'])
+
+
+def test_shared_counts_all_segments_and_future_standard_counters(management):
+    from stock_analysis.collection.collection import begin_batch,finish_batch
+    with management.db.connection(write=True) as conn:
+        ref=management.reserve(conn,'sovereign_yields',{'mode':'incremental'})
+        conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(ref,))
+    for _ in range(101):
+        batch=begin_batch(management.db,ref,'future.standard_facts','eastmoney')
+        finish_batch(management.db,batch,'complete','unknown',result=dict(inserted=1,revised=0,unchanged=0,returned=1))
+    # An unknown discovery result must not fabricate a publication count.
+    batch=begin_batch(management.db,ref,'bond_zh_us_rate','eastmoney')
+    finish_batch(management.db,batch,'complete','unknown',result=dict(kind='target_discovery',rows=50,total=1000))
+    batch=begin_batch(management.db,ref,'future.standard_facts','eastmoney')
+    finish_batch(management.db,batch,'failed','unknown',result=dict(inserted=True,revised=-2,returned='0'))
+    task=next(t for t in management.read()['tasks'] if t['task_key']=='sovereign_yields')
+    assert len(task['batches'])==100
+    count=task['history'][0]['result']['data_counts'][0]
+    assert count['label']=='future.standard_facts' and count['segments']==102
+    assert count['written']==101 and count['inserted']==101 and count['returned']==101 and count['empty_returns']==0
+    assert count['unrecorded_segments']==1
+
+
 def test_explicit_complete_target_stops_publication_window(management):
     from stock_analysis.collection.collection import begin_batch,finish_batch
     enable(management,'market_financial',rule={'frequency':'monthly','window':[1,31]},params={'target':'2026-06-30'})
