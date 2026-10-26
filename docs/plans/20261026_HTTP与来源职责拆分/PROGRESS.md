@@ -45,3 +45,9 @@
 - 启动日志正常完成初始化。就绪探测在初始化期间曾超时，服务随后处理已断开的探测连接时记录 ConnectionAbortedError；就绪后的正常页面检查通过，未为此改变原静态回应的异常行为。
 - 本轮临时测试库/浏览器目录、一次性提取脚本及过期失败 XML 已清理；保留基线/最终逐文件报告、通过的阶段报告、可复用验证工具和当前后台日志。
 - 用户验收后已授权将本轮全部修改统一提交，提交信息为 `refactor: separate HTTP routes data assembly and source parsing`；不推送。实施前基线为 fba64bf。没有手动启动采集、回填或模型生成。
+
+## 后续：长期职责约束
+
+- 按用户要求精简根 AGENTS.md：合并重复说明，SQLite 细则迁入必读的 docs/agent-rules/sqlite.md；保留原身份、8765、采集授权、数据及资料保护、计划和协作边界。
+- 新增必读的 docs/agent-rules/architecture.md，明确 server/routes/领域/组装/纯解析计算/渲染的职责，以及单向依赖、唯一状态、增长检查和验证要求；防止 application、data_service 形成新的业务单体。
+- 本次仅调整规则和进度文档，不改业务代码，不新增架构测试或 CI，不重启后台。
