@@ -28,13 +28,18 @@ def main():
             else:
                 route.continue_()
         page.route('**/api/**',guard)
+        page.add_init_script("sessionStorage.setItem('investment-industry-selection-v1',JSON.stringify({industry:'630701',level:'3'}))")
         page.goto(f'http://127.0.0.1:{args.port}/?code=300750',wait_until='domcontentloaded')
         page.locator('#industry-tab').click()
         page.wait_for_function("document.getElementById('sw-third').value==='630701' && document.getElementById('sw-chart')._fullLayout")
         assert page.locator('#trend-panel').is_hidden()
         assert page.locator('#statements-panel').is_hidden()
+        assert page.locator('#latest-period-label').inner_text()=='全市场报告期'
+        assert page.locator('#updated-label').inner_text()=='全市场数据更新'
+        assert page.locator('#latest-period').inner_text()==page.locator('#sw-period').input_value()
+        assert page.locator('#updated').inner_text() in page.locator('#sw-status').inner_text()
         assert page.locator('#sw-path').inner_text().endswith('电力设备 → 电池 → 锂电池')
-        history = '约十年' in page.locator('#sw-scope').inner_text()
+        history = page.locator('#sw-period option[value="2016-09-30"]').count()==1
         assert page.locator('#sw-ranking tbody tr').count()>2 if history else page.locator('#sw-ranking tbody tr').count()==2
         assert page.locator('#sw-metrics').inner_text().count('27/27')>=3
         assert page.locator('#sw-saved').inner_text().find('300750')>=0
@@ -48,9 +53,9 @@ def main():
         assert page.evaluate("document.getElementById('sw-chart').data[1].mode")=='lines+markers'
         assert f'{market_points} 个季度点' in page.locator('#sw-chart-note').inner_text()
         assert '2026Q3' in page.locator('#sw-market').inner_text()
-        all_market = history or '最近一年沪深市场' in page.locator('#sw-scope').inner_text()
+        all_market = '97/97' in page.locator('#sw-metrics').inner_text()
         assert page.locator('#sw-refresh-financial,#sw-refresh-cap,#sw-recheck-cap').count()==0
-        assert page.locator('#industry-panel a[href="/?tab=maintenance"]').count()==1
+        assert page.locator('#industry-panel a[href="/?tab=maintenance"]').count()==0
         before=sum('/api/industry?' in r['url'] for r in requests)
         page.evaluate("window.dispatchEvent(new CustomEvent('financial-facts-updated',{detail:{code:'300750'}}))")
         page.wait_for_timeout(250)
@@ -84,8 +89,19 @@ def main():
         page.wait_for_function("document.getElementById('sw-title').textContent.includes('乳品') && document.getElementById('sw-metrics').textContent.includes('18/18')")
         assert '600887' in page.locator('#sw-saved').inner_text()
         assert '当前股票不属于所选行业' in page.locator('#sw-metrics').inner_text()
+        page.locator('#business-tab').click()
+        page.wait_for_function("document.getElementById('bs-company').textContent.includes('300750')")
+        assert page.locator('#latest-period-label').inner_text()=='主营构成报告期'
+        assert page.locator('#updated-label').inner_text()=='主营构成更新'
+        business_state=page.evaluate("async()=>await (await fetch('/api/business-segments?code=300750')).json()")
+        expected_business_update=page.evaluate("value=>DashboardTime.format(value,'未记录')",business_state['sync'].get('succeeded_at'))
+        assert page.locator('#updated').inner_text()==expected_business_update
         page.locator('#trend-tab').click();assert page.locator('#industry-panel').is_hidden()
+        assert page.locator('#latest-period-label').inner_text()=='最新报告期'
+        assert page.locator('#updated-label').inner_text()=='财报缓存更新'
         page.locator('#industry-tab').click();assert page.locator('#trend-panel').is_hidden()
+        assert page.locator('#latest-period-label').inner_text()=='全市场报告期'
+        assert page.locator('#updated-label').inner_text()=='全市场数据更新'
         page.set_viewport_size({'width':390,'height':844})
         page.wait_for_function("document.getElementById('sw-chart')._fullLayout.width<=document.getElementById('sw-chart').clientWidth+1")
         page.locator('#industry-panel').screenshot(path=str(args.output/'mobile.png'))

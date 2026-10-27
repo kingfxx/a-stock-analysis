@@ -271,9 +271,8 @@
   </header>
   <div class="context">
     <span class="context-stock">标的 <strong id="stock-code"></strong></span>
-    <span>最新报告期 <strong id="latest-period">—</strong></span>
-    <span>本地缓存更新 <strong id="updated">—</strong></span>
-    <span id="stock-collection-status" role="status"></span>
+    <span><span id="latest-period-label">最新报告期</span> <strong id="latest-period">—</strong></span>
+    <span><span id="updated-label">财报缓存更新</span> <strong id="updated">—</strong></span>
   </div>
   <div id="error" class="error hide">__ERROR__</div>
   <div id="warnings"></div>
@@ -547,9 +546,9 @@
 <link rel="stylesheet" href="/business-segments.css?v=20261016-history-style">
 <script src="/business-segment-aliases.js?v=20261016-names"></script>
 <script src="/business-segment-names.js?v=20261016-names"></script>
-<script src="/business-segments.js?v=20261016-region-chart-restored-v1"></script>
+<script src="/business-segments.js?v=20261027-mainop-context"></script>
 <link rel="stylesheet" href="/industry.css?v=20261021-desktop-filter-grid">
-<script src="/industry.js?v=20261016-sidebar-filters"></script>
+<script src="/industry.js?v=20261027-market-context"></script>
 <link rel="stylesheet" href="/maintenance.css?v=20261025-centralized">
 <script src="/stock-cleanup.js?v=20261007-no-cleanup-backup"></script>
   <script src="/collection-overview.js?v=20261027"></script><script src="/maintenance.js?v=20261027-overview"></script>
@@ -579,6 +578,20 @@
     return data;
   }
   const state = JSON.parse(document.getElementById('payload').textContent);
+  window.setResearchContext = ({periodLabel='最新报告期',period=null,updatedLabel='财报缓存更新',updatedAt=null}={}) => {
+    document.getElementById('latest-period-label').textContent = periodLabel;
+    document.getElementById('latest-period').textContent = period || '—';
+    document.getElementById('updated-label').textContent = updatedLabel;
+    document.getElementById('updated').textContent = window.DashboardTime.format(updatedAt,'未记录');
+  };
+  const stockContext = () => window.setResearchContext({
+    period:state.views?.quarter?.at(-1)?.period,
+    updatedAt:state.updated_at
+  });
+  window.addEventListener('research-tab-changed', event => {
+    if (!['business','industry'].includes(event.detail?.tab)) stockContext();
+  });
+  stockContext();
   document.getElementById('indices-link').addEventListener('click', event => {
     event.currentTarget.href = '/indices?' + new URLSearchParams({stock:state.code || ''});
   });
@@ -620,9 +633,8 @@
   });
   function renderCachedStocks() { stockPicker.setStocks(state.cached_stocks || []); }
   renderCachedStocks();
-  if (state.updated_at) document.getElementById('updated').textContent = window.DashboardTime.format(state.updated_at);
   const periods = state.views?.quarter || [];
-  if (periods.length) document.getElementById('latest-period').textContent = periods.at(-1).period;
+  if (!['business','industry'].includes(document.querySelector('.research-tabs [aria-selected="true"]')?.id?.replace(/-tab$/,''))) stockContext();
   const warnings = document.getElementById('warnings');
   function renderWarnings() {
     warnings.replaceChildren();
@@ -1351,8 +1363,8 @@
       : '公告日期：已保存判断，检查时间未记录。';
     document.getElementById('announcement-status').textContent = announcementText;
     renderCurrentStock();
-    document.getElementById('updated').textContent = window.DashboardTime.format(state.updated_at);
-    document.getElementById('latest-period').textContent = state.views?.quarter?.at(-1)?.period || '—';
+    const selectedTab = document.querySelector('.research-tabs [aria-selected="true"]')?.id?.replace(/-tab$/,'');
+    if (!['business','industry'].includes(selectedTab)) stockContext();
     state.loading.dividends = Boolean(data.needs_dividends);
     window.dispatchEvent(new CustomEvent('financial-facts-updated', {detail:{code:state.code}}));
     renderCachedStocks();
@@ -1388,21 +1400,12 @@
     }
     if (typeof Plotly !== 'undefined') { render(); renderValuation(); renderChips('shareholders'); renderChips('financing'); }
   }
-  function collectionStatus(info) {
-    const node = document.getElementById('stock-collection-status');
-    const operation = info?.operation;
-    const checks = (info?.checks || []).map(row => row.checked_at).filter(Boolean).sort();
-    node.textContent = operation?.status === 'running' ? '采集中，可在后台维护查看进度或停止。'
-      : operation?.error ? operation.error + '；可手动刷新或在采集管理继续失败部分。'
-      : '本地数据 · 最近检查：' + (checks.at(-1) ? new Date(checks.at(-1)).toLocaleString() : '未记录');
-  }
   async function loadDashboard(force = false, full = false) {
     if (state.unfollowed) { renderFollowState(); return; }
     if (dashboardUpdating) return;
     const initial = !force && Boolean(state.collection?.needs_initial);
     const active = state.collection?.operation?.status === 'running';
     if (!force && !initial && !active) {
-      collectionStatus(state.collection);
       for (const section of Object.keys(sectionNames)) sectionStatus(section);
       return;
     }
@@ -1410,6 +1413,9 @@
     const requestCode = state.code;
     const refresh = document.getElementById('refresh');
     const fullRefresh = document.getElementById('full-audit');
+    const errorBox = document.getElementById('error');
+    errorBox.textContent = '';
+    errorBox.classList.add('hide');
     fullRefresh.disabled = true;
     refresh.setAttribute('aria-disabled', 'true');
     refresh.textContent = '更新中…';
@@ -1427,7 +1433,6 @@
         info = await response.json();
         if (!response.ok) throw Error(info.error || '读取状态失败');
         if (state.code !== requestCode) return;
-        collectionStatus(info);
         if (info.operation?.status === 'running') await new Promise(resolve => setTimeout(resolve, 3000));
       } while (info.operation?.status === 'running');
       state.collection = info;
@@ -1437,7 +1442,8 @@
       if (state.code !== requestCode) return;
       applyPriceBundle(bundle);
     } catch (error) {
-      document.getElementById('stock-collection-status').textContent = error.message;
+      errorBox.textContent = error.message;
+      errorBox.classList.remove('hide');
     } finally {
       dashboardUpdating = false;
       fullRefresh.disabled = false;

@@ -1,6 +1,6 @@
 (()=>{'use strict';
 const el=id=>document.getElementById(id), labels={pe_source:'来源披露 PE',pe_static:'静态 PE',pe_dynamic:'预测动态 PE',pe_ttm:'TTM PE',pe_rolling:'滚动 PE',pb:'PB',ps:'PS',ps_ttm:'TTM PS',dividend_yield:'股息率（%）'};
-const providers={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'中美国债收益率'}, states={running:'采集中',complete:'完成',failed:'失败',cancelled:'已停止',unknown:'未知',partial:'部分',empty:'空'};
+const providers={csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'中美国债收益率'};
 const seriesNames={'history.rolling':'历史滚动 PE',dashboard:'每日板块估值','indicator.total_shares':'近期估值（总股本）','indicator.calculation_shares':'近期估值（计算用股本）','analysis.daily':'行业估值日报','pe.ordinary':'PE（普通）','pe.equal':'PE（等权）','pe.median':'PE（中位数）','pb.ordinary':'PB（普通）','pb.equal':'PB（等权）','pb.median':'PB（中位数）'};
 const methods={source_disclosed:'来源披露口径，详细权重待核对',ordinary:'普通',equal:'等权',median:'中位数'},periods={source_disclosed:'来源披露，未另行推定',rolling:'滚动','static / rolling':'静态及滚动',pending:'待核对','LYR / TTM (source field labels)':'静态及TTM（按来源字段标识）'},shares={pending:'待核对',total_shares:'总股本',calculation_shares:'计算用股本'};
 let crowdingData=null;
@@ -8,7 +8,7 @@ const isSpread=()=>metricFamily==='equity_bond_spread';
 const isDailyMetric=()=>metricFamily==='crowding'||isSpread();
 function hasRollingPE(code){return data.coverage.some(row=>row.index_code===code&&row.provider==='csindex'&&row.series_key==='history.rolling'&&row.definition_version==='v1'&&row.frequency==='daily'&&row.pe_rolling_count>0);}
 let industryCrowdingRequest=0,industryCrowdingController,industryCrowdingData=null,industryCrowdingSortDate=null;
-let data,history=[],selectedSummary,views={},metricFamily='pe',timer,cooldownTimer,historyRevision=0,historyController,pointOverlay=false,pointData,pointCode,pointController,shownIndexCode;
+let data,history=[],selectedSummary,views={},metricFamily='pe',historyRevision=0,historyController,pointOverlay=false,pointData,pointCode,pointController,shownIndexCode;
 const indexSelectionKey='investment-index-selection-v1';
 let pendingIndexSelection=null;
 let pendingIndexNavigation=new URLSearchParams(location.search).get('index');
@@ -23,16 +23,6 @@ function renderMetricButtons(){const group=el('metric-tabs'),families=el('kind')
 function definitionFor(row){const entry=data.definitions.find(def=>def.provider===row.provider&&def.series_key===row.series_key&&def.definition_version===row.definition_version);return entry?JSON.parse(entry.definition_json):null;}
 function fieldFor(row){const fields=Object.values(definitionFor(row)?.fields||{});const candidates=metricFamily==='pe'?['pe_ttm','pe_rolling','pe_source']:[metricFamily];return candidates.find(field=>fields.includes(field))||null;}
 async function api(url,body){const response=await fetch(url,body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok)throw Error(result.error||'请求失败');return result;}
-function renderWorkProgress(operation,result){window.CollectionProgress.render({summary:el('progress-summary'),list:el('progress-sources')},operation,result);}
-function renderStatus(){const operation=data.operations[0],running=operation?.status==='running';
-let result={};try{if(operation)result=JSON.parse(operation.result_json)||{};}catch{result={};}
-el('progress').textContent=!operation?'尚未执行采集':operation.status==='running'?'指数与国债数据采集中':operation.status==='complete'?'采集已完成':operation.status==='cancelled'?'采集已停止，已完成分段保留':'采集未全部完成，请查看进度摘要';
-renderWorkProgress(operation,result);
-el('progress-toggle').textContent=el('progress-details').hidden?'查看进度':'收起进度';
-const activeCooldowns=data.cooldowns.filter(row=>Date.parse(row.cooldown_until)>Date.now());
-el('cooldowns').textContent=activeCooldowns.map(row=>`${providers[row.source_system]||row.source_system}：${row.reason}，冷却截止（北京时间）${window.DashboardTime.format(row.cooldown_until,'未记录')}`).join('；');
-clearTimeout(cooldownTimer);cooldownTimer=null;if(activeCooldowns.length&&!document.hidden){const nextExpiry=Math.min(...activeCooldowns.map(row=>Date.parse(row.cooldown_until)));cooldownTimer=setTimeout(()=>load(false),Math.min(2147483647,Math.max(0,nextExpiry-Date.now()+50)));}
-clearTimeout(timer);timer=null;if(running&&!document.hidden)timer=setTimeout(()=>load(false),5000);}
 const parentOf=row=>row.navigation_parent_index_code||row.parent_index_code;
 function renderParents(){options('parent',data.catalog.filter(row=>row.index_type==='industry'&&row.industry_level===1).map(row=>[row.index_code,row.name]),el('parent').value);}
 function updateSelectedIndex(selected){window.investmentNotes?.selectionChanged();if(selected){try{sessionStorage.setItem(indexSelectionKey,JSON.stringify({kind:selected.index_type,code:selected.index_code}));}catch{}}const jump=el('industry-companies'),industry=el('kind').value==='industry';jump.hidden=!industry;jump.disabled=!selected?.navigation_taxonomy_code;jump.title=jump.disabled?'当前行业尚未匹配申万行业分类':`查看${selected.name}的行业内公司`;const code=selected?.index_code;el('current-index-name').textContent=selected?.name||'暂无指数';el('current-index-code').textContent=code||'—';if(shownIndexCode===code)return;shownIndexCode=code;pointController?.abort();pointController=null;pointData=null;pointCode=null;el('point-overlay-note').hidden=!pointOverlay;if(pointOverlay&&code&&metricFamily!=='crowding')loadPointOverlay(code);}
@@ -214,13 +204,12 @@ function drawIndustryCrowding(){
   }));
 }
 
-async function load(refreshChoices=true){try{const status=await api('/api/indices/status');if(!refreshChoices&&data&&status.operations.some(operation=>operation.status==='running')){data.operations=status.operations;data.cooldowns=status.cooldowns;renderStatus();return;}const changed=!data||data.revision!==status.revision;if(refreshChoices||changed){const catalog=await api('/api/indices/catalog');if(!data||catalog.revision!==data.revision)clearChartCache();data={...catalog,...status,revision:catalog.revision};renderStatus();renderParents();renderCodes();}else{Object.assign(data,status);renderStatus();}}catch(error){el('progress').textContent=error.message;}}
-// Refresh versions when returning to a tab; status polling never reads all history.
-document.addEventListener('visibilitychange',()=>{clearTimeout(timer);timer=null;if(!document.hidden)load(false);});
+async function load(refreshChoices=true){try{const catalog=await api('/api/indices/catalog');if(refreshChoices||!data||catalog.revision!==data.revision){if(!data||catalog.revision!==data.revision)clearChartCache();data=catalog;renderParents();renderCodes();}el('catalog-error').hidden=true;el('catalog-error').textContent='';}catch(error){el('catalog-error').textContent=error.message;el('catalog-error').hidden=false;}}
+// Refresh the local catalog on return without reading collection operation status.
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)load(false);});
 window.addEventListener('focus',()=>load(false));
 document.addEventListener('index-collection-change',event=>{if(event.detail?.source!=='indices')load(false);});
 el('point-overlay').onclick=()=>{pointOverlay=!pointOverlay;if(metricFamily==='crowding'){draw();return;}el('point-overlay').setAttribute('aria-pressed',String(pointOverlay));if(pointOverlay&&(!pointData||pointCode!==el('code').value))loadPointOverlay(el('code').value);else draw();};
-el('progress-toggle').onclick=()=>{const details=el('progress-details'),expanded=details.hidden;details.hidden=!expanded;el('progress-toggle').setAttribute('aria-expanded',String(expanded));el('progress-toggle').textContent=expanded?'收起进度':'查看进度';};
 el('kind').onchange=renderCodes;el('parent').onchange=()=>{el('industry-second').value='';renderCodes();};el('industry-second').onchange=renderCodes;el('code').onchange=()=>{const selected=data.catalog.find(row=>row.index_code===el('code').value);renderMetricButtons();renderSeries(true);updateSelectedIndex(selected);};el('series').onchange=loadHistory;for(const id of ['range','benchmark','frequency'])el(id).onchange=draw;el('metric').onchange=draw;
 el('industry-crowding-level').onchange=loadIndustryCrowding;el('industry-crowding-range').onchange=loadIndustryCrowding;
 const stock=new URLSearchParams(location.search).get('stock');for(const link of document.querySelectorAll('[data-view]')){const params=new URLSearchParams({tab:link.dataset.view});if(stock&&/^(?:sh|sz|bj)?\d{6}$/i.test(stock))params.set('code',stock);link.href='/?'+params;}

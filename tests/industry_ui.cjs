@@ -1,5 +1,6 @@
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),assert=require('node:assert/strict');
-const context={window:{DashboardTime:require('../web/shared/datetime.js')},URLSearchParams};
+const windowListeners={};
+const context={window:{DashboardTime:require('../web/shared/datetime.js'),addEventListener(name,listener){windowListeners[name]=listener;}},URLSearchParams};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../web/features/industries/industry.js'),'utf8'),context);
 const display=context.window.industryMarketDisplay;
 assert.match(display([]).note,/尚无已发布市值汇总/);
@@ -52,19 +53,11 @@ context.window.confirm=()=>false;
 context.window.dispatchEvent=()=>{};
 context.window.initIndustry({code:'600000'});
 const panel=get('industry-panel').innerHTML;
-assert.match(panel,/id="sw-financial-progress-toggle" aria-expanded="false" aria-controls="sw-financial-progress"[^>]*>查看财务进度/);
-assert.match(panel,/id="sw-financial-progress" hidden/);
-for(const [buttonId,panelId,collapsed,expanded] of [['sw-financial-progress-toggle','sw-financial-progress','查看财务进度','收起财务进度'],['sw-snapshot-progress-toggle','sw-snapshot-progress','查看快照进度','收起快照进度']]){
-  const button=get(buttonId),details=get(panelId);
-  assert.equal(button.getAttribute('aria-expanded'),'false');
-  assert.equal(button.textContent,collapsed);
-  assert.equal(details.hidden,true);
-  button.listeners.click();
-  assert.equal(button.getAttribute('aria-expanded'),'true');
-  assert.equal(button.textContent,expanded);
-  assert.equal(details.hidden,false);
-  button.listeners.click();
-  assert.equal(button.getAttribute('aria-expanded'),'false');
-  assert.equal(details.hidden,true);
-}
-console.log('industry progress disclosure checks passed');
+let contextUpdate=null;
+context.window.setResearchContext=value=>{contextUpdate=value;};
+windowListeners['research-tab-changed']({detail:{tab:'industry'}});
+assert.equal(contextUpdate.periodLabel,'全市场报告期');
+assert.equal(contextUpdate.updatedLabel,'全市场数据更新');
+assert.doesNotMatch(panel,/sw-(?:financial|snapshot)-progress|sw-job-status|sw-updates|前往采集管理/);
+assert.doesNotMatch(fs.readFileSync(path.join(__dirname,'../web/features/industries/industry.js'),'utf8'),/api\/industry\/status|function poll\(/);
+console.log('industry collection progress module is absent from the read-only comparison page');

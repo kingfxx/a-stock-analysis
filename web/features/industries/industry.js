@@ -26,11 +26,6 @@
     const panel=el('industry-panel');
     panel.innerHTML=`<div class="sw-head"><div><h2>行业内对比</h2><p>按申万行业分类，查看营收、归母利润与市值趋势，对比同行公司表现和行业排行。</p></div></div>
       <p id="sw-status" class="sw-status" role="status" aria-live="polite"></p><p id="sw-path" class="sw-path"></p>
-      <p class="sw-alert" id="sw-scope">全市场行业更新独立于个股刷新；每次只处理所选报告期或季度，查看页面只读本地快照。</p>
-      <div class="sw-controls sw-updates"><a href="/?tab=maintenance">前往采集管理</a><button type="button" id="sw-financial-progress-toggle" aria-expanded="false" aria-controls="sw-financial-progress">查看财务进度</button><button type="button" id="sw-snapshot-progress-toggle" aria-expanded="false" aria-controls="sw-snapshot-progress">查看快照进度</button></div>
-      <div class="sw-progress-details" id="sw-financial-progress" hidden role="status" aria-live="polite"><p id="sw-financial-progress-text">尚无行业财务任务。</p><ul id="sw-financial-progress-list"></ul></div>
-      <div class="sw-progress-details" id="sw-snapshot-progress" hidden role="status" aria-live="polite"><p id="sw-snapshot-progress-text">尚无交易快照任务。</p></div>
-      <p id="sw-job-status" class="sw-status" role="status" aria-live="polite">财务仅更新指定报告期；交易快照保存季末未复权股价、股本、市值和估值。</p>
       <div class="sw-controls sw-industry-filters"><label>一级行业<select id="sw-first"><option value="">全部一级</option></select></label><label>二级行业<select id="sw-second"><option value="">全部二级</option></select></label><label>三级行业<select id="sw-third"><option value="">全部三级</option></select></label>
       <label>排行层级<select id="sw-level"><option value="1">一级</option><option value="2">二级</option><option value="3" selected>三级</option></select></label>
       <label>财务口径<select id="sw-mode"><option value="ttm">滚动十二个月 TTM</option><option value="quarter">单季度</option><option value="ytd">本年累计</option><option value="annual">全年</option></select></label>
@@ -56,7 +51,14 @@
     const active=panel.hidden===false;
     sidebarFilters.hidden=!active;
     shell.classList.toggle('industry-filters-active',active);
-    let data=null,seq=0,controller=null,loaded=false,selected='all',parent=null,period=null,pollTimer=null,periodStep='quarter';
+    let data=null,seq=0,controller=null,loaded=false,selected='all',parent=null,period=null,periodStep='quarter';
+    function showIndustryContext(){
+      window.setResearchContext?.({periodLabel:'全市场报告期',period:data?.period,
+        updatedLabel:'全市场数据更新',updatedAt:data?.obtained_at});
+    }
+    window.addEventListener('research-tab-changed',event=>{
+      if(event.detail?.tab==='industry')showIndustryContext();
+    });
     const selectionKey='investment-industry-selection-v1';
     el('sw-level').value='1';
     try{const saved=JSON.parse(sessionStorage.getItem(selectionKey));if(saved&&(saved.industry==='all'||/^\d{6}$/.test(saved.industry))&&/^[123]$/.test(saved.level)){selected=saved.industry;el('sw-level').value=saved.level;}}catch{}
@@ -106,51 +108,6 @@
       el('sw-company-total').textContent=`${(data.companies||[]).length} 家`;
       el('sw-company-count').textContent=`匹配 ${matchingCompanies.length} 家公司 · 本页 ${companies.length} 家 · ${companySort==='listing_date'?`上市日期${companyDirection===-1?'从晚到早':'从早到晚'}`:({weighted_roe:'ROE',pe:'PE (TTM)',pb:'PB'}[companySort]||companyFields.find(([key])=>key===companySort)[1])+(companyDirection===-1?'从高到低':'从低到高')}`;
     }
-    function renderProgress(status){
-      const progress=status?.result?.collection_progress;
-      const financial=status?.action==='financial_period';
-      const snapshot=status?.action==='cap_quarter';
-      const error=status?.error;
-      if(financial){
-        if(!progress?.interfaces){el('sw-financial-progress-text').textContent='该历史任务未记录总进度。'+(error?'任务未完成；失败原因：'+error:'');el('sw-financial-progress-list').replaceChildren();return;}
-        const phases={downloading:'正在下载并校验四个接口',validated:'四个接口均已通过完整性校验',publishing:'四表正在统一事务发布',aggregation:'数据已保存，正在汇总行业指标',complete:'四表比对完成，行业汇总已完成；仅保存新增、修订与补全，无变化复用原版本。以下条数按每张表的公司记录计。',failed:'任务未完成；已发布分段保留'};
-        el('sw-financial-progress-text').textContent=(phases[progress.phase]||'行业财务任务运行中')+(error?'。失败原因：'+error:'');
-        const labels={income:'利润表',balance:'资产负债表',cashflow:'现金流量表',performance:'业绩指标'};
-        const states={pending:'未开始',downloading:'下载中',cached:'使用同日缓存',validated:'已完成校验',validated_empty:'来源确认空数据',failed:'校验失败'};
-        const rows=Object.entries(progress.interfaces).map(([key,item])=>{
-          const pages=item.pages===null||item.pages===undefined?'总页数统计中':`第 ${item.page||0}/${item.pages} 页`;
-          const records=item.total===null||item.total===undefined?`已读 ${item.records||0} 条`:`已读 ${item.records||0}/${item.total} 条`;
-          const reused=item.cached_pages?` · 同日缓存 ${item.cached_pages} 页`:'';
-          const saved=status.result?.statements?.[key];
-          const completed=!status.running&&!error&&progress.phase==='complete';
-          const changes=completed?(saved&&['new','revised','enriched','unchanged'].every(field=>Number.isInteger(saved[field]))
-            ?` · 比对结果：新增 ${saved.new}、修订 ${saved.revised}、补全 ${saved.enriched}、无变化 ${saved.unchanged} 条`
-            :' · 数据变化数量未记录'):'';
-          return `${labels[key]||key}：${states[item.status]||'处理中'} · ${pages} · ${records}${reused}${changes}`;
-        });
-        el('sw-financial-progress-list').replaceChildren(...rows.map(value=>{const item=document.createElement('li');item.textContent=value;return item;}));
-      }else if(snapshot){
-        if(!progress?.kind){el('sw-snapshot-progress-text').textContent='该历史任务未记录总进度。'+(error?'任务未完成；失败原因：'+error:'');return;}
-        const phases={downloading:'正在下载并校验交易快照',publishing:'分页校验完成，正在保存快照',saved:'交易快照已保存，正在准备行业汇总',aggregation:'快照已保存，正在汇总行业指标',complete:'交易快照已保存并完成行业汇总',skipped:'该交易日已有完整快照，本次跳过',failed:'任务未完成；已发布分段保留'};
-        const pages=progress.pages===null||progress.pages===undefined?'总页数统计中':`第 ${progress.page||0}/${progress.pages} 页`;
-        const records=progress.total===null||progress.total===undefined?`已接收 ${progress.records||0} 条`:`已接收 ${progress.records||0}/${progress.total} 条`;
-        const phase=progress.collection_status==='skipped'&&progress.phase==='aggregation'?'快照已存在，本次跳过下载，正在汇总行业指标':phases[progress.phase]||'交易快照任务运行中';
-        el('sw-snapshot-progress-text').textContent=`${phase} · ${pages} · ${records}`+(error?'。失败原因：'+error:'');
-      }else{
-        el('sw-financial-progress-text').textContent='该历史任务未记录总进度。';el('sw-financial-progress-list').replaceChildren();
-        el('sw-snapshot-progress-text').textContent='该历史任务未记录总进度。';
-      }
-    }
-    function renderJobStatus(status){
-      if(status.message!=='尚未刷新')el('sw-job-status').textContent=status.message+(status.error?'：'+status.error:'');
-      renderProgress(status);
-    }
-    [['sw-financial-progress-toggle','sw-financial-progress'],['sw-snapshot-progress-toggle','sw-snapshot-progress']].forEach(([buttonId,panelId])=>{
-      el(buttonId).addEventListener('click',()=>{const button=el(buttonId),panel=el(panelId),expanded=button.getAttribute('aria-expanded')==='true';
-        button.setAttribute('aria-expanded',String(!expanded));
-        button.textContent=expanded?(buttonId==='sw-financial-progress-toggle'?'查看财务进度':'查看快照进度'):
-          (buttonId==='sw-financial-progress-toggle'?'收起财务进度':'收起快照进度');panel.hidden=expanded;});
-    });
     async function load(){
       if(selected!=='stock')saveIndustrySelection();
       const request=++seq;controller?.abort();controller=new AbortController();
@@ -164,18 +121,11 @@
         if(result.period&&!visible.includes(result.period)&&visible.length){period=visible.at(-1);return load();}
         data=result;loaded=true;companyPage=0;if(!data.empty&&data.selected){selected=data.selected.code;saveIndustrySelection();}render();
         if(locateCompanies&&!data.empty&&data.selected){locateCompanies=false;companyTab('companies');if(entry.has('industry')){for(const key of ['industry','level','industry_view'])entry.delete(key);window.history.replaceState(null,'','?'+entry);}requestAnimationFrame(()=>{el('sw-companies-tab').closest('.sw-company-toolbar').scrollIntoView({block:'start',behavior:'instant'});});}
-        const statusResponse=await fetch('/api/industry/status',{cache:'no-store'});
-        if(statusResponse.ok&&request===seq){
-          const status=await statusResponse.json();
-          renderJobStatus(status);
-          if(status.running&&!pollTimer)pollTimer=setTimeout(poll,1500);
-          if(!status.running){clearTimeout(pollTimer);pollTimer=null;}
-        }
       }catch(e){if(e.name!=='AbortError'&&request===seq)el('sw-status').textContent=e.message;}
     }
     function choices(id,items,value,label){el(id).innerHTML=`<option value="">全部${label}</option>`+items.map(r=>`<option value="${esc(r.code)}">${esc(r.name)} · ${esc(r.code)}</option>`).join('');el(id).value=value||'';}
     function render(){
-      el('sw-scope').textContent='财务更新一次采集所选报告期的全 A 股（含北交所）三表摘要及业绩指标全部字段；行业展示仍使用已导入沪深公司及申万分类名单。三表摘要不等于完整财报明细。季度交易快照按固定季末交易日采集全部字段，已完成分段跳过；采集与修订核对统一在后台维护的采集管理执行。任务独立于个股刷新，查看页面不采集。';
+      showIndustryContext();
       el('sw-notes').innerHTML=data.notes.map(n=>`<p>${esc(n)}</p>`).join('')+`<p>官方来源：<a href="https://www.swsresearch.com/swindex/pdf/SwClass2021/SwClassCode_2021.xls" target="_blank" rel="noopener">申万行业分类</a> · <a href="https://www.swsresearch.com/swindex/pdf/SwClass2021/StockClassifyUse_stock.xls" target="_blank" rel="noopener">股票分类及变更</a>；营收、利润与毛利率计算字段：东方财富 RPT_DMSK_FN_INCOME；加权 ROE：RPT_LICO_FN_CPD；总市值：东方财富全字段交易快照优先（元），缺失时读取同日旧来源。</p>`;
       [1,2,3].forEach(level=>el(`sw-rank-level-${level}`).setAttribute('aria-pressed',String(level===data.level)));
       if(data.empty){el('sw-status').textContent='尚未初始化行业分类及历史，请先导入试运行来源。';return;}
@@ -343,12 +293,6 @@
     el('sw-company-search').addEventListener('input',()=>{companyPage=0;if(data)renderCompanies();});
     for(const [id,step] of [['sw-company-prev',-1],['sw-company-next',1]])el(id).addEventListener('click',()=>{companyPage+=step;renderCompanies();el('sw-companies').scrollTop=0;});
     el('sw-companies').addEventListener('click',e=>{const button=e.target.closest('[data-company-sort]');if(!button)return;companyDirection=button.dataset.companySort===companySort?-companyDirection:-1;companySort=button.dataset.companySort;companyPage=0;renderCompanies();});
-    async function poll(){
-      try{const response=await fetch('/api/industry/status',{cache:'no-store'});const status=await response.json();if(!response.ok)throw new Error(status.error||'读取刷新状态失败');
-        renderJobStatus(status);
-        if(status.running)pollTimer=setTimeout(poll,1500);else if(!status.error)await load();
-      }catch(e){el('sw-job-status').textContent=e.message;}
-    }
     el('industry-tab').addEventListener('click',()=>{if(!loaded)load();else window.dispatchEvent(new Event('resize'));});
     if(!panel.hidden)load();
   };

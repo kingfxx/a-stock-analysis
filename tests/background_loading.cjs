@@ -9,10 +9,10 @@ const tick = () => new Promise(resolve=>setImmediate(resolve));
 function setup(extra={}) {
   const pending=[], elements=new Map(), events=[];
   const context={state:{code:'601600',name:'中国铝业',views:{quarter:[{profit:10}]},valuation:{views:{}},loading:{financial:true},warnings:[],...extra},
-    document:{getElementById(id){if(!elements.has(id))elements.set(id,{textContent:'手动刷新',listeners:{},setAttribute(){},addEventListener(k,f){this.listeners[k]=f;}});return elements.get(id);}},
+    document:{getElementById(id){if(!elements.has(id))elements.set(id,{textContent:'手动刷新',listeners:{},classList:{add(){},remove(){}},setAttribute(){},addEventListener(k,f){this.listeners[k]=f;}});return elements.get(id);},querySelector(){return null;}},
     window:{DashboardTime:require('../web/shared/datetime.js'),dispatchEvent(event){if(event.type==='dashboard-data-state')events.push(event.detail.updating);}},
     CustomEvent:class{constructor(type,init){this.type=type;this.detail=init.detail;}},
-    render(){},renderValuation(){},renderChips(){},renderCurrentStock(){},renderCachedStocks(){},renderWarnings(){},renderFollowState(){},
+    render(){},renderValuation(){},renderChips(){},renderCurrentStock(){},renderCachedStocks(){},renderWarnings(){},renderFollowState(){},stockContext(){},
     confirm:()=>false,fetch:(url,options={})=>new Promise(resolve=>pending.push({url,options,resolve}))};
   vm.createContext(context);vm.runInContext(source,context);
   function respond(data,ok=true){const request=pending.shift();assert.ok(request);request.resolve({ok,json:async()=>data});return request;}
@@ -34,12 +34,12 @@ function setup(extra={}) {
   assert.equal(f.context.state.financing.price_version,2);assert.deepEqual(f.events,[true,false]);
   f=setup();work=f.context.loadDashboard(true);assert.equal(JSON.parse(f.pending[0].options.body).params.mode,'incremental');
   f.respond({error:'source unavailable'},false);await work;
-  assert.equal(f.context.state.views.quarter[0].profit,10);assert.match(f.elements.get('stock-collection-status').textContent,/source unavailable/);
+  assert.equal(f.context.state.views.quarter[0].profit,10);assert.match(f.elements.get('error').textContent,/source unavailable/);
   const full=f.elements.get('full-audit');full.listeners.click();assert.equal(f.pending.length,0);
   f.context.confirm=message=>{assert.match(message,/仅刷新当前股票/);return true;};
   work=full.listeners.click();assert.equal(JSON.parse(f.pending[0].options.body).params.mode,'full');
   f.respond({status:'running'});await tick();f.respond({operation:{status:'failed',error:'partial failure'}});await tick();
-  f.respond(bundle);await work;assert.match(f.elements.get('stock-collection-status').textContent,/partial failure/);
+  f.respond(bundle);await work;assert.equal(f.elements.has('stock-collection-status'),false);
   assert.equal(full.disabled,false);
   f=setup({collection:{operation:{status:'running'}}});work=f.context.loadDashboard();
   assert.equal(f.pending[0].options.method,undefined);

@@ -394,7 +394,7 @@ def test_current_taxonomy_mapping_is_unique_and_does_not_change_history(db):
         assert conn.execute("SELECT parent_index_code FROM index_catalog WHERE index_code='sw:801011'").fetchone()[0] is None
 
 
-def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state(index_server):
+def test_browser_index_page_omits_collection_progress_and_refreshes_catalog(index_server):
     playwright=pytest.importorskip('playwright.sync_api')
     from stock_analysis.collection.collection import encoded
     from stock_analysis.domains.indices.index_collection import start_operation
@@ -416,14 +416,7 @@ def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state
             page.mouse.move(box['x']+box['width']*.7,box['y']+box['height']*.8,steps=8);page.mouse.up()
             zoom=page.locator('#chart').evaluate('n=>[n._fullLayout.xaxis.range,n._fullLayout.yaxis.range]')
             page.locator('#chart').evaluate("n=>n.on('plotly_afterplot',()=>window.valuationRedraws=(window.valuationRedraws||0)+1)")
-            toggle=page.locator('#progress-toggle');details=page.locator('#progress-details')
-            assert toggle.inner_text()=='查看进度'
-            assert toggle.get_attribute('aria-expanded')=='false' and details.is_hidden()
-            toggle.click()
-            assert toggle.inner_text()=='收起进度'
-            assert toggle.get_attribute('aria-expanded')=='true' and not details.is_hidden()
-            assert '该历史任务未记录总进度' in page.locator('#progress-summary').inner_text()
-            assert 'ValueError' not in page.locator('#progress-details').inner_text()
+            assert page.locator('#progress-toggle, #progress-details, #cooldowns').count()==0
             with db.connection(write=True) as conn:
                 conn.execute("UPDATE index_read_revisions SET revision=revision+1 WHERE scope='indices'")
                 conn.execute('UPDATE collection_operations SET status=?,error=NULL,result_json=? WHERE operation_id=?',
@@ -431,15 +424,8 @@ def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state
                         'cancelled':0,'pending':1,'running':1,'providers':{'csindex':{'total':4,'success':1,'skipped':1,
                             'failed':0,'cancelled':0,'pending':1,'running':1,'current':'中证指数历史 000300'}}}}),operation))
             page.evaluate("window.dispatchEvent(new Event('focus'))")
-            page.wait_for_function("document.getElementById('progress-summary').textContent.includes('已采集成功 1 项')")
-            assert not details.is_hidden() and toggle.get_attribute('aria-expanded')=='true'
-            assert '中证指数' in page.locator('#progress-sources').inner_text()
+            page.wait_for_function("document.getElementById('catalog-error').hidden")
             assert page.evaluate('window.valuationRedraws||0')==0
-            toggle.click()
-            page.evaluate("window.dispatchEvent(new Event('focus'))")
-            page.wait_for_timeout(200)
-            assert details.is_hidden() and toggle.get_attribute('aria-expanded')=='false'
-            assert 'cancelled' not in page.locator('#progress').inner_text().lower()
             with db.connection(write=True) as conn:
                 conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?",(operation,))
             page.evaluate("window.dispatchEvent(new Event('focus'))")

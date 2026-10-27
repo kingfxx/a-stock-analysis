@@ -81,6 +81,12 @@
     const title=key=>el(`bs-${key}-title`);
     const note=key=>el(`bs-${key}-note`);
     const dateLabel=date=>date.slice(0,4)+(frequencies[date.slice(5)]||' '+date.slice(5));
+    function showBusinessContext(){
+      const frequency=el('bs-frequency').value;
+      const latest=(rawData?.periods||[]).filter(row=>!frequency||row.report_date.endsWith(frequency)).sort((a,b)=>a.report_date.localeCompare(b.report_date)).at(-1);
+      window.setResearchContext?.({periodLabel:'主营构成报告期',period:latest?.report_date,
+        updatedLabel:'主营构成更新',updatedAt:rawData?.sync?.succeeded_at||latest?.obtained_at});
+    }
     const colorMap=dimension=>new Map(catalog(data.periods,dimension).map((r,i)=>[r.item_key,colors[i%colors.length]]));
     function plot(id,traces,unit,mode='relative') {
       const target=el(id);
@@ -130,6 +136,7 @@
     }
     function render(reset=false) {
       if(!data || !active())return;
+      showBusinessContext();
       const dimension=el('bs-dimension').value,field=el('bs-field').value;
       const periods=periodsFor(data.periods,el('bs-frequency').value,el('bs-range').value);
       const actual=periods.filter(p=>!p.missing),latest=actual.at(-1);
@@ -204,7 +211,7 @@
     ['bs-dimension','bs-frequency','bs-range'].forEach(id=>el(id).addEventListener('change',()=>render(true)));
     ['bs-field','bs-unit','bs-region-mode'].forEach(id=>el(id).addEventListener('change',()=>render()));
     el('bs-reload').addEventListener('click',load);
-    window.addEventListener('research-tab-changed',event=>{const selectedTab=event.detail.tab;sidebarFilters.hidden=selectedTab!=='business';el('trend-tab').closest('.shell').classList.toggle('business-filters-active',selectedTab==='business');if(selectedTab==='business'){if(dirty)load();else render();}});
+    window.addEventListener('research-tab-changed',event=>{const selectedTab=event.detail.tab;sidebarFilters.hidden=selectedTab!=='business';el('trend-tab').closest('.shell').classList.toggle('business-filters-active',selectedTab==='business');if(selectedTab==='business'){showBusinessContext();if(dirty)load();else render();}});
     ['financial-facts-updated','dashboard-data-state'].forEach(name=>window.addEventListener(name,event=>{if(event.detail.code===state.code&&!event.detail.updating){dirty=true;if(active())load();}}));
     if(active())load();
   };
