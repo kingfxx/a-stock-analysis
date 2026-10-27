@@ -656,13 +656,14 @@ def test_stock_progress_shows_per_stock_counts_and_request_causes(live):
             page.evaluate("""() => {
               const summary=document.createElement('p'),list=document.createElement('ul');
               summary.id='group-test-summary';list.id='group-test-list';document.body.append(summary,list);
-              CollectionProgress.render({summary,list},{status:'complete'},{
+              CollectionProgress.render({summary,list},{status:'complete',started_at:'2026-10-27T09:35:02.000Z',finished_at:'2026-10-27T09:37:24.000Z'},{
                 work_progress:{total:2,success:1,failed:1},network_requests:1,
                 request_reasons:[{provider:'eastmoney',reason:'incremental',requests:1}],
                 stock_results:[{code:'601919',dataset:'shareholders',status:'complete',data_counts:[{published:1,inserted:1,revised:0}]},
                   {code:'600519',dataset:'shareholders',status:'failed',error:'某股数据无效',data_counts:[{}]}]});
             }""")
             expect(page.locator('#group-test-summary')).to_contain_text('HTTP请求 1 次')
+            expect(page.locator('#group-test-summary')).to_contain_text('本次总耗时：2分22秒')
             details=page.locator('#group-test-list details');details.locator('summary').click()
             expect(details).to_contain_text('601919');expect(details).to_contain_text('写入1')
             expect(details).to_contain_text('600519');expect(details).to_contain_text('写入未记录')

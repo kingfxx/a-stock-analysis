@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+from threading import Event
 
 import pytest
 
@@ -70,7 +71,7 @@ def test_schema_is_idempotent_preserves_text_codes_and_closes_connections(db):
     assert db.ensure_instrument("sz000001") == first
     with db.connection() as conn:
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 30000
         assert conn.execute("SELECT code, name FROM instruments").fetchone()[:] == ("000001", "平安银行")
         assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == len(storage.MIGRATIONS)
         with pytest.raises(sqlite3.OperationalError, match="readonly"):
@@ -80,6 +81,32 @@ def test_schema_is_idempotent_preserves_text_codes_and_closes_connections(db):
     assert db.check()["integrity"] == "ok"
     with pytest.raises(ValueError):
         db.ensure_instrument("sh000001")
+
+
+def test_write_transactions_are_serialized_per_database_path(db):
+    first_entered, release_first, second_entered = Event(), Event(), Event()
+
+    def first_writer():
+        with db.connection(write=True) as conn:
+            conn.execute("INSERT INTO collection_rate_limits VALUES('test','first','{}','2026-10-27')")
+            first_entered.set()
+            assert release_first.wait(3)
+
+    def second_writer():
+        with db.connection(write=True) as conn:
+            second_entered.set()
+            conn.execute("INSERT INTO collection_rate_limits VALUES('test','second','{}','2026-10-27')")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(first_writer)
+        assert first_entered.wait(2)
+        second = pool.submit(second_writer)
+        assert not second_entered.wait(.1)
+        release_first.set()
+        first.result(timeout=3)
+        second.result(timeout=3)
+    with db.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM collection_rate_limits WHERE task_key='test'").fetchone()[0] == 2
 
 
 def test_unrelated_future_or_modified_migration_database_is_rejected(tmp_path, db):

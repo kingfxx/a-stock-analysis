@@ -14,16 +14,19 @@ import os
 import sqlite3
 import tempfile
 from uuid import uuid4
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock, RLock
 from typing import Callable, Iterator
 
 from stock_analysis.domains.financials.financial_storage import compress_json, financial_row, migrate_financial_json, check_financial_json
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "stock_analysis.sqlite3"
 APPLICATION_ID = 0x4153544B  # ASTK; refuse an unrelated SQLite file.
+_WRITE_LOCKS_GUARD = Lock()
+_WRITE_LOCKS: dict[str, RLock] = {}
 MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_facts.sql"),
               (4, "004_financing_compact.sql"), (5, "005_stock_library.sql"), (6, "006_stock_member_order.sql"),
               (7, "007_ai_assessments.sql"), (8, "008_checklists.sql"), (9, "009_sw_industries.sql"),
@@ -61,6 +64,12 @@ class StorageError(RuntimeError):
 
 class StaleSyncError(StorageError):
     """Another run committed after this run read its base revision."""
+
+
+def _database_write_lock(path: Path) -> RLock:
+    key = str(path.resolve())
+    with _WRITE_LOCKS_GUARD:
+        return _WRITE_LOCKS.setdefault(key, RLock())
 
 
 def utc_now() -> str:
@@ -164,7 +173,7 @@ class SyncResult:
 
 
 class Database:
-    def __init__(self, path: Path | str = DEFAULT_DATABASE, *, journal_mode="auto", busy_timeout_ms=5000):
+    def __init__(self, path: Path | str = DEFAULT_DATABASE, *, journal_mode="auto", busy_timeout_ms=30000):
         self.path = Path(path).resolve()
         self.journal_mode = choose_journal_mode(journal_mode, sqlite3.sqlite_version_info)
         if type(busy_timeout_ms) is not int or busy_timeout_ms <= 0:
@@ -269,21 +278,23 @@ class Database:
     @contextmanager
     def connection(self, *, write=False):
         """One snapshot per read; one short serialized transaction per write."""
-        conn = self._open("rw" if write else "ro")
-        try:
-            self._validate_schema(conn)
-            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-            if mode == "wal" and not wal_is_supported(sqlite3.sqlite_version_info):
-                raise StorageError("Unsafe WAL runtime; initialize using delete before accessing data")
-            conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+        lock_context = _database_write_lock(self.path) if write else nullcontext()
+        with lock_context:
+            conn = self._open("rw" if write else "ro")
             try:
-                yield conn
-                conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
-        finally:
-            conn.close()
+                self._validate_schema(conn)
+                mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+                if mode == "wal" and not wal_is_supported(sqlite3.sqlite_version_info):
+                    raise StorageError("Unsafe WAL runtime; initialize using delete before accessing data")
+                conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+                try:
+                    yield conn
+                    conn.commit()
+                except BaseException:
+                    conn.rollback()
+                    raise
+            finally:
+                conn.close()
 
     @contextmanager
     def shared_reader(self):

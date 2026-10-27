@@ -53,7 +53,7 @@ def describe(conn, key, providers):
                              (key, provider)).fetchone()
         default = fields(PacingPolicy())
         fast = fields(current)
-        if key in ('market_congestion', 'sovereign_yields'):
+        if key in ('stocks', 'market_congestion', 'sovereign_yields'):
             fast.update(interval=2, jitter=3, window_requests=30, rest_min=10, rest_max=10)
         result.append(dict(provider=provider, current=json.loads(saved['settings_json']) if saved else fields(current),
                            default=default, faster=fast, max_concurrency=concurrency_cap(key, provider),

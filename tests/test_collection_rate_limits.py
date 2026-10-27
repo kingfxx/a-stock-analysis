@@ -133,3 +133,11 @@ def test_configuration_inventory_and_real_timestamp(management):
         assert json.loads(row['settings_json'])['interval']==1.23456789
         assert table_time(conn,'collection_rate_limits',row.keys())[0]==saved['updated_at']
         assert not conn.execute('PRAGMA foreign_key_check').fetchone()
+
+
+def test_stock_faster_template_is_distinct_from_default(management):
+    with management.db.connection() as conn:
+        rate = describe(conn, 'stocks', ['sina'])[0]
+    assert rate['faster'] == dict(rate['default'], interval=2, jitter=3,
+                                 window_requests=30, rest_min=10, rest_max=10)
+    assert rate['faster'] != rate['default']

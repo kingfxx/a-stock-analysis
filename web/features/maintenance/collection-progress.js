@@ -44,6 +44,13 @@ function renderStocks(list,result){
  }).join('；');details.append(p);}
  li.append(details);list.append(li);
 }
+function renderElapsed(summary,operation){
+ const start=Date.parse(operation.started_at||''),end=Date.parse(operation.finished_at||'');
+ if(!Number.isFinite(start))return;
+ const seconds=Math.max(0,((Number.isFinite(end)?end:Date.now())-start)/1000),whole=Math.floor(seconds),hours=Math.floor(whole/3600),minutes=Math.floor((whole%3600)/60),remainder=whole%60;
+ const value=hours?`${hours}小时${minutes}分${remainder}秒`:minutes?`${minutes}分${remainder}秒`:`${remainder}秒`;
+ summary.textContent+=` ${Number.isFinite(end)?'本次总耗时':'已运行'}：${value}。`;
+}
 function render({summary,list},operation,result={}){const work=result.work_progress;list.replaceChildren();
 if(!operation){summary.textContent='尚未执行采集。';return;}
 if(!work||!Number.isInteger(work.total)){
@@ -53,7 +60,7 @@ if(!work||!Number.isInteger(work.total)){
  else if(progress){const item=document.createElement('li');item.textContent=`阶段：${progress.phase||'未记录'} · 页 ${progress.page??'未记录'}/${progress.pages??'未记录'} · 数据 ${progress.records??'未记录'}/${progress.total??'未记录'} 行`;list.append(item);}
  if(operation.status==='failed')summary.textContent+=' 任务未完成；已发布分段保留，详细诊断见运行记录。';
  else if(operation.status==='cancelled')summary.textContent+=' 已停止；已完成分段保留。';
- renderDataCounts(summary,list,result);renderStocks(list,result);return;
+ renderDataCounts(summary,list,result);renderStocks(list,result);renderElapsed(summary,operation);return;
 }
 const processed=(work.success||0)+(work.skipped||0)+(work.failed||0)+(work.cancelled||0),total=work.total;
 if(total===0)summary.textContent=work.phase==='planning'?'正在统计本轮采集任务…':'本轮没有需要采集的任务（0/0）。';
@@ -71,7 +78,7 @@ const recordedProviders=errorInfo&&typeof errorInfo==='object'?Object.keys(error
 const sources=[...new Set([...failedProviders,...recordedProviders])];
 summary.textContent+=sources.length?` 错误摘要：${sources.join('、')}来源有任务失败；详细诊断已保存在任务记录中。`:' 错误摘要：采集未能完成，详细诊断已保存在任务记录中。';}
 else if(operation.status==='cancelled')summary.textContent+=' 已停止；已完成分段保留。';
-renderDataCounts(summary,list,result);renderStocks(list,result);
+renderDataCounts(summary,list,result);renderStocks(list,result);renderElapsed(summary,operation);
 }
 window.CollectionProgress={render};
 })();
