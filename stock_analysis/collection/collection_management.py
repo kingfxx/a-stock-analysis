@@ -182,6 +182,10 @@ class CollectionManagement:
 
     def configure(self, key, command):
         spec=task(key)
+        if isinstance(command, dict) and command.get('action') == 'toggle':
+            from stock_analysis.collection.schedule_overview import toggle
+            with self.db.connection(write=True) as conn:
+                return toggle(conn, key, command)
         if key=='stocks':
             from stock_analysis.domains.stocks.collection_schedules import configure
             return configure(self.db,command)
@@ -333,6 +337,8 @@ class CollectionManagement:
                     history=rows, batches=batches, cooldowns=cooling, slots=slots,
                     coverage=coverage,
                     coverage_note='仅最近运行的分段诊断；全历史及逐字段覆盖未知'))
+            from stock_analysis.collection.schedule_overview import attach_history
+            attach_history(conn, items, RESULT_SUMMARY)
         return dict(tasks=items, generated_at=utc_now())
 
     def detail(self, key, ref, before_batch_id=None):

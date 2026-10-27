@@ -190,3 +190,17 @@
 - 原8765进程40168经API和只读SQLite确认采集、同步及模型均空闲后重启，当前PID38820保持后台运行；结构版本44，无迁移及中断任务。当前日志financial-season-server-20261027.out.log/err.log。
 - 原库只读页面验收8处均有财报季；个股／指数显示默认30/7，移动端宽度无溢出，页面错误0、storage读取0。所有业务写请求拦截，验收前后schedule配置、运行历史、batch/source水位和provider预算／冷却完全一致，未为验收保存或启用规则、未发起采集。
 - 验收报告data/verification/reports/financial_season_20261027.json；复测工具data/verification/tools/verify_financial_season.py（--stage before/after）。保留相关测试日志、验收报告及当前后台日志，清理本轮隔离测试目录和预览截图。
+
+
+## 2026-10-27 计划概览实施中
+
+已确认sample；前一轮全部修改提交83e6dc1后实施。已读取本目录三个计划文件及架构/采集/存储规则。新增概览本地查询、启停动作、两个子Tab及共享表单/公用进度接入；未增加表、来源请求或调度器。正在做隔离回归及实际页面验收。
+
+- 已完成计划概览及原有完整日程表单内联编辑；日程启停只更新开关/更新时间，首次/手动记录不进入概览。运行按独立规则引用取最近5槽位，含运行中；点击一次运行复用原CollectionProgress，自动轮询保留展开项及输入。
+- 首轮相关后端/页面/HTTP边界回归110 passed、2 failed；失败分别为旧测试全局Tab数量断言及新增静态资源未登记。修复后受影响页面/HTTP回归29 passed，概览含新增个股编辑/窄屏回归4 passed；不将重叠用例相加。Python编译及git diff --check通过。
+- 原8765 PID38820经API及只读原库确认采集/同步/模型均空闲后安全重启，当前PID5912保持后台运行；schema44，无迁移、恢复中断任务0。
+- 原库只读验收7条计划、两级Tab/内联编辑/键盘/390px布局及真实计划历史公共进度均通过；页面错误0、storage读取0。所有API写拦截，验收前后schedule/operation/source/batch及provider预算冷却一致，未为验收保存或启用计划、未启动采集。
+- 验收报告data/verification/reports/schedule_overview_20261027.json，常用工具verify_schedule_overview.py/restart_schedule_overview_server.ps1；当前日志schedule-overview-server-20261027.out.log/err.log。清理本轮隔离测试目录及预览截图，保留报告/工具/当前后台日志。
+
+- 2026-10-27刷新按钮调整：采集管理外层不显示刷新按钮；计划概览表头筛选左侧提供小号「刷新」，仍只读取本地状态。数据库预览保留原「刷新本地统计」。纯前端改动，无需重启后台。
+- 刷新按钮调整验收：采集管理/计划概览页面回归20 passed；原8765只读验证表头按钮、外层隐藏、点击仅GET、390px布局及无页面错误通过。无需重启；报告data/verification/reports/overview_refresh_button_20261027.json。

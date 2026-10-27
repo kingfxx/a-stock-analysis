@@ -127,10 +127,8 @@ def tick(service, now, stopped):
             conn.execute('UPDATE collection_schedule_slots SET status=?,finished_at=?,updated_at=?,error=? WHERE schedule_id=? AND slot_key=?', (status, utc_now(), utc_now(), result['error'], key, slot))
 
 
-def task_summary(service, conn):
-    from stock_analysis.collection.collection_rate_limits import describe
+def decorate_runs(conn, rows):
     from stock_analysis.collection.collection_progress import attach_data_counts
-    rows = [dict(r) for r in conn.execute("SELECT operation_id AS operation_ref,mode,status,trigger_type,started_at,finished_at,error FROM collection_operations WHERE task_key='stocks' ORDER BY started_at DESC LIMIT 20")]
     for row in rows:
         works=work_summary(conn,row['operation_ref'])
         counts={state:sum(w['status']==state for w in works) for state in ('pending','running','complete','failed','cancelled','reused')}
@@ -140,6 +138,12 @@ def task_summary(service, conn):
         attach_data_counts(conn,[row],PROVIDERS)
         from stock_analysis.collection.collection_progress import merge
         row['result']['provider_counts']=merge([{**entry,'label':'合计'} for entry in row['result']['data_counts']])
+
+
+def task_summary(service, conn):
+    from stock_analysis.collection.collection_rate_limits import describe
+    rows = [dict(r) for r in conn.execute("SELECT operation_id AS operation_ref,mode,status,trigger_type,started_at,finished_at,error FROM collection_operations WHERE task_key='stocks' ORDER BY started_at DESC LIMIT 20")]
+    decorate_runs(conn, rows)
     latest = rows[0]['operation_ref'] if rows else None
     batches = [dict(r) for r in conn.execute("SELECT id,dataset,source_system,status,coverage_status,scope_start,scope_end,started_at,finished_at,error FROM collection_batches WHERE operation_id=? ORDER BY id DESC LIMIT 100", (latest,))] if latest else []
     obtained = conn.execute("SELECT max(s.obtained_at) FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE b.operation_id=?", (latest,)).fetchone()[0] if latest else None

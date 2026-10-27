@@ -16,6 +16,7 @@
 | `domains/stocks/collection_schedules.py` | 分组规则/公共槽位适配、固定范围及管理页摘要；由唯一公共Scheduler调用 |
 | `collection/collection_schedule.py` | 纯北京时间日历计算，包含日检查日期与财报季截止日前后窗口；不请求或读写数据库 |
 | `collection/schedules.py` | 各模块多日程身份、合并配置及软删除；执行槽位仍由唯一Scheduler管理 |
+| `collection/schedule_overview.py` | 按独立规则只读关联最近5次计划运行，复用公共计数；日程启停校验及开关更新，不执行采集 |
 | `collection/schema_upgrade.py` | v44控制元数据事务迁移、历史诊断归属及旧表退役，不联网 |
 | `domains/stocks/collection_plan.py` | 个股真实来源分段规划与失败恢复选择，不创建独立item层 |
 | `collection/execution_context.py` | 组合采集执行中的父任务元数据与取消回调，作用域退出自动恢复 |

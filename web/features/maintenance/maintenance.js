@@ -7,9 +7,9 @@
   const date=value=>window.DashboardTime.format(value,'未记录');
   window.initMaintenance=()=>{
     const panel=document.getElementById('maintenance-panel');
-    panel.innerHTML=`<div class="maintenance-head"><div><h2>后台维护</h2><p>本地数据与股票维护</p></div><button id="maintenance-refresh" type="button">刷新采集列表</button></div>
+    panel.innerHTML=`<div class="maintenance-head"><div><h2>后台维护</h2><p>本地数据与股票维护</p></div><button id="maintenance-refresh" type="button" hidden>刷新本地统计</button></div>
       <div class="maintenance-tabs" role="tablist" aria-label="后台维护分类"><button id="maintenance-collection-tab" type="button" role="tab" aria-selected="true" aria-controls="maintenance-collection-panel">采集管理</button><button id="maintenance-database-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-database-panel" tabindex="-1">数据库预览</button><button id="maintenance-stocks-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-stocks-panel" tabindex="-1">未关注股票管理</button></div>
-      <section id="maintenance-collection-panel" role="tabpanel" aria-labelledby="maintenance-collection-tab"><p id="maintenance-collection-status" role="status" aria-live="polite">切换到此页后读取本地采集状态。</p><div id="maintenance-collection-list"></div></section>
+      <section id="maintenance-collection-panel" role="tabpanel" aria-labelledby="maintenance-collection-tab"><p id="maintenance-collection-status" role="status" aria-live="polite">切换到此页后读取本地采集状态。</p><div class="collection-view-tabs" role="tablist" aria-label="采集管理视图"><button id="collection-settings-tab" type="button" role="tab" aria-selected="true" aria-controls="collection-settings-panel">个体设定 / 运行</button><button id="collection-overview-tab" type="button" role="tab" aria-selected="false" aria-controls="collection-overview-panel" tabindex="-1">计划概览</button></div><div id="collection-settings-panel" role="tabpanel" aria-labelledby="collection-settings-tab"><div id="maintenance-collection-list"></div></div><div id="collection-overview-panel" role="tabpanel" aria-labelledby="collection-overview-tab" hidden></div></section>
       <section id="maintenance-stocks-panel" role="tabpanel" aria-labelledby="maintenance-stocks-tab" hidden>
       <section class="panel maintenance-unfollowed"><div class="maintenance-controls"><h3>已取消关注 <span id="maintenance-unfollowed-count"></span></h3><button id="maintenance-unfollowed-refresh" type="button">刷新列表</button></div>
         <p>取消关注后保留财务数据、财报原件与研究历史，停止个股自动更新。恢复关注会重新加入“全部股票”和仍然存在的原分组；已删除的分组不会重建。</p>
@@ -212,6 +212,20 @@
     panel.querySelector('thead').addEventListener('click',event=>{const button=event.target.closest('[data-maintenance-sort]');if(!button)return;const key=button.dataset.maintenanceSort;direction=key===sort?-direction:(['rows','table_bytes','index_bytes','total_bytes','updated_at'].includes(key)?-1:1);sort=key;renderRows();});
     let collectionBusy=false,collectionTimer=null,collectionTasks=[];
     const operationDetails=new Map();
+    const overview=window.initCollectionOverview({root:el('collection-overview-panel'),post:collectionPost,reload:loadCollections,makeEditor(task,rule){
+      const source=el('maintenance-collection-list').querySelector(`[data-task="${task.task_key}"] [data-task-schedule]`).closest('details');
+      const card=document.createElement('div');card.dataset.task=task.task_key;card.className='collection-task';
+      const details=source.cloneNode(true);details.open=true;card.append(details);
+      for(const node of card.querySelectorAll('[id]')){const previous=node.id;node.id='overview-'+previous;for(const label of card.querySelectorAll('[aria-controls]'))if(label.getAttribute('aria-controls')===previous)label.setAttribute('aria-controls',node.id);}
+      if(task.task_key==='stocks')editStockRule(card,rule.schedule_id);else editPublicRule(card,rule.schedule_id);
+      return card;
+    }});
+    const collectionTabs=[el('collection-settings-tab'),el('collection-overview-tab')];
+    collectionTabs.forEach((tab,index)=>{
+      tab.addEventListener('click',()=>{collectionTabs.forEach(item=>{const active=item===tab;item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;el(item.getAttribute('aria-controls')).hidden=!active;});});
+      tab.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?1:1-index;collectionTabs[next].focus();collectionTabs[next].click();});
+    });
+
     const collectionVisible=()=>!panel.hidden&&!el('maintenance-collection-panel').hidden&&!document.hidden;
     const providerNames={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',cninfo:'巨潮资讯',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所 / 航运研究所',mot:'交通运输部'};
     const progressMarkup='<div class="index-progress-details" role="status" aria-live="polite"><p data-progress-summary></p><ul data-progress-sources></ul></div>';
@@ -405,7 +419,7 @@
       try{
         const response=await fetch('/api/maintenance/collections',{cache:'no-store'}),data=await response.json();
         if(!response.ok)throw Error(data.error||'读取失败');
-        collectionTasks=data.tasks;renderCollections();el('maintenance-collection-status').textContent='本地状态已更新；刷新不会启动采集或扫描数据库预览。';
+        collectionTasks=data.tasks;renderCollections();overview.update(collectionTasks);el('maintenance-collection-status').textContent='';
       }catch(error){el('maintenance-collection-status').textContent='采集状态未更新：'+error.message;}
       finally{collectionBusy=false;if(collectionVisible()&&collectionTasks.some(task=>task.running))collectionTimer=setTimeout(loadCollections,3000);}
     }
@@ -413,7 +427,7 @@
       const response=await fetch('/api/maintenance/collections/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(command)}),data=await response.json();
       if(!response.ok)throw Error(data.error||'操作失败');return data;
     }
-    el('maintenance-collection-list').addEventListener('change',event=>{
+    el('maintenance-collection-panel').addEventListener('change',event=>{
       if(event.target.matches('[data-public-rule-select]')){editPublicRule(event.target.closest('[data-task]'),event.target.value);return;}
 
       if(event.target.matches('[data-shipping-select]')){const module=event.target.closest('[data-shipping-module]');module.querySelectorAll('[data-shipping-view]').forEach(view=>{view.hidden=view.dataset.shippingView!==event.target.value;});return;}
@@ -442,7 +456,7 @@
       const menu=event.target.closest('[data-provider-menu]');if(!menu)return;
       menu.querySelector('[data-provider-selection]').textContent=`已选 ${menu.querySelectorAll('input:checked').length} / ${menu.querySelectorAll('input').length} 项`;
     });
-    el('maintenance-collection-list').addEventListener('input',event=>{const form=event.target.closest('[data-task-rate-form]');if(form&&event.target.matches('input')){form.dataset.dirty='true';form.querySelector('[data-rate-preset]').value='custom';form.querySelector('[data-rate-status]').textContent='参数未保存';}});
+    el('maintenance-collection-panel').addEventListener('input',event=>{const form=event.target.closest('[data-task-rate-form]');if(form&&event.target.matches('input')){form.dataset.dirty='true';form.querySelector('[data-rate-preset]').value='custom';form.querySelector('[data-rate-status]').textContent='参数未保存';}});
     panel.addEventListener('toggle',event=>{
       const menu=event.target;if(!menu.matches?.('[data-provider-menu]')||!menu.open)return;
       const options=menu.querySelector('.collection-provider-options'),box=menu.getBoundingClientRect(),below=innerHeight-box.bottom-12,above=box.top-12;
@@ -450,7 +464,7 @@
     },true);
     panel.addEventListener('keydown',event=>{const menu=event.target.closest('[data-provider-menu]');if(menu&&event.key==='Escape'){event.preventDefault();menu.open=false;menu.querySelector('summary').focus();}});
     document.addEventListener('click',event=>{panel.querySelectorAll('[data-provider-menu][open]').forEach(menu=>{if(!menu.contains(event.target))menu.open=false;});});
-    el('maintenance-collection-list').addEventListener('submit',async event=>{
+    el('maintenance-collection-panel').addEventListener('submit',async event=>{
       event.preventDefault();const form=event.target,card=form.closest('[data-task]'),key=card.dataset.task,values=new FormData(form),isSchedule=form.hasAttribute('data-task-schedule');
       if(form.hasAttribute('data-task-rate-form')){
         const settings=Object.fromEntries(Object.keys(rateFields).map(name=>[name,Number(values.get(name))])),button=form.querySelector('button[type=submit]'),status=form.querySelector('[data-rate-status]');
@@ -478,7 +492,7 @@
       catch(error){el('maintenance-collection-status').textContent=error.message;}
       finally{button.disabled=!isSchedule&&collectionTasks.some(other=>other.running&&taskConflict(other,collectionTasks.find(task=>task.task_key===key)));}
     });
-    el('maintenance-collection-list').addEventListener('click',async event=>{
+    el('maintenance-collection-panel').addEventListener('click',async event=>{
       const publicRemove=event.target.closest('[data-public-rule-delete]');
       if(publicRemove){const card=publicRemove.closest('[data-task]'),key=card.dataset.task,identity=card.querySelector('[data-public-rule-select]').value;if(!identity)return;if(!confirm('删除这条日程规则？已运行任务和历史保留。'))return;try{await collectionPost('schedule',{task_key:key,schedule:{action:'delete',schedule_key:identity}});await loadCollections();editPublicRule(card,'');}catch(error){el('maintenance-collection-status').textContent=error.message;}return;}
 
@@ -514,7 +528,7 @@
     tabs.forEach((tab,index)=>{
       tab.addEventListener('click',()=>{
         tabs.forEach(item=>{const active=item===tab;item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;el(item.getAttribute('aria-controls')).hidden=!active;});
-        el('maintenance-refresh').hidden=index===2;el('maintenance-refresh').textContent=index===0?'刷新采集列表':'刷新本地统计';loadActiveTab();
+        el('maintenance-refresh').hidden=index!==1;loadActiveTab();
       });
       tab.addEventListener('keydown',event=>{
         if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;

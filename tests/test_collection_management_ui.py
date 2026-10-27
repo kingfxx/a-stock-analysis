@@ -14,6 +14,14 @@ from stock_analysis.maintenance.database_restore import RequestGate, RestoreMana
 from stock_analysis.infrastructure.storage import Database
 
 
+def refresh_collections(page):
+    settings_visible=page.locator('#collection-settings-panel').is_visible()
+    page.locator('#collection-overview-tab').click()
+    page.locator('#collection-overview-refresh').click()
+    if settings_visible:
+        page.locator('#collection-settings-tab').click()
+
+
 @pytest.fixture
 def live(tmp_path,monkeypatch):
     from stock_analysis.http import server
@@ -38,11 +46,11 @@ def live(tmp_path,monkeypatch):
         def log_message(self,*args):pass
         def _do_GET(self):
             if self.path=='/harness':
-                body=b'''<!doctype html><html><meta charset="utf-8"><style>.panel{overflow:hidden}</style><link rel="stylesheet" href="/maintenance.css"><link rel="stylesheet" href="/collection-progress.css"><button id="maintenance-tab">maintenance</button><button id="leave">leave</button><section id="maintenance-panel"></section><script src="/datetime.js"></script><script>window.initStockCleanup=()=>{};</script><script src="/collection-progress.js"></script><script src="/maintenance.js"></script><script>initMaintenance();document.getElementById('leave').onclick=()=>document.getElementById('maintenance-panel').hidden=true;document.getElementById('maintenance-tab').addEventListener('click',()=>document.getElementById('maintenance-panel').hidden=false);</script></html>'''
+                body=b'''<!doctype html><html><meta charset="utf-8"><style>.panel{overflow:hidden}</style><link rel="stylesheet" href="/maintenance.css"><link rel="stylesheet" href="/collection-progress.css"><button id="maintenance-tab">maintenance</button><button id="leave">leave</button><section id="maintenance-panel"></section><script src="/datetime.js"></script><script>window.initStockCleanup=()=>{};</script><script src="/collection-progress.js"></script><script src="/collection-overview.js"></script><script src="/maintenance.js"></script><script>initMaintenance();document.getElementById('leave').onclick=()=>document.getElementById('maintenance-panel').hidden=true;document.getElementById('maintenance-tab').addEventListener('click',()=>document.getElementById('maintenance-panel').hidden=false);</script></html>'''
                 self.send_response(200);self.send_header('Content-Type','text/html;charset=utf-8');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
             if self.path.startswith('/api/maintenance/storage'):state['storage']+=1
             if self.path=='/api/maintenance/collections':state['collections']+=1
-            if self.path in ('/maintenance.js','/datetime.js','/maintenance.css','/collection-progress.js','/collection-progress.css'):
+            if self.path in ('/maintenance.js','/datetime.js','/maintenance.css','/collection-progress.js','/collection-progress.css','/collection-overview.js'):
                 path=asset_path(self.path[1:]);body=path.read_bytes()
                 self.send_response(200);self.send_header('Content-Type','text/css' if path.suffix=='.css' else 'text/javascript');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
             super()._do_GET()
@@ -97,7 +105,7 @@ def test_browser_rate_templates_custom_save_polling_and_guards(live):
             form.locator('[data-rate-preset]').select_option('faster')
             expect(form.locator('input[name=interval]')).to_have_value('3')
             form.locator('input[name=interval]').fill('7.5')
-            page.click('#maintenance-refresh');page.wait_for_timeout(200)
+            refresh_collections(page);page.wait_for_timeout(200)
             expect(form.locator('input[name=interval]')).to_have_value('7.5')
             expect(form.locator('[data-rate-preset]')).to_have_value('custom')
             form.locator('button[type=submit]').click()
@@ -110,7 +118,7 @@ def test_browser_rate_templates_custom_save_polling_and_guards(live):
             styles=(Path(__file__).resolve().parents[1]/'web/pages/index.html').read_text(encoding='utf-8').split('<style>',1)[1].split('</style>',1)[0]
             page.add_style_tag(content=styles)
             card.screenshot(path=str(db.path.parent/'rate-preview.png'))
-            state['running']=True;page.click('#maintenance-refresh');page.wait_for_timeout(150)
+            state['running']=True;refresh_collections(page);page.wait_for_timeout(150)
             expect(form.locator('button[type=submit]')).to_be_disabled()
             assert state['storage']==0 and not errors
         finally:browser.close()
@@ -148,17 +156,17 @@ def test_browser_default_lazy_scans_events_polling_and_keyboard(live):
             page=browser.new_page(timezone_id='America/Los_Angeles');errors=[]
             page.on('pageerror',lambda error:errors.append(str(error)))
             page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-3)
-            assert page.locator('[role=tab]').all_text_contents()==['采集管理','数据库预览','未关注股票管理']
+            assert page.locator('.maintenance-tabs [role=tab]').all_text_contents()==['采集管理','数据库预览','未关注股票管理']
             expect(page.locator('#maintenance-collection-tab')).to_have_attribute('aria-selected','true')
             assert state['storage']==0
             page.locator('[data-task="indices"] > details').nth(1).locator('summary').first.click()
             expect(page.locator('[data-task="indices"] [data-run]').first).to_have_attribute('open','')
             page.locator('[data-task="indices"] [data-operation-ref]').click()
             expect(page.locator('[data-task="indices"] [data-task-history]')).to_contain_text('payload only in detail')
-            page.click('#maintenance-refresh');page.wait_for_timeout(150)
+            refresh_collections(page);page.wait_for_timeout(150)
             assert state['storage']==0
             state['running']=True
-            page.click('#maintenance-refresh');page.wait_for_timeout(150)
+            refresh_collections(page);page.wait_for_timeout(150)
             page.locator('[data-task="market_financial"] [data-task-run] [data-target-preset]').select_option('custom')
             page.locator('[data-task="market_financial"] [data-task-run] input[name=target]').fill('2025-12-31')
             before=state['collections'];page.wait_for_timeout(3200)
@@ -240,7 +248,7 @@ def test_browser_index_write_counts_and_zero_return_warning(live):
             expect(progress).to_contain_text('乐咕乐股 · 行情：已记录写入 2 条（新增 2 条、修订 0 条）；未变化 8 条')
             expect(progress.locator('.collection-progress-warning')).to_have_count(1)
             expect(progress.locator('.collection-progress-warning')).to_contain_text('2026-10-26—2026-10-26')
-            page.click('#maintenance-refresh')
+            refresh_collections(page)
             expect(card.locator('.collection-progress-warning')).to_have_count(1)
             assert state['storage']==0 and not errors
         finally:browser.close()
@@ -316,7 +324,7 @@ def test_browser_latest_once_collapsed_batches_and_dropdown_multi_select(live):
             expect(card.locator('[data-run=latest] .index-progress-details')).to_have_count(1)
             card.locator('[data-run=latest] > summary').click()
             card.locator('[data-task-batches] > summary').click()
-            page.click('#maintenance-refresh');page.wait_for_timeout(150)
+            refresh_collections(page);page.wait_for_timeout(150)
             expect(card.locator('[data-run=latest]')).not_to_have_attribute('open','')
             expect(card.locator('[data-task-batches]')).to_have_attribute('open','')
             menu=card.locator('[data-task-run] [data-provider-menu]')
@@ -327,20 +335,20 @@ def test_browser_latest_once_collapsed_batches_and_dropdown_multi_select(live):
             expect(menu.locator('[data-provider-selection]')).to_have_text('已选 2 / 3 项')
             assert card.locator('[data-task-run]').evaluate("form=>new FormData(form).getAll('provider')")==['csindex','sws']
             page.keyboard.press('Escape');expect(menu).not_to_have_attribute('open','')
-            page.click('#maintenance-refresh');page.wait_for_timeout(150)
+            refresh_collections(page);page.wait_for_timeout(150)
             expect(menu.locator('input[value=legu]')).not_to_be_checked()
             # Scheduled provider selection is an independent dropdown with the same semantics.
             card.locator(':scope > details').first.locator('summary').first.click()
             scheduled=card.locator('[data-task-schedule] [data-provider-menu]')
             scheduled.locator('summary').click();scheduled.locator('input[value=sws]').uncheck()
             expect(scheduled.locator('[data-provider-selection]')).to_have_text('已选 2 / 3 项')
-            page.click('#maintenance-refresh');page.wait_for_timeout(150)
+            refresh_collections(page);page.wait_for_timeout(150)
             expect(scheduled).not_to_have_attribute('open','')
             expect(scheduled.locator('input[value=sws]')).not_to_be_checked()
             # A newly arriving running operation is the newest timestamped row and opens once.
             with db.connection(write=True) as conn:
                 conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at) VALUES('new-running','incremental','{}','running','2026-10-26')")
-            page.click('#maintenance-refresh');page.wait_for_timeout(150)
+            refresh_collections(page);page.wait_for_timeout(150)
             expect(card.locator('[data-run]').first).to_have_attribute('data-run','new-running')
             expect(card.locator('[data-run]').first).to_have_attribute('open','')
             expect(card.locator('[data-run]').first.locator('summary')).to_contain_text('running')
@@ -369,7 +377,7 @@ def test_browser_recent_four_targets_default_latest_and_custom_preserved(live):
             expect(page.locator('[data-task=market_financial] [data-task-schedule] [data-target-preset]')).to_have_value('2026-06-30')
             financial.locator('[data-target-preset]').select_option('custom')
             financial.locator('input[name=target]').fill('2024-12-31')
-            page.click('#maintenance-refresh');page.wait_for_timeout(150)
+            refresh_collections(page);page.wait_for_timeout(150)
             expect(financial.locator('input[name=target]')).to_have_value('2024-12-31')
             assert financial.evaluate("form=>new FormData(form).get('target')")=='2024-12-31'
             financial.locator('[data-target-preset]').select_option('2026-06-30')
@@ -490,7 +498,7 @@ def test_shipping_one_module_independent_settings_and_monthly_image_fallback(liv
             # A running monthly job remains reachable and does not change the selected type on refresh.
             with db.connection(write=True) as conn:
                 conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at,result_json,task_key) VALUES('shipping-active','backfill',?,'running','2026-10-25',?,'shipping_monthly')",(json.dumps({'dataset':'shipping_monthly'}),json.dumps({'work_progress':{'total':306,'success':8,'pending':298}})))
-            page.click('#maintenance-refresh')
+            refresh_collections(page)
             expect(module.locator('[data-shipping-status]')).to_contain_text('运行中')
             expect(picker).to_have_value('shipping_research_import')
             picker.select_option('shipping_monthly')
@@ -606,7 +614,7 @@ def test_financial_season_available_everywhere_and_roundtrips_without_collection
                 assert '未更新' not in page.locator('#maintenance-collection-status').inner_text(), page.locator('#maintenance-collection-status').inner_text()
                 expect(form.locator('[name=days_before]')).to_have_value('15')
                 selector=form.locator('[name=schedule_key]');saved=selector.input_value()
-                page.click('#maintenance-refresh')
+                refresh_collections(page)
                 expect(form.locator('[name=days_after]')).to_have_value('0')
                 selector.select_option('')
                 expect(form.locator('[name=days_before]')).to_be_hidden()

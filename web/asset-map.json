@@ -9,6 +9,7 @@
   "business-segments.css": "features/financials/business-segments.css",
   "business-segments.js": "features/financials/business-segments.js",
   "collection-progress.css": "features/maintenance/collection-progress.css",
+  "collection-overview.js": "features/maintenance/collection-overview.js",
   "collection-progress.js": "features/maintenance/collection-progress.js",
   "congestion.js": "features/market/congestion.js",
   "datetime.js": "shared/datetime.js",
