@@ -23,6 +23,8 @@ def _ten_year_floor(today):
     try: return today.replace(year=today.year-10)
     except ValueError: return today.replace(year=today.year-10,day=28)
 
+COLLECTION_DEFINITION_VERSION = 'disclosure-v1'
+
 class AnnouncementService:
     def __init__(self, db, collector=None):
         self.db=db; self.collector=collector or RequestCollector(db); self.sources=AnnouncementSources(self.collector)
@@ -105,7 +107,7 @@ class AnnouncementService:
         batch=begin_batch(self.db,f'sync_runs:{run}','stock.announcements','cninfo',floor.isoformat(),now,
             scope={'code':code,'sync_run_id':run,'evidence_mode':'metadata_only','reports':periods,
                    'category_codes':[CATEGORY_REGISTRY[x] for x in categories],'category_profile':profile},trigger='manual' if refresh else 'automatic',
-            domain='stock',parser_version=RULE_VERSION,definition_version='disclosure-v1')
+            domain='stock',parser_version=RULE_VERSION,definition_version=COLLECTION_DEFINITION_VERSION)
         try:
             org_id=identity['org_id'] if identity and identity['identity_status']=='matched' else None
             if not org_id:
@@ -158,9 +160,14 @@ class AnnouncementService:
             coverage_start=min(floor,date.fromisoformat(state['coverage_start'])) if state and state['coverage_start'] else floor
             coverage_end=max(date.fromisoformat(now),date.fromisoformat(state['coverage_end'])) if state and state['coverage_end'] else date.fromisoformat(now)
             def publish(conn):
+                from stock_analysis.collection.publication_counts import counts, published
+                metadata_counts, date_counts = counts(len(prepared)), counts(len(decisions))
                 for item,fingerprint in prepared:
                     old=conn.execute('SELECT * FROM stock_announcement_metadata WHERE instrument_id=? AND announcement_id=? ORDER BY metadata_version DESC LIMIT 1',(instrument['id'],item['announcement_id'])).fetchone()
-                    if old and old['metadata_fingerprint']==fingerprint: continue
+                    if old and old['metadata_fingerprint']==fingerprint:
+                        metadata_counts['unchanged'] += 1
+                        continue
+                    metadata_counts['revised' if old else 'inserted'] += 1
                     ver=(old['metadata_version']+1) if old else 1
                     conn.execute('INSERT INTO stock_announcement_metadata(instrument_id,announcement_id,metadata_version,org_id,title,announcement_time,published_on,adjunct_url,period,report_type,title_category,revision_marker,periods_json,date_conflict,metadata_fingerprint,source_id,batch_id,run_id,obtained_at,supersedes_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                         (instrument['id'],item['announcement_id'],ver,org_id,item['title'],item['announcement_time'],item['published_on'],item['adjunct_url'],item['periods'][0] if len(item['periods'])==1 else None,item['report_type'] or 'unknown',item['title_category'],item['revision_marker'],json.dumps(item['periods']),int(bool(item.get('date_conflict'))),fingerprint,item['_source_id'],batch,run,item.get('_obtained_at') or stamp,old['id'] if old else None))
@@ -190,10 +197,14 @@ class AnnouncementService:
                     values=(decision['first_published_on'],decision['latest_revision_on'],decision['status'],decision['reason'],
                             original_id,revision_id,candidate_json,report_type,RULE_VERSION)
                     if old and values==(old['first_published_on'],old['latest_revision_on'],old['status'],old['reason'],
-                        old['original_announcement_row_id'],old['revision_announcement_row_id'],old['candidates_json'],old['report_type'],old['rule_version']): continue
+                        old['original_announcement_row_id'],old['revision_announcement_row_id'],old['candidates_json'],old['report_type'],old['rule_version']):
+                        date_counts['unchanged'] += 1
+                        continue
+                    date_counts['revised' if old else 'inserted'] += 1
                     ver=old['result_version']+1 if old else 1
                     if old: conn.execute('UPDATE report_disclosure_dates SET is_current=0 WHERE id=?',(old['id'],))
                     conn.execute('INSERT INTO report_disclosure_dates(instrument_id,period,report_type,rule_version,result_version,first_published_on,latest_revision_on,status,reason,original_announcement_row_id,revision_announcement_row_id,candidates_json,is_current,previous_result_id,run_id,created_at,validated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)',(instrument['id'],period,report_type,RULE_VERSION,ver,decision['first_published_on'],decision['latest_revision_on'],decision['status'],decision['reason'],original_id,revision_id,candidate_json,old['id'] if old else None,run,stamp,stamp))
+                return {**published(metadata_counts), 'disclosure_counts':published(date_counts)}
             previous_range={'coverage_start':coverage_start.isoformat(),'coverage_end':coverage_end.isoformat()}
             sync_result=SyncResult(record_count=len(all_items),coverage_start=previous_range['coverage_start'],
                 coverage_end=previous_range['coverage_end'],data_watermark=max(

@@ -117,5 +117,38 @@ def test_browser_multiple_topics_edit_delete_and_alignment(live):
             assert not page.evaluate('document.documentElement.scrollWidth>innerWidth+1')
             assert errors==[] and state['storage']==0
             with db.connection() as conn:
-                assert conn.execute('SELECT count(*) FROM stock_collection_operations').fetchone()[0]==0
+                assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
+        finally:browser.close()
+
+
+def test_stock_history_source_totals_and_compact_legacy_counts(live):
+    import json
+    from stock_analysis.collection.collection import begin_batch,finish_batch
+    from stock_analysis.infrastructure.storage import utc_now
+    from playwright.sync_api import sync_playwright,expect
+    base,db,state,web=live
+    stock=StockCollections(db,None)
+    with db.connection(write=True) as conn:
+        ref=stock.reserve(conn,dict(codes=['601919'],datasets=['financial']))
+        item=conn.execute('SELECT id FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)=?',(ref,)).fetchone()[0]
+        conn.execute("UPDATE collection_batches SET status='skipped',finished_at=? WHERE operation_id=?",(utc_now(),ref))
+        conn.execute("UPDATE collection_operations SET status='complete',finished_at=? WHERE operation_id=?",(utc_now(),ref))
+    for index,(provider,dataset,counts) in enumerate([
+        ('sina','stock.financial.lrb',dict(inserted=2,revised=1,unchanged=5,returned=8,published=3)),
+        ('baidu','stock.valuation.pe',dict(inserted=0,revised=2,unchanged=1,returned=3,published=2)),
+        ('baidu','stock.valuation.pb',dict(inserted=1,revised=0,unchanged=2,returned=3,published=1)),
+        ('eastmoney','stock.dividends',dict(candidate_count=2))]):
+        batch=begin_batch(db,ref,dataset,provider,domain='stock',scope=dict(parent_operation=ref,parent_item=item))
+        finish_batch(db,batch,'complete',result=counts)
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page();page.goto(base+'/harness')
+            card=page.locator('[data-task="stocks"]');history=card.locator('[data-task-history]')
+            expect(history).to_contain_text('新浪财经 3 条')
+            expect(history).to_contain_text('百度股市通 3 条')
+            expect(history).to_contain_text('新增 2 条、修订 1 条')
+            expect(history).to_contain_text('实际写入数量未记录；返回／解析 2 条')
+            assert '新增 未记录' not in history.text_content()
+            assert state['storage']==0
         finally:browser.close()

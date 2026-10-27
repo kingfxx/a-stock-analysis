@@ -133,9 +133,9 @@ def publish(service, collection):
     ids = []
     now = datetime.now(timezone.utc).isoformat()
     with service.db.connection(write=True) as conn:
-        if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running' LIMIT 1").fetchone():
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running' LIMIT 1").fetchone():
             raise ValueError('已有行业任务运行，请稍后发布')
-        run_id = conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) "
+        run_id = conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) "
                               "VALUES(?,?,0,?,'running')", ('bulk_history' if collection['manifest'].get('years', 1) > 1
                               else 'bulk_one_year', collection['asof'], now)).lastrowid
     try:
@@ -147,12 +147,12 @@ def publish(service, collection):
                       'cap_roster': cap['roster'], 'manifest': collection['manifest']}
             ids.append(service.import_bundle(bundle, capture_local=False))
         with service.db.connection(write=True) as conn:
-            conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
+            conn.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE id=?",
                          (datetime.now(timezone.utc).isoformat(), dumps({'import_ids': ids,
                           'checks': collection['manifest'].get('checks', [])}), run_id))
     except Exception as exc:
         with service.db.connection(write=True) as conn:
-            conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE id=?",
+            conn.execute("UPDATE collection_operations SET status='failed',finished_at=?,error=? WHERE id=?",
                          (datetime.now(timezone.utc).isoformat(), str(exc), run_id))
         raise
     return ids

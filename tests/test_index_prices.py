@@ -224,7 +224,7 @@ def test_replay_cancellation_keeps_first_segment_and_resume_skips_it(db,monkeypa
         result=original(*args,**kwargs);calls['count']+=1
         if calls['count']==1:
             with db.connection(write=True) as conn:
-                conn.execute("UPDATE index_collection_operations SET cancel_requested=1 WHERE status='running'")
+                conn.execute("UPDATE collection_operations SET cancel_requested=1 WHERE status='running'")
         return result
     monkeypatch.setattr(replay_module,'publish_segment',cancel_after_commit)
     from stock_analysis.collection.collection import Cancelled

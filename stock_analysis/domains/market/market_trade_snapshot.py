@@ -284,7 +284,7 @@ def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress
     # Rollback-journal maintenance reads can exceed the dashboard's 5s default.
     db=Database(service.db.path,journal_mode=service.db.journal_mode,busy_timeout_ms=60000)
     with db.connection() as conn:
-        run=conn.execute("SELECT id FROM sw_update_runs WHERE status='running' ORDER BY id DESC LIMIT 1").fetchone()
+        run=conn.execute("SELECT id FROM collection_operations WHERE action IS NOT NULL AND status='running' ORDER BY id DESC LIMIT 1").fetchone()
     if not run:raise ValueError('季度快照必须在现有行业任务内运行')
     operation=f'sw_update_runs:{run[0]}'
     def cancelled():
@@ -355,37 +355,37 @@ def run(db,start,end,report,*,recheck=False):
     # Resolve all dates before making any source requests.
     dates={q:target_date(db,q) for q in selected}
     with db.connection(write=True) as conn:
-        if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():
             raise ValueError('已有行业任务运行')
-        run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('trade_snapshot_history',?,?,?,'running')",
+        run_id=conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES('trade_snapshot_history',?,?,?,'running')",
                             (end,int(recheck),utc_now())).lastrowid
     operation=f'sw_update_runs:{run_id}'
     result=dict(start=start,end=end,total_quarters=len(selected),periods=[],status='running',operation_id=operation,started_at=utc_now())
     def cancelled():
         with db.connection() as conn:
-            r=conn.execute('SELECT status FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+            r=conn.execute('SELECT status FROM collection_operations WHERE id=?',(run_id,)).fetchone()
             return not r or r[0]!='running'
     def progress(message):
         print(message,flush=True)
         with db.connection(write=True) as conn:
-            row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=? AND status=\'running\'',(run_id,)).fetchone()
+            row=conn.execute('SELECT result_json FROM collection_operations WHERE id=? AND status=\'running\'',(run_id,)).fetchone()
             try:
                 saved=json.loads(row['result_json'] or '{}') if row else {}
             except json.JSONDecodeError:
                 saved={}
             payload={**saved,'message':message,'completed_quarters':len(result['periods']),
                      'total_quarters':len(selected),'report':str(report)}
-            conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=? AND status=\'running\'',
+            conn.execute('UPDATE collection_operations SET result_json=? WHERE id=? AND status=\'running\'',
                          (encoded(payload),run_id))
     def progress_state(update):
         with db.connection(write=True) as conn:
-            row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=? AND status=\'running\'',(run_id,)).fetchone()
+            row=conn.execute('SELECT result_json FROM collection_operations WHERE id=? AND status=\'running\'',(run_id,)).fetchone()
             try:
                 saved=json.loads(row['result_json'] or '{}') if row else {}
             except json.JSONDecodeError:
                 saved={}
             saved['collection_progress']={**(saved.get('collection_progress') or {}),**update}
-            conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=? AND status=\'running\'',
+            conn.execute('UPDATE collection_operations SET result_json=? WHERE id=? AND status=\'running\'',
                          (encoded(saved),run_id))
     http=RequestCollector(db,cancelled=cancelled,progress=progress)
     try:
@@ -418,7 +418,7 @@ def run(db,start,end,report,*,recheck=False):
         result['finished_at']=utc_now();result['requests']=http.report()
         atomic_write(report,encoded(result).encode())
         with db.connection(write=True) as conn:
-            prior=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+            prior=conn.execute('SELECT result_json FROM collection_operations WHERE id=?',(run_id,)).fetchone()
             try:
                 saved=json.loads(prior['result_json'] or '{}') if prior else {}
             except json.JSONDecodeError:
@@ -426,7 +426,7 @@ def run(db,start,end,report,*,recheck=False):
             result['aggregation_results']={**(saved.get('aggregation_results') or {}),
                                            **result.get('aggregation_results',{})}
             result['collection_progress']=saved.get('collection_progress',result.get('collection_progress',{}))
-            conn.execute('UPDATE sw_update_runs SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
+            conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
                          (result['status'],result['finished_at'],encoded(result),result.get('error'),run_id))
     return result
 

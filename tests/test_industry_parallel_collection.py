@@ -109,6 +109,6 @@ def test_parallel_financial_failure_counts_sent_requests_and_returns_no_publisha
     with db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM market_financial_income').fetchone()[0]==0
         assert conn.execute('SELECT count(*) FROM market_financial_balance').fetchone()[0]==0
-        batches=conn.execute("SELECT status FROM collection_batches WHERE operation_id='industry-run:failed'").fetchall()
+        batches=conn.execute("SELECT status FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)='industry-run:failed'").fetchall()
     assert len(batches)==4
     assert all(item['status']=='failed' for item in batches)

@@ -26,7 +26,7 @@ def _digest(value):
 def current_aggregation_versions(conn):
     """Return the latest successfully published aggregation mapping per quarter."""
     current = {}
-    for row in conn.execute("SELECT id,result_json FROM sw_update_runs WHERE result_json IS NOT NULL ORDER BY id"):
+    for row in conn.execute("SELECT id,result_json FROM collection_operations WHERE action IS NOT NULL AND result_json IS NOT NULL ORDER BY id"):
         try:
             result = json.loads(row['result_json'])
         except (TypeError, json.JSONDecodeError):
@@ -160,7 +160,7 @@ def publish_in_transaction(conn, quarter, run_id, operation_id):
                   row['known_count'], row['known_cap'], row['total_cap'], row['target_date'], row['composition'])
                  for row in rows])
             created = True
-    run = conn.execute('SELECT result_json FROM sw_update_runs WHERE id=?', (run_id,)).fetchone()
+    run = conn.execute('SELECT result_json FROM collection_operations WHERE id=?', (run_id,)).fetchone()
     if run is None:
         raise ValueError(f'行业更新任务 {run_id} 不存在')
     try:
@@ -179,7 +179,7 @@ def publish_in_transaction(conn, quarter, run_id, operation_id):
     }
     result['aggregation_results'] = aggregation_results
     result['aggregation_message'] = f'{quarter} 行业市值汇总已发布'
-    conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?', (_json(result), run_id))
+    conn.execute('UPDATE collection_operations SET result_json=? WHERE id=?', (_json(result), run_id))
     return aggregation_results[quarter]
 
 

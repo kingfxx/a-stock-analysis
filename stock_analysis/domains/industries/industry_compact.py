@@ -78,7 +78,7 @@ def compact(db, report_directory):
         ('before-sw-financial-compact-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')+'.sqlite3'))
     result={'backup':str(backup),'before_bytes':db.path.stat().st_size}
     with db.connection(write=True) as conn:
-        if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():
             raise ValueError('行业任务尚未完成，未执行整理')
         before=fingerprint(conn)
         result['before_rows']=conn.execute('SELECT count(*) FROM sw_financial_facts').fetchone()[0]

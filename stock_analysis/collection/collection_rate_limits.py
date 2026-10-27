@@ -70,9 +70,7 @@ def save(conn, key, provider, settings):
         raise ValueError('该任务不支持此网络提供方的限速配置')
     settings = validate(settings, concurrency_cap(key, provider))
     # Same write transaction as configuration save and operation reservations.
-    if (conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running' LIMIT 1").fetchone()
-            or conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running' LIMIT 1").fetchone()
-            or conn.execute("SELECT 1 FROM stock_collection_operations WHERE status='running' LIMIT 1").fetchone()):
+    if conn.execute("SELECT 1 FROM collection_operations WHERE status='running' LIMIT 1").fetchone():
         raise ValueError('有采集任务正在运行，请待结束后保存限速设置')
     stamp = utc_now()
     conn.execute('INSERT INTO collection_rate_limits VALUES(?,?,?,?) ON CONFLICT(task_key,provider) DO UPDATE SET '
@@ -89,9 +87,9 @@ def task_for_batch(conn, batch_id, provider):
         return None
     operation = batch['operation_id'] or ''
     if operation.startswith('sw_update_runs:'):
-        row = conn.execute('SELECT action FROM sw_update_runs WHERE id=?', (operation.split(':', 1)[1],)).fetchone()
+        row = conn.execute('SELECT action FROM collection_operations WHERE id=?', (operation.split(':', 1)[1],)).fetchone()
         return {'financial_period': 'market_financial', 'cap_quarter': 'trade_snapshot'}.get(row['action']) if row and provider == 'eastmoney' else None
-    row = conn.execute('SELECT scope_json FROM index_collection_operations WHERE operation_id=?', (operation,)).fetchone()
+    row = conn.execute('SELECT scope_json FROM collection_operations WHERE operation_id=?', (operation,)).fetchone()
     if not row:
         return None  # Unregistered CLI backfills retain their existing strategy.
     if batch['dataset'].startswith('bond_zh_us_rate') and provider == 'eastmoney':

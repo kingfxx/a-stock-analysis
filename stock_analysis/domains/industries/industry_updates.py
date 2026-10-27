@@ -117,16 +117,16 @@ def perform(service, action, target, recheck, progress, *, run_id=None, progress
     owns_run=False
     if run_id is None:
         with service.db.connection(write=True) as conn:
-            if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+            if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():
                 raise ValueError('已有行业任务运行，未启动财务采集')
-            run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) "
+            run_id=conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) "
                 "VALUES(?,?,? ,?,'running')",(action,target,int(recheck),now())).lastrowid
             owns_run=True
     try:
         result=_perform(service,action,target,recheck,progress,batch_id,run_id=run_id,progress_state=progress_state)
         if owns_run:
             with service.db.connection(write=True) as conn:
-                conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
+                conn.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE id=?",
                     (now(),merge_run_result(conn,run_id,result),run_id))
         return result
     except Exception as exc:
@@ -144,18 +144,20 @@ def perform(service, action, target, recheck, progress, *, run_id=None, progress
                 finish_batch(service.db,public_batch,'failed',error=str(exc))
         if owns_run:
             with service.db.connection(write=True) as conn:
-                conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE id=?",
+                conn.execute("UPDATE collection_operations SET status='failed',finished_at=?,error=? WHERE id=?",
                     (now(),str(exc),run_id))
         raise
 
 
 def merge_run_result(conn, run_id, result):
-    row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+    row=conn.execute('SELECT result_json FROM collection_operations WHERE id=?',(run_id,)).fetchone()
     try:
         saved=json.loads(row['result_json'] or '{}') if row else {}
     except json.JSONDecodeError:
         saved={}
     merged={**saved,**result}
+    if merged.get('collection_batch_ids'):
+        merged.pop('files',None)  # Public source rows own request/file/hash metadata.
     merged['aggregation_results']={**(saved.get('aggregation_results') or {}),
                                   **(result.get('aggregation_results') or {})}
     return json.dumps(merged,ensure_ascii=False,separators=(',',':'))

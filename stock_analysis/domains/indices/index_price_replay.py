@@ -43,7 +43,7 @@ def replay(db, *, start='2016-10-11', end='2026-10-09', report_path=None):
         report['operation_id']=operation
         def cancelled():
             with db.connection() as conn:
-                row=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                row=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
             return not row or bool(row[0])
         def check_cancelled():
             if cancelled(): raise Cancelled('点位回放收到取消请求；已发布分段保留')
@@ -178,8 +178,8 @@ def replay(db, *, start='2016-10-11', end='2026-10-09', report_path=None):
             raise
         finally:
             with db.connection(write=True) as conn:
-                conn.execute('UPDATE index_collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
-                    (report['status'],utc_now(),encoded(report),report.get('error'),operation))
+                conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
+                    (report['status'],utc_now(),encoded({**{k:v for k,v in report.items() if k!='results'},'batch_count':len(report.get('results',[]))}),report.get('error'),operation))
             atomic_write(report_path or db.path.parent/'verification/reports'/('index-points-replay-'+operation+'.json'),encoded(report).encode('utf-8'))
     return report
 

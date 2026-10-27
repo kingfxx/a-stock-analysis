@@ -13,6 +13,7 @@ from stock_analysis.collection.collection import encoded
 from stock_analysis.collection.collection_schedule import latest_daily_date
 from stock_analysis.collection.collection_progress import attach_data_counts
 from stock_analysis.infrastructure.storage import utc_now
+from stock_analysis.collection import schedules as schedule_store
 
 ZONE = market_congestion.ZONE
 TASKS = {
@@ -163,46 +164,47 @@ class CollectionManagement:
         self.stocks = stocks
 
     def schedules(self, conn):
-        result = {}
+        result={}
         for key in TASKS:
-            row = conn.execute('SELECT s.*,r.rule_json,r.params_json FROM collection_schedules s '
-                               'LEFT JOIN collection_schedule_rules r USING(task_key) WHERE s.task_key=?', (key,)).fetchone()
-            result[key] = dict(enabled=bool(row['enabled']) if row else False,
-                               local_time=row['local_time'] if row else '18:00', timezone='Asia/Shanghai',
-                               updated_at=row['updated_at'] if row else None,
-                               rule=json.loads(row['rule_json']) if row and row['rule_json'] else {'frequency': 'daily'},
-                               params=json.loads(row['params_json']) if row and row['params_json'] else {'mode': 'incremental'})
+            rules=schedule_store.read(conn,key)
+            default=dict(enabled=False,local_time='18:00',timezone='Asia/Shanghai',updated_at=None,rule={'frequency':'daily'},params={'mode':'incremental'})
+            result[key]=next((r for r in rules if r['schedule_id']==key),rules[0] if rules else default)
         return result
 
     def configure(self, key, command):
-        task(key)
-        if key == 'stocks':
+        spec=task(key)
+        if key=='stocks':
             from stock_analysis.domains.stocks.collection_schedules import configure
-            return configure(self.db, command)
-        if not isinstance(command, dict) or set(command) - {'enabled', 'local_time', 'rule', 'params'}:
+            return configure(self.db,command)
+        if isinstance(command,dict) and command.get('action')=='delete':
+            if set(command)!={'action','schedule_key'}:
+                raise ValueError('删除规则参数无效')
+            with self.db.connection(write=True) as conn:
+                schedule_store.delete(conn,key,command['schedule_key'])
+            return dict(deleted=True)
+        if not isinstance(command,dict) or set(command)-{'enabled','local_time','rule','params','schedule_key'}:
             raise ValueError('定时配置参数无效')
         with self.db.connection(write=True) as conn:
-            current = self.schedules(conn)[key]
+            rules=schedule_store.read(conn,key)
+            selected=command.get('schedule_key',key)
+            current=next((r for r in rules if r['schedule_id']==selected),None)
+            current=dict(current or dict(enabled=False,local_time='18:00',rule={'frequency':'daily'},params={'mode':'incremental'}))
             current.update(command)
-            if TASKS[key].get('manual_only') and current['enabled']:
-                raise ValueError('资料导入仅手动，不允许开启定时')
-            if type(current['enabled']) is not bool or not isinstance(current['local_time'], str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', current['local_time']):
+            if spec.get('manual_only'):
+                raise ValueError('资料导入仅手动，不允许配置定时')
+            if type(current['enabled']) is not bool or not isinstance(current['local_time'],str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',current['local_time']):
                 raise ValueError('请指定布尔开关和北京时间HH:MM')
-            rule = validate_rule(current['rule'])
-            if 'window' in rule and 'action' not in TASKS[key]:
+            current['rule']=validate_rule(current['rule'])
+            if 'window' in current['rule'] and 'action' not in spec:
                 raise ValueError('发布窗口仅适用于指定报告期／季度目标')
-            # Turning off an old target must remain possible after its date ages out.
-            params = validate_params(key, current['params'], scheduled=True) if current['enabled'] or 'params' in command else current['params']
-            if key == 'market_congestion' and current['enabled'] and not market_congestion.initialized(conn):
+            if current['enabled'] or 'params' in command:
+                current['params']=validate_params(key,current['params'],scheduled=True)
+            if key=='market_congestion' and current['enabled'] and not market_congestion.initialized(conn):
                 raise ValueError('请先完成拥挤度历史初始化')
-            stamp = utc_now()
-            conn.execute('INSERT INTO collection_schedules VALUES(?,?,?,?,?) ON CONFLICT(task_key) DO UPDATE SET '
-                         'enabled=excluded.enabled,local_time=excluded.local_time,updated_at=excluded.updated_at',
-                         (key, int(current['enabled']), 'Asia/Shanghai', current['local_time'], stamp))
-            conn.execute('INSERT INTO collection_schedule_rules VALUES(?,?,?,?) ON CONFLICT(task_key) DO UPDATE SET '
-                         'rule_json=excluded.rule_json,params_json=excluded.params_json,updated_at=excluded.updated_at',
-                         (key, encoded(rule), encoded(params), stamp))
-        return dict(enabled=current['enabled'], rule=rule, params=params, local_time=current['local_time'])
+            if 'schedule_key' not in command:
+                current.pop('schedule_key',None)
+            identity=schedule_store.save(conn,key,current)
+        return dict(enabled=current['enabled'],rule=current['rule'],params=current['params'],local_time=current['local_time'],schedule_key=identity)
 
     def reserve(self, conn, key, params):
         spec = task(key)
@@ -235,10 +237,10 @@ class CollectionManagement:
         except Exception as exc:
             with self.db.connection(write=True) as conn:
                 if ref.startswith('sw_update_runs:'):
-                    conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE id=? AND status='running'",
+                    conn.execute("UPDATE collection_operations SET status='failed',finished_at=?,error=? WHERE id=? AND status='running'",
                                  (utc_now(), str(exc), int(ref.split(':')[1])))
                 else:
-                    conn.execute("UPDATE index_collection_operations SET status='failed',finished_at=?,error=? WHERE operation_id=? AND status='running'",
+                    conn.execute("UPDATE collection_operations SET status='failed',finished_at=?,error=? WHERE operation_id=? AND status='running'",
                                  (utc_now(), str(exc), ref))
                 conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error=? WHERE operation_id=? AND status='running'",
                              (utc_now(), str(exc), ref))
@@ -261,18 +263,12 @@ class CollectionManagement:
             raise ValueError('此任务暂不提供用户停止；已提交分段保留，可在失败后按原范围重试')
         predicate, args = self._predicate(key)
         with self.db.connection(write=True) as conn:
-            conn.execute('UPDATE index_collection_operations SET cancel_requested=1 WHERE status=\'running\' AND ' + predicate, args)
+            conn.execute('UPDATE collection_operations SET cancel_requested=1 WHERE status=\'running\' AND ' + predicate, args)
         return dict(cancel_requested=True)
 
     @staticmethod
     def _predicate(key):
-        if key.startswith('shipping_'):
-            return "json_extract(scope_json,'$.dataset')=?", (key,)
-        if key == 'market_congestion':
-            return "json_extract(scope_json,'$.dataset')=?", (key,)
-        if key == 'sovereign_yields':
-            return "json_extract(scope_json,'$.dataset') IS NULL AND json_extract(scope_json,'$.datasets[0]')=? AND coalesce(json_array_length(json_extract(scope_json,'$.providers')),0)=0", ('bond_zh_us_rate',)
-        return "json_extract(scope_json,'$.dataset') IS NULL AND (coalesce(json_array_length(json_extract(scope_json,'$.datasets')),0)=0 OR coalesce(json_array_length(json_extract(scope_json,'$.providers')),0)>0)", ()
+        return 'task_key=?', (key,)
 
     def configure_rate(self, key, provider, settings):
         from stock_analysis.collection.collection_rate_limits import save
@@ -292,12 +288,12 @@ class CollectionManagement:
                         items.append(task_summary(self.stocks, conn))
                     continue
                 if 'action' in spec:
-                    rows = [dict(r) for r in conn.execute('SELECT id,action,target,recheck,started_at,finished_at,status,error,' + RESULT_SUMMARY + ' AS result_json FROM sw_update_runs WHERE action=? ORDER BY id DESC LIMIT 20', (spec['action'],))]
+                    rows = [dict(r) for r in conn.execute('SELECT id,action,target,recheck,started_at,finished_at,status,error,' + RESULT_SUMMARY + ' AS result_json FROM collection_operations WHERE action=? ORDER BY id DESC LIMIT 20', (spec['action'],))]
                     for row in rows:
                         row['operation_ref'] = 'sw_update_runs:' + str(row['id'])
                 else:
                     predicate, args = self._predicate(key)
-                    rows = [dict(r) for r in conn.execute('SELECT operation_id,mode,scope_json,status,started_at,finished_at,cancel_requested,error,' + RESULT_SUMMARY + ' AS result_json FROM index_collection_operations WHERE ' + predicate + ' ORDER BY started_at DESC LIMIT 20', args)]
+                    rows = [dict(r) for r in conn.execute('SELECT operation_id,mode,scope_json,status,started_at,finished_at,cancel_requested,error,' + RESULT_SUMMARY + ' AS result_json FROM collection_operations WHERE ' + predicate + ' ORDER BY started_at DESC LIMIT 20', args)]
                     for row in rows:
                         row['operation_ref'] = row['operation_id']
                 for row in rows:
@@ -311,39 +307,49 @@ class CollectionManagement:
                 source = conn.execute('SELECT s.obtained_at FROM collection_sources s WHERE s.batch_id IN '
                     '(SELECT id FROM collection_batches WHERE operation_id=?) ORDER BY s.obtained_at DESC LIMIT 1', (latest['operation_ref'],)).fetchone() if latest else None
                 cooling = [dict(r) for r in conn.execute('SELECT source_system,cooldown_until,reason FROM collection_provider_state WHERE source_system IN (' + ','.join('?' for _ in spec['providers']) + ')', spec['providers'])]
-                slots = [dict(r) for r in conn.execute('SELECT * FROM collection_schedule_slots WHERE task_key=? ORDER BY slot_key DESC LIMIT 10', (key,))]
-                schedule = schedules[key]
-                schedule['next_check'] = next_check(schedule, now)
-                items.append(dict(task_key=key, **spec, supports_cancel='action' not in spec,
+                slots = [dict(r) for r in conn.execute('SELECT * FROM collection_schedule_slots WHERE schedule_id IN (SELECT schedule_id FROM collection_schedules WHERE task_key=?) ORDER BY slot_key DESC LIMIT 10', (key,))]
+                schedule = dict(schedules[key])
+                rules=schedule_store.read(conn,key)
+                schedule['enabled']=any(r['enabled'] for r in rules)
+                schedule['next_check']=min((value for r in rules if (value:=next_check(r,now))),default=None)
+                coverage_states={r[0] for r in conn.execute('SELECT DISTINCT coverage_status FROM collection_batches WHERE operation_id=?',
+                    (latest['operation_ref'],))} if latest else set()
+                coverage=('complete' if coverage_states=={'complete'} else 'empty' if coverage_states=={'empty'}
+                    else 'partial' if 'partial' in coverage_states else 'unknown')
+                items.append(dict(task_key=key,rules=[dict(r,next_check=next_check(r,now)) for r in schedule_store.read(conn,key)], **spec, supports_cancel='action' not in spec,
                     rate_limits=[] if spec.get('manual_only') else describe(conn,key,spec['providers']),
-                    schedule=schedule, running=any(r['status'] == 'running' for r in rows),
+                    schedule=schedule, running=bool(conn.execute("SELECT 1 FROM collection_operations WHERE task_key=? AND status='running' LIMIT 1",(key,)).fetchone()),
                     last_check=source[0] if source else None,
                     last_success=next((r['finished_at'] for r in rows if r['status'] == 'complete'), None),
                     history=rows, batches=batches, cooldowns=cooling, slots=slots,
-                    coverage=('complete' if all(b['coverage_status']=='complete' for b in batches) else 'empty' if all(b['coverage_status']=='empty' for b in batches) else 'partial' if any(b['coverage_status']=='partial' for b in batches) else 'unknown') if batches else 'unknown',
+                    coverage=coverage,
                     coverage_note='仅最近运行的分段诊断；全历史及逐字段覆盖未知'))
         return dict(tasks=items, generated_at=utc_now())
 
-    def detail(self, key, ref):
+    def detail(self, key, ref, before_batch_id=None):
         spec = task(key)
+        from stock_analysis.collection.evidence import operation_segments
         if key == 'stocks':
-            return self.stocks.detail(ref)
+            row=self.stocks.detail(ref)
+            row['batch_page']=operation_segments(self.db,key,ref,before_batch_id)
+            return row
         if not isinstance(ref, str) or len(ref) > 100:
             raise ValueError('运行引用无效')
         with self.db.connection() as conn:
             if 'action' in spec:
                 if not ref.startswith('sw_update_runs:') or not ref.split(':')[1].isdigit():
                     raise ValueError('行业运行引用无效')
-                row = conn.execute('SELECT * FROM sw_update_runs WHERE id=? AND action=?', (int(ref.split(':')[1]), spec['action'])).fetchone()
+                row = conn.execute('SELECT * FROM collection_operations WHERE id=? AND action=?', (int(ref.split(':')[1]), spec['action'])).fetchone()
             else:
                 predicate, args = self._predicate(key)
-                row = conn.execute('SELECT * FROM index_collection_operations WHERE operation_id=? AND ' + predicate, (ref, *args)).fetchone()
+                row = conn.execute('SELECT * FROM collection_operations WHERE operation_id=? AND ' + predicate, (ref, *args)).fetchone()
         if row is None:
             raise ValueError('任务运行不存在')
         row = dict(row)
         row['result'] = json.loads(row.pop('result_json'))
         if 'scope_json' in row:
             row['scope'] = json.loads(row.pop('scope_json'))
+        row['batch_page']=operation_segments(self.db,key,ref,before_batch_id)
         return row
 
     def recover(self):
@@ -360,7 +366,7 @@ class CollectionManagement:
         spec = TASKS[key]
         if 'action' not in spec:
             return False
-        run = conn.execute("SELECT id,result_json FROM sw_update_runs WHERE action=? AND target=? AND status='complete' ORDER BY id DESC LIMIT 1",
+        run = conn.execute("SELECT id,result_json FROM collection_operations WHERE action=? AND target=? AND status='complete' ORDER BY id DESC LIMIT 1",
                            (spec['action'], params['target'])).fetchone()
         if not run or json.loads(run['result_json'] or '{}').get('failures'):
             return False
@@ -376,19 +382,18 @@ class CollectionManagement:
         if self.stocks:
             from stock_analysis.domains.stocks.collection_schedules import tick
             tick(self.stocks, now, stopped)
-        for key in TASKS:
+        with self.db.connection() as conn:
+            all_rules=[r for key in TASKS if key!='stocks' for r in schedule_store.read(conn,key)]
+        for schedule in all_rules:
+            key= schedule['task_key']
+            schedule_id= schedule['schedule_id']
             if key == 'stocks':
                 continue
             if stopped():
                 return
             # Congestion daily checks retain initialization, manual reuse,
             # metadata_only and cooldown semantics. There is only one scheduler.
-            with self.db.connection() as conn:
-                schedule = self.schedules(conn)[key]
             if not schedule['enabled']:
-                continue
-            if key == 'market_congestion' and schedule['rule'] == {'frequency': 'daily'}:
-                market_congestion.scheduled_tick(self.db, now=now)
                 continue
             params = validate_params(key, schedule['params'], scheduled=True)
             slot = due_slot(schedule, now)
@@ -397,31 +402,50 @@ class CollectionManagement:
                 continue  # Saving/enabling starts with the next future slot, never an old backlog.
             with self.db.connection(write=True) as conn:
                 # Recheck under the same transaction as domain reservation.
-                current = self.schedules(conn)[key]
-                if stopped() or not current['enabled'] or current != schedule:
+                current = next((r for r in schedule_store.read(conn,key) if r['schedule_id']==schedule_id),None)
+                if stopped() or not current or not current['enabled'] or current != schedule:
                     continue
                 if 'window' in schedule['rule'] and self.target_complete(conn, key, params):
                     continue
-                old = conn.execute('SELECT * FROM collection_schedule_slots WHERE task_key=? AND slot_key=?', (key, slot)).fetchone()
+                old = conn.execute('SELECT * FROM collection_schedule_slots WHERE schedule_id=? AND slot_key=?', (schedule_id, slot)).fetchone()
                 if old and old['status'] != 'pending':
                     continue
                 # Do not start during any relevant source cooldown. No slot is consumed.
                 states = conn.execute('SELECT cooldown_until FROM collection_provider_state WHERE source_system IN (' + ','.join('?' for _ in TASKS[key]['providers']) + ')', TASKS[key]['providers']).fetchall()
-                if any(r[0] and datetime.fromisoformat(r[0]) > now for r in states):
+                cooling=any(r[0] and datetime.fromisoformat(r[0]) > now for r in states)
+                skip_reason=None
+                if key=='market_congestion':
+                    if not market_congestion.initialized(conn):
+                        continue
+                    if cooling:
+                        skip_reason='本次到期检查因来源冷却跳过'
+                    elif schedule['rule']=={'frequency':'daily'} and conn.execute(
+                        "SELECT 1 FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE s.dataset=? "
+                        "AND s.parse_status='complete' AND b.status='complete' AND b.trigger_type IN ('manual','scheduled','index_dependency') "
+                        "AND datetime(s.obtained_at)>=datetime(?) AND datetime(s.obtained_at)<=datetime(?) LIMIT 1",
+                        (market_congestion.DATASETS['html_recent_table'],scheduled_at.isoformat(),now.isoformat())).fetchone():
+                        skip_reason='本次到期时段已完成HTML检查，复用检查结果'
+                if cooling and key!='market_congestion':
                     continue
                 try:
                     ref = self.reserve(conn, key, params)
                 except ValueError:
                     continue  # Busy or uninitialized; retry when admissible.
+                conn.execute("UPDATE collection_operations SET trigger_type='scheduled' WHERE operation_id=?",(ref,))
                 if 'action' not in TASKS[key]:
-                    conn.execute("UPDATE index_collection_operations SET scope_json=json_set(scope_json,'$.trigger','scheduled','$.schedule_task',?,'$.schedule_slot',?) WHERE operation_id=?",
-                                 (key, slot, ref))
+                    conn.execute("UPDATE collection_operations SET scope_json=json_set(scope_json,'$.trigger','scheduled','$.schedule_task',?,'$.schedule_slot',?) WHERE operation_id=?",
+                                 (schedule_id, slot, ref))
                 stamp = utc_now()
                 conn.execute("UPDATE collection_schedule_slots SET status='failed',updated_at=?,error='漏跑已合并到最新槽位' "
-                             "WHERE task_key=? AND status='pending' AND slot_key<>?", (stamp, key, slot))
-                conn.execute("INSERT INTO collection_schedule_slots VALUES(?,?,'running',?,1,?,NULL,?,NULL) ON CONFLICT(task_key,slot_key) DO UPDATE SET "
+                             "WHERE schedule_id=? AND status='pending' AND slot_key<>?", (stamp, schedule_id, slot))
+                conn.execute("INSERT INTO collection_schedule_slots VALUES(?,?,'running',?,1,?,NULL,?,NULL) ON CONFLICT(schedule_id,slot_key) DO UPDATE SET "
                              "status='running',operation_ref=excluded.operation_ref,attempts=attempts+1,started_at=excluded.started_at,finished_at=NULL,updated_at=excluded.updated_at,error=NULL",
-                             (key, slot, ref, stamp, stamp))
+                             (schedule_id, slot, ref, stamp, stamp))
+                if skip_reason:
+                    conn.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE operation_id=?",
+                        (stamp,encoded(dict(message=skip_reason,skipped=True,network_requests=0)),ref))
+                    conn.execute("UPDATE collection_schedule_slots SET status='complete',finished_at=? WHERE schedule_id=? AND slot_key=?",(stamp,schedule_id,slot))
+                    continue
             error = None
             try:
                 self.execute(key, params, ref)
@@ -429,16 +453,16 @@ class CollectionManagement:
                 error = str(exc)
             with self.db.connection(write=True) as conn:
                 if 'action' in TASKS[key]:
-                    result = conn.execute('SELECT status,error FROM sw_update_runs WHERE id=?', (int(ref.split(':')[1]),)).fetchone()
+                    result = conn.execute('SELECT status,error FROM collection_operations WHERE id=?', (int(ref.split(':')[1]),)).fetchone()
                 else:
-                    result = conn.execute('SELECT status,error FROM index_collection_operations WHERE operation_id=?', (ref,)).fetchone()
+                    result = conn.execute('SELECT status,error FROM collection_operations WHERE operation_id=?', (ref,)).fetchone()
                 status = 'complete' if result and result['status'] == 'complete' and error is None else 'failed'
                 if status == 'failed' and stopped():
-                    attempts = conn.execute('SELECT attempts FROM collection_schedule_slots WHERE task_key=? AND slot_key=?', (key, slot)).fetchone()[0]
+                    attempts = conn.execute('SELECT attempts FROM collection_schedule_slots WHERE schedule_id=? AND slot_key=?', (schedule_id, slot)).fetchone()[0]
                     if attempts < 2:
                         status = 'pending'
-                conn.execute('UPDATE collection_schedule_slots SET status=?,finished_at=?,updated_at=?,error=? WHERE task_key=? AND slot_key=?',
-                             (status, utc_now(), utc_now(), error or (result['error'] if result else '领域任务无结果'), key, slot))
+                conn.execute('UPDATE collection_schedule_slots SET status=?,finished_at=?,updated_at=?,error=? WHERE schedule_id=? AND slot_key=?',
+                             (status, utc_now(), utc_now(), error or (result['error'] if result else '领域任务无结果'), schedule_id, slot))
 
 
 class Scheduler:
@@ -471,10 +495,8 @@ class Scheduler:
         if self.management.stocks:
             self.management.stocks.cancel()
         with self.management.db.connection(write=True) as conn:
-            conn.execute("UPDATE index_collection_operations SET cancel_requested=1 WHERE status='running' AND (operation_id IN "
-                         "(SELECT operation_ref FROM collection_schedule_slots WHERE status='running') OR json_extract(scope_json,'$.trigger')='scheduled')")
-            conn.execute("UPDATE sw_update_runs SET cancel_requested=1 WHERE status='running' AND 'sw_update_runs:'||id IN "
-                         "(SELECT operation_ref FROM collection_schedule_slots WHERE status='running')")
+            conn.execute("UPDATE collection_operations SET cancel_requested=1 WHERE status='running' AND (operation_id IN "
+                         "(SELECT operation_ref FROM collection_schedule_slots WHERE status='running') OR trigger_type='scheduled')")
         self.thread.join(timeout=90)
         if self.thread.is_alive():
             raise RuntimeError('统一采集尚未停止，不能关闭数据库')
@@ -483,7 +505,7 @@ class Scheduler:
             deadline = time.monotonic() + 60
             while True:
                 with self.management.db.connection() as conn:
-                    active = conn.execute("SELECT 1 FROM stock_collection_operations WHERE status='running' LIMIT 1").fetchone()
+                    active = conn.execute("SELECT 1 FROM collection_operations WHERE task_key='stocks' AND status='running' LIMIT 1").fetchone()
                 if not active:
                     break
                 if time.monotonic() >= deadline:

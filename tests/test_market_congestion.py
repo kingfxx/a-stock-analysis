@@ -158,7 +158,7 @@ def test_daily_schedule_restart_busy_disabled_and_cooldown(db,monkeypatch):
     now=datetime(2026,10,17,18,30,tzinfo=m.ZONE);calls=[]
     def execute(database,operation):
         calls.append(operation)
-        with database.connection(write=True) as conn:conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(operation,))
+        with database.connection(write=True) as conn:conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?",(operation,))
     assert m.scheduled_tick(db,now=now-timedelta(hours=1),execute=execute) is None
     m.scheduled_tick(db,now=now,execute=execute)
     m.scheduled_tick(Database(db.path),now=now,execute=execute)
@@ -166,7 +166,7 @@ def test_daily_schedule_restart_busy_disabled_and_cooldown(db,monkeypatch):
     op=m.start(db)
     assert m.scheduled_tick(db,now=now+timedelta(days=1),execute=execute) is None
     with db.connection(write=True) as conn:
-        conn.execute("UPDATE index_collection_operations SET status='cancelled' WHERE operation_id=?",(op,))
+        conn.execute("UPDATE collection_operations SET status='cancelled' WHERE operation_id=?",(op,))
         conn.execute('INSERT INTO collection_provider_state(source_system,cooldown_until,updated_at) VALUES(?,?,?)',('legu',(now+timedelta(days=2)).isoformat(),m.utc_now()))
     assert m.scheduled_tick(db,now=now+timedelta(days=1),execute=execute)['skipped']
     assert len(calls)==1
@@ -317,7 +317,7 @@ def test_browser_polling_preserves_zoom_and_filter_resets(live):
             assert page.evaluate('window.zoomRefreshes||0')==0
             assert page.locator('#congestion-current').text_content()=='41.66%'
             with database.connection(write=True) as conn:
-                conn.execute("UPDATE index_collection_operations SET status='complete',finished_at=? WHERE operation_id=?",(m.utc_now(),operation))
+                conn.execute("UPDATE collection_operations SET status='complete',finished_at=? WHERE operation_id=?",(m.utc_now(),operation))
             page.clock.fast_forward(11000)
             page.wait_for_function("document.getElementById('congestion-current').textContent==='42.00%' && window.zoomRefreshes>0",timeout=15000)
             after=page.locator('#congestion-chart').evaluate("n=>[n._fullLayout.xaxis.range,n._fullLayout.yaxis.range,n._fullLayout.yaxis2.range]")
@@ -341,7 +341,7 @@ def test_browser_polling_preserves_zoom_and_filter_resets(live):
             page.wait_for_function('minimum=>window.statusReads>=minimum',arg=status_before+2)
             assert history_reads()==history_before
             with database.connection(write=True) as conn:
-                conn.execute("UPDATE index_collection_operations SET status='complete',finished_at=? WHERE operation_id=?",(m.utc_now(),external_operation))
+                conn.execute("UPDATE collection_operations SET status='complete',finished_at=? WHERE operation_id=?",(m.utc_now(),external_operation))
             page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
             page.wait_for_function('minimum=>window.statusReads>=minimum',arg=status_before+4)
             # Collection controls live in maintenance; this page only links there.
@@ -430,7 +430,7 @@ def test_due_slot_reuses_successful_cross_midnight_html_check(db,monkeypatch):
     result=m.scheduled_tick(db,now=datetime(2026,10,25,9,tzinfo=m.ZONE),execute=lambda *args:pytest.fail('successful due-period check should be reused'))
     assert result['skipped']
     with db.connection() as conn:
-        row=conn.execute('SELECT scope_json FROM index_collection_operations WHERE operation_id=?',(result['operation_id'],)).fetchone()
+        row=conn.execute('SELECT scope_json FROM collection_operations WHERE operation_id=?',(result['operation_id'],)).fetchone()
         assert json.loads(row[0])['scheduled_date']=='2026-10-24'
 
 

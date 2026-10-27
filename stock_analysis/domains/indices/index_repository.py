@@ -191,7 +191,7 @@ def read_indices(db, *, code=None, kind=None, level=None, provider=None, series=
             ' FROM current GROUP BY index_code,provider,series_key,frequency,definition_version')]
         batches=[dict(r) for r in conn.execute('SELECT * FROM collection_batches WHERE domain=\'market\' AND dataset LIKE \'index%\' ORDER BY id DESC LIMIT 40')]
         cooldowns=[dict(r) for r in conn.execute('SELECT * FROM collection_provider_state WHERE cooldown_until IS NOT NULL')]
-        operations=[dict(r) for r in conn.execute('SELECT * FROM index_collection_operations ORDER BY started_at DESC LIMIT 5')]
+        operations=[dict(r) for r in conn.execute('SELECT * FROM collection_operations WHERE action IS NULL AND task_key<>\'stocks\' ORDER BY started_at DESC LIMIT 5')]
         rows=[]
         views={}
         if code:

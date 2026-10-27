@@ -1,0 +1,41 @@
+# v44采集控制整合字段与迁移对照
+
+状态：实施中；以PROGRESS记录的最终验证/部署状态为准。
+
+## 运行
+
+collection_operations.operation_id是稳定文本身份；id是唯一数字行ID，用于承接行业旧run ID。先迁移行业数字身份，再分配指数/个股行ID，已有sw_update_runs:<id>、指数UUID、stock:<uuid>均保留。重复身份报错并回滚整个迁移，不猜测冲突历史归属。
+
+公共字段为task_key、mode、trigger_type、scope_json、status、cancel_requested、started_at、finished_at、result_json、error。worker_started_at用于个股原子领取一次实际后台执行，防止重复调用run重复执行。行业原action/target/recheck是同一行的业务参数，保留其旧API查询语义；由插入触发器赋予真实task_key/mode及文本身份，不维护第二份运行状态。旧sw_update_runs物理表退役。
+
+指数/国债/拥挤度/航运保留原共享互斥组；行业保留原行业互斥。个股同股票同数据项通过公共运行的固定范围，在同一短写事务占位和检查，不因拆成多个来源分段而放宽原互斥。所有范围冲突及计划校验在写入父运行前完成，定时调用者在事务内捕获冲突也不会提交孤立运行。初始化唯一索引限定stocks/initial/initial_code。
+
+原API的operation_ref与行业数字run ID继续可用；个股detail.items是从真实batch按股票×数据项聚合的兼容响应字段，不代表新增item表。业务sync_runs/state及事实外键不迁移。
+
+## 分段
+
+collection_batches保留原id及全部业务范围/口径/执行/覆盖/计数。新增operation_id真实外键、legacy_operation_ref未知旧引用、sync_run_id业务同步外键、created_at、code、work_dataset、work_key、sequence、mode、reused_batch_id。
+
+- 旧operation_id能证明父operation时迁入有效外键；个股依据parent_operation关联，sync_runs:<id>解析为真实sync_run_id。无法证明父任务时operation_id为空，真实旧引用保留，不新建假operation。
+- 个股直接计划来源分段：四类新浪报表、两类价格、三个百度估值/同行估值、两种股东接口及其余真实单来源数据项。开始前pending，started_at为空；领域服务到达真实分段时原子领取原行，填写实际范围、开始时间、解析版本与sync_run_id。没有新建子batch。
+- 复用/本地跳过为reused/skipped，保持覆盖未知且不生成source；reused_batch_id指向被复用分段，不复制旧计数。继续失败按相同股票/来源/接口及当前服务的真实解析/定义版本匹配，按分段原mode执行，不把增量扩成全量；无已知分段的旧全量工作也保留原模式。动态发现或辅助简称请求直接新增真实来源分段，不建立无范围父占位。
+- 新工作键在同operation内唯一，领取按sequence/id排序；数据库短事务与领域锁共同保持互斥。任务首次幂等由operation管理。
+- 旧item已有分段时，其精确历史业务状态附到对应分段scope.legacy_work；无可证分段的少量旧汇总保留在真实operation的legacy_unsegmented_work中，明确为旧聚合记录，不补造成功/待执行分段。stock_collection_items退役。
+
+SQLite在迁移事务前关闭FK执行检查，使用legacy_alter_table重建批次表；原source/事实仍引用原名和原id。重建后外键全检通过才能提交。主营版本身份触发器同步由旧文本前缀判断切换为sync_run_id；历史迁移文件不修改，备份旧schema的完整性验证按版本选择相应表达式。
+
+## 日程
+
+collection_schedules以schedule_id为主键，task_key为可重复模块身份；合入rule_json/params_json，保留rule_updated_at及旧updated_at真实原值。deleted区分关闭与删除；旧股票缺rules行表示已删除，旧拥挤度无rules行沿用daily。原规则身份及用户参数不变。
+
+collection_schedule_slots以schedule_id+slot_key唯一，继续保存operation_ref、status、attempts及真实时间；不复制operation结果。公共配置/API/调度及管理页支持其他可定时模块的多规则、新增/编辑/删除；manual_only任务不因此开放。股票旧schedule_key外部字段仍可解析。
+
+## 结果与证据
+
+历史指数results只按真实batch_id或唯一的精确dataset/provider/code关联核对；已有相同字段不复制，独有字段归真实batch.result_json.legacy_operation_details，无法证明关联才保留明确legacy_unmapped_results，不能静默丢弃。work_progress仅保存整体计数和有限来源摘要；逐任务运行状态在执行器内管理，真实分段状态在batch。旧任务中没有可证分段的跳过/错误消息以legacy_task_states原样保留，仅作历史，不为新任务生成。分段详情通过evidence API读取完整诊断，operation详情的batch_page按每页100条提供引用及next_url，不向父运行复制明细。
+
+新指数重放不再把全results复制到operation；既有专用验收报告仍保留。航运月度当前运行仅保留计数和有限错误摘要；缺失月份诊断保存在真实目录分段，月度结果按batch查阅。日常公共财务结果不再复制来源files清单，来源信息由collection_sources及collection_batch_ids追溯。
+
+旧行业CLI历史存在独有业务核对/回填结果，保留其原内容，不把迁入公共控制表误称为已完成所有领域历史结果规范化；未注册CLI授权和采集行为不扩展。旧航运独有诊断同样先保留，未来清理须证明完整归属。JSON精简不自动VACUUM，报告分别核对逻辑字节和物理页/空闲空间。
+
+索引与维护用途随实际schema同步。报告、性能测试和原库部署由PROGRESS与data/verification/reports中的实际结果记录，当前文件不代替验收。

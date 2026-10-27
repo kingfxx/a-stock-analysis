@@ -46,7 +46,7 @@ def add_snapshot(db, code, exchange, cap, definition='em-valueanalysis-v1'):
 
 def task(db):
     with db.connection(write=True) as c:
-        return c.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status,result_json) VALUES('test','2025Q4',0,'2026-10-14','running','{}')").lastrowid
+        return c.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status,result_json) VALUES('test','2025Q4',0,'2026-10-14','running','{}')").lastrowid
 
 
 def test_computes_partial_and_complete_groups_and_reuses_same_input(db):
@@ -145,8 +145,8 @@ def test_task_entrypoint_keeps_published_cap_aggregation_current_and_visible(db,
 
     def refresh_quarter(service,quarter,recheck,foundation,membership_check,progress,*,progress_state=None):
         with db.connection(write=True) as conn:
-            run_id=conn.execute("SELECT id FROM sw_update_runs WHERE status='running'").fetchone()[0]
-            conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?',
+            run_id=conn.execute("SELECT id FROM collection_operations WHERE status='running'").fetchone()[0]
+            conn.execute('UPDATE collection_operations SET result_json=? WHERE id=?',
                          (json.dumps({'message':'已有进度','audit_marker':'preserved',
                                       'aggregation_results':{'2025Q3':{'import_id':9}}}),run_id))
         aggregation=aggregate_quarter(db,quarter,run_id,f'sw_update_runs:{run_id}')
@@ -158,11 +158,11 @@ def test_task_entrypoint_keeps_published_cap_aggregation_current_and_visible(db,
     if entrypoint=='perform':
         result=perform(service,'cap_quarter','2025Q4',False,progress)
         with db.connection() as conn:
-            run=conn.execute('SELECT status,result_json FROM sw_update_runs ORDER BY id DESC LIMIT 1').fetchone()
+            run=conn.execute('SELECT status,result_json FROM collection_operations ORDER BY id DESC LIMIT 1').fetchone()
     else:
         service._refresh('cap_quarter','2025Q4',False)
         with db.connection() as conn:
-            run=conn.execute('SELECT status,result_json FROM sw_update_runs ORDER BY id DESC LIMIT 1').fetchone()
+            run=conn.execute('SELECT status,result_json FROM collection_operations ORDER BY id DESC LIMIT 1').fetchone()
         result=json.loads(run['result_json'])
 
     saved=json.loads(run['result_json'])
@@ -196,7 +196,7 @@ def test_failed_task_entrypoint_preserves_already_published_aggregation(db,monke
 
     def refresh_then_fail(service,quarter,recheck,foundation,membership_check,progress,*,progress_state=None):
         with db.connection() as conn:
-            run_id=conn.execute("SELECT id FROM sw_update_runs WHERE status='running'").fetchone()[0]
+            run_id=conn.execute("SELECT id FROM collection_operations WHERE status='running'").fetchone()[0]
         aggregate_quarter(db,quarter,run_id,f'sw_update_runs:{run_id}')
         raise RuntimeError('后续审计阶段失败')
 
@@ -208,7 +208,7 @@ def test_failed_task_entrypoint_preserves_already_published_aggregation(db,monke
         service._refresh('cap_quarter','2025Q4',False)
 
     with db.connection() as conn:
-        run=conn.execute('SELECT status,result_json FROM sw_update_runs ORDER BY id DESC LIMIT 1').fetchone()
+        run=conn.execute('SELECT status,result_json FROM collection_operations ORDER BY id DESC LIMIT 1').fetchone()
         saved=json.loads(run['result_json'])
         current=current_aggregation_versions(conn)['2025Q4']
     assert run['status']=='failed'

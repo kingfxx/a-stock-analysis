@@ -15,6 +15,9 @@ from stock_analysis.domains.stocks.sync_support import audit_due, data_lock, dig
 SOURCE = "tencent"
 
 
+COLLECTION_PARSER_VERSION = "tencent-ohlc-v2"
+COLLECTION_DEFINITION_VERSION = "current-adjustment-v1"
+
 class PriceVersionUnavailable(StorageError):
     pass
 
@@ -133,7 +136,7 @@ class PriceService:
             rebuild = full or not old or audit_due(state, key.dataset)
             start = "1990-01-01" if rebuild else old[max(0, len(old) - (30 if adjustment == "raw" else 20))]["date"]
             end = today.isoformat()
-            run = self.db.start_sync(key, parser_version="tencent-ohlc-v2", methodology_version="current-adjustment-v1",
+            run = self.db.start_sync(key, parser_version=COLLECTION_PARSER_VERSION, methodology_version=COLLECTION_DEFINITION_VERSION,
                                      trigger_reason="full_audit" if rebuild else "overlap_check",
                                      requested_start=start, requested_end=end)
             dataset = "prices_raw" if adjustment == "raw" else "prices_adjusted"
@@ -141,7 +144,7 @@ class PriceService:
                                          trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
                                          scope={"adjustment": adjustment, "mode": "full" if rebuild else "incremental",
                                                 "source_interface": "fqkline/get"},
-                                         parser_version="tencent-ohlc-v2", definition_version="current-adjustment-v1")
+                                         parser_version=COLLECTION_PARSER_VERSION, definition_version=COLLECTION_DEFINITION_VERSION)
             try:
                 rows = self._scheduled_fetch(code, adjustment, start, end, batch_id)
                 self._validate(rows, start, end)
@@ -180,6 +183,17 @@ class PriceService:
                 changed = bool(set(merged) != set(old_by_day) or any(
                     d in old_by_day and not price_equal(r, old_by_day[d]) for d, r in fresh.items()))
                 warnings = []
+                from stock_analysis.collection.publication_counts import counts, observe, published
+                counters = counts(len(rows))
+                fields = ('open','close','high','low','volume')
+                for row in rows:
+                    previous = old_by_day.get(row['date'])
+                    old_values = tuple(previous.get(f) for f in fields) if previous else None
+                    values = tuple(row.get(f) for f in fields)
+                    # Incremental qfq generations copy existing dates unchanged;
+                    # only a validated rebuild publishes revisions of old dates.
+                    observe(counters,old_values,old_values if adjustment=='qfq' and previous and (not rebuild or not changed) else values)
+                publication = published(counters)
                 if adjustment == "raw":
                     def write(conn):
                         conn.executemany("INSERT INTO raw_daily_prices(instrument_id,source,trade_date,open,close,high,low,volume,"
@@ -191,14 +205,14 @@ class PriceService:
                                            encoded(r["raw"]), digest(r["raw"]), utc_now(), run) for r in rows])
                     self.db.complete_sync(run, SyncResult(len(rows), *coverage, next_full_audit_at=next_full), write,
                                           collection_batch_id=batch_id,
-                                          batch_result={"row_count": len(rows), "sync_run_id": run, "mode": "full" if rebuild else "incremental"})
+                                          batch_result={"row_count": len(rows), "sync_run_id": run, "mode": "full" if rebuild else "incremental", **publication})
                     version = None
                 elif not changed and old:
                     version = state["active_price_version_id"]
                     self.db.complete_sync(run, SyncResult(0, *coverage, active_price_version_id=version,
                                                          next_full_audit_at=next_full), lambda conn: None,
                                           collection_batch_id=batch_id,
-                                          batch_result={"row_count": 0, "sync_run_id": run, "mode": "unchanged"})
+                                          batch_result={"row_count": 0, "sync_run_id": run, "mode": "unchanged", **publication})
                 else:
                     # Stage candidates; only the final validated state is published atomically.
                     with self.db.connection(write=True) as conn:
@@ -222,7 +236,7 @@ class PriceService:
                     self.db.complete_sync(run, SyncResult(len(rows), *coverage, active_price_version_id=version,
                                                          next_full_audit_at=next_full), publish,
                                           collection_batch_id=batch_id,
-                                          batch_result={"row_count": len(rows), "sync_run_id": run, "mode": "full" if rebuild else "incremental"})
+                                          batch_result={"row_count": len(rows), "sync_run_id": run, "mode": "full" if rebuild else "incremental", **publication})
                     try:
                         self.prune(code)
                     except Exception as exc:

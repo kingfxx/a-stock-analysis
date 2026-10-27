@@ -2,13 +2,22 @@
 (()=>{'use strict';
 const labels={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所',mot:'交通运输部',user_excel:'本地研究资料',cninfo:'巨潮资讯',local:'本地'};
 function renderDataCounts(summary,list,result){
+if(result.provider_counts?.length){
+ summary.textContent+=' 来源写入：'+result.provider_counts.map(counts=>`${labels[counts.provider]||counts.provider} ${Number.isInteger(counts.written)?`${counts.unrecorded_segments?'已知 ':''}${counts.written} 条${counts.unrecorded_segments?'（部分未记录）':''}`:'未记录写入数'}`).join('；')+'。';
+}
 for(const counts of result.data_counts||[]){
  const item=document.createElement('li');
  const number=key=>Number.isInteger(counts[key])?counts[key]:'未记录';
  item.className='collection-data-counts';
- item.textContent=`${labels[counts.provider]||counts.provider} · ${counts.label||'数据'}：已记录写入 ${number('written')} 条（新增 ${number('inserted')} 条、修订 ${number('revised')} 条${Number.isInteger(counts.enriched)?'、补全 '+number('enriched')+' 条':''}）；未变化 ${number('unchanged')} 条；返回／解析 ${number('returned')} 条。`;
+ const title=`${labels[counts.provider]||counts.provider} · ${counts.label||'数据'}`;
+ if(!Number.isInteger(counts.written)){
+  item.textContent=`${title}：实际写入数量未记录；${Number.isInteger(counts.returned)?`返回／解析 ${counts.returned} 条`:'解析数量未记录'}。`;
+ }else{
+  const details=Number.isInteger(counts.inserted)&&Number.isInteger(counts.revised)?`（新增 ${counts.inserted} 条、修订 ${counts.revised} 条${Number.isInteger(counts.enriched)?'、补全 '+counts.enriched+' 条':''}）`:'（新增／修订未分别记录）';
+  item.textContent=`${title}：已记录写入 ${counts.written} 条${details}；未变化 ${number('unchanged')} 条；返回／解析 ${number('returned')} 条。`;
+ }
  if(counts.reused_segments)item.textContent+=` 复用／跳过 ${counts.reused_segments} 个分段，这些分段未重复写入。`;
- if(counts.unrecorded_segments)item.textContent+=` 另有 ${counts.unrecorded_segments} 个分段未记录写入数量。`;
+ if(counts.unrecorded_segments&&Number.isInteger(counts.written))item.textContent+=` 另有 ${counts.unrecorded_segments} 个分段未记录写入数量。`;
  list.append(item);
  if(counts.empty_returns>0){
   const warning=document.createElement('li');warning.className='collection-progress-warning';

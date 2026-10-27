@@ -46,8 +46,8 @@ DEFINITION='historical-suspended-preclose-v1'
 def collect(db):
     RUN.mkdir(parents=True,exist_ok=True);REPORT.mkdir(parents=True,exist_ok=True)
     with db.connection(write=True) as c:
-        if c.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():raise ValueError('已有行业任务运行')
-        rid=c.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('suspended_price_cache','2015Q1:2017Q4',0,?,'running')",(utc_now(),)).lastrowid
+        if c.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():raise ValueError('已有行业任务运行')
+        rid=c.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES('suspended_price_cache','2015Q1:2017Q4',0,?,'running')",(utc_now(),)).lastrowid
     sdk=BigQuantSDK(db,f'sw_update_runs:{rid}',progress=lambda s:print(s,flush=True))
     result=dict(status='running',started_at=utc_now(),operation_id=f'sw_update_runs:{rid}')
     try:
@@ -111,7 +111,7 @@ WHERE s.change_date >= '{first}' OR s.change_date=b.base_date ORDER BY s.instrum
         result.update(status='failed',error=str(exc),finished_at=utc_now());raise
     finally:
         save(REPORT/'collection.json',result)
-        with db.connection(write=True) as c:c.execute('UPDATE sw_update_runs SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
+        with db.connection(write=True) as c:c.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
             (result['status'],result['finished_at'],json.dumps(result,ensure_ascii=False),result.get('error'),rid))
 
 def base_rows(db,*,conn=None):
@@ -218,8 +218,8 @@ def publish_reference(db,*,rehearsal=False):
         if proof.get('status')!='complete' or not proof.get('idempotency_verified') or proof['manifest_hash']!=result['manifest_hash']:raise ValueError('当前停牌候选未通过演练')
         result['backup']=str(db.backup(db.path.parent/'backups'/('before-suspended-price-'+utc_now().replace(':','').replace('+','')+'.sqlite3')))
     with db.connection(write=True) as c:
-        if c.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():raise ValueError('已有行业任务运行')
-        rid=c.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('suspended_price_publish','2015Q1:2017Q4',0,?,'running')",(utc_now(),)).lastrowid
+        if c.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():raise ValueError('已有行业任务运行')
+        rid=c.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES('suspended_price_publish','2015Q1:2017Q4',0,?,'running')",(utc_now(),)).lastrowid
     sources=[]
     try:
         for item,rows in prepared:
@@ -242,14 +242,14 @@ def publish_reference(db,*,rehearsal=False):
                 result['periods'].append(summary)
                 c.execute("UPDATE collection_batches SET status='complete',coverage_status='partial',finished_at=?,result_json=? WHERE id=?",(utc_now(),encoded(summary),batch))
             result.update(status='aggregating')
-            c.execute("UPDATE sw_update_runs SET result_json=? WHERE id=?",(encoded(result),rid))
+            c.execute("UPDATE collection_operations SET result_json=? WHERE id=?",(encoded(result),rid))
         from stock_analysis.domains.industries.industry_cap_summary import aggregate_quarter
         for item,_,_,_ in sources:
             aggregation=aggregate_quarter(db,item['quarter'],rid,f'sw_update_runs:{rid}')
             result.setdefault('aggregation_results',{})[item['quarter']]=aggregation
         result.update(status='complete',finished_at=utc_now())
         with db.connection(write=True) as c:
-            c.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
+            c.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE id=?",
                       (result['finished_at'],encoded(result),rid))
         if protected_fingerprints(db)!=before or original_series_hash(db)!=original_hash:raise ValueError('原有业务或原合成系列保护核对失败')
         result['protected_tables']=len(before);result['original_series_unchanged']=True
@@ -269,7 +269,7 @@ def publish_reference(db,*,rehearsal=False):
         for _,_,batch,_ in sources:
             with db.connection() as c:status=c.execute('SELECT status FROM collection_batches WHERE id=?',(batch,)).fetchone()[0]
             if status=='running':finish_batch(db,batch,'failed',error=exc)
-        with db.connection(write=True) as c:c.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE id=?",(utc_now(),str(exc),rid))
+        with db.connection(write=True) as c:c.execute("UPDATE collection_operations SET status='failed',finished_at=?,error=? WHERE id=?",(utc_now(),str(exc),rid))
         save(REPORT/('rehearsal.json' if rehearsal else 'publication.json'),result);raise
 
 def rehearse(db):

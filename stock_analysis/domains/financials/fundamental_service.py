@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from stock_analysis.domains.stocks.collection_plan import selected
+
 import json
 import hashlib
 from datetime import date
@@ -26,6 +28,9 @@ def _income_fields(raw):
                  if item.get("item_value") not in (None, "", "--")}
     return bool({"营业收入", "营业总收入"} & populated), bool(set(PROFIT_KEYS) & populated)
 
+
+COLLECTION_PARSER_VERSION = "sina_reports_v1"
+COLLECTION_DEFINITION_VERSION = "raw_facts_v1"
 
 class FundamentalService:
     def __init__(self, db: Database, legacy_root: Path, *, fetch_page=None):
@@ -234,6 +239,8 @@ class FundamentalService:
             identity = self.db.ensure_instrument(code)
             warnings = []
             for kind in REPORT_TYPES:
+                if not selected("financial."+kind, "getFinanceReport2022:"+kind):
+                    continue
                 key = SyncKey(identity, f"financial:{kind}", SOURCE)
                 state = sync_state(self.db, key)
                 recent_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
@@ -245,14 +252,14 @@ class FundamentalService:
                                   or not recently_checked(state, seconds=86400)):
                     continue
                 full_kind = full or not saved or audit_due(state, "financial")
-                run = self.db.start_sync(key, parser_version="sina_reports_v1",
-                                         methodology_version="raw_facts_v1",
+                run = self.db.start_sync(key, parser_version=COLLECTION_PARSER_VERSION,
+                                         methodology_version=COLLECTION_DEFINITION_VERSION,
                                          trigger_reason="full" if full_kind else "refresh")
                 batch = begin_stock_batch(self.db, run, "sina", f"financial.{kind}", code,
                                           trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
                                           scope={"source_interface": f"getFinanceReport2022:{kind}",
                                                  "mode": "full" if full_kind else "incremental"},
-                                          parser_version="sina_reports_v1", definition_version="raw_facts_v1")
+                                          parser_version=COLLECTION_PARSER_VERSION, definition_version=COLLECTION_DEFINITION_VERSION)
                 try:
                     with routed_stock_requests(self.db, batch, "sina", f"financial.{kind}"):
                         candidates = self._collect(code, kind, full=full_kind, saved=saved)

@@ -78,18 +78,18 @@ def run(db, start, end, report_path, *, recheck=False):
               'periods': [], 'status': 'running', 'datasets':list(mf.FIELDS), 'legacy_updated':False}
     report_path = Path(report_path)
     with db.connection(write=True) as conn:
-        if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():
             raise ValueError('已有行业任务运行，未启动历史采集')
-        run_id = conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) "
+        run_id = conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) "
                               "VALUES('financial_history',?,?,?,'running')",
                               (end, int(recheck), now())).lastrowid
     def progress(message):
         print(message, flush=True)
         with db.connection(write=True) as conn:
-            state=conn.execute('SELECT status FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+            state=conn.execute('SELECT status FROM collection_operations WHERE id=?',(run_id,)).fetchone()
             if not state or state['status']!='running':
                 raise ValueError('历史任务状态已被中断，停止采集；已提交的报告期保留')
-            conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?',
+            conn.execute('UPDATE collection_operations SET result_json=? WHERE id=?',
                          (encoded({'message': message,'start':start,'end':end,'report':str(report_path),
                                    'completed_periods':len(result['periods']),'total_periods':len(selected)}), run_id))
     from stock_analysis.collection.collection import RequestCollector,finish_batch
@@ -136,7 +136,7 @@ def run(db, start, end, report_path, *, recheck=False):
         result['finished_at'] = now()
         atomic_write(report_path, encoded(result).encode('utf-8'))
         with db.connection(write=True) as conn:
-            conn.execute('UPDATE sw_update_runs SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
+            conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
                          (result['status'], result['finished_at'], encoded(result), result.get('error'), run_id))
     return result
 

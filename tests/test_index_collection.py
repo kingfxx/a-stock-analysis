@@ -249,7 +249,7 @@ def test_truncated_sw_pages_keep_sources_but_publish_no_facts(db):
 
 def test_maintenance_and_legacy_metadata_fit_without_migration(db):
     data=MaintenanceService(db).read()
-    new_tables=['collection_batches','collection_sources','collection_provider_state','index_identities','index_catalog','index_provider_codes','index_metric_definitions','index_valuation_observations','index_collection_operations']
+    new_tables=['collection_batches','collection_sources','collection_provider_state','index_identities','index_catalog','index_provider_codes','index_metric_definitions','index_valuation_observations','collection_operations']
     for name in new_tables:
         row=next(r for r in data['tables'] if r['name']==name)
         assert row['description']!='尚未登记用途'
@@ -267,7 +267,7 @@ def test_maintenance_and_legacy_metadata_fit_without_migration(db):
     with db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM market_financial_batches').fetchone()[0]==0
         assert conn.execute('SELECT count(*) FROM market_price_batches').fetchone()[0]==0
-        assert conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id='legacy-financial:7'").fetchone()[0]==4
+        assert conn.execute("SELECT count(*) FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)='legacy-financial:7'").fetchone()[0]==4
 
 
 def test_monthly_moving_point_keeps_snapshots_but_shows_latest_per_month(db):

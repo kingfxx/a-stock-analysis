@@ -56,7 +56,7 @@ def test_permission_failure_is_durable_and_retryable(setup, monkeypatch):
     assert '已保存市值保留' in prices.price_status({'quarter_prices':result})
     db = setup[0].db
     with db.connection(write=True) as conn:
-        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status,result_json) "
+        conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status,result_json) "
             "VALUES('cap_quarter','2026Q3',0,'2026-10-10','complete',?)",
             (json.dumps({'quarter_prices':result}),))
         assert conn.execute('SELECT count(*) FROM market_quarterly_prices').fetchone()[0]==0

@@ -1,6 +1,6 @@
 # SQLite 存储、数据更新与备份
 
-当前结构版本为v43。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
+当前结构版本为v44，部署与验收状态见[当前计划进度](plans/20261025_统一采集管理/PROGRESS.md)。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
 
 v37仅扩展既有`index_price_observations`，新增volume、amount、change_points、change_pct、turnover_rate、amount_ratio、constituent_count、mean_price、float_market_cap和mean_float_market_cap十个可空字段，另增field_lineage_json字段级来源/估算JSON，不新增业务表。中证/申万原series及行情行就地升级v2，保留ID及OHLC，不保留v1行情副本；Legu/Sina继续v1。每个series_id/observation_date物理唯一，历史修订就地更新，version只作计数；不建立独立derived行情。估算字段标记及父依赖同行存储，官方值优先；仅补算保留原source/batch/obtained_at，computed_at在估算JSON中，updated_at是真实写入时间；缺依赖保持NULL或撤回。单位、字段映射、缺值和派生估算规则见[指数行情字段映射](index-data-collection.md#field-mapping)。v38后逻辑来源/时间语义保持，物理来源/时间格式见下节。
 
@@ -563,3 +563,23 @@ collection_rate_limits以(task_key,provider)复合主键保存settings_json和�
 原业务事实、raw_json、价格版本及metadata_only不变。新表没有HTTP正文、图表载荷、原文哈希或BLOB。旧股票不新增初始化记录，不发迁移请求。SQLite备份与外部文件边界不变。代表性占用与读取报告见[控制元数据测量](../data/verification/reports/stock_collection_storage_20261027.json)，复测工具data/verification/tools/stock_collection_management_benchmark.py仅操作临时隔离库。
 
 同组多主题沿用v43，无新增迁移或表。删除规则时关闭collection_schedules开关并移除collection_schedule_rules有效行，父身份为历史槽位外键保留；待恢复槽位标failed并记录删除原因，已完成/运行中的历史不删除。
+
+
+个股发布计数补充（2026-10-27）：schema仍为v43，无迁移。complete_sync的本地写回调可返回少量计数字典，与既有batch.result_json合并并与事实一起提交；原UPSERT和版本策略不变。每分段仅固定整数及公告派生子计数，不逐行复制统计、响应或图表数据。原历史不回填，写入统计不依赖事实全表扫描。
+
+
+## v44 采集控制元数据整合
+
+整次实际启动统一存collection_operations，operation_id为稳定文本引用；id保留行业旧数字身份，action/target/recheck保留业务参数，同一行管理状态，不维护第二份控制。原index_collection_operations、stock_collection_operations、stock_collection_items、sw_update_runs物理表退役。不新增collection_items或父子batch层，sync_runs/state及其事实/价格版本外键保留。
+
+collection_batches保留原id，operation_id引用真实公共父运行；legacy_operation_ref保留无法证明父级的旧引用，sync_run_id引用业务同步记录。新增created_at、code/work_dataset/work_key、sequence、mode、reused_batch_id用于真实来源分段的排队、领取及恢复。pending无开始时间，实际执行才填写started_at；复用/跳过无假source、无旧写入计数复制。个股各来源/报表分段直接领取原计划行，股票×数据项状态由分段汇总。旧item有分段则其精确历史状态附入scope.legacy_work，无法证明分段的旧聚合信息以legacy_unsegmented_work保留在真实父运行，不伪造执行。
+
+collection_schedules的schedule_id为规则主键，task_key为可重复模块身份；合入rule_json/params_json，并保留规则与原配置各自可证更新时间rule_updated_at/updated_at。deleted区分关闭与删除。collection_schedule_rules退役；collection_schedule_slots改以schedule_id+slot_key唯一并继续保存执行引用与有界恢复状态。各可定时模块均支持多规则，原规则身份/时间/范围/开关不变，未注册或手动导入任务不扩大定时授权。
+
+所有控制表在maintenance登记“运行与配置”，时间依据实际updated_at/created_at/started_at/finished_at，空表/缺值不推算。源码恢复/压缩/限速保存门禁统一查询公共operation。重建批次表保持原source/事实外键，迁移事务完成前全检外键；旧数据库备份的主营版本验证按其schema选择旧文本引用或新sync_run_id规则。
+
+指数父运行不再复制全results数组，新运行不保存完整任务数组；旧任务独有消息以legacy_task_states保留，分段独有诊断归batch；新指数重放只存摘要和既有报告引用。日常公共财务不重复保存已在公共source中的files清单，航运月度将目录缺失月份诊断留在真实目录batch，父运行仅保留计数及有限错误摘要。旧行业CLI的独有业务历史保留，不在本次伪造归属或移至另一份大JSON。
+
+隔离原库验证：53条原指数类result_json从10,833,973减至249,704字节（保留独有旧任务消息）；3460个batch ID与来源/事实不变，批次JSON仅增加35,971字节以承接独有诊断及旧工作元数据。运行列表三次约51—57ms。全未变表逐行SHA256相同、来源预算/冷却和6条原日程配置保持。详见[迁移报告](../data/verification/reports/collection_control_migration_20261027.json)。JSON逻辑字节不等于物理释放文件大小，未自动VACUUM。
+
+代表性隔离测量：10次运行×20股票×16个真实来源分段，共3200个batch；批次表含索引2,818,048字节，约881字节/行；10次占位及模拟终结约242ms，公共列表约55ms。该值包含真实batch及排队索引，不能只与旧1600条item的开销比较。无新增source/业务sync/响应文件。报告与复测工具见[存储测量](../data/verification/reports/collection_control_storage_20261027.json)、[测量工具](../data/verification/tools/collection_control_benchmark.py)；具体迁移边界见[字段对照](plans/20261025_统一采集管理/CONTROL_SCHEMA.md)。

@@ -115,7 +115,7 @@ def apply(db, evidence, *, backup_path):
     rows=evidence['rows'];operation='congestion-local-gap-'+uuid4().hex
     with instance_lock(str(db.path)+'.congestion-local-gap'):
         with db.connection() as conn:
-            if conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone():raise ValueError('指数采集运行中，暂不写入')
+            if conn.execute("SELECT 1 FROM collection_operations WHERE status='running'").fetchone():raise ValueError('指数采集运行中，暂不写入')
             existing=[dict(r) for r in conn.execute('SELECT * FROM market_indicator_observations WHERE '+
                 ' AND '.join(k+'=?' for k in congestion.IDENTITY_FIELDS)+' AND is_latest=1',congestion.CALCULATED_IDENTITY)]
         by_date={r['observation_date']:r for r in existing}

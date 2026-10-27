@@ -23,9 +23,9 @@ def now(value='2026-10-25T19:00:00'):
 def complete(management, key, params, ref):
     with management.db.connection(write=True) as conn:
         if ref.startswith('sw_update_runs:'):
-            conn.execute("UPDATE sw_update_runs SET status='complete',finished_at='2026-10-25T11:00:00+00:00' WHERE id=?",(int(ref.split(':')[1]),))
+            conn.execute("UPDATE collection_operations SET status='complete',finished_at='2026-10-25T11:00:00+00:00' WHERE id=?",(int(ref.split(':')[1]),))
         else:
-            conn.execute("UPDATE index_collection_operations SET status='complete',finished_at='2026-10-25T11:00:00+00:00' WHERE operation_id=?",(ref,))
+            conn.execute("UPDATE collection_operations SET status='complete',finished_at='2026-10-25T11:00:00+00:00' WHERE operation_id=?",(ref,))
 
 
 def enable(management,key='indices',rule=None,params=None):
@@ -70,17 +70,19 @@ def test_whitelist_rejects_invalid_inputs(key,params):
 
 def test_schedule_save_does_not_execute_and_legacy_congestion_preserved(management,monkeypatch):
     with management.db.connection(write=True) as conn:
-        conn.execute('INSERT INTO collection_schedules VALUES(?,?,?,?,?)',('market_congestion',1,'Asia/Shanghai','19:33','2026-10-17T00:00:00+00:00'))
+        conn.execute('INSERT INTO collection_schedules(schedule_id,enabled,timezone,local_time,updated_at,task_key) VALUES(?,?,?,?,?,\'market_congestion\')',('market_congestion',1,'Asia/Shanghai','19:33','2026-10-17T00:00:00+00:00'))
     enable(management)
     with management.db.connection() as conn:
         row=dict(conn.execute("SELECT * FROM collection_schedules WHERE task_key='market_congestion'").fetchone())
         assert row['enabled']==1 and row['local_time']=='19:33'
-        assert conn.execute('SELECT count(*) FROM index_collection_operations').fetchone()[0]==0
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
     called=[]
-    monkeypatch.setattr(market_congestion,'scheduled_tick',lambda db,**kw:called.append(kw['now']))
-    management.execute=lambda *args:complete(management,*args)
+    monkeypatch.setattr(market_congestion,'initialized',lambda conn:True)
+    def execute(key,params,ref):
+        called.append(key);complete(management,key,params,ref)
+    management.execute=execute
     management.tick(now=now())
-    assert len(called)==1
+    assert called.count('market_congestion')==1
 
 
 def test_idempotent_ticks_and_restart_merge_missed_slots(management):
@@ -93,7 +95,7 @@ def test_idempotent_ticks_and_restart_merge_missed_slots(management):
     other.tick(now=now())
     with management.db.connection() as conn:
         assert [r[0] for r in conn.execute('SELECT slot_key FROM collection_schedule_slots ORDER BY slot_key')]==['2026-10-20','2026-10-25']
-        assert conn.execute('SELECT count(*) FROM index_collection_operations').fetchone()[0]==2
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==2
 
 
 def test_cross_process_style_claim_and_disable_running(management):
@@ -108,7 +110,7 @@ def test_cross_process_style_claim_and_disable_running(management):
     with pytest.raises(ValueError):index_collection.start_operation(management.db,'incremental')
     management.configure('indices',{'enabled':False})
     with management.db.connection() as conn:
-        assert conn.execute('SELECT status,cancel_requested FROM index_collection_operations').fetchone()[:]==('running',0)
+        assert conn.execute('SELECT status,cancel_requested FROM collection_operations').fetchone()[:]==('running',0)
     finish.set();worker.join(8);assert not worker.is_alive()
     management.tick(now=now('2026-10-26T19:00:00'))
     with management.db.connection() as conn:
@@ -159,13 +161,13 @@ def test_new_schedule_incremental_only_and_publication_window_target(management)
 def test_maintenance_registration_empty_and_actual_times(management):
     from stock_analysis.maintenance.maintenance import DESCRIPTIONS,table_time
     with management.db.connection() as conn:
-        for name in ('collection_schedule_rules','collection_schedule_slots'):
+        for name in ('collection_schedules','collection_schedule_slots'):
             assert DESCRIPTIONS[name][0]=='运行与配置'
             columns=[r['name'] for r in conn.execute('PRAGMA table_info('+name+')')]
             assert table_time(conn,name,columns)[0] is None
     enable(management)
     with management.db.connection() as conn:
-        assert table_time(conn,'collection_schedule_rules',['updated_at'])[0]
+        assert table_time(conn,'collection_schedules',['updated_at'])[0]
 
 def _process_tick(path, barrier):
     db=Database(path)
@@ -185,7 +187,7 @@ def test_real_cross_process_slot_claim(management):
     assert all(not worker.is_alive() and worker.exitcode==0 for worker in workers)
     with management.db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM collection_schedule_slots').fetchone()[0]==1
-        assert conn.execute('SELECT count(*) FROM index_collection_operations').fetchone()[0]==1
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==1
 
 
 def test_saved_configuration_waits_for_future_slot(management):
@@ -230,15 +232,15 @@ def test_scheduler_gate_and_shutdown_cancel_only_scheduled(management):
         manual=index_collection.start_operation(management.db,'incremental',connection=conn)
     scheduler=Scheduler(management,gate=gate);scheduler.thread.start();scheduler.close()
     with management.db.connection() as conn:
-        assert conn.execute('SELECT cancel_requested FROM sw_update_runs').fetchone()[0]==1
-        assert conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(manual,)).fetchone()[0]==0
+        assert conn.execute('SELECT cancel_requested FROM collection_operations').fetchone()[0]==1
+        assert conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(manual,)).fetchone()[0]==0
 
 def test_list_projects_small_summary_and_detail_keeps_full_evidence(management):
     import json
     with management.db.connection(write=True) as conn:
         ref=management.reserve(conn,'indices',{'mode':'incremental','providers':['legu']})
         result={'message':'ready','network_requests':7,'files':['x'*100000],'work_progress':{'total':10,'success':9,'tasks':{'large':'x'*100000}}}
-        conn.execute("UPDATE index_collection_operations SET status='complete',result_json=? WHERE operation_id=?",(json.dumps(result),ref))
+        conn.execute("UPDATE collection_operations SET status='complete',result_json=? WHERE operation_id=?",(json.dumps(result),ref))
     payload=management.read()
     summary=next(row for row in payload['tasks'] if row['task_key']=='indices')['history'][0]['result']
     assert 'files' not in summary and 'tasks' not in summary['work_progress']
@@ -253,9 +255,9 @@ def test_index_history_counts_publications_and_empty_returns_without_rewriting_h
     from stock_analysis.collection.collection import begin_batch, finish_batch
     with management.db.connection(write=True) as conn:
         older=index_collection.start_operation(management.db,'incremental',['sws'],connection=conn)
-        conn.execute("UPDATE index_collection_operations SET status='complete',started_at='2026-10-25' WHERE operation_id=?",(older,))
+        conn.execute("UPDATE collection_operations SET status='complete',started_at='2026-10-25' WHERE operation_id=?",(older,))
         latest=index_collection.start_operation(management.db,'incremental',['sws','legu'],connection=conn)
-        conn.execute("UPDATE index_collection_operations SET status='complete',started_at='2026-10-26' WHERE operation_id=?",(latest,))
+        conn.execute("UPDATE collection_operations SET status='complete',started_at='2026-10-26' WHERE operation_id=?",(latest,))
     def publish(ref,provider,result,coverage='unknown'):
         batch=begin_batch(management.db,ref,'index.sw.analysis' if provider=='sws' else 'index.legu.pe',provider,
                           '2026-10-26','2026-10-26')
@@ -282,7 +284,7 @@ def test_index_history_counts_publications_and_empty_returns_without_rewriting_h
     assert runs[older]['data_counts'][0]['inserted']==31
     assert 'data_counts' not in management.detail('indices',latest)['result']
     with management.db.connection() as conn:
-        assert all('data_counts' not in json.loads(r[0]) for r in conn.execute('SELECT result_json FROM index_collection_operations'))
+        assert all('data_counts' not in json.loads(r[0]) for r in conn.execute('SELECT result_json FROM collection_operations'))
 
 
 @pytest.mark.parametrize('key,dataset,provider,values,written', [
@@ -300,9 +302,9 @@ def test_shared_publication_counts_for_registered_collectors(management,key,data
     with management.db.connection(write=True) as conn:
         ref=management.reserve(conn,key,params)
         if ref.startswith('sw_update_runs:'):
-            conn.execute("UPDATE sw_update_runs SET status='complete' WHERE id=?",(int(ref.split(':')[1]),))
+            conn.execute("UPDATE collection_operations SET status='complete' WHERE id=?",(int(ref.split(':')[1]),))
         else:
-            conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(ref,))
+            conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?",(ref,))
     batch=begin_batch(management.db,ref,dataset,provider,'2026-10-26','2026-10-26')
     finish_batch(management.db,batch,'complete','unknown',result=values)
     task=next(t for t in management.read()['tasks'] if t['task_key']==key)
@@ -321,20 +323,20 @@ def test_shared_counts_review_import_skip_empty_and_unknown(management):
     # Review publishes against an old image batch, so only this run's channels count.
     with management.db.connection(write=True) as conn:
         ref=management.reserve(conn,'shipping_image_review',{'mode':'incremental','file':'review.json'})
-        conn.execute("UPDATE index_collection_operations SET status='complete',result_json=? WHERE operation_id=?",
+        conn.execute("UPDATE collection_operations SET status='complete',result_json=? WHERE operation_id=?",
                      (json.dumps({'channels':[{'published':4}]}),ref))
     task=next(t for t in management.read()['tasks'] if t['task_key']=='shipping_image_review')
     assert task['history'][0]['result']['data_counts'][0]['written']==4
     with management.db.connection(write=True) as conn:
         skipped=management.reserve(conn,'trade_snapshot',{'mode':'incremental','target':'2026Q2'})
-        conn.execute("UPDATE sw_update_runs SET status='complete',result_json=? WHERE id=?",
+        conn.execute("UPDATE collection_operations SET status='complete',result_json=? WHERE id=?",
                      (json.dumps({'snapshot':{'skipped':True,'inserted':999,'revised':99}}),int(skipped.split(':')[1])))
     task=next(t for t in management.read()['tasks'] if t['task_key']=='trade_snapshot')
     counts=task['history'][0]['result']['data_counts'][0]
     assert counts['written']==0 and counts['inserted'] is None and counts['reused_segments']==1
     with management.db.connection(write=True) as conn:
         ref=management.reserve(conn,'sovereign_yields',{'mode':'incremental'})
-        conn.execute("UPDATE index_collection_operations SET status='failed' WHERE operation_id=?",(ref,))
+        conn.execute("UPDATE collection_operations SET status='failed' WHERE operation_id=?",(ref,))
     batch=begin_batch(management.db,ref,'bond_zh_us_rate','eastmoney','2026-10-26','2026-10-26')
     finish_batch(management.db,batch,'failed','empty',result={'total':0,'empty':True})
     task=next(t for t in management.read()['tasks'] if t['task_key']=='sovereign_yields')
@@ -342,7 +344,7 @@ def test_shared_counts_review_import_skip_empty_and_unknown(management):
     assert counts['empty_returns']==1 and counts['written'] is None
     with management.db.connection(write=True) as conn:
         ref=management.reserve(conn,'shipping_weekly',{'mode':'incremental'})
-        conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(ref,))
+        conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?",(ref,))
     task=next(t for t in management.read()['tasks'] if t['task_key']=='shipping_weekly')
     assert all(c['written'] is None and c['empty_returns']==0 for c in task['history'][0]['result']['data_counts'])
 
@@ -351,7 +353,7 @@ def test_shared_counts_all_segments_and_future_standard_counters(management):
     from stock_analysis.collection.collection import begin_batch,finish_batch
     with management.db.connection(write=True) as conn:
         ref=management.reserve(conn,'sovereign_yields',{'mode':'incremental'})
-        conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(ref,))
+        conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?",(ref,))
     for _ in range(101):
         batch=begin_batch(management.db,ref,'future.standard_facts','eastmoney')
         finish_batch(management.db,batch,'complete','unknown',result=dict(inserted=1,revised=0,unchanged=0,returned=1))
@@ -385,15 +387,15 @@ def test_bond_provider_and_independent_history_do_not_inherit_combined_failure(m
     import json
     with management.db.connection(write=True) as conn:
         combined=index_collection.start_operation(management.db,'incremental',['legu'],datasets=['bond_zh_us_rate'],connection=conn)
-        conn.execute("UPDATE index_collection_operations SET status='failed',error=?,finished_at=? WHERE operation_id=?",(json.dumps({'legu':'HTTP 429'}),'2026-10-25',combined))
+        conn.execute("UPDATE collection_operations SET status='failed',error=?,finished_at=? WHERE operation_id=?",(json.dumps({'legu':'HTTP 429'}),'2026-10-25',combined))
         standalone=management.reserve(conn,'sovereign_yields',{'mode':'incremental'})
-        conn.execute("UPDATE index_collection_operations SET status='complete',finished_at='2026-10-25' WHERE operation_id=?",(standalone,))
+        conn.execute("UPDATE collection_operations SET status='complete',finished_at='2026-10-25' WHERE operation_id=?",(standalone,))
     rows={t['task_key']:t for t in management.read()['tasks']}
     assert rows['sovereign_yields']['providers']==['eastmoney']
     assert [r['operation_ref'] for r in rows['sovereign_yields']['history']]==[standalone]
     assert [r['operation_ref'] for r in rows['indices']['history']]==[combined]
     with management.db.connection() as conn:
-        scope=json.loads(conn.execute('SELECT scope_json FROM index_collection_operations WHERE operation_id=?',(standalone,)).fetchone()[0])
+        scope=json.loads(conn.execute('SELECT scope_json FROM collection_operations WHERE operation_id=?',(standalone,)).fetchone()[0])
         assert scope['providers']==[] and scope['datasets']==['bond_zh_us_rate']
     with pytest.raises(ValueError):management.detail('sovereign_yields',combined)
 
@@ -418,18 +420,18 @@ def test_previously_enabled_daily_schedule_catches_latest_due_slot(management,cl
     management.tick(now=now(clock));management.tick(now=now(clock))
     with management.db.connection() as conn:
         assert [row[0] for row in conn.execute('SELECT slot_key FROM collection_schedule_slots')]==['2026-10-25']
-        assert conn.execute('SELECT count(*) FROM index_collection_operations').fetchone()[0]==1
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==1
 
 
 def test_congestion_next_morning_catches_yesterday_and_deduplicates(management,monkeypatch):
     with management.db.connection(write=True) as conn:
-        conn.execute('INSERT INTO collection_schedules VALUES(?,?,?,?,?)',('market_congestion',1,'Asia/Shanghai','18:00','2026-01-01T00:00:00+00:00'))
+        conn.execute('INSERT INTO collection_schedules(schedule_id,enabled,timezone,local_time,updated_at,task_key) VALUES(?,?,?,?,?,\'market_congestion\')',('market_congestion',1,'Asia/Shanghai','18:00','2026-01-01T00:00:00+00:00'))
     monkeypatch.setattr(market_congestion,'initialized',lambda conn:True)
     calls=[]
     def execute(db,operation):
         calls.append(operation)
         with db.connection(write=True) as conn:
-            conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(operation,))
+            conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?",(operation,))
     market_congestion.scheduled_tick(management.db,now=now('2026-10-26T09:00:00'),execute=execute)
     assert len(calls)==1
     market_congestion.scheduled_tick(management.db,now=now('2026-10-26T09:30:00'),execute=execute)
@@ -437,4 +439,4 @@ def test_congestion_next_morning_catches_yesterday_and_deduplicates(management,m
     market_congestion.scheduled_tick(management.db,now=now('2026-10-26T22:00:00'),execute=execute)
     assert len(calls)==2
     with management.db.connection() as conn:
-        assert [r[0] for r in conn.execute("SELECT json_extract(scope_json,'$.scheduled_date') FROM index_collection_operations ORDER BY started_at")]==['2026-10-25','2026-10-26']
+        assert [r[0] for r in conn.execute("SELECT json_extract(scope_json,'$.scheduled_date') FROM collection_operations ORDER BY started_at")]==['2026-10-25','2026-10-26']

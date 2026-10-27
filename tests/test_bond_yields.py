@@ -103,10 +103,10 @@ def collect_year(db, results, *, year=2026, start='2026-10-01', end='2026-10-31'
                                 cancelled, progress)
     except BaseException:
         with db.connection(write=True) as conn:
-            conn.execute("UPDATE index_collection_operations SET status='failed' WHERE operation_id=?", (operation_id,))
+            conn.execute("UPDATE collection_operations SET status='failed' WHERE operation_id=?", (operation_id,))
         raise
     with db.connection(write=True) as conn:
-        conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?", (operation_id,))
+        conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?", (operation_id,))
     return result, session, clock, operation_id
 
 
@@ -135,7 +135,7 @@ def test_fixed_annual_filter_paginates_and_rejects_truncation_without_publicatio
     with db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM sovereign_yield_observations').fetchone()[0] == 3
     with db.connection(write=True) as conn:
-        conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?", (op,))
+        conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?", (op,))
 
     bad_op = operation(db)
     truncated, failed_session, _ = http(db, [response(payload(page1, pages=2, count=3)),
@@ -263,7 +263,7 @@ def test_cross_year_empty_tail_stops_at_same_range_and_recovers_after_expiry(db,
         last = conn.execute("SELECT scope_start,scope_end,status FROM collection_batches WHERE dataset=? ORDER BY id DESC LIMIT 1", (by.DATASET,)).fetchone()
         assert (last['scope_start'], last['scope_end'], last['status']) == ('2025-12-27', '2025-12-31', 'failed')
     with db.connection(write=True) as conn:
-        conn.execute("UPDATE index_collection_operations SET status='failed' WHERE operation_id=?", (first_op,))
+        conn.execute("UPDATE collection_operations SET status='failed' WHERE operation_id=?", (first_op,))
 
     # Force the one-hour empty-response TTL to expire; the next click must retry
     # the same older year before advancing to the newer year.
@@ -342,7 +342,7 @@ def test_month_old_withdrawal_candidate_is_resolved_before_recent_ttl_skip(db, m
         original = json.loads(conn.execute('SELECT result_json FROM collection_batches WHERE id=?', (candidate_id,)).fetchone()[0])
         resolved = original['pending_withdrawals'][0]
         assert resolved['resolved'] is True
-        recovery_batch = conn.execute('SELECT id FROM collection_batches WHERE operation_id=? AND dataset=? AND scope_start=? AND scope_end=? ORDER BY id DESC LIMIT 1',
+        recovery_batch = conn.execute('SELECT id FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)=? AND dataset=? AND scope_start=? AND scope_end=? ORDER BY id DESC LIMIT 1',
                                       (resumed_op, by.DATASET, day, day)).fetchone()
         recovery_source = conn.execute('SELECT id FROM collection_sources WHERE batch_id=? ORDER BY id DESC LIMIT 1',
                                        (recovery_batch['id'],)).fetchone()
@@ -382,7 +382,7 @@ def test_initialization_publishes_latest_year_then_resumes_older_year(db, monkey
         assert saved['target_end'] == '2003-02-01'
         assert [item['year'] for item in saved['annual_segments']] == [2003]
     with db.connection(write=True) as conn:
-        conn.execute("UPDATE index_collection_operations SET status='cancelled' WHERE operation_id=?", (first_op,))
+        conn.execute("UPDATE collection_operations SET status='cancelled' WHERE operation_id=?", (first_op,))
 
     second_op = operation(db)
     old, second_session, _ = http(db, [response(payload([raw_row('2002-01-04', EMM00166466=Decimal('4.1'))])),
@@ -450,7 +450,7 @@ def test_empty_first_initialization_year_remains_resumable(db, monkeypatch):
         assert manifest_scope['annual_segments'] == []
         assert conn.execute('SELECT status FROM collection_batches WHERE id=?', (manifest,)).fetchone()[0] == 'running'
     with db.connection(write=True) as conn:
-        conn.execute("UPDATE index_collection_operations SET status='failed' WHERE operation_id=?", (op,))
+        conn.execute("UPDATE collection_operations SET status='failed' WHERE operation_id=?", (op,))
 
     resumed = operation(db)
     collector, session, _ = http(db, [response(payload([raw_row('2002-01-04', EMM00166466=Decimal('4.1'))])),
@@ -501,7 +501,7 @@ def test_bond_only_operation_saves_result_and_cancellation_state(db, monkeypatch
     assert json.loads(result['result_json'])['bond_yields'] == {'status': 'complete', 'requests': 3}
     assert seen[0][0] == op and not seen[0][1]
     with db.connection() as conn:
-        saved = conn.execute('SELECT status,result_json FROM index_collection_operations WHERE operation_id=?', (op,)).fetchone()
+        saved = conn.execute('SELECT status,result_json FROM collection_operations WHERE operation_id=?', (op,)).fetchone()
         assert saved['status'] == 'complete'
         assert json.loads(saved['result_json'])['bond_yields']['requests'] == 3
 
@@ -514,7 +514,7 @@ def test_bond_only_operation_saves_result_and_cancellation_state(db, monkeypatch
     assert stopped['status'] == 'cancelled'
     assert json.loads(stopped['result_json'])['errors']['bond_zh_us_rate'] == 'user cancelled'
     with db.connection() as conn:
-        saved = conn.execute('SELECT status,result_json FROM index_collection_operations WHERE operation_id=?', (cancelled_op,)).fetchone()
+        saved = conn.execute('SELECT status,result_json FROM collection_operations WHERE operation_id=?', (cancelled_op,)).fetchone()
         assert saved['status'] == 'cancelled'
         assert json.loads(saved['result_json'])['errors']['bond_zh_us_rate'] == 'user cancelled'
 
@@ -620,7 +620,7 @@ def test_combined_bond_and_three_providers_overlap_and_merge(db,monkeypatch,bond
     seen={};snapshots=[]
     def snapshot():
         with db.connection() as conn:
-            result=json.loads(conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(op,)).fetchone()[0])
+            result=json.loads(conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(op,)).fetchone()[0])
             snapshots.append(result['work_progress'])
     gate=threading.Barrier(4,action=snapshot,timeout=5)
     def calendar(worker,**kwargs):
@@ -699,6 +699,6 @@ def test_parallel_progress_updates_provider_when_another_provider_is_current(db)
     tracker.transition(bond,'running');tracker.transition(other,'running')
     tracker.update_message('eastmoney','checking recent yields')
     with db.connection() as conn:
-        progress=json.loads(conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(op,)).fetchone()[0])['work_progress']
+        progress=json.loads(conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(op,)).fetchone()[0])['work_progress']
     assert progress['providers']['eastmoney']['current']=='checking recent yields'
     assert progress['current']['provider']=='legu'

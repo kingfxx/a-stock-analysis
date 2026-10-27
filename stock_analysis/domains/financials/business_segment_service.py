@@ -227,6 +227,8 @@ class BusinessSegmentService:
                 summary['sync_run_id'] = run
                 old_by_period = {v['report_date']: v for v in saved}
                 def write(conn):
+                    from stock_analysis.collection.publication_counts import counts, observe, published
+                    counters = counts(len(rows))
                     for period, items in sorted(by_period.items()):
                         names = {r['report_name'] for r in items}
                         if len(names) != 1:
@@ -234,7 +236,14 @@ class BusinessSegmentService:
                         fingerprint = hashlib.sha256(encoded({'definition': DEFINITION, 'items': business_content(items)}).encode()).hexdigest()
                         old = old_by_period.get(period)
                         if old and old['content_hash'] == fingerprint:
+                            counters['unchanged'] += len(items)
                             continue
+                        previous_items = {(r['dimension_type'],r['item_key']):r for r in old['items']} if old else {}
+                        fields = ('item_code','item_name',*FIELDS)
+                        for item in items:
+                            previous = previous_items.get((item['dimension_type'],item['item_key']))
+                            observe(counters, (old['report_name'], *(previous[f] for f in fields)) if previous else None,
+                                    (items[0]['report_name'], *(item[f] for f in fields)))
                         if old:
                             conn.execute('UPDATE business_segment_versions SET is_current=0 WHERE id=?', (old['id'],))
                         version = conn.execute('INSERT INTO business_segment_versions(instrument_id,source,report_date,report_name,revision,supersedes_id,is_current,content_hash,definition_version,row_count,run_id,batch_id,obtained_at) VALUES (?,?,?,?,?,?,1,?,?,?,?,?,?)',
@@ -244,6 +253,7 @@ class BusinessSegmentService:
                         for item in items:
                             conn.execute('INSERT INTO business_segment_items(version_id,' + ','.join(columns) + ',batch_id) VALUES (' + ','.join('?' for _ in range(len(columns) + 2)) + ')',
                                          (version, *(item[c] for c in columns), batch))
+                    return published(counters)
                 actual = sorted({v['report_date'] for v in saved} | set(by_period))
                 coverage_start = min(start, state.get('coverage_start') or start)
                 coverage_end = max(end, state.get('coverage_end') or end)

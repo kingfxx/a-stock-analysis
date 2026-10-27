@@ -100,8 +100,7 @@ def _runtime_worker_activity():
 
 def _restore_activity():
     with Database(settings.DATABASE_PATH).connection() as conn:
-        index_running=bool(conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone()
-                           or conn.execute("SELECT 1 FROM stock_collection_operations WHERE status='running'").fetchone())
+        index_running=bool(conn.execute("SELECT 1 FROM collection_operations WHERE status='running'").fetchone())
     return index_running or _runtime_worker_activity()
 
 def _clear_runtime_services():

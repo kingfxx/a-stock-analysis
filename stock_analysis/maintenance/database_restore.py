@@ -183,7 +183,7 @@ class RestoreManager:
     def _idle(self):
         if self.activity_check():raise ValueError('采集或分析任务正在启动／运行，请完成后再恢复')
         with self.db.connection() as conn:
-            for table,active in [('sync_runs',"'running'"),('sw_update_runs',"'running'"),
+            for table,active in [('sync_runs',"'running'"),('collection_operations',"'running'"),
                                  ('ai_analysis_runs',"'queued','running','validating'")]:
                 if conn.execute(f'SELECT 1 FROM {table} WHERE status IN ({active}) LIMIT 1').fetchone():
                     raise ValueError('采集或分析任务尚未完成，请完成后再恢复')

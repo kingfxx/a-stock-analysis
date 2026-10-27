@@ -60,8 +60,9 @@ def expired_provider_cooldown(db, provider, clock):
 def test_metadata_only_records_request_without_archiving_response(tmp_path):
     db = Database(tmp_path / "stock.sqlite3")
     db.initialize()
-    batch = begin_batch(db, "sync_runs:7", "stock.financing", "eastmoney",
-                        scope={"evidence_mode": "metadata_only", "sync_run_id": 7})
+    run=db.start_sync(SyncKey(db.ensure_instrument('601919'),'financing','eastmoney'),parser_version='test',methodology_version='test')
+    batch = begin_batch(db, f"sync_runs:{run}", "stock.financing", "eastmoney",
+                        scope={"evidence_mode": "metadata_only", "sync_run_id": run})
     response = requests.Response()
     response.status_code = 200
     response._content = b'{"result":{"data":[]}}'
@@ -140,8 +141,9 @@ def test_stock_requests_skip_public_wait_but_remain_in_shared_budget(tmp_path):
 def test_stock_session_routes_real_get_and_finalizes_parse_metadata(tmp_path):
     db = Database(tmp_path / "stock.sqlite3")
     db.initialize()
-    batch = begin_batch(db, "sync_runs:9", "stock.financing", "eastmoney",
-                        scope={"evidence_mode": "metadata_only", "sync_run_id": 9})
+    run=db.start_sync(SyncKey(db.ensure_instrument('601919'),'financing','eastmoney'),parser_version='test',methodology_version='test')
+    batch = begin_batch(db, f"sync_runs:{run}", "stock.financing", "eastmoney",
+                        scope={"evidence_mode": "metadata_only", "sync_run_id": run})
     response = requests.Response()
     response.status_code = 200
     response._content = b'{"success":true,"result":{"data":[]}}'
@@ -186,7 +188,7 @@ def test_page_parse_status_does_not_claim_batch_validation_success(tmp_path):
     with db.connection() as conn:
         source = conn.execute("SELECT parse_status FROM collection_sources WHERE batch_id=?", (batch,)).fetchone()
         statuses = conn.execute("SELECT r.status,b.status FROM sync_runs r JOIN collection_batches b "
-                                "ON b.operation_id='sync_runs:'||r.id WHERE r.id=?", (run,)).fetchone()
+                                "ON b.sync_run_id=r.id WHERE r.id=?", (run,)).fetchone()
     assert source[0] == "complete"  # This is the response page parse status only.
     assert tuple(statuses) == ("failed", "failed")  # Batch-level validation remains separate.
 
@@ -207,7 +209,7 @@ def test_financial_sync_run_and_public_batch_complete_together(tmp_path):
 
     with db.connection() as conn:
         batches = conn.execute("SELECT b.*,r.status AS sync_status FROM collection_batches b "
-                               "JOIN sync_runs r ON b.operation_id='sync_runs:'||r.id "
+                               "JOIN sync_runs r ON b.sync_run_id=r.id "
                                "WHERE b.domain='stock' ORDER BY b.id").fetchall()
     assert len(batches) == 4
     assert all(row["status"] == "complete" and row["sync_status"] == "success" for row in batches)
@@ -226,7 +228,7 @@ def test_interrupted_stock_batch_recovers_with_its_sync_run(tmp_path):
 
     with db.connection() as conn:
         status = conn.execute("SELECT r.status,b.status FROM sync_runs r JOIN collection_batches b "
-                              "ON b.operation_id='sync_runs:'||r.id WHERE r.id=? AND b.id=?",
+                              "ON b.sync_run_id=r.id WHERE r.id=? AND b.id=?",
                               (run, batch)).fetchone()
     assert tuple(status) == ("failed", "failed")
 

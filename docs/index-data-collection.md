@@ -211,7 +211,7 @@ python -m stock_analysis.domains.indices.index_price_audit --report data/verific
 
 `index-v2` 解析还识别中证把首个基日记录复制到请求边界的情况：起日为真实交易日也不能凭此入库，需同时核实PE为空、后续日期有长间隔且其他来源字段完全复制。已核实科创50／综指的2016-10-11复制行剔除，原文与修复审计保留。真实日期上来源明确缺失的PE仍留空。查询逐指标报告有效值起止日和个数，分别列出来源观测数，不用行情起点冒充PE历史起点。
 
-`collection_provider_state` 保存共享预算和冷却，`index_collection_operations` 保存进度／取消。新表已登记维护页；更新时间用真实 `updated_at/obtained_at/started_at/finished_at`，不使用观察日期；缺时间显示未记录，空表暂无数据。
+`collection_provider_state` 保存共享预算和冷却，`collection_operations` 保存进度／取消。新表已登记维护页；更新时间用真实 `updated_at/obtained_at/started_at/finished_at`，不使用观察日期；缺时间显示未记录，空表暂无数据。
 
 ### 采集、限速及恢复
 
@@ -429,7 +429,7 @@ v26新增 `index_read_revisions` 单行版本记录；v28增加`index_price_obse
 已备份并直接更新既有320条中证amount_ratio、3240条申万amount，覆盖2026-07-31至08-27共20个交易日，行情行数保持353116；原始字段及市场来源事实哈希前后相同。每条按实际BigQuant分母复算核验，重复补算修改0行，无网络请求、无新增批次或来源。报告见[补算审计](../data/verification/reports/20261018_index_bigquant_gap_recompute.json)，复用工具为`python -m data.verification.tools.index_bigquant_gap_recompute`（会先备份日常库）。
 # 中美国债收益率采集
 
-指数页「更新近期估值」同时附加`bond_zh_us_rate`手动工作项，共用`index_collection_operations`进度、取消及公共来源采集器。首次点击先通过Eastmoney首页固定初始化最新观测日，再按2002-01-04至该日倒序逐年请求并校验；已完整年度可跳过，失败年度下次从固定年度第一页恢复。完成初始化后按自身水位补尾并重新读取近期14个日历日。`providers=[]`与`datasets=['bond_zh_us_rate']`可用于单独运行这项验收工作；必须使用`mode='incremental'`且不传日期范围。
+指数页「更新近期估值」同时附加`bond_zh_us_rate`手动工作项，共用`collection_operations`进度、取消及公共来源采集器。首次点击先通过Eastmoney首页固定初始化最新观测日，再按2002-01-04至该日倒序逐年请求并校验；已完整年度可跳过，失败年度下次从固定年度第一页恢复。完成初始化后按自身水位补尾并重新读取近期14个日历日。`providers=[]`与`datasets=['bond_zh_us_rate']`可用于单独运行这项验收工作；必须使用`mode='incremental'`且不传日期范围。
 
 来源为Eastmoney `RPTA_WEB_TREASURYYIELD`，使用`SOLAR_DATE`闭区间filter、500行分页、倒序。13列原始映射、13字段单位、来源双哈希和精度规则见[SQLite v39存储说明](sqlite-storage.md#211-中美国债收益率v39)。新增事实保存在`sovereign_yield_observations`，十进制字符串保留来源精度，空值留NULL，零和负值有效；相同值保留旧出处，有值转空暂缓该日期发布并登记待核实候选。每个年度独立短事务发布，取消时保留已完成年度。
 

@@ -221,7 +221,7 @@ def _publish(db,batch_id,rows,sources,cancelled):
     operation_id=None
     with db.connection(write=True) as conn:
         operation_id=conn.execute('SELECT operation_id FROM collection_batches WHERE id=?',(batch_id,)).fetchone()[0]
-        active=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation_id,)).fetchone()
+        active=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation_id,)).fetchone()
         if cancelled() or not active or active[0]:raise Cancelled('用户取消采集；已发布年度分段保留')
         for day,(row,source_id) in sorted(by_date.items()):
             old=conn.execute('SELECT * FROM sovereign_yield_observations WHERE observation_date=? AND definition_version=? AND is_latest=1',

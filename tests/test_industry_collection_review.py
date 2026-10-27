@@ -191,6 +191,6 @@ def test_parallel_collection_failure_leaves_no_partial_facts_or_abandoned_batche
     with pytest.raises(ValueError):mf.collect_public(db,'industry-review-failure',PERIOD,client,parallel_interfaces=True)
     with db.connection() as conn:
         assert all(conn.execute(f'SELECT count(*) FROM market_financial_{name}').fetchone()[0]==0 for name in mf.FIELDS)
-        actual=conn.execute("SELECT count(*) FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE b.operation_id='industry-review-failure'").fetchone()[0]
+        actual=conn.execute("SELECT count(*) FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE coalesce(b.operation_id,b.legacy_operation_ref)='industry-review-failure'").fetchone()[0]
         assert actual==client.requests
-        assert conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id='industry-review-failure' AND status='running'").fetchone()[0]==0
+        assert conn.execute("SELECT count(*) FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)='industry-review-failure' AND status='running'").fetchone()[0]==0

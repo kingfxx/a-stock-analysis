@@ -155,16 +155,41 @@ def begin_batch(db, operation_id, dataset, provider, start=None, end=None, *, sc
         scope = {**(scope or {}), **execution['scope']}
         trigger = execution['trigger']
     with db.connection(write=True) as conn:
-        scheduled=conn.execute("SELECT task_key,slot_key FROM collection_schedule_slots WHERE operation_ref=? AND status='running' LIMIT 1",
+        legacy_operation = operation_id
+        operation_id = execution['operation_id'] if execution and execution.get('operation_id') else operation_id
+        owner = conn.execute('SELECT 1 FROM collection_operations WHERE operation_id=?', (operation_id,)).fetchone()
+        if not owner:
+            operation_id = None
+        sync_run_id = (scope or {}).get('sync_run_id')
+        if sync_run_id is None and isinstance(legacy_operation,str) and legacy_operation.startswith('sync_runs:'):
+            candidate=legacy_operation.split(':',1)[1]
+            if candidate.isdigit() and conn.execute('SELECT 1 FROM sync_runs WHERE id=?',(int(candidate),)).fetchone():
+                sync_run_id=int(candidate)
+        work_dataset = execution.get('work_dataset') if execution else None
+        code = (scope or {}).get('code')
+        if execution and work_dataset:
+            interface = (scope or {}).get('source_interface', '')
+            planned = conn.execute("SELECT id,scope_json FROM collection_batches WHERE operation_id=? AND code=? "
+                "AND work_dataset=? AND dataset=? AND source_system=? AND status='pending' "
+                "AND coalesce(json_extract(scope_json,'$.source_interface'),'')=? ORDER BY sequence,id LIMIT 1",
+                (operation_id, code, work_dataset, dataset, provider, interface)).fetchone()
+            if planned:
+                merged = {**json.loads(planned['scope_json']), **(scope or {})}
+                conn.execute("UPDATE collection_batches SET status='running',started_at=?,scope_start=?,scope_end=?,scope_json=?,"
+                    "sync_run_id=?,parser_version=?,definition_version=?,frequency=?,universe_version=?,idempotency_key=? WHERE id=? AND status='pending'",
+                    (utc_now(), start, end, encoded(merged), sync_run_id, parser_version, definition_version,
+                     frequency, universe_version, idempotency_key, planned['id']))
+                return planned['id']
+        scheduled=conn.execute("SELECT schedule_id,slot_key FROM collection_schedule_slots WHERE operation_ref=? AND status='running' LIMIT 1",
                                (operation_id,)).fetchone()
         if scheduled:
             trigger='scheduled'
-            scope={**(scope or {}),'schedule':dict(scheduled)}
-        return conn.execute('INSERT INTO collection_batches(operation_id,domain,dataset,source_system,scope_start,scope_end,'
-            'scope_json,frequency,trigger_type,status,started_at,parser_version,definition_version,idempotency_key,universe_version) '
-            "VALUES(?,?,?,?,?,?,?,?,?,'running',?,?,?,?,?)",
-            (operation_id,domain,dataset,provider,start,end,encoded(scope or {}),frequency,trigger,utc_now(),
-             parser_version,definition_version,idempotency_key,universe_version)).lastrowid
+            scope={**(scope or {}),'schedule':dict(task_key=scheduled['schedule_id'],slot_key=scheduled['slot_key'])}
+        return conn.execute('INSERT INTO collection_batches(operation_id,legacy_operation_ref,sync_run_id,domain,dataset,source_system,scope_start,scope_end,'
+            'scope_json,frequency,trigger_type,status,created_at,started_at,parser_version,definition_version,idempotency_key,universe_version,code,work_dataset) '
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,'running',?,?,?,?,?,?,?,?)",
+            (operation_id,legacy_operation if operation_id is None and sync_run_id is None else None,sync_run_id,domain,dataset,provider,start,end,encoded(scope or {}),frequency,trigger,utc_now(),utc_now(),
+             parser_version,definition_version,idempotency_key,universe_version,code,work_dataset)).lastrowid
 
 
 def finish_batch(db, batch_id, status, coverage='unknown', *, result=None, error=None):

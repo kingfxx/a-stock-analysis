@@ -91,11 +91,11 @@ def import_probe(db, reports, *, tag, start, end):
                         result=publish_segment(db,batch,rows,identities,dict(cache_reused=True,network_requests=0,coverage=coverage,anomalies=anomalies),coverage=state)
                         results.append(dict(provider=provider,code=code,dataset=dataset,**result))
             with db.connection(write=True) as conn:
-                conn.execute("UPDATE index_collection_operations SET status='complete',finished_at=?,result_json=? WHERE operation_id=?",
+                conn.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE operation_id=?",
                              (utc_now(),encoded(dict(message='已核验样本导入完成；保留原始采集时间',network_requests=0,results=results)),operation))
     except Exception as exc:
         with db.connection(write=True) as conn:
-            conn.execute("UPDATE index_collection_operations SET status='failed',finished_at=?,error=? WHERE operation_id=?",(utc_now(),str(exc),operation))
+            conn.execute("UPDATE collection_operations SET status='failed',finished_at=?,error=? WHERE operation_id=?",(utc_now(),str(exc),operation))
             conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error=? WHERE operation_id=? AND status='running'",(utc_now(),str(exc),operation))
         raise
     return dict(operation_id=operation,results=results)

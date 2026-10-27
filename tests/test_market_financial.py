@@ -146,7 +146,7 @@ def test_public_financial_collect_and_atomic_publish_uses_shared_provenance(db):
         rows=conn.execute('SELECT collection_batch_id,collection_source_id,batch_id,source_id FROM market_financial_income').fetchall()
         assert len(rows)==1 and rows[0]['collection_batch_id'] and rows[0]['collection_source_id']
         assert rows[0]['batch_id'] is None and rows[0]['source_id'] is None
-        assert conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id='sw_update_runs:sample' AND status='complete'").fetchone()[0]==4
+        assert conn.execute("SELECT count(*) FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)='sw_update_runs:sample' AND status='complete'").fetchone()[0]==4
         assert conn.execute('SELECT count(*) FROM market_financial_sources').fetchone()[0]==0
         assert conn.execute('PRAGMA foreign_key_check').fetchall()==[]
 
@@ -175,7 +175,7 @@ def test_public_financial_reuses_hash_verified_same_day_pages_across_operations(
     with db.connection() as conn:
         original_obtained={r['dataset']:r['obtained_at'] for r in conn.execute(
             "SELECT dataset,obtained_at FROM collection_sources WHERE batch_id IN "
-            "(SELECT id FROM collection_batches WHERE operation_id='operation:first')")}
+            "(SELECT id FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)='operation:first')")}
     second=mf.collect_public(db,'operation:restart',PERIOD,collector,lambda _message:None)
     with db.connection(write=True) as conn:
         mf.publish(conn,None,PERIOD,second)
@@ -188,12 +188,12 @@ def test_public_financial_reuses_hash_verified_same_day_pages_across_operations(
     with db.connection() as conn:
         reused=conn.execute("SELECT s.dataset,s.obtained_at,s.reused_source_id,o.obtained_at AS original_time "
             "FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id "
-            "JOIN collection_sources o ON o.id=s.reused_source_id WHERE b.operation_id='operation:restart'").fetchall()
+            "JOIN collection_sources o ON o.id=s.reused_source_id WHERE coalesce(b.operation_id,b.legacy_operation_ref)='operation:restart'").fetchall()
         assert len(reused)==4
         assert all(r['reused_source_id'] and r['obtained_at']==r['original_time'] for r in reused)
         assert {r['dataset']:r['obtained_at'] for r in reused}==original_obtained
         income_source=conn.execute("SELECT s.id,s.file_path FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id "
-            "WHERE b.operation_id='operation:explicit-recheck' AND s.dataset='market.financial.income'").fetchone()
+            "WHERE coalesce(b.operation_id,b.legacy_operation_ref)='operation:explicit-recheck' AND s.dataset='market.financial.income'").fetchone()
     # Simulate a verified completed archive whose page-one total no longer matches its archived page set.
     from stock_analysis.collection.collection import read_source
     raw,_=read_source(db,income_source['id'])
@@ -267,7 +267,7 @@ def test_public_financial_never_mixes_pages_from_different_batches(db):
     assert collector.requests==2
     with db.connection() as conn:
         current_income=conn.execute("SELECT s.request_status,s.reused_source_id,json_extract(s.request_json,'$.params.pageNumber') AS page "
-            "FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE b.operation_id='operation:resume' "
+            "FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE coalesce(b.operation_id,b.legacy_operation_ref)='operation:resume' "
             "AND s.dataset='market.financial.income' ORDER BY page").fetchall()
         assert [r['page'] for r in current_income]==[1,2]
         assert all(r['request_status']=='success' and r['reused_source_id'] is None for r in current_income)
@@ -401,7 +401,7 @@ def test_recovery_fails_only_unfinished_batches(db):
     interrupted = mf.begin_batch(db, PERIOD)
     from stock_analysis.collection.collection import finish_batch
     with db.connection(write=True) as conn:
-        run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) "
+        run_id=conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) "
             "VALUES('financial_period',? ,0,'2026-10-14','running')",(PERIOD,)).lastrowid
     operation='sw_update_runs:'+str(run_id)
     children=[]

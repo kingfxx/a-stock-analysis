@@ -1,5 +1,20 @@
 # 进展
 
+## 当前增量：2026-10-27 采集控制元数据整合已完成
+
+- 用户授权实施，单代理应用Karpathy指南；v44统一collection_operations，退役指数/个股整次表、stock_collection_items、collection_schedule_rules和sw_update_runs。行业数字身份及业务参数保留在公共运行同一行；保留sync_runs/state与业务事实。
+- operation→batch→source，无公共item/父子batch；真实个股分段预排/领取，按实际解析/定义版本复用，失败继续保留逐分段模式。范围冲突在写入前检查，定时事务捕获冲突不会留下孤立运行。旧无分段全量工作模式及独有旧任务消息保留，未知父级不造运行。
+- schedule_id/task_key分离，各可定时模块支持独立多规则及新增/编辑/删除；区分关闭/删除。多规则表单采用所选规则实际开关，不混用模块汇总开关。唯一公共Scheduler、原预算/冷却/证据/授权保留。
+- 详情按100条batch分页并给出next_url，evidence API提供单batch诊断与200条source元数据；列表不复制全分段结果，覆盖聚合不受显示100条限制。新指数进度不保存全任务数组；旧独有消息通过legacy_task_states明确保留。
+- 最终隔离1.36GB原库副本：76张未变表逐行SHA256完全一致，3460个batch ID保留，6条原日程配置保持，来源与预算/冷却不变。旧53条指数类result_json为10,833,973→249,704字节（旧任务消息保留后最终值，覆盖此前146,973字节中间测量）；最大7,898,532→28,472字节。batch JSON仅增加35,971字节，results无未知归属。报告collection_control_migration_20261027.json；自动备份+迁移约19.9秒，列表约51—57ms。没有移动来源/PDF或自动VACUUM。
+- 代表性10运行×20股票×16分段=3200 batch：含索引2,818,048字节，约881字节/行；写入约242ms、列表约54ms。没有source/sync/响应文件；报告collection_control_storage_20261027.json。不能只与旧item表比较，新表已承接真实batch职责。
+- 验证记录：相关组合147 passed；最终控制/领域/限速123 passed；分页/证据/API边界及浏览器75 passed；最新迁移与多规则界面15 passed。完整tests目录末轮1691 passed、2 failed（冷却文案尚未渲染、Edge临时DevToolsActivePort读取被占用），两个原用例串行原样复跑2 passed。未降低断言或跳过。新财务分段执行及历史保留等13项控制测试通过；上述结果有重叠，不相加。初始根目录pytest误收第三方runtime，已改为项目tests目录；未改第三方依赖。
+- 已核对宿主机原PID24976为python -X utf8 -u app.py --port 8765，原库operation/sync/AI均空闲后安全重启。自动备份data/backups/pre-migration-20261027T032606306360Z.sqlite3，v43→44；当前PID40168保持8765运行，启动恢复中断任务0，日志无Traceback/ERROR/Exception。
+- 原库只读验收：80条原运行的状态/时间/错误逐条保留；source数量/最大ID均5763、batch数量/最大ID均3460，6条原配置及provider状态完全一致。启动时唯一新增控制记录是原已启用拥挤度日程的本地HTML检查复用，HTTP=0、skipped=true、槽位complete；真实发生的记录保留，不删除来制造前后相同。当前operation为81，无新增来源请求/事实写入。
+- 实际页面7个公共规则选择器、个股模块、390px无横向溢出，JS错误0、storage请求0、转发API写入0；仅拦截原页面visit等写请求。旧大运行298分段可按100条分页、单分段诊断可读；报告collection_control_deployment_20261027.json，API约64ms/235143字节。没有保存用户设置、开启新日程或为验收采集。
+- Python编译、JS语法及git diff --check通过；存储、采集规则、个股/指数说明、目录导航和本计划字段对照已同步。后台日志collection-control-server-20261027.out.log/err.log、报告及常用复测工具保留；清理本轮隔离库/备份/浏览器缓存，不动日常库、正式备份或资料。
+- 本任务无待实现事项；后续反馈沿用本目录。原工作区已有改动保留，本轮未创建其他代理、未提交或推送Git。
+
 ## 计划准备
 
 - 已检查web/maintenance.js：当前仅数据库预览/未关注股票tab，默认数据库；load()调用/api/maintenance/storage，刷新及stock-cleanup-complete等路径需一并检查懒加载，不只调整按钮顺序。
@@ -149,3 +164,17 @@
 - 两轮相关回归89 passed、57 passed；原8765 PID42524保持运行。只读实页验收：1920与1440顶部信息/按钮同一行，手动字段底部偏差0px，分组控件180×36px，390px无横向溢出，页面错误0、storage读取0。
 - 原持仓日程仍为1条，启用状态/19:00时间/数据项及全配置哈希前后相同；source最大ID5738、batch最大ID3444与stock operation 0均未变化。未保存/删除用户真实规则，也未启动采集。
 - 报告data/verification/reports/stock_collection_feedback_20261027.json；测试日志stock-feedback-tests-20261027.log、stock-feedback-final-20261027.log；后台日志stock-feedback-server-20261027.out.log/err.log。当前后台运行记录以本节为准。
+
+## 2026-10-27 发布计数修复实施中
+
+- 已核查用户给出的09:05运行：16个公共batch无标准写入计数。已补领域发布计数与同事务保存、来源汇总及旧记录简化显示，不修改业务存储/采集行为。
+- 首轮既有存储/领域回归172 passed；新增计数与财务/筹码43 passed；新增计数+浏览器来源汇总10 passed。正在运行完整隔离回归，之后按项目规则重启原8765并只读验收。
+
+## 2026-10-27 发布计数修复完成
+
+- 在既有batch.result_json补齐发布计数，标准inserted/revised/unchanged/returned/published与事实同事务提交。八类领域均已接入；公告日期派生独立计数，复权/主营版本复制不冒充新增。页面只读汇总各来源，不新增表、缓存、原文或事实副本。
+- 完整隔离回归1678 passed、2 failed：一项是公共旧文案断言（未记录文本已精简），另一项是Windows归档临时路径过长；更新对应断言及使用短路径后公共展示/BigQuant原测试/新增计数复测23 passed。另有172项既有领域回归、43项财务/筹码/计数、10项计数+浏览器、3项最后SQL投影复测通过，不将重叠用例相加。
+- 核对原PID42524为空闲8765后重启，当前PID24976保持运行；schema43无迁移，启动无中断任务。当前后台日志stock-counts-server-20261027.out.log/err.log。
+- 原库只读验收：09:05旧运行来源汇总正常；公告解析122、分红解析1、财务各2条，同行估值旧changed=true可确认写入1但不伪造新增/修订。其余实际写入仍未记录，不能从当前事实倒算。页面错误0、storage读取0，浏览器股票库visit写请求已拦截。
+- 配置哈希、target历史16个batch结果哈希前后相同；source水位5763、batch水位3460、stock operation 1、日程1条均不变。没有为验收采集、保存设置或回填历史计数。报告data/verification/reports/stock_write_counts_20261027.json；复测工具verify_stock_write_counts.py。
+- 临时隔离库、浏览器缓存与预览截图已清理，保留验收报告、相关测试日志、当前后台日志及常用工具。

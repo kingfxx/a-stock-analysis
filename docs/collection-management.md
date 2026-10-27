@@ -12,18 +12,18 @@
 
 ## 已实现任务与操作
 
-任务目录见 [TASK_CATALOG](plans/20261025_统一采集管理/TASK_CATALOG.md)。全市场财务、季度快照、指数、拥挤度及已有国债增量均复用原采集器。手动默认增量；历史初始化、回填及范围操作显示参数并要求确认。行业任务暂不开放用户取消，失败后按相同范围续跑；指数／拥挤度／国债提供请求停止。批量采集入口统一在本页；原行业、指数、拥挤度页面仅保留只读进度和前往采集管理的导航。执行继续复用真实领域operation及数据库短事务互斥。
+任务目录见 [TASK_CATALOG](plans/20261025_统一采集管理/TASK_CATALOG.md)。全市场财务、季度快照、指数、拥挤度及已有国债增量均复用原采集器。手动默认增量；历史初始化、回填及范围操作显示参数并要求确认。行业任务暂不开放用户取消，失败后按相同范围续跑；指数／拥挤度／国债提供请求停止。批量采集入口统一在本页；原行业、指数、拥挤度页面仅保留只读进度和前往采集管理的导航。执行统一使用collection_operations及数据库短事务互斥，保留各领域原有冲突范围。
 
 财务／快照自动检查只运行保存的单个目标报告期／季度，需主动更新目标；不自动扩大历史范围。个股到期检查、收费数据工具、正式财报和模型不注册自动任务。航运统一显示为一个「航运采集」模块，内选月度（含图片）、周度或既有资料导入；月度图片自动解析，人工补正在月度下折叠展示。内部保留周度、月度和两个手动资料导入适配任务的原身份与记录，详见[航运采集](shipping-collection.md)。
 
 ## API与证据
 
-- `GET /api/maintenance/collections`：九个显式注册适配任务（页面合并为六个模块）、白名单模式、最近20次领域历史、最近运行至多100个公共分段、来源冷却、最近10个定时槽位。
-- `GET /api/maintenance/collections/operation?task_key=…&operation_ref=…`：显式点击时读取该任务的完整领域运行结果；列表SQL仅投影计数／进度摘要，剔除来源清单、逐字段计数和工作项明细。
-- `GET /api/maintenance/collections/evidence?batch_id=…`：该分段最近200条来源元数据，包括状态、时间、归档路径及双哈希；不下载文件。
+- `GET /api/maintenance/collections`：十个显式注册适配任务（页面按个股及航运等业务模块合并）、白名单模式、最近20次领域历史、最近运行至多100个公共分段、来源冷却、最近10个定时槽位。
+- `GET /api/maintenance/collections/operation?task_key=…&operation_ref=…`：显式点击时读取该任务的运行摘要/历史结果，batch_page提供每页100个分段引用；可传before_batch_id继续读取；列表SQL仅投影计数／进度摘要，剔除来源清单、逐字段计数和工作项明细。
+- `GET /api/maintenance/collections/evidence?batch_id=…`：该分段的范围、结果/诊断及最近200条来源元数据，包括状态、时间、归档路径及双哈希；不下载文件。
 - `POST /api/maintenance/collections/run`：`task_key,params`。
 - `POST /api/maintenance/collections/cancel`：`task_key`，仅支持真实取消的任务。
-- `POST /api/maintenance/collections/schedule`：`task_key,schedule`，只保存配置。schedule包含布尔enabled、local_time、rule及白名单params。
+- `POST /api/maintenance/collections/schedule`：`task_key,schedule`，只保存配置。schedule包含布尔enabled、local_time、rule及白名单params；所有支持定时的模块均可提交schedule_key=null新增独立规则、指定已有schedule_key编辑，或action=delete与schedule_key删除。保存不启动任务，手动资料导入仍不能配置定时。
 
 不接受任意URL、函数、shell或cron。写接口沿用本地Origin／JSON校验和RequestGate。最近检查取最近运行关联source.obtained_at；最近成功取最近20次运行中的领域finished_at。没有记录显示未记录，不以数据日期替代。分段的执行状态和coverage_status分开，全历史／逐字段覆盖仍可能未知；成功不自动变成完整覆盖。历史详情保留原采集器进度及请求／行数，不混算为任务数。
 
@@ -31,17 +31,19 @@
 
 服务器仅启动一个 `collection_management.Scheduler`，每30秒检查，在原8765生命周期内运行。未注册来源不会执行。旧 `market_congestion.DailyScheduler` 类保留兼容，但服务器不再启动它。
 
-拥挤度原collection_schedules记录不重写。默认每日规则继续调用原scheduled_tick，保留初始化门槛、到期时段内成功HTML检查复用、冷却和metadata_only；已有开关、北京时间不改变。其他任务没有配置记录时默认关闭。用户保存启用即授权该任务所填范围。保存不执行采集；新增规则从保存后下一个未来槽位开始，停机重启不修改配置时间，错过的槽位合并到最近一个，不逐日重放。
+拥挤度原collection_schedules记录不重写。每日规则也由公共槽位执行，保留初始化门槛、到期时段内成功HTML检查复用、冷却和metadata_only；已有开关、北京时间不改变。其他任务没有配置记录时默认关闭。用户保存启用即授权该任务所填范围。保存不执行采集；新增规则从保存后下一个未来槽位开始，停机重启不修改配置时间，错过的槽位合并到最近一个，不逐日重放。
 
 规则均按Asia/Shanghai计算：daily；weekly+weekday（0周一—6周日）；monthly+day（1—31，短月按月末）。财务／快照可设monthly+window=[起日,止日]，窗口内逐日检查明确目标。只有原任务无失败且目标相关公共分段明确coverage_status=complete才停止重复检查；unknown不当成完整，窗口外只合并最后一个必要检查。航运周/月任务可独立保存日周月规则，默认关闭；两个资料导入任务仅手动。正式财报单份准备仍需预测页明确操作，不纳入航运批量定时。
 
-新定时槽位唯一键(task_key,slot_key)。数据库短事务同时领取槽位与创建领域operation，提交后才联网；多个进程／页面不能重复领取或绕过领域互斥。公共batch通过operation_ref关联记录真实scheduled触发和槽位，不复制响应及整份运行结果。来源锁、预算、拒绝停止及冷却原样复用。来源冷却期间不消费新槽位，解除后由公共层执行恢复探测。
+定时配置以schedule_id标识规则，task_key标识所属模块，一个模块可有多条。定时槽位唯一键(schedule_id,slot_key)。数据库短事务同时领取槽位与创建公共operation，提交后才联网；多个进程／页面不能重复领取或绕过领域互斥。公共batch通过operation_ref关联记录真实scheduled触发和槽位，不复制响应及整份运行结果。来源锁、预算、拒绝停止及冷却原样复用。来源冷却期间不消费新槽位，解除后由公共层执行恢复探测。
 
 启动先执行原领域恢复，再将未完成定时槽位标pending；同一槽位最多自动恢复一次，仍失败保留failed，后续新周期可再次做增量检查。跨多期恢复合并到最新槽位。关闭自动开关不取消已执行任务；安全停机内部只对本调度器的领域任务发送取消，并等待退出。财务／快照为停机新增内部cancel_requested及公共collector回调，不因此宣称支持用户取消。数据库恢复／压缩门禁覆盖整次定时执行，未排空时不能替换数据库。
 
 ## 存储与验收
 
-v40保留collection_schedules五列，新增collection_schedule_rules（规则与参数）和collection_schedule_slots（定时执行引用），不建立手动任务结果副本、不迁移旧历史。sw_update_runs增加内部停机标记。新增表分类均为「运行与配置」，时间依据updated_at／started_at／finished_at；空表或缺值不推算，显示未记录／暂无数据。详细字段见 [SQLite存储](sqlite-storage.md#v40-统一采集管理)。
+当前v44统一collection_operations，退役index_collection_operations、stock_collection_operations/items和sw_update_runs；行业数字运行身份与业务结果保留在同一公共运行行。collection_schedules合入原rules配置，collection_schedule_rules退役，slots仍独立；关闭与删除分别表示。batch直接承接真实分段排队与恢复，不新增公共item。旧sync run/事实/source ID保留，未知历史父级不编造。详见[SQLite存储](sqlite-storage.md#v44-采集控制元数据整合)。
+
+operation仅保存必要摘要；指数results中的重复分段结果已移除，独有诊断归真实batch，历史无法证明的内容明确保留。新进度不反复重写全任务数组，详情按batch/source读取。旧行业CLI独有历史业务核对结果保留，不宣称所有领域旧结果已一律压成固定大小。
 
 代表性存储与读取报告：[collection_management_20261025.json](../data/verification/reports/collection_management_20261025.json)。可复测工具：[collection_management_benchmark.py](../data/verification/tools/collection_management_benchmark.py)，只创建并删除隔离库。
 
@@ -104,3 +106,10 @@ v40保留collection_schedules五列，新增collection_schedule_rules（规则�
 明确记录返回／解析0条时，摘要和黄色提示注明分段数及日期范围；失败的空响应也提示并保留失败状态。新增0、published=0、空覆盖状态、缺计数和复用旧分段都不能单独证明来源为空。未变化表示重复值，不是新写入。页面读取和统计不会触发来源采集，来源预算、定时和证据策略保持原规则。
 
 验证：[最初指数版本验收报告](../data/verification/reports/index_write_counts_20261026.json)，[统一模板验收报告](../data/verification/reports/collection_write_counts_20261026.json)，[只读复测工具](../data/verification/tools/verify_index_write_counts.py)。
+
+
+## 个股来源写入计数（2026-10-27）
+
+个股运行在总进度后按真实提供方汇总已记录写入数，下面按数据项展示新增、修订、未变化及返回/解析数。写入计数与业务事实在同一事务提交，written为新增+修订（有补全时加补全）；SQL重复UPSERT更新取得时间/run_id不算业务新增，复权和主营版本复制不重复计新增。公告元数据与派生披露日期分别显示，派生无需重新计算不报来源空响应。
+
+历史批次没有写入计数时保持未知，不从当前事实、sync run的record_count或解析量猜测；以简短“实际写入数量未记录”说明。已有candidate_count、metadata_rows补只读解析展示；同行估值changed标志可确认写入1/0，但不能拆分新增/修订。部分分段未知时来源总计标“已知/部分未记录”。旧复权mode=unchanged的row_count=0仅表示未发布新版本，不当作来源返回空。页面不扫描事实表、补写历史或触发采集。

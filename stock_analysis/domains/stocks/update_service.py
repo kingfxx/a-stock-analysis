@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from stock_analysis.domains.stocks.collection_plan import selected
+
 import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
@@ -19,6 +21,9 @@ from stock_analysis.domains.stocks.sync_support import (data_lock, encoded, dige
 FINANCING_SOURCE = "eastmoney:RPTA_WEB_RZRQ_GGMX"
 HOLDER_SOURCES = ("RPT_F10_EH_HOLDERNUM", "RPT_HOLDERNUM_DET")
 
+
+COLLECTION_PARSER_VERSION = "eastmoney-facts-v1"
+COLLECTION_DEFINITION_VERSION = "source-fields-v1"
 
 class FinancingHistoryGap(ValueError):
     """A response omitted already stored dates in the requested overlap."""
@@ -88,8 +93,14 @@ class ChipService:
                             next_full_audit_at=None,
                             checked_at=import_meta.get("checked_at") if import_meta else None)
         def write(conn):
+            from stock_analysis.collection.publication_counts import counts, observe, published
+            counters = counts(len(rows))
             for row in rows:
                 v = row["values"]
+                previous = conn.execute('SELECT margin_balance,short_balance,total_balance,net_buy,close FROM financing_daily WHERE instrument_id=? AND source=? AND trade_date=?',
+                                        (key.instrument_id,key.source,row['date'])).fetchone()
+                observe(counters, tuple(previous) if previous else None,
+                        tuple(v[f] for f in ('margin_balance','short_balance','total_balance','net_buy','close')))
                 conn.execute("INSERT INTO financing_daily(instrument_id,source,trade_date,margin_balance,short_balance,"
                              "total_balance,net_buy,close,raw_json,retained_fields_json,"
                              "content_hash,obtained_at,run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
@@ -105,6 +116,7 @@ class ChipService:
                               digest(row["raw"]), utc_now(), run))
             if import_meta:
                 self._import_record(conn, key, run, len(rows), import_meta)
+            return published(counters)
         self.db.complete_sync(run, result, write, collection_batch_id=collection_batch_id,
                               batch_result={"row_count": len(rows), "sync_run_id": run} if collection_batch_id else None)
         return warnings
@@ -118,11 +130,16 @@ class ChipService:
             raise ValueError("股东历史缺少已知日期")
         days = sorted(known | {r["date"] for r in parsed})
         def write(conn):
+            from stock_analysis.collection.publication_counts import counts, observe, published
+            counters = counts(len(parsed))
             for raw, item in zip(sorted(records, key=lambda r: r["END_DATE"]), parsed):
                 if raw.get("SECURITY_CODE") != code:
                     raise ValueError("股东记录股票不匹配")
                 scope = "total" if "HOLDER_TOTAL_NUM" in raw else "unknown"
                 record_key = item["date"] + ":" + scope
+                previous = conn.execute('SELECT content_hash,announced_on,holders FROM shareholder_observations WHERE instrument_id=? AND source=? AND source_record_key=?',
+                                        (key.instrument_id,key.source,record_key)).fetchone()
+                observe(counters, tuple(previous) if previous else None, (digest(raw),item['announced_on'],item['holders']))
                 conn.execute("INSERT INTO shareholder_observations(instrument_id,source,source_record_key,stat_date,"
                              "announced_on,holder_scope,holders,raw_json,content_hash,obtained_at,run_id) "
                              "VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(instrument_id,source,source_record_key) "
@@ -132,6 +149,7 @@ class ChipService:
                               item["holders"], encoded(raw), digest(raw), utc_now(), run))
             if import_meta:
                 self._import_record(conn, key, run, len(parsed), import_meta)
+            return published(counters)
         self.db.complete_sync(run, SyncResult(len(parsed), days[0] if days else None, days[-1] if days else None,
                                               days[-1] if days else None, no_data=not days, next_full_audit_at=None,
                                               checked_at=import_meta.get("checked_at") if import_meta else None), write,
@@ -203,6 +221,8 @@ class ChipService:
             identity = self.db.ensure_instrument(code)
             sources = (FINANCING_SOURCE,) if section == "financing" else tuple("eastmoney:" + s for s in HOLDER_SOURCES)
             for source in sources:
+                if not selected(section,source.split(":",1)[1]):
+                    continue
                 key = SyncKey(identity, section, source)
                 state = sync_state(self.db, key)
                 recent_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
@@ -223,7 +243,7 @@ class ChipService:
                         bounds["date_field"] = "NOTICE_DATE" if source.endswith("RPT_F10_EH_HOLDERNUM") else "HOLD_NOTICE_DATE"
                 # Providers may publish a holder record before its labelled notice date.
                 end = (today + timedelta(days=7) if section == "shareholders" and not complete else today).isoformat()
-                run = self.db.start_sync(key, parser_version="eastmoney-facts-v1", methodology_version="source-fields-v1",
+                run = self.db.start_sync(key, parser_version=COLLECTION_PARSER_VERSION, methodology_version=COLLECTION_DEFINITION_VERSION,
                                          trigger_reason="full_audit" if complete else "incremental",
                                          requested_start=start, requested_end=end)
                 batch_id = begin_stock_batch(self.db, run, "eastmoney", section, code,
@@ -232,7 +252,7 @@ class ChipService:
                                              scope={"source_interface": source.split(":", 1)[1],
                                                     "mode": "full" if complete else "incremental",
                                                     "date_field": bounds.get("date_field")},
-                                             parser_version="eastmoney-facts-v1", definition_version="source-fields-v1")
+                                             parser_version=COLLECTION_PARSER_VERSION, definition_version=COLLECTION_DEFINITION_VERSION)
                 try:
                     with routed_stock_requests(self.db, batch_id, "eastmoney", section):
                         records = self.fetcher(code, section, source.split(":", 1)[1], start_date=start, end_date=end, **bounds)

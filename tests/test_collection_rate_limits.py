@@ -23,7 +23,7 @@ def settings(**kwargs):
 
 def operation(db, ref='test', scope=None, status='complete'):
     with db.connection(write=True) as conn:
-        conn.execute('INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at) VALUES(?,?,?,?,?)',
+        conn.execute('INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at) VALUES(?,?,?,?,?)',
                      (ref, 'incremental', json.dumps(scope or {}), status, '2026-10-25'))
 
 
@@ -51,7 +51,7 @@ def test_read_and_save_preserve_existing_profiles_and_shared_state(management):
         assert rates[0]['current']['interval'] == 8 and rates[0]['updated_at']
         assert describe(conn, 'market_congestion', ['legu'])[0]['current']['interval'] == 10
         assert conn.execute('SELECT count(*) FROM collection_schedules').fetchone()[0] == 0
-        assert conn.execute('SELECT count(*) FROM index_collection_operations').fetchone()[0] == 0
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0] == 0
 
 
 def test_running_guard_and_provider_caps(management):
@@ -116,7 +116,7 @@ def test_unregistered_backfill_and_stock_are_unchanged(management):
 def test_industry_tasks_and_cli_backfills_remain_distinct(management,action,expected):
     db=management.db
     with db.connection(write=True) as conn:
-        run=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES(?,'2026Q3',0,'2026-10-25','complete')",(action,)).lastrowid
+        run=conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES(?,'2026Q3',0,'2026-10-25','complete')",(action,)).lastrowid
     batch=begin_batch(db,f'sw_update_runs:{run}','market.financial.income','eastmoney')
     with db.connection() as conn: assert task_for_batch(conn,batch,'eastmoney') == expected
 

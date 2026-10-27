@@ -52,7 +52,7 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (36, "036_market_congestion.sql"), (37, "037_index_price_market_fields.sql"),
               (38, "038_compact_index_prices.sql"), (39, "039_sovereign_yields.sql"), (40, "040_collection_management.sql"),
               (41, "041_shipping_research.sql"), (42, "042_collection_rate_limits.sql"),
-              (43, "043_stock_collection_management.sql"))
+              (43, "043_stock_collection_management.sql"), (44, "044_collection_control.sql"))
 
 
 class StorageError(RuntimeError):
@@ -221,11 +221,17 @@ class Database:
             actual_mode = conn.execute(f"PRAGMA journal_mode={self.journal_mode}").fetchone()[0]
             if actual_mode != self.journal_mode:
                 raise StorageError(f"Could not select journal mode {self.journal_mode}: {actual_mode}")
+            if applied < 44:
+                conn.execute("PRAGMA foreign_keys=OFF")
+                conn.execute("PRAGMA legacy_alter_table=ON")
             conn.execute("BEGIN IMMEDIATE")
             try:
                 for version, name, checksum, sql in migrations[applied:]:
                     for statement in _sql_statements(sql):
                         conn.execute(statement)
+                    if version == 44:
+                        from stock_analysis.collection.schema_upgrade import migrate_control
+                        migrate_control(conn)
                     if version == 32:
                         from stock_analysis.domains.financials.schema_upgrade import migrate_public_sources
                         migrate_public_sources(conn)
@@ -247,6 +253,8 @@ class Database:
                     conn.execute("INSERT INTO schema_migrations VALUES (?, ?, ?, ?)",
                                  (version, name, checksum, utc_now()))
                     conn.execute(f"PRAGMA user_version={version}")
+                if conn.execute("PRAGMA foreign_key_check").fetchone():
+                    raise StorageError("Migration left invalid foreign keys")
                 conn.execute(f"PRAGMA application_id={APPLICATION_ID}")
                 conn.commit()
             except BaseException:
@@ -302,14 +310,20 @@ class Database:
             return conn.execute("SELECT id FROM instruments WHERE exchange=? AND code=?",
                                 (exchange, code)).fetchone()[0]
 
-    def upsert_financial_reports(self, conn, key: SyncKey, run_id: int, rows: list[dict]) -> None:
+    def upsert_financial_reports(self, conn, key: SyncKey, run_id: int, rows: list[dict]) -> dict:
         if not key.dataset.startswith("financial:") or key.adjustment != "raw":
             raise ValueError("Expected a financial report synchronization key")
         report_type = key.dataset.removeprefix("financial:")
+        from stock_analysis.collection.publication_counts import counts, observe, published
+        counters = counts(len(rows))
+        old = {r['period']: (r['content_hash'],r['publish_date'],r['update_time']) for r in conn.execute(
+            'SELECT period,content_hash,publish_date,update_time FROM financial_reports WHERE instrument_id=? AND source=? AND report_type=?',
+            (key.instrument_id,key.source,report_type))}
         for row in rows:
             _day(row["period"])
             _day(row.get("publish_date"))
             raw_json, content_hash = _raw_payload(row["raw_json"])
+            observe(counters, old.get(row['period']), (content_hash,row.get('publish_date'),row.get('update_time')))
             conn.execute(
                 "INSERT INTO financial_reports(instrument_id,source,report_type,period,publish_date,update_time,"
                 "raw_json,content_hash,obtained_at,run_id) VALUES (?,?,?,?,?,?,?,?,?,?) "
@@ -318,6 +332,7 @@ class Database:
                 "content_hash=excluded.content_hash,obtained_at=excluded.obtained_at,run_id=excluded.run_id",
                 (key.instrument_id, key.source, report_type, row["period"], row.get("publish_date"),
                  row.get("update_time"), compress_json(raw_json), content_hash, utc_now(), run_id))
+        return published(counters)
 
     def financial_reports(self, instrument_id: int, source: str, report_type: str) -> list[dict]:
         with self.connection() as conn:
@@ -325,14 +340,20 @@ class Database:
                 "SELECT * FROM financial_reports WHERE instrument_id=? AND source=? AND report_type=? ORDER BY period",
                 (instrument_id, source, report_type))]
 
-    def upsert_dividend_events(self, conn, key: SyncKey, run_id: int, rows: list[dict]) -> None:
+    def upsert_dividend_events(self, conn, key: SyncKey, run_id: int, rows: list[dict]) -> dict:
         if key.dataset != "dividends" or key.adjustment != "raw":
             raise ValueError("Expected a dividend synchronization key")
+        from stock_analysis.collection.publication_counts import counts, observe, published
+        counters = counts(len(rows))
+        fields = ('source_event_id','report_period','proposal_date','notice_date','registration_date','ex_dividend_date','status','cash_per_ten','content_hash')
+        old = {r['event_key']:tuple(r[f] for f in fields) for r in conn.execute(
+            'SELECT event_key,'+','.join(fields)+' FROM dividend_events WHERE instrument_id=? AND source=?',(key.instrument_id,key.source))}
         for row in rows:
             for field in ("report_period", "proposal_date", "notice_date", "registration_date",
                           "ex_dividend_date"):
                 _day(row.get(field))
             raw_json, content_hash = _raw_payload(row["raw_json"])
+            observe(counters, old.get(row['event_key']), tuple(content_hash if f=='content_hash' else row.get(f) for f in fields))
             conn.execute(
                 "INSERT INTO dividend_events(instrument_id,source,event_key,source_event_id,report_period,"
                 "proposal_date,notice_date,registration_date,ex_dividend_date,status,cash_per_ten,raw_json,"
@@ -347,6 +368,7 @@ class Database:
                  row.get("report_period"), row.get("proposal_date"), row.get("notice_date"),
                  row.get("registration_date"), row.get("ex_dividend_date"), row["status"],
                  row.get("cash_per_ten"), raw_json, content_hash, utc_now(), run_id))
+        return published(counters)
 
     def dividend_events(self, instrument_id: int, source: str) -> list[dict]:
         with self.connection() as conn:
@@ -355,13 +377,19 @@ class Database:
                 "ORDER BY coalesce(ex_dividend_date,notice_date,proposal_date),id",
                 (instrument_id, source))]
 
-    def upsert_valuation_observations(self, conn, key: SyncKey, run_id: int, rows: list[dict]) -> None:
+    def upsert_valuation_observations(self, conn, key: SyncKey, run_id: int, rows: list[dict]) -> dict:
         if not key.dataset.startswith("valuation:") or key.adjustment != "raw":
             raise ValueError("Expected a valuation synchronization key")
         metric = key.dataset.removeprefix("valuation:")
+        from stock_analysis.collection.publication_counts import counts, observe, published
+        counters = counts(len(rows))
+        old = {r['observed_on']:(r['value'],r['sampling_version']) for r in conn.execute(
+            'SELECT observed_on,value,sampling_version FROM valuation_observations WHERE instrument_id=? AND source=? AND metric=?',
+            (key.instrument_id,key.source,metric))}
         for row in rows:
             _day(row["observed_on"])
             raw_json, content_hash = _raw_payload(row["raw_json"])
+            observe(counters, old.get(row['observed_on']), (row['value'],row['sampling_version']))
             window_value = row.get("source_windows_json", row.get("source_windows", []))
             windows = json.dumps(json.loads(window_value) if isinstance(window_value, str) else window_value,
                                  ensure_ascii=False, separators=(",", ":"))
@@ -374,6 +402,7 @@ class Database:
                 "content_hash=excluded.content_hash,obtained_at=excluded.obtained_at,run_id=excluded.run_id",
                 (key.instrument_id, key.source, metric, row["observed_on"], row["value"], windows,
                  row["sampling_version"], raw_json, content_hash, utc_now(), run_id))
+        return published(counters)
 
     def valuation_observations(self, instrument_id: int, source: str, metric: str) -> list[dict]:
         with self.connection() as conn:
@@ -455,12 +484,14 @@ class Database:
                 if conn.execute("SELECT changes()").fetchone()[0] != 1:
                     raise StorageError("Public collection batch is missing or already finished")
 
-    def complete_sync(self, run_id: int, result: SyncResult, write_records: Callable[[sqlite3.Connection], None], *,
+    def complete_sync(self, run_id: int, result: SyncResult, write_records: Callable[[sqlite3.Connection], dict | None], *,
                       collection_batch_id: int | None = None, batch_result: dict | None = None):
         """Atomically commit caller's validated facts, successful run and state.
 
         write_records must only issue local SQL on this connection. Do not perform
         source requests here. Domain validation/UPSERT policies belong to P2/P3.
+        A returned counter dict is published with the public batch in this same
+        transaction; failed or rolled-back facts cannot publish success counts.
         """
         try:
             result.validate()
@@ -480,7 +511,7 @@ class Database:
                         or result.coverage_end < state["coverage_end"]
                         or result.data_watermark < state["data_watermark"]):
                     raise StorageError("Successful coverage/watermark cannot move backward")
-                write_records(conn)
+                publication = write_records(conn)
                 now = utc_now()
                 conn.execute("UPDATE sync_runs SET status=?, finished_at=?, record_count=? WHERE id=?",
                              ("no_data" if result.no_data else "success", now, result.record_count, run_id))
@@ -496,7 +527,7 @@ class Database:
                 if collection_batch_id is not None:
                     conn.execute("UPDATE collection_batches SET status='complete',coverage_status='unknown',finished_at=?,"
                                  "result_json=?,error=NULL WHERE id=? AND status='running'",
-                                 (now, json.dumps(batch_result or {}, ensure_ascii=False, sort_keys=True,
+                                 (now, json.dumps({**(batch_result or {}), **(publication if isinstance(publication,dict) else {})}, ensure_ascii=False, sort_keys=True,
                                                   separators=(",", ":"), allow_nan=False), collection_batch_id))
                     if conn.execute("SELECT changes()").fetchone()[0] != 1:
                         raise StorageError("Public collection batch is missing or already finished")
@@ -516,8 +547,8 @@ class Database:
                                      "error='Application exited before synchronization completed' "
                                      "WHERE status='running'", (utc_now(),)).rowcount
             conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error='Interrupted stock sync' "
-                         "WHERE domain='stock' AND status='running' AND operation_id IN "
-                         "(SELECT 'sync_runs:'||id FROM sync_runs WHERE status IN ('failed','success','no_data'))",
+                         "WHERE domain='stock' AND status='running' AND sync_run_id IN "
+                         "(SELECT id FROM sync_runs WHERE status IN ('failed','success','no_data'))",
                          (utc_now(),))
             conn.execute("DELETE FROM adjusted_price_versions WHERE status='candidate' AND run_id IN "
                          "(SELECT id FROM sync_runs WHERE status IN ('failed','superseded'))")
@@ -587,8 +618,8 @@ class Database:
                 invalid_provenance += conn.execute(
                     "SELECT count(*) FROM business_segment_versions v JOIN sync_runs r ON r.id=v.run_id "
                     "JOIN collection_batches b ON b.id=v.batch_id WHERE r.instrument_id<>v.instrument_id "
-                    "OR r.dataset<>'business_segments' OR r.source<>v.source OR r.status<>'success' "
-                    "OR b.status<>'complete' OR b.operation_id<>'sync_runs:'||r.id "
+                    "OR r.dataset<>'business_segments' OR r.source<>v.source OR r.status<>'success' " +
+                    ("OR b.status<>'complete' OR b.sync_run_id IS NOT r.id " if schema_count >= 44 else "OR b.status<>'complete' OR b.operation_id<>'sync_runs:'||r.id ") +
                     "OR v.row_count<>(SELECT count(*) FROM business_segment_items i WHERE i.version_id=v.id)"
                 ).fetchone()[0]
                 invalid_provenance += conn.execute(

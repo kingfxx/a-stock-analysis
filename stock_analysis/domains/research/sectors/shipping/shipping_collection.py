@@ -15,11 +15,11 @@ from stock_analysis.infrastructure.storage import utc_now
 
 
 def reserve(conn,key,params):
-    if conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone():
+    if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NULL AND task_key<>'stocks' AND status='running'").fetchone():
         raise ValueError('已有采集任务正在运行，请先等待或停止')
     ref=uuid4().hex
-    conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at) VALUES(?,?,?,'running',?)",
-                 (ref,params['mode'],encoded(dict(dataset=key,**params)),utc_now()))
+    conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at,task_key) VALUES(?,?,?,'running',?,?)",
+                 (ref,params['mode'],encoded(dict(dataset=key,**params)),utc_now(),key))
     return ref
 
 
@@ -68,11 +68,11 @@ def reuse_month_segment(db,ref,scope,month,kind,url,previous):
 
 def run(db,ref):
     with db.connection() as conn:
-        operation=dict(conn.execute('SELECT * FROM index_collection_operations WHERE operation_id=?',(ref,)).fetchone())
+        operation=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(ref,)).fetchone())
     scope=json.loads(operation['scope_json']);key=scope['dataset']
     def cancelled():
         with db.connection() as conn:
-            return bool(conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(ref,)).fetchone()[0])
+            return bool(conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(ref,)).fetchone()[0])
     collector=RequestCollector(db,cancelled=cancelled)
     results=[];errors=[];batch=None;total=0;completed=0
     def progress():
@@ -80,9 +80,9 @@ def run(db,ref):
         counts=dict(total=total,success=max(0,completed-skipped-len(errors)),skipped=skipped,
                     failed=len(errors),cancelled=0,running=int(completed<total),
                     pending=max(0,total-completed-int(completed<total)))
-        result=dict(channels=results,errors=errors,work_progress=counts,**collector.report())
+        result=dict(channels=[] if key=='shipping_monthly' else results,errors=errors[:3],error_count=len(errors),work_progress=counts,**collector.report())
         with db.connection(write=True) as conn:
-            conn.execute("UPDATE index_collection_operations SET result_json=? WHERE operation_id=? AND status='running'",(encoded(result),ref))
+            conn.execute("UPDATE collection_operations SET result_json=? WHERE operation_id=? AND status='running'",(encoded(result),ref))
         return counts
     def fetch(url,dataset,provider, *, cached=False):
         nonlocal batch
@@ -141,6 +141,10 @@ def run(db,ref):
             first_year,first_month=map(int,start.split('-'));last_year,last_month=map(int,end.split('-'))
             expected=[f'{n//12:04d}-{n%12+1:02d}' for n in range(first_year*12+first_month-1,last_year*12+last_month)]
             missing=[month for month in expected if (month,'rates') not in links]
+            with db.connection(write=True) as conn:
+                saved=json.loads(conn.execute('SELECT result_json FROM collection_batches WHERE id=?',(batch,)).fetchone()[0])
+                saved.update(missing_rate_months=missing,expected_months=len(expected))
+                conn.execute('UPDATE collection_batches SET result_json=? WHERE id=?',(encoded(saved),batch))
             results.append(dict(discovered_months=len({m for m,k,u in selected}),missing_rate_months=missing,note='目录缺项不当成指数不存在；需定向核验'))
             for month,kind,url in selected:
                 collector.check_cancelled()
@@ -220,11 +224,11 @@ def run(db,ref):
     if errors:status='failed'
     counts=progress() if key=='shipping_monthly' else None
     with db.connection(write=True) as conn:
-        conn.execute('UPDATE index_collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
-                     (status,utc_now(),encoded(dict(channels=results,errors=errors,
+        conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
+                     (status,utc_now(),encoded(dict(channels=[] if key=='shipping_monthly' else results,errors=errors[:3],error_count=len(errors),
                         **({'work_progress':counts} if counts is not None else {}),
                         message='所选范围执行完成；已校验分段保留原覆盖判定，全历史覆盖未知' if status=='complete' else '运行未完成，请查看分段诊断',
-                        **collector.report())),encoded(errors) if errors else None,ref))
+                        **collector.report())),encoded(errors[:3]) if errors else None,ref))
     return dict(status=status,results=results,errors=errors)
 
 

@@ -30,9 +30,9 @@ def live(tmp_path,monkeypatch):
     def execute(self,key,params,ref):
         with self.db.connection(write=True) as conn:
             if ref.startswith('sw_update_runs:'):
-                conn.execute("UPDATE sw_update_runs SET status='complete',finished_at='2026-10-25T00:00:00+00:00' WHERE id=?",(int(ref.split(':')[1]),))
+                conn.execute("UPDATE collection_operations SET status='complete',finished_at='2026-10-25T00:00:00+00:00' WHERE id=?",(int(ref.split(':')[1]),))
             else:
-                conn.execute("UPDATE index_collection_operations SET status='complete',finished_at='2026-10-25T00:00:00+00:00' WHERE operation_id=?",(ref,))
+                conn.execute("UPDATE collection_operations SET status='complete',finished_at='2026-10-25T00:00:00+00:00' WHERE operation_id=?",(ref,))
     monkeypatch.setattr(CollectionManagement,'execute',execute)
     class Handler(server.Handler):
         def log_message(self,*args):pass
@@ -66,7 +66,7 @@ def test_http_whitelist_shared_state_and_maintenance_gate(live):
     assert session.post(base+'/api/maintenance/collections/run',json={'task_key':'indices'},headers={'Origin':'https://evil.test'},timeout=5).status_code==400
     result=session.post(base+'/api/maintenance/collections/schedule',json={'task_key':'indices','schedule':{'enabled':True}},timeout=5)
     assert result.ok
-    with db.connection() as conn:assert conn.execute('SELECT count(*) FROM index_collection_operations').fetchone()[0]==0
+    with db.connection() as conn:assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
     web.request_gate.blocked=True
     result=session.post(base+'/api/maintenance/collections/run',json={'task_key':'indices'},timeout=5)
     assert result.status_code==503
@@ -130,7 +130,7 @@ def test_rate_http_validation_no_execution_and_maintenance_gate(live):
     assert session.post(url,json=command,headers={'Origin':'https://evil.test'},timeout=5).status_code==400
     with db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM collection_rate_limits').fetchone()[0]==1
-        assert conn.execute('SELECT count(*) FROM index_collection_operations').fetchone()[0]==0
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
     web.request_gate.blocked=True
     assert session.post(url,json=command,timeout=5).status_code==503
     web.request_gate.blocked=False
@@ -141,7 +141,7 @@ def test_browser_default_lazy_scans_events_polling_and_keyboard(live):
     base,db,state,web=live
     from playwright.sync_api import sync_playwright,expect
     with db.connection(write=True) as conn:
-        conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at,finished_at,result_json) VALUES('detail-test','incremental','{}','complete','2026-10-25','2026-10-25',?)",(json.dumps({'files':['payload only in detail']}),))
+        conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at,finished_at,result_json) VALUES('detail-test','incremental','{}','complete','2026-10-25','2026-10-25',?)",(json.dumps({'files':['payload only in detail']}),))
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
@@ -186,7 +186,7 @@ def test_browser_reuses_index_progress_and_task_specific_confirmation(live):
     result={'work_progress':{'total':42,'success':6,'skipped':36,'failed':0,'cancelled':0,'running':0,'pending':0,'providers':{
         'csindex':{'total':18,'success':1,'skipped':17},'legu':{'total':24,'success':5,'skipped':19}}}}
     with db.connection(write=True) as conn:
-        conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at,finished_at,result_json) VALUES('progress-test','incremental',?,'complete','2026-10-25','2026-10-25',?)",(json.dumps({'providers':['csindex','legu'],'datasets':[]}),json.dumps(result)))
+        conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at,finished_at,result_json) VALUES('progress-test','incremental',?,'complete','2026-10-25','2026-10-25',?)",(json.dumps({'providers':['csindex','legu'],'datasets':[]}),json.dumps(result)))
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
@@ -213,7 +213,7 @@ def test_browser_reuses_index_progress_and_task_specific_confirmation(live):
             page.locator('[data-task="market_financial"] [data-task-run] button[type=submit]').click()
             assert '全A股四表' in messages[-1] and '季度交易快照' not in messages[-1]
             with db.connection() as conn:
-                assert conn.execute('SELECT count(*) FROM index_collection_operations').fetchone()[0]==1
+                assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==1
         finally:browser.close()
 
 def test_browser_index_write_counts_and_zero_return_warning(live):
@@ -221,7 +221,7 @@ def test_browser_index_write_counts_and_zero_return_warning(live):
     from playwright.sync_api import sync_playwright,expect
     from stock_analysis.collection.collection import begin_batch,finish_batch
     with db.connection(write=True) as conn:
-        conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at,result_json) VALUES('empty-test','incremental','{}','complete','2026-10-26',?)",
+        conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at,result_json) VALUES('empty-test','incremental','{}','complete','2026-10-26',?)",
                      (json.dumps({'work_progress':{'total':3,'success':3,'providers':{'sws':{'total':2,'success':2},'legu':{'total':1,'success':1}}}}),))
     for level in (1,2):
         batch=begin_batch(db,'empty-test','index.sw.analysis','sws','2026-10-26','2026-10-26',scope={'level':level})
@@ -256,8 +256,8 @@ def test_browser_shared_write_template_for_other_collectors(live):
         ('market_financial','market.financial.income','eastmoney',dict(rows=12,new=2,revised=3,enriched=1,unchanged=6),'利润表：已记录写入 6 条（新增 2 条、修订 3 条、补全 1 条）'),
         ('trade_snapshot','market.trade_snapshot','eastmoney',dict(rows=10,inserted=2,revised=0,unchanged=8),'交易快照：已记录写入 2 条'),
         ('market_congestion','market.legu.congestion.page','legu',dict(rows=30,inserted=1,revised=0,unchanged=29),'拥挤度页面：已记录写入 1 条'),
-        ('sovereign_yields','bond_zh_us_rate','eastmoney',dict(total=0),'国债收益率：已记录写入 未记录 条'),
-        ('shipping_weekly','shipping.ccfi','sse',dict(published=0,visible_points=26),'CCFI 周度：已记录写入 0 条（新增 未记录 条'),
+        ('sovereign_yields','bond_zh_us_rate','eastmoney',dict(total=0),'国债收益率：实际写入数量未记录；返回／解析 0 条'),
+        ('shipping_weekly','shipping.ccfi','sse',dict(published=0,visible_points=26),'CCFI 周度：已记录写入 0 条（新增／修订未分别记录）'),
         ('shipping_monthly','shipping.mot_rates','mot',dict(published=8),'航运月度指数：已记录写入 8 条'),
         ('shipping_research_import','shipping.excel','user_excel',dict(published=3),'研究资料指数导入：已记录写入 3 条'),
         ('shipping_image_review',None,'mot',dict(published=4),'资料核验导入：已记录写入 4 条'),
@@ -267,9 +267,9 @@ def test_browser_shared_write_template_for_other_collectors(live):
             ref=manager.reserve(conn,key,dict(mode='full' if key=='market_congestion' else 'incremental',
                 target='2026-06-30' if key=='market_financial' else '2026Q2',file='review.json'))
             if ref.startswith('sw_update_runs:'):
-                conn.execute("UPDATE sw_update_runs SET status='complete' WHERE id=?",(int(ref.split(':')[1]),))
+                conn.execute("UPDATE collection_operations SET status='complete' WHERE id=?",(int(ref.split(':')[1]),))
             else:
-                conn.execute("UPDATE index_collection_operations SET status='complete',result_json=? WHERE operation_id=?",
+                conn.execute("UPDATE collection_operations SET status='complete',result_json=? WHERE operation_id=?",
                     (json.dumps({'channels':[values]} if dataset is None else {}),ref))
         if dataset:
             batch=begin_batch(db,ref,dataset,provider,'2026-10-26','2026-10-26')
@@ -301,7 +301,7 @@ def test_browser_latest_once_collapsed_batches_and_dropdown_multi_select(live):
     from playwright.sync_api import sync_playwright,expect
     with db.connection(write=True) as conn:
         for ref,stamp in [('older','2026-10-24'),('latest','2026-10-25')]:
-            conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at,finished_at,result_json) VALUES(?,'incremental','{}','complete',?,?,?)",(ref,stamp,stamp,json.dumps({'work_progress':{'total':1,'success':1}})))
+            conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at,finished_at,result_json) VALUES(?,'incremental','{}','complete',?,?,?)",(ref,stamp,stamp,json.dumps({'work_progress':{'total':1,'success':1}})))
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
@@ -339,7 +339,7 @@ def test_browser_latest_once_collapsed_batches_and_dropdown_multi_select(live):
             expect(scheduled.locator('input[value=sws]')).not_to_be_checked()
             # A newly arriving running operation is the newest timestamped row and opens once.
             with db.connection(write=True) as conn:
-                conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at) VALUES('new-running','incremental','{}','running','2026-10-26')")
+                conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at) VALUES('new-running','incremental','{}','running','2026-10-26')")
             page.click('#maintenance-refresh');page.wait_for_timeout(150)
             expect(card.locator('[data-run]').first).to_have_attribute('data-run','new-running')
             expect(card.locator('[data-run]').first).to_have_attribute('open','')
@@ -354,7 +354,7 @@ def test_browser_recent_four_targets_default_latest_and_custom_preserved(live):
     mg=CollectionManagement(db,IndustryService(db))
     mg.configure('market_financial',{'enabled':False,'params':{'target':'2026-06-30'}})
     with db.connection(write=True) as conn:
-        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('financial_period','2026-06-30',0,'2026-10-15','complete')")
+        conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES('financial_period','2026-06-30',0,'2026-10-15','complete')")
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
@@ -489,7 +489,7 @@ def test_shipping_one_module_independent_settings_and_monthly_image_fallback(liv
             expect(correction).to_be_hidden()
             # A running monthly job remains reachable and does not change the selected type on refresh.
             with db.connection(write=True) as conn:
-                conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at,result_json) VALUES('shipping-active','backfill',?,'running','2026-10-25',?)",(json.dumps({'dataset':'shipping_monthly'}),json.dumps({'work_progress':{'total':306,'success':8,'pending':298}})))
+                conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at,result_json,task_key) VALUES('shipping-active','backfill',?,'running','2026-10-25',?,'shipping_monthly')",(json.dumps({'dataset':'shipping_monthly'}),json.dumps({'work_progress':{'total':306,'success':8,'pending':298}})))
             page.click('#maintenance-refresh')
             expect(module.locator('[data-shipping-status]')).to_contain_text('运行中')
             expect(picker).to_have_value('shipping_research_import')
@@ -501,3 +501,69 @@ def test_shipping_one_module_independent_settings_and_monthly_image_fallback(liv
             page.reload();expect(page.locator('[data-shipping-select]')).to_have_value('shipping_monthly')
             assert not errors,errors
         finally:browser.close()
+
+
+def test_public_multiple_schedule_rules_edit_delete_without_running(live):
+    from playwright.sync_api import sync_playwright,expect
+    base,db,state,web=live
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+            page.goto(base+'/harness')
+            card=page.locator('[data-task="indices"]');form=card.locator('[data-task-schedule]')
+            form.locator('..').locator('summary').first.click()
+            selector=form.locator('[data-public-rule-select]')
+            for hour in ('03:10','04:20'):
+                selector.select_option('')
+                form.locator('[name=local_time]').fill(hour)
+                with page.expect_response('**/api/maintenance/collections/schedule') as response:
+                    form.locator('button[type=submit]').click()
+                assert response.value.ok
+                expect(selector.locator('option')).to_have_count(2 if hour=='03:10' else 3)
+            with db.connection() as c:
+                rules=[dict(r) for r in c.execute("SELECT schedule_id,local_time FROM collection_schedules WHERE task_key='indices' ORDER BY local_time")]
+                assert c.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
+            selector.select_option(rules[0]['schedule_id'])
+            expect(form.locator('[name=local_time]')).to_have_value('03:10')
+            form.locator('[name=local_time]').fill('05:30')
+            with page.expect_response('**/api/maintenance/collections/schedule') as response:
+                form.locator('button[type=submit]').click()
+            assert response.value.ok
+            page.on('dialog',lambda dialog:dialog.accept())
+            with page.expect_response('**/api/maintenance/collections/schedule') as response:
+                form.locator('[data-public-rule-delete]').click()
+            assert response.value.ok
+            expect(selector.locator('option')).to_have_count(2)
+            with db.connection() as c:
+                saved=[tuple(r) for r in c.execute("SELECT local_time,enabled FROM collection_schedules WHERE task_key='indices' AND deleted=0")]
+                assert saved==[('04:20',0)]
+                assert c.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
+            assert not errors and state['storage']==0
+        finally:
+            browser.close()
+
+
+def test_public_schedule_form_keeps_selected_rule_enabled_state(live):
+    from playwright.sync_api import sync_playwright,expect
+    base,db,state,web=live
+    management=CollectionManagement(db,None)
+    management.configure('indices',dict(enabled=False,local_time='18:00',rule={'frequency':'daily'},params={'mode':'incremental','providers':['csindex']}))
+    management.configure('indices',dict(schedule_key=None,enabled=True,local_time='19:00',rule={'frequency':'daily'},params={'mode':'incremental','providers':['sws']}))
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page();page.goto(base+'/harness')
+            card=page.locator('[data-task="indices"]');form=card.locator('[data-task-schedule]')
+            form.locator('..').locator('summary').first.click()
+            expect(form.locator('[data-public-rule-select]')).to_have_value('indices')
+            expect(form.locator('[name=enabled]')).not_to_be_checked()
+            expect(card.locator('[data-task-status]')).to_contain_text('自动检查已开启')
+            with page.expect_response('**/api/maintenance/collections/schedule') as response:
+                form.locator('button[type=submit]').click()
+            assert response.value.ok
+            with db.connection() as c:
+                assert c.execute("SELECT enabled FROM collection_schedules WHERE schedule_id='indices'").fetchone()[0]==0
+                assert c.execute("SELECT count(*) FROM collection_schedules WHERE enabled=1").fetchone()[0]==1
+        finally:
+            browser.close()

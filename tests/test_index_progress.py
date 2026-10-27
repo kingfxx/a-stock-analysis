@@ -19,7 +19,7 @@ def db(tmp_path):
 
 def read_progress(db,operation):
     with db.connection() as conn:
-        value=conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0]
+        value=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()[0]
     return json.loads(value)['work_progress']
 
 
@@ -67,7 +67,7 @@ def test_operation_plans_full_denominator_before_first_provider_work(db,monkeypa
             self.task_progress.register('csindex','recent-xls','中证近期估值文件')
         def collect_cs(self,*args):
             with self.db.connection() as conn:
-                body=json.loads(conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(self.operation_id,)).fetchone()[0])
+                body=json.loads(conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(self.operation_id,)).fetchone()[0])
             observed.append(body['work_progress']['total'])
 
     monkeypatch.setattr(ic,'IndexCollector',FakeCollector)
@@ -83,7 +83,7 @@ def test_new_progress_format_does_not_break_empty_or_legacy_operation_json(db):
     progress=OperationProgress(db,operation)
     result=read_progress(db,operation)
     assert result['total']==0 and result['phase']=='planning'
-    with db.connection(write=True) as conn:conn.execute('UPDATE index_collection_operations SET result_json=? WHERE operation_id=?',(encoded({'message':'legacy'}),operation))
+    with db.connection(write=True) as conn:conn.execute('UPDATE collection_operations SET result_json=? WHERE operation_id=?',(encoded({'message':'legacy'}),operation))
     with db.connection() as conn:
-        legacy=json.loads(conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
+        legacy=json.loads(conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
     assert 'work_progress' not in legacy

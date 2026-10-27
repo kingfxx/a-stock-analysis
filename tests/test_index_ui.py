@@ -68,7 +68,7 @@ def test_index_http_read_collect_cancel_and_cross_origin(index_server):
     assert session.post(base+'/api/indices/collect',json={'mode':'full'},timeout=5).status_code==400
     assert session.post(base+'/api/indices/cancel',json={},timeout=5).json()['cancel_requested']
     with db.connection() as conn:
-        operation=conn.execute('SELECT * FROM index_collection_operations').fetchone()
+        operation=conn.execute('SELECT * FROM collection_operations').fetchone()
         assert operation['cancel_requested']==1
         assert json.loads(operation['scope_json'])['providers']==['csindex']
 
@@ -401,7 +401,7 @@ def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state
     base,_,db=index_server
     operation=start_operation(db,mode='incremental',providers=['csindex'])
     with db.connection(write=True) as conn:
-        conn.execute('UPDATE index_collection_operations SET error=?,result_json=? WHERE operation_id=?',
+        conn.execute('UPDATE collection_operations SET error=?,result_json=? WHERE operation_id=?',
             (encoded({'csindex':'ValueError: fixture error'}),encoded({'errors':{'csindex':'ValueError: fixture error'}}),operation))
     with playwright.sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
@@ -426,7 +426,7 @@ def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state
             assert 'ValueError' not in page.locator('#progress-details').inner_text()
             with db.connection(write=True) as conn:
                 conn.execute("UPDATE index_read_revisions SET revision=revision+1 WHERE scope='indices'")
-                conn.execute('UPDATE index_collection_operations SET status=?,error=NULL,result_json=? WHERE operation_id=?',
+                conn.execute('UPDATE collection_operations SET status=?,error=NULL,result_json=? WHERE operation_id=?',
                     ('running',encoded({'work_progress':{'phase':'running','total':4,'success':1,'skipped':1,'failed':0,
                         'cancelled':0,'pending':1,'running':1,'providers':{'csindex':{'total':4,'success':1,'skipped':1,
                             'failed':0,'cancelled':0,'pending':1,'running':1,'current':'中证指数历史 000300'}}}}),operation))
@@ -441,7 +441,7 @@ def test_browser_progress_panel_starts_closed_and_polling_preserves_manual_state
             assert details.is_hidden() and toggle.get_attribute('aria-expanded')=='false'
             assert 'cancelled' not in page.locator('#progress').inner_text().lower()
             with db.connection(write=True) as conn:
-                conn.execute("UPDATE index_collection_operations SET status='complete' WHERE operation_id=?",(operation,))
+                conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?",(operation,))
             page.evaluate("window.dispatchEvent(new Event('focus'))")
             page.wait_for_function("window.valuationRedraws>0 && document.getElementById('current').textContent==='13.10 倍'")
             assert page.locator('#chart').evaluate('n=>[n._fullLayout.xaxis.range,n._fullLayout.yaxis.range]')==zoom

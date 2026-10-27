@@ -205,7 +205,7 @@ def test_management_registration_defaults_and_isolation(db):
     assert manager.detail('shipping_weekly',ref)['scope']['dataset']=='shipping_weekly'
     with pytest.raises(ValueError):manager.detail('indices',ref)
     manager.cancel('shipping_weekly')
-    with db.connection() as conn:assert conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(ref,)).fetchone()[0]==1
+    with db.connection() as conn:assert conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(ref,)).fetchone()[0]==1
 
 
 def test_new_tables_maintenance_empty_and_time(db):
@@ -291,7 +291,7 @@ def test_weekly_managed_incremental_and_refusal_stops_shared_source(db,monkeypat
 def test_cancel_before_source_keeps_no_facts(db):
     with db.connection(write=True) as c:
         ref=shipping_collection.reserve(c,'shipping_weekly',dict(mode='review'))
-        c.execute('UPDATE index_collection_operations SET cancel_requested=1 WHERE operation_id=?',(ref,))
+        c.execute('UPDATE collection_operations SET cancel_requested=1 WHERE operation_id=?',(ref,))
     assert shipping_collection.run(db,ref)['status']=='cancelled'
     with db.connection() as c:assert c.execute('SELECT count(*) FROM research_shipping_rate_points').fetchone()[0]==0
 
@@ -341,19 +341,19 @@ def test_monthly_recovery_logs_reused_segments_and_keeps_failed_history(db,monke
         finish_batch(db,batch,'complete','partial' if kind=='rates' else 'unknown' if kind=='directory' else 'complete')
         originals.append(batch)
     with db.connection(write=True) as c:
-        c.execute("UPDATE index_collection_operations SET status='failed',finished_at=?,error='首次解析失败' WHERE operation_id=?",(stamp,old))
+        c.execute("UPDATE collection_operations SET status='failed',finished_at=?,error='首次解析失败' WHERE operation_id=?",(stamp,old))
     monkeypatch.setattr(RequestCollector,'get',lambda *a,**k:pytest.fail('已校验分段恢复不得联网'))
     for _ in range(2):
         with db.connection(write=True) as c:ref=shipping_collection.reserve(c,'shipping_monthly',scope)
         result=shipping_collection.run(db,ref)
         assert result['status']=='complete' and not result['errors']
         with db.connection() as c:
-            batches=[dict(r) for r in c.execute('SELECT * FROM collection_batches WHERE operation_id=?',(ref,))]
+            batches=[dict(r) for r in c.execute('SELECT * FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)=?',(ref,))]
             assert len(batches)==3
             assert sorted(r['coverage_status'] for r in batches)==['complete','partial','unknown']
             assert all(r['status']=='complete' for r in batches)
-            assert c.execute('SELECT status FROM index_collection_operations WHERE operation_id=?',(old,)).fetchone()[0]=='failed'
-            assert c.execute("SELECT min(obtained_at),max(obtained_at) FROM collection_sources WHERE batch_id IN (SELECT id FROM collection_batches WHERE operation_id=?)",(ref,)).fetchone()[:]==(stamp,stamp)
+            assert c.execute('SELECT status FROM collection_operations WHERE operation_id=?',(old,)).fetchone()[0]=='failed'
+            assert c.execute("SELECT min(obtained_at),max(obtained_at) FROM collection_sources WHERE batch_id IN (SELECT id FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)=?)",(ref,)).fetchone()[:]==(stamp,stamp)
             assert c.execute('SELECT count(*) FROM research_shipping_rate_points').fetchone()[0]==0
         task=next(t for t in CollectionManagement(db,None).read()['tasks'] if t['task_key']=='shipping_monthly')
         assert task['history'][0]['status']=='complete' and task['last_success'] and task['coverage']=='partial'
@@ -371,5 +371,5 @@ def test_reused_month_rejects_corrupt_archive_and_records_failure(db):
     with pytest.raises(ValueError,match='哈希'):
         shipping_collection.reuse_month_segment(db,'new',dict(mode='backfill'),'2026-09','rates','https://www.mot.gov.cn/test.html',previous)
     with db.connection() as c:
-        new=c.execute("SELECT * FROM collection_batches WHERE operation_id='new'").fetchone()
+        new=c.execute("SELECT * FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)='new'").fetchone()
         assert new['status']=='failed' and new['coverage_status']=='unknown' and new['scope_end']=='2026-09-30'

@@ -9,11 +9,14 @@
 | `application.py` | 唯一数据服务、行业/AI/维护实例组装，以及初始化和恢复清理 |
 | `http/` | server 保留协议/鉴权/门禁，routes 按功能分发；rendering 负责侧栏、页面模板与安全插值 |
 | `infrastructure/` | SQLite 连接、事务、版本检查及网络基础；SQL 历史在 `migrations/` |
-| `collection/` | 公共来源归档、预算、锁、限速、调度及已注册任务适配 |
+| `collection/` | 公共运行控制、来源归档、预算、锁、限速、调度及已注册任务适配；publication_counts提供不含IO的发布计数，collection_progress只读汇总公共批次 |
 | `maintenance/` | 统计、备份恢复、空间整理和清理 |
 | `domains/stocks/` | 股票库、行情、公告、分红、筹码；data_service 负责个股加载和数据组装，source_parsers 负责离线解析，sync_support 提供共享同步状态与策略 |
 | `domains/stocks/collection_operations.py` | 个股首次/手动/分组执行编排与轻量运行状态；复用事实服务及公共来源，不复制业务缓存 |
 | `domains/stocks/collection_schedules.py` | 分组规则/公共槽位适配、固定范围及管理页摘要；由唯一公共Scheduler调用 |
+| `collection/schedules.py` | 各模块多日程身份、合并配置及软删除；执行槽位仍由唯一Scheduler管理 |
+| `collection/schema_upgrade.py` | v44控制元数据事务迁移、历史诊断归属及旧表退役，不联网 |
+| `domains/stocks/collection_plan.py` | 个股真实来源分段规划与失败恢复选择，不创建独立item层 |
 | `collection/execution_context.py` | 组合采集执行中的父任务元数据与取消回调，作用域退出自动恢复 |
 | `domains/financials/` | 财务周期、报表、指标与主营构成；payloads 组装财务视图数据 |
 | `domains/valuation/` | 估值、DCF、股息预测；纯计算在 calculations，视图数据组装在 payloads |

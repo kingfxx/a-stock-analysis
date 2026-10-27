@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from stock_analysis.domains.stocks.collection_plan import selected
+
 import json
 import hashlib
 import math
@@ -24,6 +26,10 @@ METRICS = ("pe", "pb", "market_cap")
 INITIAL_WINDOWS = ("近十年", "近五年", "近三年")
 SAMPLING_VERSION = "baidu_dense_observations_v1"
 
+
+COLLECTION_PARSER_VERSION = "baidu_observations_v1"
+PEER_PARSER_VERSION = "eastmoney_peer_v1"
+PEER_DEFINITION_VERSION = "current_peer_mean_v1"
 
 class ValuationService:
     def __init__(self, db: Database, legacy_root: Path, *, fetch_indicator=None, fetch_industry=None):
@@ -70,13 +76,13 @@ class ValuationService:
         if state and not (refresh or full
                           or not recently_checked(state, seconds=86400)):
             return [], False
-        run = self.db.start_sync(key, parser_version="eastmoney_peer_v1",
-                                 methodology_version="current_peer_mean_v1",
+        run = self.db.start_sync(key, parser_version=PEER_PARSER_VERSION,
+                                 methodology_version=PEER_DEFINITION_VERSION,
                                  trigger_reason="refresh")
         batch_id = begin_stock_batch(self.db, run, "eastmoney", "valuation.industry", code,
                                      trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
                                      scope={"source_interface": "RPT_PCF10_INDUSTRY_CVALUE"},
-                                     parser_version="eastmoney_peer_v1", definition_version="current_peer_mean_v1")
+                                     parser_version=PEER_PARSER_VERSION, definition_version=PEER_DEFINITION_VERSION)
         try:
             with routed_stock_requests(self.db, batch_id, "eastmoney", "valuation.industry"):
                 details = self.fetch_industry(code)
@@ -95,6 +101,8 @@ class ValuationService:
                         "snapshot_at": utc_now(), "industry_name": details["industry_name"],
                         "industry_code": details.get("industry_code"),
                         "classification_basis": "eastmoney_current_peer_group_v1", "raw_json": raw})
+                return dict(returned=1, inserted=int(changed and latest is None), revised=int(changed and latest is not None),
+                            unchanged=int(not changed), published=int(changed))
             self.db.complete_sync(run, result, write, collection_batch_id=batch_id,
                                   batch_result={"changed": changed, "sync_run_id": run})
             return [], True
@@ -231,6 +239,8 @@ class ValuationService:
             identity = self.db.ensure_instrument(code)
             warnings = []
             for metric in METRICS:
+                if not selected("valuation."+metric):
+                    continue
                 key = SyncKey(identity, f"valuation:{metric}", SOURCE)
                 state = sync_state(self.db, key)
                 recent_failure = recent_sync_failure(self.db, key) if not (refresh or full) else None
@@ -252,14 +262,14 @@ class ValuationService:
                         windows = ("近五年",)
                     elif gap > timedelta(days=365):
                         windows = ("近三年",)
-                run = self.db.start_sync(key, parser_version="baidu_observations_v1",
+                run = self.db.start_sync(key, parser_version=COLLECTION_PARSER_VERSION,
                                          methodology_version=SAMPLING_VERSION,
                                          trigger_reason="full" if full_metric else "refresh")
                 batch_id = begin_stock_batch(self.db, run, "baidu", f"valuation.{metric}", code,
                                              trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
                                              scope={"source_interface": "opendata", "windows": list(windows),
                                                     "mode": "full" if full_metric else "incremental"},
-                                             parser_version="baidu_observations_v1",
+                                             parser_version=COLLECTION_PARSER_VERSION,
                                              definition_version=SAMPLING_VERSION)
                 try:
                     with routed_stock_requests(self.db, batch_id, "baidu", f"valuation.{metric}"):
@@ -302,9 +312,10 @@ class ValuationService:
                 except Exception as exc:
                     mark_failed(self.db, run, exc, collection_batch_id=batch_id)
                     warnings.append(f"{metric} 估值更新失败，保留已存事实：{exc}")
-            industry_warnings, _ = self._update_industry(
-                code, identity, refresh=refresh, full=full)
-            warnings.extend(industry_warnings)
+            if selected("valuation.industry"):
+                industry_warnings, _ = self._update_industry(
+                    code, identity, refresh=refresh, full=full)
+                warnings.extend(industry_warnings)
             result = self.read(code, reports)
             result["warnings"] = warnings
             return result

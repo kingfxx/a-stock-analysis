@@ -289,8 +289,8 @@ def test_listing_source_lineage_survives_three_changed_roster_versions(service,m
             row=conn.execute("SELECT collection_batch_id,collection_source_id FROM sw_memberships "
                 "WHERE import_id=? AND stock_code='300750'",(member,)).fetchone()
             source=conn.execute('SELECT reused_source_id,obtained_at FROM collection_sources WHERE id=?',(row['collection_source_id'],)).fetchone()
-            batch=conn.execute('SELECT operation_id FROM collection_batches WHERE id=?',(row['collection_batch_id'],)).fetchone()
-            assert batch['operation_id']==json.loads(item['source_manifest_json'])['collection_operation_id']
+            batch=conn.execute('SELECT operation_id,legacy_operation_ref FROM collection_batches WHERE id=?',(row['collection_batch_id'],)).fetchone()
+            assert (batch['operation_id'] or batch['legacy_operation_ref'])==json.loads(item['source_manifest_json'])['collection_operation_id']
             source_chain.append((row['collection_source_id'],source['reused_source_id'],source['obtained_at']))
         assert source_chain[0][1] is None
         assert source_chain[1][1]==source_chain[0][0]

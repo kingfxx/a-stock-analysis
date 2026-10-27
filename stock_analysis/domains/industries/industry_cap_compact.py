@@ -90,7 +90,7 @@ def compact(db, directory):
         ('before-sw-cap-compact-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')+'.sqlite3'))
     result={'backup':str(backup),'before_bytes':db.path.stat().st_size}
     with db.connection(write=True) as conn:
-        if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():
             raise ValueError('行业任务尚未完成，未整理市值记录')
         before=cap_fingerprint(conn);others=other_table_hashes(conn)
         result['before_rows']=conn.execute('SELECT count(*) FROM sw_cap_facts').fetchone()[0]

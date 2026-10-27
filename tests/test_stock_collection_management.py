@@ -57,9 +57,9 @@ def test_initial_once_and_failed_visit_never_retries(service, monkeypatch):
     second = service.start(dict(codes=['601919']), initial=True)
     assert first == second
     with service.db.connection() as conn:
-        assert conn.execute('SELECT count(*) FROM stock_collection_operations').fetchone()[0] == 1
-        assert conn.execute('SELECT count(*) FROM stock_collection_items').fetchone()[0] == 8
-        assert conn.execute('SELECT mode FROM stock_collection_operations').fetchone()[0] == 'full'
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0] == 1
+        assert conn.execute('SELECT count(*) FROM collection_batches').fetchone()[0] == 16
+        assert conn.execute('SELECT mode FROM collection_operations').fetchone()[0] == 'full'
     service.recover()
     assert service.start(dict(codes=['601919']), initial=True)['status'] == 'failed'
     assert not service.page_status('601919')['needs_initial']
@@ -119,14 +119,14 @@ def test_group_schedules_reuse_same_slot_and_no_save_execution(service, monkeypa
     assert calls == []
     # Configure before a fixed slot; operation completion after that slot is reusable.
     with service.db.connection(write=True) as conn:
-        conn.execute("UPDATE collection_schedules SET updated_at='2026-01-01T00:00:00+00:00' WHERE task_key LIKE 'stocks:%'")
+        conn.execute("UPDATE collection_schedules SET updated_at='2026-01-01T00:00:00+00:00' WHERE schedule_id LIKE 'stocks:%'")
     now = datetime(2026,1,2,19,tzinfo=timezone(timedelta(hours=8)))
     collection_schedules.tick(service, now, lambda:False)
     collection_schedules.tick(service, now, lambda:False)
     assert calls == [('601919','dividends')]
     with service.db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM collection_schedule_slots').fetchone()[0] == 2
-        assert conn.execute("SELECT count(*) FROM stock_collection_items WHERE status='reused'").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM collection_batches WHERE status='reused'").fetchone()[0] == 1
     # A later manual request still performs a check.
     ref = reserve(service,codes=['601919'],datasets=['dividends'])
     service.run(ref)
@@ -169,8 +169,8 @@ def test_upgrade_v42_preserves_stocks_and_does_not_initialize_or_enable(tmp_path
     service=StockCollections(db,None)
     assert not service.page_status('601919')['needs_initial']
     with db.connection() as conn:
-        assert conn.execute('SELECT count(*) FROM stock_collection_operations').fetchone()[0]==0
-        assert conn.execute("SELECT count(*) FROM collection_schedules WHERE task_key LIKE 'stocks:%'").fetchone()[0]==0
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
+        assert conn.execute("SELECT count(*) FROM collection_schedules WHERE schedule_id LIKE 'stocks:%'").fetchone()[0]==0
 
 
 def test_interrupted_slot_recovers_original_members_after_group_edit(service,monkeypatch):
@@ -178,7 +178,7 @@ def test_interrupted_slot_recovers_original_members_after_group_edit(service,mon
     params=dict(group_id=identity,datasets=['financing'],mode='incremental')
     collection_schedules.configure(service.db,dict(enabled=True,local_time='18:00',rule=dict(frequency='daily'),params=params))
     with service.db.connection(write=True) as conn:
-        conn.execute("UPDATE collection_schedules SET updated_at='2026-01-01T00:00:00+00:00' WHERE task_key=?", (f'stocks:{identity}',))
+        conn.execute("UPDATE collection_schedules SET updated_at='2026-01-01T00:00:00+00:00' WHERE schedule_id=?", (f'stocks:{identity}',))
         ref=service.reserve(conn,params,trigger='scheduled')
         conn.execute("INSERT INTO collection_schedule_slots VALUES(?,?,'running',?,1,?,NULL,?,NULL)",
                      (f'stocks:{identity}','2026-01-02',ref,utc_now(),utc_now()))
@@ -202,7 +202,8 @@ def test_group_delete_closes_rule_even_if_sqlite_reuses_group_id(service):
     StockLibrary(service.db).change(dict(action='delete',id=identity))
     group(service,'replacement',['601919'])
     with service.db.connection() as conn:
-        assert not collection_schedules.read_rules(conn)[0]['enabled']
+        assert collection_schedules.read_rules(conn)==[]
+        assert tuple(conn.execute('SELECT deleted,enabled FROM collection_schedules WHERE schedule_id=?',(f'stocks:{identity}',)).fetchone())==(1,0)
 
 
 def test_same_group_topic_rules_edit_delete_preserve_legacy_and_history(service):
@@ -222,9 +223,9 @@ def test_same_group_topic_rules_edit_delete_preserve_legacy_and_history(service)
     collection_schedules.configure(service.db,dict(action='delete',schedule_key=key))
     with service.db.connection() as conn:
         assert len(collection_schedules.read_rules(conn))==1
-        assert conn.execute('SELECT enabled FROM collection_schedules WHERE task_key=?',(key,)).fetchone()[0]==0
-        assert conn.execute('SELECT count(*) FROM collection_schedule_slots WHERE task_key=?',(key,)).fetchone()[0]==2
-        assert conn.execute("SELECT status FROM collection_schedule_slots WHERE task_key=? AND slot_key='2026-11-15'",(key,)).fetchone()[0]=='failed'
+        assert conn.execute('SELECT enabled FROM collection_schedules WHERE schedule_id=?',(key,)).fetchone()[0]==0
+        assert conn.execute('SELECT count(*) FROM collection_schedule_slots WHERE schedule_id=?',(key,)).fetchone()[0]==2
+        assert conn.execute("SELECT status FROM collection_schedule_slots WHERE schedule_id=? AND slot_key='2026-11-15'",(key,)).fetchone()[0]=='failed'
     with pytest.raises(ValueError,match='已删除'):
         collection_schedules.configure(service.db,{**monthly,'schedule_key':key})
     assert collection_schedules.configure(service.db,monthly)['schedule_key']!=key

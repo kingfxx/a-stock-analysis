@@ -223,10 +223,10 @@ def prepare_index_dependency(db, operation_id, target_date, cancelled=lambda:Fal
             return {'status':'reused','target_date':target_date,'network_requests':0}
         if not initialized(conn):
             return {'status':'not_initialized','target_date':target_date,'network_requests':0}
-        schedule=conn.execute('SELECT enabled FROM collection_schedules WHERE task_key=?',(TASK,)).fetchone()
+        schedule=conn.execute('SELECT enabled FROM collection_schedules WHERE schedule_id=? AND deleted=0',(TASK,)).fetchone()
         if schedule and not schedule['enabled']:
             return {'status':'paused','target_date':target_date,'network_requests':0}
-        schedule_row=conn.execute('SELECT local_time FROM collection_schedules WHERE task_key=?',(TASK,)).fetchone()
+        schedule_row=conn.execute('SELECT local_time FROM collection_schedules WHERE schedule_id=? AND deleted=0',(TASK,)).fetchone()
         threshold=schedule_row['local_time'] if schedule_row else '18:00'
         now_local=local_now()
         checks=conn.execute("SELECT b.started_at,b.trigger_type FROM collection_batches b WHERE b.dataset=? AND b.source_system='legu' "
@@ -275,16 +275,16 @@ def configure(db, command):
     if not isinstance(command,dict) or set(command)-{'enabled','local_time'}:
         raise ValueError('每日检查配置参数无效')
     with db.connection(write=True) as conn:
-        old=conn.execute('SELECT * FROM collection_schedules WHERE task_key=?',(TASK,)).fetchone()
+        old=conn.execute('SELECT * FROM collection_schedules WHERE schedule_id=? AND deleted=0',(TASK,)).fetchone()
         enabled=command.get('enabled',bool(old['enabled']) if old else False)
         clock=command.get('local_time',old['local_time'] if old else '18:00')
         if type(enabled) is not bool or not isinstance(clock,str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',clock):
             raise ValueError('每日检查须指定布尔开关及HH:MM时间')
         if enabled and not initialized(conn):
             raise ValueError('请先完成历史初始化')
-        conn.execute('INSERT INTO collection_schedules VALUES(?,?,?,?,?) ON CONFLICT(task_key) DO UPDATE SET '
+        conn.execute('INSERT INTO collection_schedules(schedule_id,enabled,timezone,local_time,updated_at,task_key) VALUES(?,?,?,?,?,?) ON CONFLICT(schedule_id) DO UPDATE SET '
                      'enabled=excluded.enabled,local_time=excluded.local_time,updated_at=excluded.updated_at',
-                     (TASK,int(enabled),'Asia/Shanghai',clock,utc_now()))
+                     (TASK,int(enabled),'Asia/Shanghai',clock,utc_now(),TASK))
     return dict(enabled=enabled,local_time=clock,timezone='Asia/Shanghai')
 
 
@@ -293,17 +293,17 @@ def start(db, mode='incremental', *, scheduled_date=None, connection=None):
         raise ValueError('拥挤度采集模式无效')
     operation=uuid4().hex
     with (nullcontext(connection) if connection is not None else db.connection(write=True)) as conn:
-        if conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone():
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NULL AND task_key<>'stocks' AND status='running'").fetchone():
             raise ValueError('已有指数采集任务正在运行')
         if mode!='full' and not initialized(conn):
             raise ValueError('请先完成拥挤度历史初始化')
-        if scheduled_date and conn.execute("SELECT 1 FROM index_collection_operations WHERE "
+        if scheduled_date and conn.execute("SELECT 1 FROM collection_operations WHERE "
                 "json_extract(scope_json,'$.dataset')=? AND json_extract(scope_json,'$.scheduled_date')=?",
                 (TASK,scheduled_date)).fetchone():
             return None
         scope=dict(dataset=TASK,providers=['legu'],trigger='scheduled' if scheduled_date else 'manual',
                    scheduled_date=scheduled_date)
-        conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at) VALUES(?,?,?,'running',?)",
+        conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at,task_key) VALUES(?,?,?,'running',?,'market_congestion')",
                      (operation,mode,encoded(scope),utc_now()))
     return operation
 
@@ -325,11 +325,11 @@ def run(db, operation, *, http=None):
     from stock_analysis.domains.indices.index_collection import OperationProgress
     tracker=OperationProgress(db,operation)
     with db.connection() as conn:
-        op=dict(conn.execute('SELECT * FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone())
+        op=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(operation,)).fetchone())
     scope=json.loads(op['scope_json']);full=op['mode']=='full'
     def cancelled():
         with db.connection() as conn:
-            return bool(conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
+            return bool(conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
     owns=http is None
     http=http or RequestCollector(db,policy=PacingPolicy(max_attempts=1),cancelled=cancelled)
     completed=[];status='complete';error=None;batch=None;source=None;channel=None
@@ -398,7 +398,7 @@ def run(db, operation, *, http=None):
                 http.confirm_recovery('legu',recovery)
             with db.connection(write=True) as conn:
                 if initialized(conn):
-                    conn.execute('INSERT OR IGNORE INTO collection_schedules VALUES(?,?,?,?,?)',(TASK,1,'Asia/Shanghai','18:00',utc_now()))
+                    conn.execute('INSERT OR IGNORE INTO collection_schedules(schedule_id,enabled,timezone,local_time,updated_at,task_key) VALUES(?,?,?,?,?,?)',(TASK,1,'Asia/Shanghai','18:00',utc_now(),TASK))
             try:
                 from stock_analysis.domains.indices.index_price_derived import recompute
                 latest=max((item.get('last') for item in completed if item.get('last')),default=None)
@@ -422,11 +422,11 @@ def run(db, operation, *, http=None):
     finally:
         tracker.finish(status)
         with db.connection(write=True) as conn:
-            current=json.loads(conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
+            current=json.loads(conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
             current.update(message='大盘拥挤度：'+('检查完成，缺值保留' if status=='complete' else error or status),
                            channels=completed,derived=locals().get('derived_result',{'status':'pending','facts':0,'network_requests':0}),
                            errors={'legu':error} if error else {})
-            conn.execute('UPDATE index_collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
+            conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
                          (status,utc_now(),encoded(current),error,operation))
         if owns:
             http.session.close()
@@ -447,9 +447,9 @@ def read(db, *, start=None, end=None, index_code='cn:000001'):
             '(provider=? AND channel=? AND definition_version=?)) AND is_latest=1 ORDER BY observation_date,channel',
             ('ashares_congestion','all_a','daily','legu','v1',CALCULATED_IDENTITY[2],CALCULATED_CHANNEL,CALCULATED_IDENTITY[5]))]
         broad=[dict(r) for r in conn.execute("SELECT index_code,max(name) AS name FROM index_catalog WHERE index_type='broad' GROUP BY index_code ORDER BY name")]
-        schedule=conn.execute('SELECT * FROM collection_schedules WHERE task_key=?',(TASK,)).fetchone()
-        operations=[dict(r) for r in conn.execute("SELECT * FROM index_collection_operations WHERE json_extract(scope_json,'$.dataset')=? ORDER BY started_at DESC LIMIT 1",(TASK,))]
-        running=bool(conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone())
+        schedule=conn.execute('SELECT * FROM collection_schedules WHERE schedule_id=? AND deleted=0',(TASK,)).fetchone()
+        operations=[dict(r) for r in conn.execute("SELECT * FROM collection_operations WHERE json_extract(scope_json,'$.dataset')=? ORDER BY started_at DESC LIMIT 1",(TASK,))]
+        running=bool(conn.execute("SELECT 1 FROM collection_operations WHERE action IS NULL AND task_key<>'stocks' AND status='running'").fetchone())
         check=conn.execute("SELECT s.obtained_at,s.parse_status,s.http_status,s.file_path FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id "
             "WHERE s.dataset=? AND b.domain='market' ORDER BY s.obtained_at DESC,s.id DESC LIMIT 1",(DATASETS['html_recent_table'],)).fetchone()
         ready=initialized(conn)
@@ -497,7 +497,7 @@ def read(db, *, start=None, end=None, index_code='cn:000001'):
 def scheduled_tick(db, *, now=None, execute=run):
     now=now or local_now()
     with db.connection() as conn:
-        schedule=conn.execute('SELECT * FROM collection_schedules WHERE task_key=?',(TASK,)).fetchone()
+        schedule=conn.execute('SELECT * FROM collection_schedules WHERE schedule_id=? AND deleted=0',(TASK,)).fetchone()
         if not schedule or not schedule['enabled'] or not initialized(conn):
             return None
     due_date=latest_daily_date(now,schedule['local_time']).isoformat()
@@ -519,7 +519,7 @@ def scheduled_tick(db, *, now=None, execute=run):
     if cooling or manual:
         message='本次到期检查因来源冷却跳过' if cooling else '本次到期时段已完成HTML检查，复用检查结果'
         with db.connection(write=True) as conn:
-            conn.execute("UPDATE index_collection_operations SET status='complete',finished_at=?,result_json=? WHERE operation_id=?",
+            conn.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE operation_id=?",
                          (utc_now(),encoded(dict(message=message,skipped=True)),operation))
         return dict(operation_id=operation,status='complete',skipped=True)
     return execute(db,operation)
@@ -536,7 +536,7 @@ class DailyScheduler:
         self.stop_event.set()
         # Cancel only this scheduler's running operation so database restore can drain it.
         with self.db.connection(write=True) as conn:
-            conn.execute("UPDATE index_collection_operations SET cancel_requested=1 WHERE status='running' "
+            conn.execute("UPDATE collection_operations SET cancel_requested=1 WHERE action IS NULL AND task_key<>'stocks' AND status='running' "
                          "AND json_extract(scope_json,'$.dataset')=? AND json_extract(scope_json,'$.trigger')='scheduled'",(TASK,))
         self.thread.join(timeout=90)
         if self.thread.is_alive():

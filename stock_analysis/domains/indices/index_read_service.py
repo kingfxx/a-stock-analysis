@@ -53,7 +53,7 @@ class IndexReadService:
         with self.lock:
             revision = self._revision()
             with self.db.connection() as conn:
-                operations = [dict(r) for r in conn.execute('SELECT status,result_json,error FROM index_collection_operations ORDER BY started_at DESC LIMIT 1')]
+                operations = [dict(r) for r in conn.execute('SELECT status,result_json,error FROM collection_operations WHERE action IS NULL AND task_key<>\'stocks\' ORDER BY started_at DESC LIMIT 1')]
                 now = datetime.now(timezone.utc)
                 cooldowns = [dict(r) for r in conn.execute('SELECT source_system,reason,cooldown_until FROM collection_provider_state WHERE cooldown_until IS NOT NULL')
                              if datetime.fromisoformat(r['cooldown_until']).astimezone(timezone.utc) > now]

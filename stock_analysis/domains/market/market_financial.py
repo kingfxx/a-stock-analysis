@@ -333,7 +333,7 @@ def collect_public(db, operation_id, period, request_collector, progress=lambda 
         reason='四表采集未完整，所有未发布接口段均关闭'
         with db.connection() as conn:
             abandoned=[row[0] for row in conn.execute(
-                "SELECT id FROM collection_batches WHERE operation_id=? AND status='running'",
+                "SELECT id FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)=? AND status='running'",
                 (operation_id,))]
         for batch_id in abandoned:
             finish_batch(db,batch_id,'failed',error=reason)
@@ -355,7 +355,7 @@ def publish(conn, batch_id, period, datasets):
                     or batch['scope_start']!=period or batch['scope_end']!=period
                     or batch['parser_version']!='market-financial-v1'):
                 raise ValueError('公共财务采集批次范围或状态不适用')
-            operation_ids.add(batch['operation_id'])
+            operation_ids.add(batch['operation_id'] or batch['legacy_operation_ref'])
         if len(operation_ids)!=1:
             raise ValueError('四个财务段必须属于同一 operation')
     else:

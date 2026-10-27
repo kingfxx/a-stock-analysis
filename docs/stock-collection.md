@@ -10,7 +10,9 @@
 
 每个自建分组可保存多条独立的日/周/月增量日程，分别选择数据主题，支持财务月更与价格等数据日更；默认关闭，保存不执行，从未来槽位开始，后台漏跑合并至最近槽位。运行开始固定组成员；取消关注不进入新运行，删除组立即关闭其规则。不同组同股同数据项复用该槽位之后已成功检查的结果；显式手动可再次刷新。打开页面不会补定时失败或漏跑。
 
-collection_operations.py负责后端编排；stock_collection_operations/items只保存运行范围、状态和时间，来源仍通过原sync run/batch引用，batch.scope_json的parent_operation/parent_item关联新父运行，不改写旧历史。分组规则复用collection_schedules/rules/slots，旧规则为stocks:<group_id>，同组多主题新规则为stocks:<group_id>:<uuid>，不另起调度器。事实表、价格版本、业务记录和metadata_only策略不变，不增加业务缓存、响应文件、响应哈希或BLOB。
+collection_operations.py负责后端编排；整次记录统一写collection_operations，来源分段直接写collection_batches，不再使用stock_collection_operations/items。batch预先登记股票、数据项、真实来源/接口、顺序和模式；pending没有开始时间，领域服务实际执行时领取同一分段，填写真实范围及sync_run_id，不创建父子batch。股票×数据项状态从分段汇总，价格、财务等继续失败时跳过已完成来源；首次初始化及同股同项互斥仍由持久运行范围保证。旧item独有信息保留为明确历史元数据，不补造来源或执行。
+
+分组规则使用合并后的collection_schedules及独立collection_schedule_slots；schedule_id是规则身份，task_key为stocks，同组多主题身份保留。规则删除通过deleted区分关闭，历史槽位保留；只有一个公共Scheduler。事实表、价格版本、业务同步水位和metadata_only策略不变。
 
 单股显式/首次保留stock_fast；分组、多股和定时沿用公共保守限速及cninfo既有策略，管理模块的限速只作用这些批量任务。所有来源共享原provider预算、跨进程锁和冷却；停止/重启不清空。停止保留已提交事实，重启关闭失联运行；首次及手动任务不自动重跑，定时槽位按公共规则最多自动恢复一次。
 
@@ -96,3 +98,12 @@ collection_operations.py负责后端编排；stock_collection_operations/items�
 股息率计算器D模式仅在用户选择或显式重读时访问同花顺F10盈利预测页。公共provider为`ths`，沿用保守默认限速和共享冷却，无自动到期检查。`stock.institution_forecast`批次及source仅存请求元数据、解析状态、取得时间；结果、原文、哈希及预测事实均不落盘，不创建sync事实表，批次完成不代表覆盖三年。浏览器也不保存预测值。实现口径见[股息率预测计算器](dividend-forecast.md#机构预期模式2026-10-21)。
 
 已保存规则可编辑和删除。编辑按规则引用修改，不覆盖同组其他主题；删除停用后续调度并移除有效规则配置，保留公共父身份及历史槽位，已运行任务继续，待恢复槽位关闭。无需数据库迁移或新表，保存不立即采集。
+
+
+## 发布计数（2026-10-27）
+
+后续采集在既有公共batch.result_json中保存returned、inserted、revised、unchanged、published整数，事实与计数同事务提交，失败回滚不发布成功计数。不新增表、事实副本、业务缓存或HTTP原文。页面仅从公共分段汇总，不读事实反推历史。
+
+财务按原始业务记录hash及披露/来源更新时间，分红按事件业务字段/hash，估值按数值和采样定义（窗口证据扩展不算数值修订），融资按有效数值字段，股东按来源记录/hash及公告/人数，价格按实际发布字段，主营按维度项目内容计数。复权旧日期复制到新版本、主营版本中的未变项目仍计未变化。公告主计数为目录元数据，另存disclosure_counts显示派生日期判断；简称/身份辅助记录和同步水位不混入业务行数。
+
+历史未记录写入数不可准确补回，保持未记录；候选量只作为解析量。旧同行changed可确认实际快照写入1/0；旧qfq未变化run的record_count/row_count=0不能解释为来源空列表。不会为补计数重发来源请求或改写旧batch。

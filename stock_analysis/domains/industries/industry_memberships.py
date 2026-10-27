@@ -372,11 +372,11 @@ if __name__ == '__main__':
         service=IndustryService(db,args.directory)
         day=datetime.now(SHANGHAI).date().isoformat()
         with db.connection(write=True) as conn:
-            run_id=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) "
+            run_id=conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) "
                 "VALUES('classification',?,1,?,'running')",(day,datetime.now(timezone.utc).isoformat())).lastrowid
         result=ensure_daily_memberships(service,lambda message:print(message,flush=True),today=day,run_id=run_id)
         with db.connection(write=True) as conn:
-            conn.execute('UPDATE sw_update_runs SET finished_at=?,status=?,result_json=?,error=? WHERE id=?',
+            conn.execute('UPDATE collection_operations SET finished_at=?,status=?,result_json=?,error=? WHERE id=?',
                 (datetime.now(timezone.utc).isoformat(),result['status'],json.dumps(result,ensure_ascii=False),
                  result.get('warning'),run_id))
         args.report.parent.mkdir(parents=True,exist_ok=True)

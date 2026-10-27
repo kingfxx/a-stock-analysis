@@ -181,7 +181,7 @@ class IndustryService:
         with self._lock:
             status = dict(self._status)
         with self.db.connection() as conn:
-            run = conn.execute("SELECT * FROM sw_update_runs ORDER BY id DESC LIMIT 1").fetchone()
+            run = conn.execute("SELECT * FROM collection_operations WHERE action IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
         if run and run['status']=='running':
             try:
                 result=json.loads(run['result_json'] or '{}')
@@ -239,28 +239,28 @@ class IndustryService:
             conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error=? "
                          "WHERE status='running' AND (dataset LIKE 'market.financial.%' "
                          "OR dataset LIKE 'industry.classification.%' OR dataset LIKE 'market.listings.%') "
-                         "AND operation_id IN (SELECT 'sw_update_runs:'||id FROM sw_update_runs WHERE status='running')",
+                         "AND operation_id IN (SELECT 'sw_update_runs:'||id FROM collection_operations WHERE action IS NOT NULL AND status='running')",
                          (stamp,'后台中断，行业／财务公共采集段未完成；已归档来源保留，可按原范围重试'))
             conn.execute("UPDATE market_financial_batches SET status='failed',finished_at=?,error=? WHERE status='running'",
                 (stamp,'后台中断，三表批次未发布，请重试'))
             conn.execute("UPDATE sw_membership_checks SET status='failed',finished_at=?,error=? WHERE status='running'",
                 (stamp,'后台中断，今日名单检查未完成，沿用已保存名单'))
-            return conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE status='running'",
+            return conn.execute("UPDATE collection_operations SET status='failed',finished_at=?,error=? WHERE action IS NOT NULL AND status='running'",
                 (stamp,'后台中断，已有行业快照保留；请在行业页面重试补缺')).rowcount
 
     def collection_cancelled(self, run_id):
         if run_id is None:
             return False
         with self.db.connection() as conn:
-            row=conn.execute('SELECT status,cancel_requested FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+            row=conn.execute('SELECT status,cancel_requested FROM collection_operations WHERE id=?',(run_id,)).fetchone()
             return not row or row['status']!='running' or bool(row['cancel_requested'])
 
     def reserve_refresh(self, conn, action, target, recheck=False):
         from stock_analysis.domains.industries.industry_updates import validate_request
         validate_request(action,target,recheck)
-        if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():
             raise ValueError('已有行业任务运行，未启动重复更新')
-        return conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES(?,?,?,?,'running')",
+        return conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES(?,?,?,?,'running')",
             (action,target,int(recheck),datetime.now(timezone.utc).isoformat())).lastrowid
 
     def start_refresh(self, action, target, recheck=False):
@@ -268,7 +268,7 @@ class IndustryService:
         validate_request(action,target,recheck)
         with self._lock:
             with self.db.connection(write=True) as conn:
-                if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():
+                if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():
                     return {'running':True,'message':'已有行业任务正在运行','error':None}
                 run_id=self.reserve_refresh(conn,action,target,recheck)
             self._status = {'running':True,'message':f'准备更新行业 {target}','error':None,'action':action,'target':target}
@@ -282,7 +282,7 @@ class IndustryService:
             if run_id is None:
                 return
             with self.db.connection(write=True) as conn:
-                row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+                row=conn.execute('SELECT result_json FROM collection_operations WHERE id=?',(run_id,)).fetchone()
                 try:
                     saved=json.loads(row['result_json'] or '{}') if row else {}
                 except json.JSONDecodeError:
@@ -294,20 +294,20 @@ class IndustryService:
                 saved['collection_progress']=merged
                 if update.get('message'):
                     saved['message']=update['message']
-                conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?',
+                conn.execute('UPDATE collection_operations SET result_json=? WHERE id=?',
                              (json.dumps(saved,ensure_ascii=False,separators=(',',':')),run_id))
         def progress(message):
             with self._lock:
                 self._status['message'] = message
             if run_id is not None:
                 with self.db.connection(write=True) as conn:
-                    row=conn.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(run_id,)).fetchone()
+                    row=conn.execute('SELECT result_json FROM collection_operations WHERE id=?',(run_id,)).fetchone()
                     try:
                         saved=json.loads(row['result_json'] or '{}') if row else {}
                     except json.JSONDecodeError:
                         saved={}
                     saved['message']=message
-                    conn.execute('UPDATE sw_update_runs SET result_json=? WHERE id=?',
+                    conn.execute('UPDATE collection_operations SET result_json=? WHERE id=?',
                                  (json.dumps(saved,ensure_ascii=False,separators=(',',':')),run_id))
         try:
             with self.db.connection(write=True) as conn:
@@ -315,7 +315,7 @@ class IndustryService:
                     run_id=self.reserve_refresh(conn,action,target,recheck)
             result=perform(self,action,target,recheck,progress,run_id=run_id,progress_state=persist_progress)
             with self.db.connection(write=True) as conn:
-                conn.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
+                conn.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE id=?",
                              (datetime.now(timezone.utc).isoformat(),merge_run_result(conn,run_id,result),run_id))
             with self._lock:
                 warning=result.get('membership_check',{}).get('warning')
@@ -328,7 +328,7 @@ class IndustryService:
         except Exception as exc:
             if run_id is not None:
                 with self.db.connection(write=True) as conn:
-                    conn.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,error=? WHERE id=?",
+                    conn.execute("UPDATE collection_operations SET status='failed',finished_at=?,error=? WHERE id=?",
                                  (datetime.now(timezone.utc).isoformat(),str(exc),run_id))
             with self._lock:
                 self._status.update(running=False,message='刷新失败，已有版本继续可用',error=str(exc))
@@ -340,7 +340,7 @@ class IndustryService:
                 raise ValueError('请先导入沪深全市场分类及必要历史，行业更新不会自动初始化全历史')
             member_id=latest['member_import_id']
             obtained=conn.execute('SELECT obtained_at FROM sw_imports WHERE id=?',(member_id,)).fetchone()[0]
-            checked=conn.execute("SELECT max(json_extract(result_json,'$.source_obtained_at')) FROM sw_update_runs "
+            checked=conn.execute("SELECT max(json_extract(result_json,'$.source_obtained_at')) FROM collection_operations "
                 "WHERE action='classification' AND status='complete' AND json_extract(result_json,'$.member_import_id')=?",(member_id,)).fetchone()[0]
             return {'member_import_id':member_id,'member_obtained_at':max(obtained,checked or obtained),
                 'taxonomy':[dict(r) for r in conn.execute('SELECT * FROM sw_industries ORDER BY level,code')],
@@ -364,11 +364,11 @@ class IndustryService:
     def _classification_check(conn, bundle, member_id):
         if bundle['manifest'].get('scope')!='classification':return
         obtained=bundle['obtained_at']
-        if conn.execute("SELECT 1 FROM sw_update_runs WHERE action='classification' AND status='complete' "
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action='classification' AND status='complete' "
                 "AND json_extract(result_json,'$.member_import_id')=? AND json_extract(result_json,'$.source_obtained_at')=?",
                 (member_id,obtained)).fetchone():return
         now=datetime.now(timezone.utc).isoformat()
-        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,finished_at,status,result_json) "
+        conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,finished_at,status,result_json) "
             "VALUES('classification',?,1,?,?,'complete',?)",(bundle.get('asof',obtained[:10]),now,now,
                 dumps({'member_import_id':member_id,'source_obtained_at':obtained,'manifest':bundle['manifest']})))
 
@@ -499,7 +499,7 @@ class IndustryService:
             for row in bundle['members']:
                 batch_id=row.get('collection_batch_id');source_id=row.get('collection_source_id')
                 if batch_id is None and source_id is None:continue
-                batch=conn.execute('SELECT operation_id FROM collection_batches WHERE id=?',(batch_id,)).fetchone()
+                batch=conn.execute('SELECT coalesce(operation_id,legacy_operation_ref) AS operation_id FROM collection_batches WHERE id=?',(batch_id,)).fetchone()
                 if batch is None or source_id is None or batch['operation_id']!=operation_id:
                     retained.append({'stock_code':row['stock_code'],'retained':True,
                         'collection_batch_id':batch_id,'collection_source_id':source_id})

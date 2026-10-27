@@ -255,6 +255,7 @@ class OperationProgress:
 
     def __init__(self,db,operation_id):
         self.db=db;self.operation_id=operation_id
+        self.tasks={}
         self.update(lambda result: result.setdefault('work_progress',dict(version=1,phase='planning',unit='独立采集任务',tasks={})))
 
     @staticmethod
@@ -265,9 +266,10 @@ class OperationProgress:
 
     def update(self,mutate):
         with self.db.connection(write=True) as conn:
-            row=conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(self.operation_id,)).fetchone()
+            row=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(self.operation_id,)).fetchone()
             result=json.loads(row[0]) if row and row[0] else {}
-            progress=result.setdefault('work_progress',dict(version=1,phase='planning',unit='独立采集任务',tasks={}))
+            progress=result.setdefault('work_progress',dict(version=1,phase='planning',unit='独立采集任务'))
+            progress['tasks']=self.tasks
             mutate(result)
             tasks=progress.setdefault('tasks',{})
             by_provider={}
@@ -277,8 +279,9 @@ class OperationProgress:
                 active=next((item for item in reversed(list(items.values())) if item.get('status')=='running'),None)
                 if active:provider_counts[provider]['current']=active.get('message') or active['label']
             progress.update(self._counts(tasks),providers=provider_counts)
+            progress.pop('tasks',None)
             result['work_progress']=progress
-            conn.execute('UPDATE index_collection_operations SET result_json=? WHERE operation_id=?',(encoded(result),self.operation_id))
+            conn.execute('UPDATE collection_operations SET result_json=? WHERE operation_id=?',(encoded(result),self.operation_id))
 
     def register(self,provider,key,label):
         task_id=provider+':'+key
@@ -348,7 +351,7 @@ class IndexCollector:
         self.sw_page_size=sw_page_size
         def cancelled():
             with db.connection() as conn:
-                row=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation_id,)).fetchone()
+                row=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation_id,)).fetchone()
             return bool(row and row[0])
         self.http=request_collector or RequestCollector(db,cancelled=cancelled,progress=progress)
         from stock_analysis.domains.industries.industry_sources import SWAdapter
@@ -879,17 +882,17 @@ def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None
         raise ValueError('采集日期范围倒置')
     operation=uuid4().hex
     with (nullcontext(connection) if connection is not None else db.connection(write=True)) as conn:
-        if conn.execute("SELECT 1 FROM index_collection_operations WHERE status='running'").fetchone():
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NULL AND task_key<>'stocks' AND status='running'").fetchone():
             raise ValueError('已有指数任务正在运行，请先等待或取消')
-        conn.execute("INSERT INTO index_collection_operations(operation_id,mode,scope_json,status,started_at) VALUES(?,?,?,'running',?)",
+        conn.execute("INSERT INTO collection_operations(operation_id,mode,scope_json,status,started_at,task_key) VALUES(?,?,?,'running',?,?)",
             (operation,mode,encoded(dict(providers=list(dict.fromkeys(providers)),start=start,end=end,
-                                         datasets=list(dict.fromkeys(datasets or ())))),utc_now()))
+                                         datasets=list(dict.fromkeys(datasets or ())))),utc_now(),'sovereign_yields' if datasets == ['bond_zh_us_rate'] and not providers else 'indices'))
     return operation
 
 
 def run_operation(db,operation,*,collector=None):
     with db.connection() as conn:
-        scope=json.loads(conn.execute('SELECT scope_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
+        scope=json.loads(conn.execute('SELECT scope_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
     if scope.get('dataset')=='market_congestion':
         from stock_analysis.domains.market.market_congestion import run
         return run(db,operation)
@@ -898,23 +901,23 @@ def run_operation(db,operation,*,collector=None):
 
 def _run_operation_locked(db,operation,*,collector=None):
     with db.connection() as conn:
-        scope=json.loads(conn.execute('SELECT scope_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
+        scope=json.loads(conn.execute('SELECT scope_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()[0])
     if scope.get('dataset')=='market_congestion':
         from stock_analysis.domains.market.market_congestion import run
         return run(db,operation)
     tracker=OperationProgress(db,operation)
     def progress(message,provider=None):
         with db.connection(write=True) as conn:
-            current=conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+            current=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
             result=json.loads(current[0])
             result['message']=message
             if provider:
                 result.setdefault('providers',{})[provider]=message
-            conn.execute('UPDATE index_collection_operations SET result_json=? WHERE operation_id=?',(encoded(result),operation))
+            conn.execute('UPDATE collection_operations SET result_json=? WHERE operation_id=?',(encoded(result),operation))
         if provider:tracker.update_message(provider,message)
         print(message,flush=True)
     with db.connection() as conn:
-        row=dict(conn.execute('SELECT * FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone())
+        row=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(operation,)).fetchone())
     scope=json.loads(row['scope_json'])
     if not scope.get('providers') and scope.get('datasets')==['bond_zh_us_rate']:
         return _run_bond_only_operation(db,operation,row)
@@ -937,7 +940,7 @@ def _run_operation_locked(db,operation,*,collector=None):
             from stock_analysis.domains.market.bond_yields import collect as collect_bond_yields
             def bond_cancelled():
                 with db.connection() as conn:
-                    item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                    item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
                 return not item or bool(item[0])
             bond_result=collect_bond_yields(db,operation,collector=http,cancelled=bond_cancelled,
                 progress=lambda message:tracker.update_message('eastmoney',message))
@@ -959,7 +962,7 @@ def _run_operation_locked(db,operation,*,collector=None):
         from stock_analysis.collection.collection import RequestCollector
         def bond_cancelled():
             with db.connection() as conn:
-                item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
             return not item or bool(item[0])
         bond_http=RequestCollector(db,cancelled=bond_cancelled,
             progress=lambda message:tracker.update_message('eastmoney',message))
@@ -986,7 +989,7 @@ def _run_operation_locked(db,operation,*,collector=None):
                 # Rotate one older month per manual monthly audit; quarter-wide overview is read-only.
                 candidates=list(segments(start,end))[:-4]
                 with db.connection() as conn:
-                    audit_number=conn.execute("SELECT count(*) FROM index_collection_operations WHERE mode='audit' AND operation_id<>? AND status='complete'",(operation,)).fetchone()[0]
+                    audit_number=conn.execute("SELECT count(*) FROM collection_operations WHERE mode='audit' AND operation_id<>? AND status='complete'",(operation,)).fetchone()[0]
                 if candidates:
                     start,end=candidates[audit_number%len(candidates)]
             if start>end:
@@ -996,7 +999,7 @@ def _run_operation_locked(db,operation,*,collector=None):
                 from stock_analysis.domains.market.market_congestion import prepare_index_dependency
                 def dependency_cancelled():
                     with db.connection() as conn:
-                        item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                        item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
                     return not item or bool(item[0])
                 dependency_result=prepare_index_dependency(db,operation,end,dependency_cancelled)
             except Cancelled:
@@ -1079,7 +1082,7 @@ def _run_operation_locked(db,operation,*,collector=None):
                 from stock_analysis.domains.indices.index_price_derived import recompute
                 def derivation_cancelled():
                     with db.connection() as conn:
-                        item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                        item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
                     return not item or bool(item[0])
                 with db.connection() as conn:
                     affected_start=conn.execute("SELECT min(scope_start) FROM collection_batches WHERE operation_id=? "
@@ -1114,20 +1117,20 @@ def _run_operation_locked(db,operation,*,collector=None):
                 bond_http.session.close()
     tracker.finish(status)
     with db.connection(write=True) as conn:
-        current=conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+        current=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
         progress_result=json.loads(current[0]) if current and current[0] else {}
         totals=[dict(r) for r in conn.execute('SELECT status,coverage_status,count(*) AS batches FROM collection_batches WHERE operation_id=? '
                                             'GROUP BY status,coverage_status',(operation,))]
         valuation_batches=conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND dataset NOT IN "
             "('index.calendar','index.price.derived','market.legu.congestion.page')",(operation,)).fetchone()[0]
-        conn.execute('UPDATE index_collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
+        conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
             (status,utc_now(),encoded(dict(message=_operation_message(status,row['mode'],valuation_batches,derived_result),
                 providers=progress_result.get('providers',{}),work_progress=progress_result.get('work_progress'),
                 batches=totals,errors=errors,bond_yields=bond_result,derived=derived_result,dependency=dependency_result,**collector.http.report())),
              encoded(errors) if errors else None,operation))
     report=db.path.parent/'verification'/'reports'/('index-collection-'+operation+'.json')
     with db.connection() as conn:
-        payload=dict(conn.execute('SELECT * FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone())
+        payload=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(operation,)).fetchone())
     atomic_write(report,encoded(payload).encode())
     return payload
 
@@ -1138,7 +1141,7 @@ def _run_bond_only_operation(db,operation,row):
     from stock_analysis.domains.market.bond_yields import collect as collect_bond_yields
     def cancelled():
         with db.connection() as conn:
-            item=conn.execute('SELECT cancel_requested FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+            item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
         return not item or bool(item[0])
     collector=RequestCollector(db,cancelled=cancelled,progress=lambda message:tracker.update_message('eastmoney',message))
     task=tracker.register('eastmoney','bond_zh_us_rate','中美国债收益率')
@@ -1157,23 +1160,23 @@ def _run_bond_only_operation(db,operation,row):
         tracker.transition(task,'failed',str(exc))
     tracker.finish(status)
     with db.connection(write=True) as conn:
-        current=conn.execute('SELECT result_json FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone()
+        current=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
         progress_result=json.loads(current[0]) if current and current[0] else {}
         totals=[dict(r) for r in conn.execute('SELECT status,coverage_status,count(*) AS batches FROM collection_batches WHERE operation_id=? GROUP BY status,coverage_status',(operation,))]
-        conn.execute('UPDATE index_collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
+        conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
             (status,utc_now(),encoded(dict(message='国债收益率采集'+('完成' if status=='complete' else '未完成'),
                 providers=progress_result.get('providers',{}),work_progress=progress_result.get('work_progress'),
                 batches=totals,errors=errors,bond_yields=result,**collector.report())),
              encoded(errors) if errors else None,operation))
     report=db.path.parent/'verification'/'reports'/('index-collection-'+operation+'.json')
-    with db.connection() as conn:payload=dict(conn.execute('SELECT * FROM index_collection_operations WHERE operation_id=?',(operation,)).fetchone())
+    with db.connection() as conn:payload=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(operation,)).fetchone())
     atomic_write(report,encoded(payload).encode())
     return payload
 
 
 def cancel_operation(db):
     with db.connection(write=True) as conn:
-        conn.execute("UPDATE index_collection_operations SET cancel_requested=1 WHERE status='running'")
+        conn.execute("UPDATE collection_operations SET cancel_requested=1 WHERE action IS NULL AND task_key<>'stocks' AND status='running'")
 
 
 def recover_operations(db):
@@ -1181,9 +1184,9 @@ def recover_operations(db):
     try:
         with instance_lock(db.path.parent/'collection_sources'/'index-operation'):
             with db.connection(write=True) as conn:
-                operations=[r[0] for r in conn.execute("SELECT operation_id FROM index_collection_operations WHERE status='running'")]
+                operations=[r[0] for r in conn.execute("SELECT operation_id FROM collection_operations WHERE action IS NULL AND task_key<>'stocks' AND status='running'")]
                 for operation in operations:
-                    conn.execute("UPDATE index_collection_operations SET status='failed',finished_at=?,error='后台重启，分段保留；可恢复全量' WHERE operation_id=?",(utc_now(),operation))
+                    conn.execute("UPDATE collection_operations SET status='failed',finished_at=?,error='后台重启，分段保留；可恢复全量' WHERE operation_id=?",(utc_now(),operation))
                     conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error='采集中断，已归档来源保留' WHERE operation_id=? AND status='running'",(utc_now(),operation))
     except Exception as exc:
         from stock_analysis.infrastructure.storage import StorageError

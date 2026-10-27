@@ -7,10 +7,10 @@ import json
 # in the explicit evidence endpoint. Missing counters remain unknown, never zero.
 FIELDS = ('inserted', 'new', 'revised', 'enriched', 'unchanged', 'published',
           'returned', 'rows', 'total', 'visible_points', 'price_counts',
-          'reused_batch_id', 'kind', 'row_count')
+          'reused_batch_id', 'kind', 'row_count', 'candidate_count', 'metadata_rows', 'mode', 'disclosure_counts')
 PROJECTION = 'json_object(' + ','.join(
     "'" + key + "',CASE WHEN json_type(result_json,'$." + key + "') IN ('true','false') "
-    "THEN NULL ELSE json_extract(result_json,'$." + key + "') END" for key in FIELDS) + ')'
+    "THEN NULL ELSE json_extract(result_json,'$." + key + "') END" for key in FIELDS) + ", 'changed_type',json_type(result_json,'$.changed'))"
 INDEX_DATASETS = {'index.cs.history', 'index.cs.dashboard', 'index.cs.indicator',
                   'index.sw.analysis', 'index.legu.pe', 'index.legu.pb'}
 LABELS = {
@@ -51,15 +51,28 @@ def normalize(batch, values, label):
         returned = number(values.get('rows'))
     if returned is None and dataset.startswith('stock.'):
         returned = number(values.get('row_count'))
+        if returned is None:
+            returned = number(values.get('candidate_count'))
+        if returned is None:
+            returned = number(values.get('metadata_rows'))
+        if dataset == 'stock.prices_adjusted' and values.get('mode') == 'unchanged' and values.get('returned') is None:
+            returned = None  # Old row_count=0 meant no publication, not an empty response.
+    if dataset == 'stock.valuation.industry' and values.get('changed_type') in ('true','false'):
+        returned = 1
+        if written is None:
+            written = int(values['changed_type'] == 'true')
+        if values.get('unchanged') is None:
+            values = {**values, 'unchanged':int(values['changed_type'] == 'false')}
     if dataset == 'bond_zh_us_rate':
         returned = number(values.get('total'))
     if dataset in {'shipping.ccfi', 'shipping.scfi'}:
         returned = number(values.get('visible_points'))
     reused = number(values.get('reused_batch_id')) is not None
+    reused = reused or batch['status'] in ('reused','skipped')
     if reused:
         # Reuse is not another response or another publication of old facts.
         returned, written, inserted, revised, enriched = None, 0, None, None, None
-    empty = returned == 0 and batch['status'] in ('complete', 'failed')
+    empty = returned == 0 and batch['status'] in ('complete', 'failed') and dataset != 'stock.announcement_dates'
     return dict(provider=batch['source_system'], label=label, returned=returned,
                 written=written, inserted=inserted, revised=revised, enriched=enriched,
                 unchanged=number(values.get('unchanged')) if not reused else None,
@@ -104,6 +117,8 @@ def attach_data_counts(conn, rows, providers):
             # Discovery requests are evidence, not another set of published yields.
             if values.get('kind') != 'target_discovery':
                 refs[batch['operation_id']].append(normalize(batch, values, LABELS.get(dataset, dataset)))
+                if dataset == 'stock.announcements' and isinstance(values.get('disclosure_counts'),dict):
+                    refs[batch['operation_id']].append(normalize({**batch,'dataset':'stock.announcement_dates'},values['disclosure_counts'],'公告日期判断（派生）'))
     for row in rows:
         entries = refs[row['operation_ref']]
         has_batches = bool(entries)

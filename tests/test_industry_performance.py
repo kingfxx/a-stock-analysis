@@ -86,7 +86,7 @@ def test_partial_refresh_preserves_missing_value_and_original_evidence(tmp_path)
 def test_completed_performance_task_status(tmp_path):
     db=Database(tmp_path/'test.sqlite3');db.initialize()
     with db.connection(write=True) as conn:
-        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status,result_json) "
+        conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status,result_json) "
             "VALUES('performance_fields','2026-06-30',0,'2026-10-08T00:00:00+00:00','complete',?)",
             (json.dumps({'periods':[{}],'start':'2026-06-30','end':'2026-06-30'}),))
     status=IndustryService(db).status()

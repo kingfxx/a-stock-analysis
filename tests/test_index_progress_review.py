@@ -24,7 +24,7 @@ def setup_collector(db,monkeypatch,responses=()):
 
 def progress(db,operation):
     with db.connection() as conn:
-        return json.loads(conn.execute('SELECT result_json FROM index_collection_operations '
+        return json.loads(conn.execute('SELECT result_json FROM collection_operations '
             'WHERE operation_id=?',(operation,)).fetchone()[0])['work_progress']
 
 

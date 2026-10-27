@@ -23,6 +23,9 @@ def _source_day(value):
     return date.fromisoformat(token).isoformat() if token else None
 
 
+COLLECTION_PARSER_VERSION = "eastmoney_dividend_v1"
+COLLECTION_DEFINITION_VERSION = "implemented_cash_v1"
+
 class DividendService:
     def __init__(self, db: Database, legacy_root: Path, *, fetch_page=None):
         self.db = db
@@ -175,15 +178,15 @@ class DividendService:
             checked = state.get("checked_at")
             since = ((datetime.fromisoformat(checked.replace("Z", "+00:00")).date()
                       if checked else datetime.now(timezone.utc).date()) - timedelta(days=30)).isoformat()
-            run = self.db.start_sync(key, parser_version="eastmoney_dividend_v1",
-                                     methodology_version="implemented_cash_v1",
+            run = self.db.start_sync(key, parser_version=COLLECTION_PARSER_VERSION,
+                                     methodology_version=COLLECTION_DEFINITION_VERSION,
                                      trigger_reason="full" if full_fetch else "refresh",
                                      requested_start=None if full_fetch else since)
             batch_id = begin_stock_batch(self.db, run, "eastmoney", "dividends", code,
                                          start=None if full_fetch else since, end=date.today().isoformat(),
                                          trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
                                          scope={"source_interface": "RPT_SHAREBONUS_DET", "mode": "full" if full_fetch else "incremental"},
-                                         parser_version="eastmoney_dividend_v1", definition_version="implemented_cash_v1")
+                                         parser_version=COLLECTION_PARSER_VERSION, definition_version=COLLECTION_DEFINITION_VERSION)
             warnings = []
             try:
                 with routed_stock_requests(self.db, batch_id, "eastmoney", "dividends"):
@@ -238,7 +241,7 @@ class DividendService:
                     for old_key, new_key in renames:
                         conn.execute("UPDATE dividend_events SET event_key=? WHERE instrument_id=? "
                                      "AND source=? AND event_key=?", (new_key, identity, SOURCE, old_key))
-                    self.db.upsert_dividend_events(conn, key, run, list(candidates.values()))
+                    return self.db.upsert_dividend_events(conn, key, run, list(candidates.values()))
                 self.db.complete_sync(run, result, write, collection_batch_id=batch_id,
                                       batch_result={"candidate_count": len(candidates), "sync_run_id": run})
             except Exception as exc:

@@ -366,7 +366,7 @@ def test_stock_financial_refresh_does_not_collect_or_change_industry_snapshot(se
     assert after['series']==before['series'] and after['market_series']==before['market_series']
     assert after['import_id']==before['import_id']
     with service.db.connection() as conn:
-        assert conn.execute('SELECT count(*) FROM sw_update_runs').fetchone()[0]==0
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
 
 
 def test_financial_task_one_period_reuses_local_and_never_fetches_caps(service,monkeypatch,tmp_path):
@@ -534,10 +534,10 @@ def test_industry_job_audits_success_and_failure(service,monkeypatch,tmp_path):
     service._refresh('financial_period','2026-06-30',False)
     assert 'source failed' in service.status()['error'] and not service.status()['running']
     with service.db.connection() as conn:
-        assert [r[0] for r in conn.execute('SELECT status FROM sw_update_runs ORDER BY id')]==['complete','failed']
+        assert [r[0] for r in conn.execute('SELECT status FROM collection_operations ORDER BY id')]==['complete','failed']
         assert conn.execute('SELECT count(*) FROM sw_imports').fetchone()[0]==1
     with service.db.connection(write=True) as conn:
-        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('cap_quarter','2026Q3',0,'2026-10-03','running')")
+        conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES('cap_quarter','2026Q3',0,'2026-10-03','running')")
     assert service.recover_interrupted_runs()==1
     assert service.recover_interrupted_runs()==0
 
@@ -577,4 +577,4 @@ def test_classification_recheck_advances_source_date_without_copying_data(servic
     with service.db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM sw_imports').fetchone()[0]==1
         assert conn.execute('SELECT count(*) FROM sw_memberships').fetchone()[0]==3
-        assert conn.execute('SELECT count(*) FROM sw_update_runs').fetchone()[0]==1
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==1

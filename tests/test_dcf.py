@@ -236,7 +236,7 @@ def test_auto_wacc_uses_annual_interest_tax_latest_interim_debt_and_same_day_mar
         put_report(conn,'lrb','2025-12-31',raw('lrb',[
             ('INTERESTEXPENSE','利息费用',8),('INCOTAXEXPE','所得税费用',20),('TOTPROFIT','利润总额',100)]))
     with facts.connection(write=True) as conn:
-        conn.execute("INSERT INTO collection_batches(id,operation_id,domain,dataset,source_system,trigger_type,status,started_at) VALUES (1,'wacc','market','snapshot','test','manual','complete','2026-06-30')")
+        conn.execute("INSERT INTO collection_batches(id,legacy_operation_ref,domain,dataset,source_system,trigger_type,status,started_at) VALUES (1,'wacc','market','snapshot','test','manual','complete','2026-06-30')")
         conn.execute("INSERT INTO collection_sources(id,batch_id,source_system,dataset,request_key,attempt_no,request_json) VALUES (1,1,'test','snapshot','wacc',1,'{}')")
         conn.execute("INSERT INTO market_trade_snapshot(exchange,trade_date,version,is_latest,definition_version,batch_id,source_id,content_hash,obtained_at,updated_at,security_code,total_market_cap) VALUES ('sh','2026-06-30',1,1,'em-valueanalysis-v1',1,1,'hash','2026-06-30','2026-06-30','600519',900)")
         conn.execute("INSERT INTO market_trade_snapshot(exchange,trade_date,version,is_latest,definition_version,batch_id,source_id,content_hash,obtained_at,updated_at,security_code,total_market_cap) VALUES ('sh','2026-09-30',1,1,'em-valueanalysis-v1',1,1,'hash-q3','2026-09-30','2026-09-30','600519',1200)")
@@ -347,7 +347,7 @@ def test_market_definition_preference_missing_shares_and_newer_price(facts,tmp_p
     from stock_analysis.domains.stocks.price_service import PriceService
     monkeypatch.setattr(PriceService,'read',lambda *a,**k:[dict(date='2026-08-31',close=90)])
     with facts.connection(write=True) as conn:
-        conn.execute("INSERT INTO collection_batches(id,operation_id,domain,dataset,source_system,trigger_type,status,started_at) VALUES (1,'test','market','snapshot','test','manual','complete','2026-01-01')")
+        conn.execute("INSERT INTO collection_batches(id,legacy_operation_ref,domain,dataset,source_system,trigger_type,status,started_at) VALUES (1,'test','market','snapshot','test','manual','complete','2026-01-01')")
         conn.execute("INSERT INTO collection_sources(id,batch_id,source_system,dataset,request_key,attempt_no,request_json) VALUES (1,1,'test','snapshot','test',1,'{}')")
         def snapshot(day,definition,shares,price):
             conn.execute("INSERT INTO market_trade_snapshot(exchange,trade_date,version,is_latest,definition_version,batch_id,source_id,content_hash,obtained_at,updated_at,security_code,total_shares,close_price) VALUES ('sh',?,1,1,?,1,1,'hash','2026-01-01','2026-01-01','600519',?,?)",(day,definition,shares,price))

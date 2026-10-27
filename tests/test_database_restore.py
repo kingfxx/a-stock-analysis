@@ -92,9 +92,9 @@ def test_busy_expired_and_parallel_requests_block_confirmation(tmp_path):
     with pytest.raises(ValueError,match='请求'):manager.schedule(command,gate)
     gate.leave()
     with db.connection(write=True) as conn:
-        conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('cap_quarter','2026Q3',0,'2026-10-04','running')")
+        conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES('cap_quarter','2026Q3',0,'2026-10-04','running')")
     with pytest.raises(ValueError,match='任务'):manager.schedule(command,gate)
-    with db.connection(write=True) as conn:conn.execute("UPDATE sw_update_runs SET status='failed'")
+    with db.connection(write=True) as conn:conn.execute("UPDATE collection_operations SET status='failed'")
     manager.prepared[preview['token']]['at']-=901
     with pytest.raises(ValueError,match='过期'):manager.schedule(command,gate)
     assert not gate.blocked and not manager.pending

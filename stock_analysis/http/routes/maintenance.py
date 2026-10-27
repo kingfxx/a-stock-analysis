@@ -75,7 +75,8 @@ class MaintenanceRoutes:
         if parsed.path=='/api/maintenance/collections/operation':
             try:
                 query=parse_qs(parsed.query)
-                self._ai_reply(app.collection_management().detail(query.get('task_key',[''])[0],query.get('operation_ref',[''])[0]))
+                before=int(query['before_batch_id'][0]) if 'before_batch_id' in query else None
+                self._ai_reply(app.collection_management().detail(query.get('task_key',[''])[0],query.get('operation_ref',[''])[0],before))
             except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
                 self._ai_reply({'error':str(exc)},400)
             return True
@@ -85,9 +86,8 @@ class MaintenanceRoutes:
         if parsed.path=='/api/maintenance/collections/evidence':
             try:
                 batch_id=int(parse_qs(parsed.query).get('batch_id',[''])[0])
-                with Database(app.settings.DATABASE_PATH).connection() as conn:
-                    rows=[dict(row) for row in conn.execute('SELECT id,batch_id,source_system,dataset,request_status,parse_status,http_status,error,obtained_at,file_path,raw_sha256,stored_sha256,reused_source_id FROM collection_sources WHERE batch_id=? ORDER BY id DESC LIMIT 200',(batch_id,))]
-                self._ai_reply({'batch_id':batch_id,'sources':rows,'limit':200})
+                from stock_analysis.collection.evidence import batch_evidence
+                self._ai_reply(batch_evidence(Database(app.settings.DATABASE_PATH),batch_id))
             except (ValueError,TypeError,OSError,StorageError,sqlite3.DatabaseError) as exc:
                 self._ai_reply({'error':str(exc)},400)
             return True

@@ -7,17 +7,18 @@ from datetime import datetime, timezone
 from stock_analysis.collection.collection import encoded
 from stock_analysis.domains.stocks.collection_operations import DATASETS, PROVIDERS, DATA_PROVIDERS, validate_params
 from stock_analysis.infrastructure.storage import utc_now
+from stock_analysis.collection import schedules
+from stock_analysis.domains.stocks.collection_operations import work_summary
 
 
 def read_rules(conn):
     from stock_analysis.collection.collection_management import next_check, ZONE
-    rows = conn.execute("SELECT s.*,r.rule_json,r.params_json FROM collection_schedules s JOIN collection_schedule_rules r USING(task_key) WHERE s.task_key LIKE 'stocks:%' ORDER BY s.task_key")
+    rows = schedules.read(conn, "stocks")
     result = []
     for row in rows:
         rule = dict(row)
         rule['enabled'] = bool(rule['enabled'])
-        rule['rule'] = json.loads(rule.pop('rule_json'))
-        rule['params'] = json.loads(rule.pop('params_json'))
+        rule['task_key'] = rule['schedule_id']
         group = conn.execute('SELECT name FROM stock_groups WHERE id=?', (rule['params']['group_id'],)).fetchone()
         rule['group_name'] = group[0] if group else '分组已删除'
         if not group:
@@ -50,16 +51,19 @@ def configure(db, command):
     key = selected if selected is not None else base + ':' + uuid4().hex if 'schedule_key' in command else base
     stamp = utc_now()
     with db.connection(write=True) as conn:
+        if 'schedule_key' not in command and conn.execute('SELECT 1 FROM collection_schedules WHERE schedule_id=? AND deleted=1',(key,)).fetchone():
+            key=base+':'+uuid4().hex
         if not conn.execute('SELECT 1 FROM stock_groups WHERE id=?', (params['group_id'],)).fetchone():
             raise ValueError('分组不存在')
         if selected is not None:
-            existing = conn.execute('SELECT params_json FROM collection_schedule_rules WHERE task_key=?',(key,)).fetchone()
+            existing = conn.execute('SELECT params_json FROM collection_schedules WHERE schedule_id=? AND deleted=0',(key,)).fetchone()
             if not existing or json.loads(existing[0]).get('group_id') != params['group_id']:
                 raise ValueError('规则已删除或不属于该分组，请重新读取')
-        conn.execute('INSERT INTO collection_schedules VALUES(?,?,?,?,?) ON CONFLICT(task_key) DO UPDATE SET enabled=excluded.enabled,local_time=excluded.local_time,updated_at=excluded.updated_at',
-                     (key, int(command['enabled']), 'Asia/Shanghai', command['local_time'], stamp))
-        conn.execute('INSERT INTO collection_schedule_rules VALUES(?,?,?,?) ON CONFLICT(task_key) DO UPDATE SET rule_json=excluded.rule_json,params_json=excluded.params_json,updated_at=excluded.updated_at',
-                     (key, encoded(rule), encoded(params), stamp))
+        conn.execute('INSERT INTO collection_schedules(schedule_id,task_key,enabled,timezone,local_time,updated_at,rule_json,params_json,rule_updated_at) '
+            "VALUES(?,'stocks',?,'Asia/Shanghai',?,?,?,?,?) ON CONFLICT(schedule_id) DO UPDATE SET enabled=excluded.enabled,"
+            'local_time=excluded.local_time,updated_at=excluded.updated_at,rule_json=excluded.rule_json,params_json=excluded.params_json,rule_updated_at=excluded.rule_updated_at',
+            (key,int(command['enabled']),command['local_time'],stamp,encoded(rule),encoded(params),stamp))
+
     return dict(saved=True,schedule_key=key)
 
 
@@ -67,14 +71,8 @@ def delete_rule(db, key):
     if not isinstance(key,str) or not key.startswith('stocks:'):
         raise ValueError('个股规则引用无效')
     with db.connection(write=True) as conn:
-        if not conn.execute('SELECT 1 FROM collection_schedule_rules WHERE task_key=?',(key,)).fetchone():
-            raise ValueError('规则已删除或不存在')
-        stamp = utc_now()
-        conn.execute('UPDATE collection_schedules SET enabled=0,updated_at=? WHERE task_key=?',(stamp,key))
-        conn.execute("UPDATE collection_schedule_slots SET status='failed',finished_at=coalesce(finished_at,?),updated_at=?,error='规则已删除，不再恢复' WHERE task_key=? AND status='pending'", (stamp,stamp,key))
-        # Keep the parent identity for historical slot foreign keys; removing the
-        # rule hides it from future scheduling without deleting execution history.
-        conn.execute('DELETE FROM collection_schedule_rules WHERE task_key=?',(key,))
+        schedules.delete(conn,'stocks',key)
+
     return dict(deleted=True,schedule_key=key)
 
 
@@ -96,7 +94,7 @@ def tick(service, now, stopped):
             current = next((r for r in read_rules(conn) if r['task_key'] == key), None)
             if not current or any(current[k] != rule[k] for k in ('enabled','updated_at','rule','params','local_time')) or not current['enabled'] or stopped():
                 continue
-            old = conn.execute('SELECT * FROM collection_schedule_slots WHERE task_key=? AND slot_key=?', (key, slot)).fetchone()
+            old = conn.execute('SELECT * FROM collection_schedule_slots WHERE schedule_id=? AND slot_key=?', (key, slot)).fetchone()
             if old and old['status'] != 'pending':
                 continue
             providers = sorted({p for dataset in rule['params']['datasets'] for p in DATA_PROVIDERS[dataset]})
@@ -105,58 +103,55 @@ def tick(service, now, stopped):
                 continue
             params = rule['params']
             if old and old['operation_ref']:
-                prior = conn.execute('SELECT scope_json FROM stock_collection_operations WHERE id=?', (old['operation_ref'],)).fetchone()
+                prior = conn.execute('SELECT scope_json FROM collection_operations WHERE operation_id=?', (old['operation_ref'],)).fetchone()
                 if prior:
                     fixed = json.loads(prior[0])
                     if not fixed['codes']:
-                        conn.execute("UPDATE collection_schedule_slots SET status='complete',finished_at=?,updated_at=?,error='原范围为空，无待恢复数据项' WHERE task_key=? AND slot_key=?", (utc_now(),utc_now(),key,slot))
+                        conn.execute("UPDATE collection_schedule_slots SET status='complete',finished_at=?,updated_at=?,error='原范围为空，无待恢复数据项' WHERE schedule_id=? AND slot_key=?", (utc_now(),utc_now(),key,slot))
                         continue
                     params = dict(codes=fixed['codes'], datasets=fixed['datasets'], mode='incremental')
             try:
                 ref = service.reserve(conn, params, trigger='scheduled', since=scheduled_at.astimezone(timezone.utc).isoformat())
             except ValueError:
                 continue
-            conn.execute("UPDATE stock_collection_operations SET scope_json=json_set(scope_json,'$.schedule',json(?)) WHERE id=?",
+            conn.execute("UPDATE collection_operations SET scope_json=json_set(scope_json,'$.schedule',json(?)) WHERE operation_id=?",
                          (encoded(dict(task_key=key,slot_key=slot)),ref))
             stamp = utc_now()
-            conn.execute("UPDATE collection_schedule_slots SET status='failed',updated_at=?,error='漏跑已合并到最新槽位' WHERE task_key=? AND status='pending' AND slot_key<>?", (stamp, key, slot))
-            conn.execute("INSERT INTO collection_schedule_slots VALUES(?,?,'running',?,1,?,NULL,?,NULL) ON CONFLICT(task_key,slot_key) DO UPDATE SET status='running',operation_ref=excluded.operation_ref,attempts=attempts+1,started_at=excluded.started_at,finished_at=NULL,updated_at=excluded.updated_at,error=NULL", (key, slot, ref, stamp, stamp))
+            conn.execute("UPDATE collection_schedule_slots SET status='failed',updated_at=?,error='漏跑已合并到最新槽位' WHERE schedule_id=? AND status='pending' AND slot_key<>?", (stamp, key, slot))
+            conn.execute("INSERT INTO collection_schedule_slots VALUES(?,?,'running',?,1,?,NULL,?,NULL) ON CONFLICT(schedule_id,slot_key) DO UPDATE SET status='running',operation_ref=excluded.operation_ref,attempts=attempts+1,started_at=excluded.started_at,finished_at=NULL,updated_at=excluded.updated_at,error=NULL", (key, slot, ref, stamp, stamp))
         service.run(ref)
         with db.connection(write=True) as conn:
-            result = conn.execute('SELECT status,error FROM stock_collection_operations WHERE id=?', (ref,)).fetchone()
-            attempts = conn.execute('SELECT attempts FROM collection_schedule_slots WHERE task_key=? AND slot_key=?', (key, slot)).fetchone()[0]
+            result = conn.execute('SELECT status,error FROM collection_operations WHERE operation_id=?', (ref,)).fetchone()
+            attempts = conn.execute('SELECT attempts FROM collection_schedule_slots WHERE schedule_id=? AND slot_key=?', (key, slot)).fetchone()[0]
             status = 'complete' if result['status'] == 'complete' else 'pending' if stopped() and attempts < 2 else 'failed'
-            conn.execute('UPDATE collection_schedule_slots SET status=?,finished_at=?,updated_at=?,error=? WHERE task_key=? AND slot_key=?', (status, utc_now(), utc_now(), result['error'], key, slot))
+            conn.execute('UPDATE collection_schedule_slots SET status=?,finished_at=?,updated_at=?,error=? WHERE schedule_id=? AND slot_key=?', (status, utc_now(), utc_now(), result['error'], key, slot))
 
 
 def task_summary(service, conn):
     from stock_analysis.collection.collection_rate_limits import describe
     from stock_analysis.collection.collection_progress import attach_data_counts
-    rows = [dict(r) for r in conn.execute('SELECT id AS operation_ref,mode,status,trigger_type,started_at,finished_at,error FROM stock_collection_operations ORDER BY started_at DESC LIMIT 20')]
+    rows = [dict(r) for r in conn.execute("SELECT operation_id AS operation_ref,mode,status,trigger_type,started_at,finished_at,error FROM collection_operations WHERE task_key='stocks' ORDER BY started_at DESC LIMIT 20")]
     for row in rows:
-        counts = {r[0]: r[1] for r in conn.execute('SELECT status,count(*) FROM stock_collection_items WHERE operation_id=? GROUP BY status', (row['operation_ref'],))}
-        row['result'] = dict(message='股票数据项：' + '，'.join(f'{k} {v}' for k, v in counts.items()))
-        row['result']['work_progress'] = dict(total=sum(counts.values()), success=counts.get('complete',0),
-            skipped=counts.get('reused',0), failed=counts.get('failed',0), cancelled=counts.get('cancelled',0),
-            running=counts.get('running',0), pending=counts.get('pending',0), providers={}, unit='股票数据项')
-        row['result']['network_requests'] = conn.execute("SELECT count(*) FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE json_extract(b.scope_json,'$.parent_operation')=?", (row['operation_ref'],)).fetchone()[0]
-        children = [dict(operation_ref=r[0], result={}) for r in conn.execute("SELECT DISTINCT operation_id FROM collection_batches WHERE json_extract(scope_json,'$.parent_operation')=?", (row['operation_ref'],))]
-        attach_data_counts(conn, children, PROVIDERS)
-        # Shared data_counts shape is assembled below from each linked sync run.
+        works=work_summary(conn,row['operation_ref'])
+        counts={state:sum(w['status']==state for w in works) for state in ('pending','running','complete','failed','cancelled','reused')}
+        row['result']=dict(message='股票数据项：'+'，'.join(f'{k} {v}' for k,v in counts.items() if v))
+        row['result']['work_progress']=dict(total=len(works),success=counts['complete'],skipped=counts['reused'],failed=counts['failed'],cancelled=counts['cancelled'],running=counts['running'],pending=counts['pending'],providers={},unit='股票数据项')
+        row['result']['network_requests']=conn.execute('SELECT count(*) FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE b.operation_id=?',(row['operation_ref'],)).fetchone()[0]
+        attach_data_counts(conn,[row],PROVIDERS)
         from stock_analysis.collection.collection_progress import merge
-        row['result']['data_counts'] = merge([entry for child in children for entry in child['result'].get('data_counts', [])])
+        row['result']['provider_counts']=merge([{**entry,'label':'合计'} for entry in row['result']['data_counts']])
     latest = rows[0]['operation_ref'] if rows else None
-    batches = [dict(r) for r in conn.execute("SELECT id,dataset,source_system,status,coverage_status,scope_start,scope_end,started_at,finished_at,error FROM collection_batches WHERE json_extract(scope_json,'$.parent_operation')=? ORDER BY id DESC LIMIT 100", (latest,))] if latest else []
-    obtained = conn.execute("SELECT max(s.obtained_at) FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE json_extract(b.scope_json,'$.parent_operation')=?", (latest,)).fetchone()[0] if latest else None
+    batches = [dict(r) for r in conn.execute("SELECT id,dataset,source_system,status,coverage_status,scope_start,scope_end,started_at,finished_at,error FROM collection_batches WHERE operation_id=? ORDER BY id DESC LIMIT 100", (latest,))] if latest else []
+    obtained = conn.execute("SELECT max(s.obtained_at) FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE b.operation_id=?", (latest,)).fetchone()[0] if latest else None
     groups = [dict(r) for r in conn.execute('SELECT g.id,g.name,count(m.instrument_id) AS member_count FROM stock_groups g LEFT JOIN stock_group_members m ON m.group_id=g.id GROUP BY g.id ORDER BY g.position,g.id')]
     rules = read_rules(conn)
     return dict(task_key='stocks', name='个股采集', group='个股', providers=PROVIDERS, modes=['incremental','full','resume'],
         supports_cancel=True, rate_limits=describe(conn, 'stocks', PROVIDERS), datasets=DATASETS, groups=groups,
         rules=rules, schedule=dict(enabled=any(r['enabled'] for r in rules), local_time='18:00', rule=dict(frequency='daily'),
             next_check=min((r['next_check'] for r in rules if r['next_check']),default=None)),
-        running=bool(conn.execute("SELECT 1 FROM stock_collection_operations WHERE status='running' LIMIT 1").fetchone()),
+        running=bool(conn.execute("SELECT 1 FROM collection_operations WHERE task_key='stocks' AND status='running' LIMIT 1").fetchone()),
         history=rows, batches=batches, last_check=obtained,
         last_success=next((r['finished_at'] for r in rows if r['status'] == 'complete'), None),
         cooldowns=[dict(r) for r in conn.execute('SELECT source_system,cooldown_until,reason FROM collection_provider_state WHERE source_system IN (' + ','.join('?' for _ in PROVIDERS) + ')', PROVIDERS)],
-        slots=[dict(r) for r in conn.execute("SELECT * FROM collection_schedule_slots WHERE task_key LIKE 'stocks:%' ORDER BY started_at DESC LIMIT 10")],
+        slots=[dict(r) for r in conn.execute("SELECT * FROM collection_schedule_slots WHERE schedule_id IN (SELECT schedule_id FROM collection_schedules WHERE task_key='stocks') ORDER BY started_at DESC LIMIT 10")],
         coverage='unknown', coverage_note='执行与数据覆盖分开；全历史及逐字段覆盖未知')

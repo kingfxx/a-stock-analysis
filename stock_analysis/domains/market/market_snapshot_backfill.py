@@ -162,8 +162,8 @@ def collect(db,folder=RUN):
     from stock_analysis.domains.market.bigquant_sdk import BigQuantSDK
     REPORT.mkdir(parents=True,exist_ok=True);folder.mkdir(parents=True,exist_ok=True)
     with db.connection(write=True) as conn:
-        if conn.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():raise ValueError('已有行业任务运行')
-        rid=conn.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('snapshot_composite_cache','2015Q1:2017Q4',0,?,'running')",(utc_now(),)).lastrowid
+        if conn.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():raise ValueError('已有行业任务运行')
+        rid=conn.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES('snapshot_composite_cache','2015Q1:2017Q4',0,?,'running')",(utc_now(),)).lastrowid
     operation=f'sw_update_runs:{rid}'
     result=dict(operation=operation,status='running',started_at=utc_now())
     try:
@@ -218,7 +218,7 @@ WHERE s.change_date >= '{min(days)}' OR s.change_date=b.base_date ORDER BY s.ins
     finally:
         save(REPORT/'collection.json',result)
         with db.connection(write=True) as conn:
-            conn.execute('UPDATE sw_update_runs SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
+            conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE id=?',
                 (result['status'],result['finished_at'],encoded(result),result.get('error'),rid))
     return result
 
@@ -267,8 +267,8 @@ def publish_cache(db,folder=RUN,*,rehearsal=False):
         if rehearsal_result.get('status')!='complete' or not rehearsal_result.get('idempotency_verified') or rehearsal_result['manifest_hash']!=result['manifest_hash']:raise ValueError('当前候选未通过隔离演练及幂等验证')
         result['backup']=str(db.backup(db.path.parent/'backups'/('before-composite-snapshot-'+utc_now().replace(':','').replace('+','')+'.sqlite3')))
     with db.connection(write=True) as c:
-        if c.execute("SELECT 1 FROM sw_update_runs WHERE status='running'").fetchone():raise ValueError('已有行业任务运行')
-        rid=c.execute("INSERT INTO sw_update_runs(action,target,recheck,started_at,status) VALUES('snapshot_composite_publish','2015Q1:2017Q4',0,?,'running')",(utc_now(),)).lastrowid
+        if c.execute("SELECT 1 FROM collection_operations WHERE action IS NOT NULL AND status='running'").fetchone():raise ValueError('已有行业任务运行')
+        rid=c.execute("INSERT INTO collection_operations(action,target,recheck,started_at,status) VALUES('snapshot_composite_publish','2015Q1:2017Q4',0,?,'running')",(utc_now(),)).lastrowid
     operation=f'sw_update_runs:{rid}';sources=[]
     try:
         for item,rows in prepared:
@@ -291,14 +291,14 @@ def publish_cache(db,folder=RUN,*,rehearsal=False):
                 result['periods'].append(summary)
                 c.execute("UPDATE collection_batches SET status='complete',coverage_status='partial',finished_at=?,result_json=? WHERE id=?",(utc_now(),encoded(summary),batch))
             result.update(status='aggregating')
-            c.execute("UPDATE sw_update_runs SET result_json=? WHERE id=?",(encoded(result),rid))
+            c.execute("UPDATE collection_operations SET result_json=? WHERE id=?",(encoded(result),rid))
         from stock_analysis.domains.industries.industry_cap_summary import aggregate_quarter
         for item,_,_,_ in sources:
             aggregation=aggregate_quarter(db,item['quarter'],rid,operation)
             result.setdefault('aggregation_results',{})[item['quarter']]=aggregation
         result.update(status='complete',finished_at=utc_now())
         with db.connection(write=True) as c:
-            c.execute("UPDATE sw_update_runs SET status='complete',finished_at=?,result_json=? WHERE id=?",
+            c.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE id=?",
                       (result['finished_at'],encoded(result),rid))
         after=protected_fingerprints(db)
         if before!=after:raise ValueError('非目标业务表保护校验失败')
@@ -321,13 +321,13 @@ def publish_cache(db,folder=RUN,*,rehearsal=False):
             with db.connection() as c:state=c.execute('SELECT status FROM collection_batches WHERE id=?',(batch,)).fetchone()[0]
             if state=='running':finish_batch(db,batch,'failed',error=exc)
         with db.connection(write=True) as c:
-            saved=c.execute('SELECT result_json FROM sw_update_runs WHERE id=?',(rid,)).fetchone()
+            saved=c.execute('SELECT result_json FROM collection_operations WHERE id=?',(rid,)).fetchone()
             try:
                 prior=json.loads(saved['result_json'] or '{}') if saved else {}
             except json.JSONDecodeError:
                 prior={}
             result['aggregation_results']={**(prior.get('aggregation_results') or {}),**result.get('aggregation_results',{})}
-            c.execute("UPDATE sw_update_runs SET status='failed',finished_at=?,result_json=?,error=? WHERE id=?",
+            c.execute("UPDATE collection_operations SET status='failed',finished_at=?,result_json=?,error=? WHERE id=?",
                       (utc_now(),encoded(result),str(exc),rid))
         save(REPORT/('rehearsal.json' if rehearsal else 'publication.json'),result)
         raise
