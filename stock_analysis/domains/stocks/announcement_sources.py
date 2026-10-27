@@ -71,10 +71,12 @@ class AnnouncementSources:
                 parsed_source(self.collector.db,sid,error='公告响应结构无效'); raise ValueError('巨潮公告响应结构无效')
             source_ids.append(sid)
             obj['_source_id']=sid
-            for item in obj['announcements']:
-                item['_source_id']=sid
+            row_sources=getattr(response,'stock_source_ids',None)
+            for position,item in enumerate(obj['announcements']):
+                item_source=row_sources[position] if row_sources else sid
+                item['_source_id']=item_source
                 with self.collector.db.connection() as conn:
-                    source=conn.execute('SELECT obtained_at FROM collection_sources WHERE id=?',(sid,)).fetchone()
+                    source=conn.execute('SELECT obtained_at FROM collection_sources WHERE id=?',(item_source,)).fetchone()
                 item['_obtained_at']=source['obtained_at'] if source else None
             return obj,sid
         first,_=fetch(1)

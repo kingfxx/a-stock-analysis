@@ -95,13 +95,6 @@ def _fetch_chip_report(code, section, session, report_override=None, *, start_da
 
 def fetch_chip_records(code, section, session):
     records = _fetch_chip_report(code, section, session)
-    if section == "shareholders":
-        # F10 covers A/H issuers and older history; the detail table sometimes
-        # has additional interim observations. Prefer F10 on matching dates.
-        details = _fetch_chip_report(code, section, session, "RPT_HOLDERNUM_DET")
-        by_date = {row["END_DATE"][:10]: row for row in details}
-        by_date.update({row["END_DATE"][:10]: row for row in records})
-        records = [by_date[day] for day in sorted(by_date)]
     return records
 
 

@@ -10,7 +10,7 @@ def segments(dataset):
     if dataset == 'valuation':
         return [('baidu', 'valuation.' + metric, 'opendata') for metric in ('pe','pb','market_cap')] + [('eastmoney','valuation.industry','RPT_PCF10_INDUSTRY_CVALUE')]
     if dataset == 'shareholders':
-        return [('eastmoney', dataset, source) for source in ('RPT_F10_EH_HOLDERNUM','RPT_HOLDERNUM_DET')]
+        return [('eastmoney', dataset, source) for source in ('RPT_F10_EH_HOLDERNUM',)]
     if dataset == 'financing':
         return [('eastmoney', dataset, 'RPTA_WEB_RZRQ_GGMX')]
     if dataset=='business_segments':

@@ -93,10 +93,14 @@ class StockCollections:
                     sequence += 1
                     work_key = ':'.join((code,detail,provider,interface))
                     parser,definition=versions(detail)
-                    prior = conn.execute("SELECT id,status,finished_at,mode,parser_version,definition_version FROM collection_batches WHERE code=? AND work_dataset=? "
+                    prior = conn.execute("SELECT id,status,finished_at,mode,parser_version,definition_version,result_json,scope_json FROM collection_batches WHERE (code=? OR EXISTS (SELECT 1 FROM json_each(scope_json,'$.stock_members') m WHERE json_extract(m.value,'$.code')=?)) AND work_dataset=? "
                         "AND dataset=? AND source_system=? AND coalesce(json_extract(scope_json,'$.source_interface'),'')=? "
                         "AND status IN ('complete','failed','cancelled','reused','skipped') ORDER BY id DESC LIMIT 1",
-                        (code,dataset,'stock.'+detail,provider,interface)).fetchone()
+                        (code,code,dataset,'stock.'+detail,provider,interface)).fetchone()
+                    if prior and json.loads(prior['scope_json']).get('stock_members'):
+                        prior=dict(prior)
+                        member=json.loads(prior['result_json']).get('stock_results',{}).get(code,{})
+                        prior.update(status=member.get('status','failed'),finished_at=member.get('finished_at'))
                     reused = bool(prior and prior['parser_version']==parser and prior['definition_version']==definition and prior['status'] in ('complete','reused','skipped') and
                         (params['mode']=='resume' or since and prior['finished_at'] and prior['finished_at']>=since))
                     mode = prior['mode'] if params['mode']=='resume' and prior and prior['mode'] else legacy_mode or ('full' if params['mode']=='full' else 'incremental')
@@ -190,6 +194,12 @@ class StockCollections:
             groups = conn.execute("SELECT code,work_dataset,mode,min(sequence) AS position FROM collection_batches WHERE operation_id=? "
                 "AND status='pending' GROUP BY code,work_dataset,mode ORDER BY position", (ref,)).fetchall()
         scope = json.loads(operation['scope_json'])
+        pacing = operation['trigger_type']=='scheduled' or 'group_id' in scope or len(scope['codes'])>1
+        if pacing:
+            from stock_analysis.domains.stocks.group_execution import run_group
+            run_group(self,ref,operation,groups,factory=RequestCollector)
+            self._finish(ref)
+            return
         collector = RequestCollector(self.db, cancelled=lambda: self.cancelled(ref))
         try:
             for group in groups:
@@ -217,14 +227,17 @@ class StockCollections:
                     # A service that used local data has no actual start/request; preserve that distinction.
                     conn.execute("UPDATE collection_batches SET status=?,finished_at=?,error=? WHERE operation_id=? AND code=? AND work_dataset=? AND mode=? AND status='pending'",
                         ('cancelled' if cancelled else 'failed' if error else 'skipped',utc_now(),error,ref,code,dataset,group['mode']))
-            with self.db.connection(write=True) as conn:
-                cancelled = conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?', (ref,)).fetchone()[0]
-                conn.execute("UPDATE collection_batches SET status='cancelled',finished_at=? WHERE operation_id=? AND status='pending'", (utc_now(),ref))
-                failed = conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND status IN ('failed','running')", (ref,)).fetchone()[0]
-                conn.execute('UPDATE collection_operations SET status=?,finished_at=?,error=? WHERE operation_id=?',
-                    ('cancelled' if cancelled else 'failed' if failed else 'complete',utc_now(),f'{failed}个分段失败，已保留成功部分' if failed else None,ref))
+            self._finish(ref)
         finally:
             collector.session.close()
+
+    def _finish(self, ref):
+        with self.db.connection(write=True) as conn:
+            cancelled = conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?', (ref,)).fetchone()[0]
+            conn.execute("UPDATE collection_batches SET status='cancelled',finished_at=? WHERE operation_id=? AND status='pending'", (utc_now(),ref))
+            failed = conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND status IN ('failed','running')", (ref,)).fetchone()[0]
+            conn.execute('UPDATE collection_operations SET status=?,finished_at=?,error=? WHERE operation_id=?',
+                ('cancelled' if cancelled else 'failed' if failed else 'complete',utc_now(),f'{failed}个分段失败，已保留成功部分' if failed else None,ref))
 
     def recover(self):
         with self.db.connection(write=True) as conn:
@@ -254,12 +267,17 @@ class StockCollections:
 
 
 def work_summary(conn, ref):
-    rows = [dict(r) for r in conn.execute('SELECT id,code,work_dataset,status,mode,started_at,finished_at,error,sync_run_id FROM collection_batches WHERE operation_id=? AND work_dataset IS NOT NULL ORDER BY sequence,id', (ref,))]
+    rows = [dict(r) for r in conn.execute('SELECT id,code,work_dataset,status,mode,started_at,finished_at,error,sync_run_id,scope_json,result_json,dataset,source_system FROM collection_batches WHERE operation_id=? AND work_dataset IS NOT NULL ORDER BY sequence,id', (ref,))]
+    from stock_analysis.domains.stocks.group_batches import member_rows
+    rows = [member for row in rows for member in member_rows(row)]
     groups = {}
     for row in rows:
         key = row['code'],row['work_dataset']
         item = groups.setdefault(key,dict(id=row['id'],code=row['code'],dataset=row['work_dataset'],mode=row['mode'],statuses=[],sync_runs=[],started_at=None,finished_at=None,error=None))
         item['statuses'].append(row['status'])
+        entry=row['counts'] if 'counts' in row else json.loads(row.get('result_json') or '{}')
+        if row['status'] in ('reused','skipped'):entry={'published':0}
+        item.setdefault('data_counts',[]).append(dict(provider=row['source_system'],dataset=row['dataset'],**{k:entry.get(k) for k in ('inserted','revised','published','returned','unchanged')}))
         if row['sync_run_id'] is not None:
             item['sync_runs'].append('sync_runs:'+str(row['sync_run_id']))
         if row['error']:

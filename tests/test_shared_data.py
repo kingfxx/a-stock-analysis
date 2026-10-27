@@ -188,6 +188,10 @@ def test_shareholders_preserve_separate_scope_and_update_without_price_sources(d
     def fetch(code, section, source, **bounds):
         return [holder("2026-06-30")] if "F10" in source else [holder("2026-05-16", 90, total=False)]
     service = ChipService(db, tmp_path, fetcher=fetch)
+    # Previously saved detail data remains readable even though new refreshes stop it.
+    key=SyncKey(db.ensure_instrument("600887"),"shareholders","eastmoney:RPT_HOLDERNUM_DET")
+    run=db.start_sync(key,parser_version="test",methodology_version="test")
+    service._save_holders("600887",key,run,[holder("2026-05-16",90,total=False)])
     result = service.update("600887", "shareholders")
     assert result["stored_count"] == 2
     assert result["rows"][0]["date"] == "2026-06-30"
@@ -764,15 +768,15 @@ def test_shareholder_increment_keeps_history_accepts_late_old_stat_and_empty_che
     service.update("600887", "shareholders")
     stage[0] = 1
     data = service.update("600887", "shareholders", refresh=True)
-    assert not data["warnings"] and data["stored_count"] == 4
-    for source, bounds in calls[-2:]:
+    assert not data["warnings"] and data["stored_count"] == 2
+    for source, bounds in calls[-1:]:
         assert bounds["start_date"] is not None
         assert bounds["date_field"] == ("NOTICE_DATE" if "F10" in source else "HOLD_NOTICE_DATE")
     with db.connection() as conn:
         assert {r[0] for r in conn.execute("SELECT holders FROM shareholder_observations WHERE stat_date='2020-06-30'")} == {150}
     stage[0] = 2
     data = service.update("600887", "shareholders", refresh=True)
-    assert not data["warnings"] and data["stored_count"] == 4
+    assert not data["warnings"] and data["stored_count"] == 2
     assert not data["needs_update"] and not data["empty"]
     assert db.check()["integrity"] == "ok"
 
@@ -785,8 +789,9 @@ def test_empty_shareholder_source_checks_incrementally_after_initial_check(db, t
     service = ChipService(db, tmp_path, fetcher=fetch)
     service.update("600887", "shareholders")
     service.update("600887", "shareholders", refresh=True)
-    assert all(b["start_date"] is None for b in calls[:2])
-    assert all(b["start_date"] is not None for b in calls[2:])
+    assert len(calls)==2
+    assert all(b["start_date"] is None for b in calls[:1])
+    assert all(b["start_date"] is not None for b in calls[1:])
 
 
 def test_shareholder_increment_accepts_notice_dates_through_next_week(db, tmp_path):
@@ -821,9 +826,9 @@ def test_shareholder_increment_accepts_notice_dates_through_next_week(db, tmp_pa
     incremental[0] = True
     result = service.update("600887", "shareholders", refresh=True, today=today)
     assert not result["warnings"]
-    assert all(bounds["end_date"] == "2026-10-29" for _, bounds in calls[-2:])
+    assert all(bounds["end_date"] == "2026-10-29" for _, bounds in calls[-1:])
     with db.connection() as conn:
         latest = [tuple(r) for r in conn.execute("SELECT stat_date,announced_on,holders FROM shareholder_observations "
                                                 "WHERE stat_date>'2026-06-30' ORDER BY source,stat_date")]
-        assert latest == [("2026-09-30", "2026-10-23", 256705), ("2026-10-01", "2026-10-29", 256000)] * 2
+        assert latest == [("2026-09-30", "2026-10-23", 256705), ("2026-10-01", "2026-10-29", 256000)]
         assert {r[0] for r in conn.execute("SELECT requested_end FROM sync_runs WHERE trigger_reason='incremental'")} == {"2026-10-29"}

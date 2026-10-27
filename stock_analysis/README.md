@@ -13,6 +13,9 @@
 | `maintenance/` | 统计、备份恢复、空间整理和清理 |
 | `domains/stocks/` | 股票库、行情、公告、分红、筹码；data_service 负责个股加载和数据组装，source_parsers 负责离线解析，sync_support 提供共享同步状态与策略 |
 | `domains/stocks/collection_operations.py` | 个股首次/手动/分组执行编排与轻量运行状态；复用事实服务及公共来源，不复制业务缓存 |
+| `domains/stocks/group_execution.py` | 分组业务依赖及有界工作线程，复用唯一operation和取消生命周期 |
+| `domains/stocks/group_requests.py` | 独立来源通道、最多20股请求合并及全页校验/内存分流，同源仍走公共collector |
+| `domains/stocks/group_batches.py` | 真实共享分段合并、逐股同事务计数和批次终态，不复制source |
 | `domains/stocks/collection_schedules.py` | 分组规则/公共槽位适配、固定范围及管理页摘要；由唯一公共Scheduler调用 |
 | `collection/collection_schedule.py` | 纯北京时间日历计算，包含日检查日期与财报季截止日前后窗口；不请求或读写数据库 |
 | `collection/schedules.py` | 各模块多日程身份、合并配置及软删除；执行槽位仍由唯一Scheduler管理 |

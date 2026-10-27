@@ -58,7 +58,7 @@ def test_initial_once_and_failed_visit_never_retries(service, monkeypatch):
     assert first == second
     with service.db.connection() as conn:
         assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0] == 1
-        assert conn.execute('SELECT count(*) FROM collection_batches').fetchone()[0] == 16
+        assert conn.execute('SELECT count(*) FROM collection_batches').fetchone()[0] == 15
         assert conn.execute('SELECT mode FROM collection_operations').fetchone()[0] == 'full'
     service.recover()
     assert service.start(dict(codes=['601919']), initial=True)['status'] == 'failed'

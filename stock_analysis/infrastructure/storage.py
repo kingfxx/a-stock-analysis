@@ -52,7 +52,7 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (36, "036_market_congestion.sql"), (37, "037_index_price_market_fields.sql"),
               (38, "038_compact_index_prices.sql"), (39, "039_sovereign_yields.sql"), (40, "040_collection_management.sql"),
               (41, "041_shipping_research.sql"), (42, "042_collection_rate_limits.sql"),
-              (43, "043_stock_collection_management.sql"), (44, "044_collection_control.sql"))
+              (43, "043_stock_collection_management.sql"), (44, "044_collection_control.sql"), (45, "045_stock_group_batches.sql"))
 
 
 class StorageError(RuntimeError):
@@ -476,6 +476,11 @@ class Database:
             if changed != 1:
                 raise StorageError("Synchronization run is missing or already finished")
             if collection_batch_id is not None:
+                from stock_analysis.collection.execution_context import current_execution
+                context = current_execution.get() or {}
+                callback = context.get('batch_complete')
+                if callback and callback(conn, collection_batch_id, run_id, 'cancelled' if type(error).__name__=='Cancelled' else 'failed', error=str(error)):
+                    return
                 batch_status = "cancelled" if type(error).__name__ == "Cancelled" else "failed"
                 conn.execute("UPDATE collection_batches SET status=?,finished_at=?,error=? "
                              "WHERE id=? AND status='running'",
@@ -525,6 +530,12 @@ class Database:
                      result.active_price_version_id if result.active_price_version_id is not None
                      else state["active_price_version_id"], *key))
                 if collection_batch_id is not None:
+                    from stock_analysis.collection.execution_context import current_execution
+                    context = current_execution.get() or {}
+                    callback = context.get('batch_complete')
+                    counts = {**(batch_result or {}), **(publication if isinstance(publication,dict) else {})}
+                    if callback and callback(conn, collection_batch_id, run_id, 'complete', counts):
+                        return
                     conn.execute("UPDATE collection_batches SET status='complete',coverage_status='unknown',finished_at=?,"
                                  "result_json=?,error=NULL WHERE id=? AND status='running'",
                                  (now, json.dumps({**(batch_result or {}), **(publication if isinstance(publication,dict) else {})}, ensure_ascii=False, sort_keys=True,
@@ -619,7 +630,8 @@ class Database:
                     "SELECT count(*) FROM business_segment_versions v JOIN sync_runs r ON r.id=v.run_id "
                     "JOIN collection_batches b ON b.id=v.batch_id WHERE r.instrument_id<>v.instrument_id "
                     "OR r.dataset<>'business_segments' OR r.source<>v.source OR r.status<>'success' " +
-                    ("OR b.status<>'complete' OR b.sync_run_id IS NOT r.id " if schema_count >= 44 else "OR b.status<>'complete' OR b.operation_id<>'sync_runs:'||r.id ") +
+                    ("OR NOT ((b.status='complete' AND b.sync_run_id IS r.id) OR EXISTS(SELECT 1 FROM json_each(b.scope_json,'$.stock_members') m WHERE json_extract(m.value,'$.sync_run_id')=r.id AND json_extract(b.result_json,'$.stock_results.'||json_extract(m.value,'$.code')||'.status')='complete')) " if schema_count >= 45 else
+                     "OR b.status<>'complete' OR b.sync_run_id IS NOT r.id " if schema_count >= 44 else "OR b.status<>'complete' OR b.operation_id<>'sync_runs:'||r.id ") +
                     "OR v.row_count<>(SELECT count(*) FROM business_segment_items i WHERE i.version_id=v.id)"
                 ).fetchone()[0]
                 invalid_provenance += conn.execute(

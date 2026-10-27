@@ -191,19 +191,15 @@ def test_shareholder_price_never_uses_future_trades_or_long_suspension_prices():
     assert rows[2]["close"] is None
 
 
-def test_shareholders_merge_detail_only_dates_and_prefer_f10_values():
+def test_shareholders_refresh_only_f10_and_never_requests_detail():
     class Reports(Session):
         def get(self, url, params, **kwargs):
-            if params["reportName"] == "RPT_F10_EH_HOLDERNUM":
-                return Response(page([holder(count=12000)], 1, 1))
-            return Response(page([
-                {"SECURITY_CODE": "600887", "END_DATE": "2026-06-30", "HOLDER_NUM": 9000},
-                {"SECURITY_CODE": "600887", "END_DATE": "2026-05-18", "HOLDER_NUM": 11000},
-            ], 2, 1))
+            assert params["reportName"] == "RPT_F10_EH_HOLDERNUM"
+            return Response(page([holder(count=12000)], 1, 1))
     records = fetch_chip_records("600887", "shareholders", Reports([]))
     rows = chip_rows(records, "shareholders")
     assert [(row["date"], row["holders"]) for row in rows] == [
-        ("2026-05-18", 11000), ("2026-06-30", 12000)]
+        ("2026-06-30", 12000)]
 
 
 def test_cached_chip_data_embeds_without_network_and_keeps_financial_loading_independent(chip_cache, monkeypatch):

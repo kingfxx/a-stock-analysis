@@ -115,6 +115,12 @@ class BusinessSegmentService:
                 if len(raw) != min(500, max(0, count - (index - 1) * 500)):
                     raise ValueError('主营构成分页截断')
                 rows = parse_rows(raw, secucode, start, end)
+                row_sources=getattr(response,'stock_source_ids',None)
+                if row_sources:
+                    for row,sid in zip(rows,row_sources):
+                        with self.db.connection() as conn:
+                            stamp=conn.execute('SELECT obtained_at FROM collection_sources WHERE id=?',(sid,)).fetchone()[0]
+                        row.update(source_id=sid,obtained_at=stamp)
                 source = session.source_ids[-1]
                 with self.db.connection() as conn:
                     obtained = conn.execute('SELECT obtained_at FROM collection_sources WHERE id=?', (source,)).fetchone()[0]
@@ -137,7 +143,7 @@ class BusinessSegmentService:
                     if key in seen:
                         raise ValueError('主营构成重复项目或跨页重复')
                     seen.add(key)
-                    collected.append({**row, 'source_id': source, 'obtained_at': obtained})
+                    collected.append({**row, 'source_id': row.get('source_id',source), 'obtained_at': row.get('obtained_at',obtained)})
             if pages > 1:
                 check, check_count, check_pages, _, _ = page(1)
                 if (check_count, check_pages) != (count, pages) or business_content(check) != business_content(first):

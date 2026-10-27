@@ -151,6 +151,10 @@ def begin_batch(db, operation_id, dataset, provider, start=None, end=None, *, sc
                 parser_version='index-v2', definition_version='v1', universe_version=None):
     from stock_analysis.collection.execution_context import current_execution
     execution = current_execution.get()
+    if execution and execution.get('group_batches'):
+        return execution['group_batches'].begin(db, operation_id, dataset, provider, start, end,
+            scope=scope, frequency=frequency, trigger=trigger, idempotency_key=idempotency_key, domain=domain,
+            parser_version=parser_version, definition_version=definition_version, universe_version=universe_version)
     if execution:
         scope = {**(scope or {}), **execution['scope']}
         trigger = execution['trigger']
@@ -709,6 +713,12 @@ class RequestCollector:
         scrub=lambda values:{k:v for k,v in (values or {}).items() if k.lower() not in ('token','apikey','api_key')}
         request=dict(transport='http',method=method,url=url,params=scrub(params))
         if method=='POST': request['data']=scrub(data)
+        if execution and execution.get('request_reason'):
+            reason=execution['request_reason']
+            query=data if method=='POST' else params
+            if int((query or {}).get('pageNum',(query or {}).get('pageNumber',1)) or 1)>1:reason='pagination'
+            if '/new/data/' in url:reason='identity'
+            request['reason']=reason
         key=digest(encoded(request).encode())
         for attempt in range(1,policy.max_attempts+1):
             if provider in self.halted:

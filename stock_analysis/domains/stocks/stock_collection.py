@@ -219,7 +219,7 @@ def stock_request_scope(db, batch_id, provider, dataset, *, collector=None):
     from stock_analysis.collection.execution_context import current_execution
     execution = current_execution.get()
     route = {"db": db, "batch_id": batch_id, "provider": provider, "dataset": f"stock.{dataset}",
-             "collector": collector or (execution['collector'] if execution else RequestCollector(db))}
+             "collector": collector or (execution.get('collector') if execution else None) or RequestCollector(db)}
     return _ACTIVE_ROUTE.set(route)
 
 

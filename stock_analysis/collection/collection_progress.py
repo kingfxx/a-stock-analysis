@@ -7,7 +7,7 @@ import json
 # in the explicit evidence endpoint. Missing counters remain unknown, never zero.
 FIELDS = ('inserted', 'new', 'revised', 'enriched', 'unchanged', 'published',
           'returned', 'rows', 'total', 'visible_points', 'price_counts',
-          'reused_batch_id', 'kind', 'row_count', 'candidate_count', 'metadata_rows', 'mode', 'disclosure_counts')
+          'reused_batch_id', 'kind', 'row_count', 'candidate_count', 'metadata_rows', 'mode', 'disclosure_counts', 'unrecorded_stock_members')
 PROJECTION = 'json_object(' + ','.join(
     "'" + key + "',CASE WHEN json_type(result_json,'$." + key + "') IN ('true','false') "
     "THEN NULL ELSE json_extract(result_json,'$." + key + "') END" for key in FIELDS) + ", 'changed_type',json_type(result_json,'$.changed'))"
@@ -76,7 +76,7 @@ def normalize(batch, values, label):
     return dict(provider=batch['source_system'], label=label, returned=returned,
                 written=written, inserted=inserted, revised=revised, enriched=enriched,
                 unchanged=number(values.get('unchanged')) if not reused else None,
-                segments=1, unrecorded_segments=int(written is None), reused_segments=int(reused),
+                segments=1, unrecorded_segments=int(written is None or bool(number(values.get('unrecorded_stock_members')))), reused_segments=int(reused),
                 empty_returns=int(empty), empty_start=batch['scope_start'] if empty else None,
                 empty_end=batch['scope_end'] if empty else None)
 

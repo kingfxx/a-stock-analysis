@@ -26,6 +26,24 @@ for(const counts of result.data_counts||[]){
  }
 }
 }
+function renderStocks(list,result){
+ const reasons={incremental:'增量',full:'全量',pagination:'分页',historical_rebuild:'历史重建',anchor_check:'旧日期核验',identity:'身份辅助',legacy_unknown:'历史未记录'};
+ if(result.request_reasons?.length){const li=document.createElement('li');li.textContent='请求用途：'+result.request_reasons.map(r=>`${labels[r.provider]||r.provider} ${reasons[r.reason]||r.reason} ${r.requests}次`).join('；')+'。实际请求只计一次，共享请求不按股票重复累加。';list.append(li);}
+ if(!result.stock_results?.length)return;
+ const li=document.createElement('li'),details=document.createElement('details'),title=document.createElement('summary');
+ title.textContent='逐股刷新结果（整组统计由各股实际提交汇总）'+(result.stock_results_truncated?` · 另有${result.stock_results_truncated}只，请按需查看任务详情`:'');details.append(title);
+ const stocks=new Map();for(const work of result.stock_results){if(!stocks.has(work.code))stocks.set(work.code,[]);stocks.get(work.code).push(work);}
+ const names={financial:'财务',business_segments:'主营',announcements:'公告',prices:'价格',valuation:'估值',dividends:'分红',shareholders:'股东人数',financing:'融资融券'};
+ for(const [code,works] of stocks){const p=document.createElement('p');p.textContent=code+' · '+works.map(w=>{
+   const status=({complete:'成功',failed:'失败',cancelled:'已停止',pending:'待执行',running:'进行中',reused:'复用'})[w.status]||w.status;
+   const entries=w.data_counts||[],known=entries.filter(e=>Number.isInteger(e.published));
+   const total=key=>{const values=entries.map(e=>e[key]).filter(Number.isInteger);return values.length?values.reduce((a,b)=>a+b,0):'未记录';};
+   const seconds=w.started_at&&w.finished_at?Math.max(0,(Date.parse(w.finished_at)-Date.parse(w.started_at))/1000).toFixed(1):null;
+   const updated=w.finished_at?new Date(w.finished_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'未结束';
+   return `${names[w.dataset]||w.dataset} ${status}（写入${known.length?total('published'):'未记录'}，新增${total('inserted')}，修订${total('revised')}；结束${updated}${seconds===null?'':'，历时'+seconds+'秒'}）${w.error?'：'+w.error:''}`;
+ }).join('；');details.append(p);}
+ li.append(details);list.append(li);
+}
 function render({summary,list},operation,result={}){const work=result.work_progress;list.replaceChildren();
 if(!operation){summary.textContent='尚未执行采集。';return;}
 if(!work||!Number.isInteger(work.total)){
@@ -35,7 +53,7 @@ if(!work||!Number.isInteger(work.total)){
  else if(progress){const item=document.createElement('li');item.textContent=`阶段：${progress.phase||'未记录'} · 页 ${progress.page??'未记录'}/${progress.pages??'未记录'} · 数据 ${progress.records??'未记录'}/${progress.total??'未记录'} 行`;list.append(item);}
  if(operation.status==='failed')summary.textContent+=' 任务未完成；已发布分段保留，详细诊断见运行记录。';
  else if(operation.status==='cancelled')summary.textContent+=' 已停止；已完成分段保留。';
- renderDataCounts(summary,list,result);return;
+ renderDataCounts(summary,list,result);renderStocks(list,result);return;
 }
 const processed=(work.success||0)+(work.skipped||0)+(work.failed||0)+(work.cancelled||0),total=work.total;
 if(total===0)summary.textContent=work.phase==='planning'?'正在统计本轮采集任务…':'本轮没有需要采集的任务（0/0）。';
@@ -53,7 +71,7 @@ const recordedProviders=errorInfo&&typeof errorInfo==='object'?Object.keys(error
 const sources=[...new Set([...failedProviders,...recordedProviders])];
 summary.textContent+=sources.length?` 错误摘要：${sources.join('、')}来源有任务失败；详细诊断已保存在任务记录中。`:' 错误摘要：采集未能完成，详细诊断已保存在任务记录中。';}
 else if(operation.status==='cancelled')summary.textContent+=' 已停止；已完成分段保留。';
-renderDataCounts(summary,list,result);
+renderDataCounts(summary,list,result);renderStocks(list,result);
 }
 window.CollectionProgress={render};
 })();

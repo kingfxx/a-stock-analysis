@@ -643,3 +643,29 @@ def test_financial_season_available_everywhere_and_roundtrips_without_collection
                 assert len(rows)==2 and all(json.loads(row[0])==dict(frequency='financial_season',days_before=30,days_after=7) for row in rows)
             assert not errors and state['storage']==0
         finally:browser.close()
+
+
+def test_stock_progress_shows_per_stock_counts_and_request_causes(live):
+    from playwright.sync_api import sync_playwright,expect
+    base,db,state,web=live
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page()
+            page.goto(base+'/harness')
+            page.evaluate("""() => {
+              const summary=document.createElement('p'),list=document.createElement('ul');
+              summary.id='group-test-summary';list.id='group-test-list';document.body.append(summary,list);
+              CollectionProgress.render({summary,list},{status:'complete'},{
+                work_progress:{total:2,success:1,failed:1},network_requests:1,
+                request_reasons:[{provider:'eastmoney',reason:'incremental',requests:1}],
+                stock_results:[{code:'601919',dataset:'shareholders',status:'complete',data_counts:[{published:1,inserted:1,revised:0}]},
+                  {code:'600519',dataset:'shareholders',status:'failed',error:'某股数据无效',data_counts:[{}]}]});
+            }""")
+            expect(page.locator('#group-test-summary')).to_contain_text('HTTP请求 1 次')
+            details=page.locator('#group-test-list details');details.locator('summary').click()
+            expect(details).to_contain_text('601919');expect(details).to_contain_text('写入1')
+            expect(details).to_contain_text('600519');expect(details).to_contain_text('写入未记录')
+            expect(details).to_contain_text('某股数据无效')
+            expect(page.locator('#group-test-list')).to_contain_text('东方财富 增量 1次')
+        finally:browser.close()

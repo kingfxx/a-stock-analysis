@@ -134,6 +134,10 @@ def decorate_runs(conn, rows):
         counts={state:sum(w['status']==state for w in works) for state in ('pending','running','complete','failed','cancelled','reused')}
         row['result']=dict(message='股票数据项：'+'，'.join(f'{k} {v}' for k,v in counts.items() if v))
         row['result']['work_progress']=dict(total=len(works),success=counts['complete'],skipped=counts['reused'],failed=counts['failed'],cancelled=counts['cancelled'],running=counts['running'],pending=counts['pending'],providers={},unit='股票数据项')
+        codes=list(dict.fromkeys(w['code'] for w in works))
+        row['result']['stock_results']=[w for w in works if w['code'] in codes[:20]]
+        row['result']['stock_results_truncated']=max(0,len(codes)-20)
+        row['result']['request_reasons']=[dict(r) for r in conn.execute("SELECT s.source_system AS provider,coalesce(json_extract(s.request_json,'$.reason'),'legacy_unknown') AS reason,count(*) AS requests FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE b.operation_id=? GROUP BY 1,2",(row['operation_ref'],))]
         row['result']['network_requests']=conn.execute('SELECT count(*) FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE b.operation_id=?',(row['operation_ref'],)).fetchone()[0]
         attach_data_counts(conn,[row],PROVIDERS)
         from stock_analysis.collection.collection_progress import merge

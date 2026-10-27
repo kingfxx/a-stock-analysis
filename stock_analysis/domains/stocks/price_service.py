@@ -39,10 +39,12 @@ class PriceService:
         with create_data_session() as session:
             return fetch_price_history(code, session, "" if adjustment == "raw" else adjustment, start, end)
 
-    def _scheduled_fetch(self, code, adjustment, start, end, batch_id):
+    def _scheduled_fetch(self, code, adjustment, start, end, batch_id, reason='incremental'):
         dataset = "prices_raw" if adjustment == "raw" else "prices_adjusted"
-        with routed_stock_requests(self.db, batch_id, "tencent", dataset):
-            return self.fetcher(code, adjustment, start, end)
+        from stock_analysis.collection.execution_context import current_execution, execution_context
+        with execution_context(**{**(current_execution.get() or {"scope":{},"cancelled":lambda:False}), "request_reason":reason}):
+            with routed_stock_requests(self.db, batch_id, "tencent", dataset):
+                return self.fetcher(code, adjustment, start, end)
 
     def current_version(self, code):
         identity = instrument_id(self.db, code)
@@ -146,7 +148,7 @@ class PriceService:
                                                 "source_interface": "fqkline/get"},
                                          parser_version=COLLECTION_PARSER_VERSION, definition_version=COLLECTION_DEFINITION_VERSION)
             try:
-                rows = self._scheduled_fetch(code, adjustment, start, end, batch_id)
+                rows = self._scheduled_fetch(code, adjustment, start, end, batch_id, 'historical_rebuild' if rebuild else 'incremental')
                 self._validate(rows, start, end)
                 if not rebuild:
                     overlap = [r for r in rows if r["date"] in old_by_day]
@@ -154,7 +156,7 @@ class PriceService:
                     missing = expected - {r["date"] for r in rows}
                     if missing and adjustment == "raw":
                         rebuild = True
-                        rows = self._scheduled_fetch(code, adjustment, "1990-01-01", end, batch_id)
+                        rows = self._scheduled_fetch(code, adjustment, "1990-01-01", end, batch_id, "historical_rebuild")
                         self._validate(rows, "1990-01-01", end)
                         with self.db.connection(write=True) as conn:
                             conn.execute("UPDATE sync_runs SET trigger_reason='historical_gap',requested_start='1990-01-01' WHERE id=?", (run,))
@@ -165,11 +167,11 @@ class PriceService:
                         for anchor in anchors:
                             if rebuild:
                                 break
-                            sample = self._scheduled_fetch(code, adjustment, anchor["date"], anchor["date"], batch_id)
+                            sample = self._scheduled_fetch(code, adjustment, anchor["date"], anchor["date"], batch_id, "anchor_check")
                             self._validate(sample, anchor["date"], anchor["date"])
                             rebuild = len(sample) != 1 or not price_equal(anchor, sample[0])
                         if rebuild:
-                            rows = self._scheduled_fetch(code, adjustment, "1990-01-01", end, batch_id)
+                            rows = self._scheduled_fetch(code, adjustment, "1990-01-01", end, batch_id, "historical_rebuild")
                             self._validate(rows, "1990-01-01", end)
                             with self.db.connection(write=True) as conn:
                                 conn.execute("UPDATE sync_runs SET trigger_reason='historical_change',requested_start='1990-01-01' WHERE id=?", (run,))

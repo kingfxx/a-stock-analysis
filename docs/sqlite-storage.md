@@ -583,3 +583,12 @@ collection_schedules的schedule_id为规则主键，task_key为可重复模块�
 隔离原库验证：53条原指数类result_json从10,833,973减至249,704字节（保留独有旧任务消息）；3460个batch ID与来源/事实不变，批次JSON仅增加35,971字节以承接独有诊断及旧工作元数据。运行列表三次约51—57ms。全未变表逐行SHA256相同、来源预算/冷却和6条原日程配置保持。详见[迁移报告](../data/verification/reports/collection_control_migration_20261027.json)。JSON逻辑字节不等于物理释放文件大小，未自动VACUUM。
 
 代表性隔离测量：10次运行×20股票×16个真实来源分段，共3200个batch；批次表含索引2,818,048字节，约881字节/行；10次占位及模拟终结约242ms，公共列表约55ms。该值包含真实batch及排队索引，不能只与旧1600条item的开销比较。无新增source/业务sync/响应文件。报告与复测工具见[存储测量](../data/verification/reports/collection_control_storage_20261027.json)、[测量工具](../data/verification/tools/collection_control_benchmark.py)；具体迁移边界见[字段对照](plans/20261025_统一采集管理/CONTROL_SCHEMA.md)。
+
+
+## v45 个股共享分段身份约束
+
+045_stock_group_batches.sql不新增表、不改写旧事实或历史控制记录。stock共享分段的collection_batches.scope_json.stock_members保存最多20个真实成员code、业务数据集/模式、sync_run_id、范围和开始时间；code/sync_run_id标量在共享行留空，原单股行继续使用原标量。result_json.stock_results按股票保存已提交状态、结束时间、错误、计数与业务run引用，顶部仅汇总实际发布计数及必要派生计数；不存响应或逐条事实。
+
+每股事实及sync状态与对应stock_results在同一短事务提交，全部成员结束才关闭batch；部分失败可保留成功成员，数据库一致性检查按逐股成功结果验证。每次真实HTTP只登记一条collection_sources并保持同batch外键；不复制共享来源，不增加父子batch或公共item。合并只发生于尚无source的本次新分段，原历史不迁移/重建。
+
+主营版本身份触发器兼容原单股sync_run或stock_members中同股票/同run；主营明细继续验证source/batch/provider/dataset和请求SECUCODE单股/IN名单。公告元数据身份触发器精确匹配单股或分号名单中的code,orgId，不再只识别名单第一只；原run/来源/同batch验证保留。迁移沿用既有初始化备份与事务回滚，SQLite备份不包含来源文件/PDF。本轮不移动这些资料。

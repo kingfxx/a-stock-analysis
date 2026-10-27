@@ -218,7 +218,10 @@ class AnnouncementService:
                 conn.execute("UPDATE collection_sources SET parse_status='failed',error=coalesce(error,?) WHERE batch_id=? AND parse_status='pending'",
                              (type(exc).__name__,batch))
                 conn.execute("UPDATE sync_runs SET status='failed',finished_at=?,error=? WHERE id=? AND status='running'",(utc_now(),str(exc)[:1000],run))
-                conn.execute("UPDATE collection_batches SET status='failed',coverage_status='unknown',finished_at=?,error=? WHERE id=? AND status='running'",(utc_now(),type(exc).__name__,batch))
+                from stock_analysis.collection.execution_context import current_execution
+                callback = (current_execution.get() or {}).get('batch_complete')
+                if not callback or not callback(conn,batch,run,'failed',error=type(exc).__name__):
+                    conn.execute("UPDATE collection_batches SET status='failed',coverage_status='unknown',finished_at=?,error=? WHERE id=? AND status='running'",(utc_now(),type(exc).__name__,batch))
             result=self.read(code,categories)
             result['sync']['status']='failed'; result['sync']['error']=str(exc)[:500]
             result['warnings'].append(f'巨潮公告日期检查失败，已保留已有结果：{type(exc).__name__}')

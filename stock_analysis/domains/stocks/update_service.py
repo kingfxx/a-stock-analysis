@@ -19,7 +19,7 @@ from stock_analysis.domains.stocks.stock_collection import begin_stock_batch, ro
 from stock_analysis.domains.stocks.sync_support import (data_lock, encoded, digest, instrument_id, sync_state, recently_checked, recent_sync_failure, checked_today, audit_due, next_audit, mark_failed, backup_before_update)
 
 FINANCING_SOURCE = "eastmoney:RPTA_WEB_RZRQ_GGMX"
-HOLDER_SOURCES = ("RPT_F10_EH_HOLDERNUM", "RPT_HOLDERNUM_DET")
+HOLDER_SOURCES = ("RPT_F10_EH_HOLDERNUM",)
 
 
 COLLECTION_PARSER_VERSION = "eastmoney-facts-v1"
