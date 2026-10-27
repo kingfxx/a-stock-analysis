@@ -178,3 +178,15 @@
 - 原库只读验收：09:05旧运行来源汇总正常；公告解析122、分红解析1、财务各2条，同行估值旧changed=true可确认写入1但不伪造新增/修订。其余实际写入仍未记录，不能从当前事实倒算。页面错误0、storage读取0，浏览器股票库visit写请求已拦截。
 - 配置哈希、target历史16个batch结果哈希前后相同；source水位5763、batch水位3460、stock operation 1、日程1条均不变。没有为验收采集、保存设置或回填历史计数。报告data/verification/reports/stock_write_counts_20261027.json；复测工具verify_stock_write_counts.py。
 - 临时隔离库、浏览器缓存与预览截图已清理，保留验收报告、相关测试日志、当前后台日志及常用工具。
+
+
+## 2026-10-27 财报季频率实施
+
+- 已读取本目录计划/决策/进度及架构、采集、财务和存储规则；沿用本计划单代理实施。
+- 已完成公共日历、规则校验及全部8处定时表单；纯计算复用collection_schedule.py，调度仍由唯一Scheduler执行，无数据库迁移。
+
+- 公共调度／个股调度／设置页面／HTTP来源边界回归105 passed；既有个股分组页面4 passed。覆盖默认、0偏移、跨年、重叠、时区及边界、下一次、窗口外漏跑合并、各模块相同增量参数、保存不执行和页面编辑回显。JS语法及git diff --check通过。
+- 页面切换只显示并启用当前频率适用字段；新表单只在创建时初始化，避免隐藏字段触发可见性观察器后循环读取。新规则和旧规则的保存、刷新及日周月切换验收通过。
+- 原8765进程40168经API和只读SQLite确认采集、同步及模型均空闲后重启，当前PID38820保持后台运行；结构版本44，无迁移及中断任务。当前日志financial-season-server-20261027.out.log/err.log。
+- 原库只读页面验收8处均有财报季；个股／指数显示默认30/7，移动端宽度无溢出，页面错误0、storage读取0。所有业务写请求拦截，验收前后schedule配置、运行历史、batch/source水位和provider预算／冷却完全一致，未为验收保存或启用规则、未发起采集。
+- 验收报告data/verification/reports/financial_season_20261027.json；复测工具data/verification/tools/verify_financial_season.py（--stage before/after）。保留相关测试日志、验收报告及当前后台日志，清理本轮隔离测试目录和预览截图。

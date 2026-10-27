@@ -234,3 +234,26 @@ def test_same_group_topic_rules_edit_delete_preserve_legacy_and_history(service)
 @pytest.mark.parametrize('params',[{'codes':[]},{'codes':['601919'],'datasets':['unknown']},{'group_id':True},{'codes':['601919'],'url':'x'}])
 def test_parameters_reject_unregistered_work(params):
     with pytest.raises(ValueError): validate_params(params)
+
+
+def test_financial_season_group_rule_preserves_incremental_work(service,monkeypatch):
+    identity=group(service,'season',['601919'])
+    command=dict(enabled=True,local_time='18:00',rule=dict(frequency='financial_season'),
+                 params=dict(group_id=identity,datasets=['financing'],mode='incremental'),schedule_key=None)
+    saved=collection_schedules.configure(service.db,command)
+    with service.db.connection(write=True) as conn:
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
+        conn.execute("UPDATE collection_schedules SET updated_at='2026-01-01T00:00:00+00:00'")
+        assert collection_schedules.read_rules(conn)[0]['rule']==dict(frequency='financial_season',days_before=30,days_after=7)
+    calls=[]
+    monkeypatch.setattr(service,'collect',lambda code,dataset,mode,*args:calls.append((code,dataset,mode)))
+    zone=timezone(timedelta(hours=8))
+    for day in (30,31,31):
+        collection_schedules.tick(service,datetime(2026,3,day,19,tzinfo=zone),lambda:False)
+    assert calls==[('601919','financing',False)]
+    with service.db.connection() as conn:
+        assert conn.execute('SELECT count(*) FROM collection_schedule_slots').fetchone()[0]==1
+    collection_schedules.configure(service.db,{**command,'schedule_key':saved['schedule_key'],
+        'rule':dict(frequency='financial_season',days_before=10,days_after=0)})
+    with service.db.connection() as conn:
+        assert collection_schedules.read_rules(conn)[0]['rule']==dict(frequency='financial_season',days_before=10,days_after=0)

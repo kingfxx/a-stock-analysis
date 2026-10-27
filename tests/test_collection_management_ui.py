@@ -567,3 +567,71 @@ def test_public_schedule_form_keeps_selected_rule_enabled_state(live):
                 assert c.execute("SELECT count(*) FROM collection_schedules WHERE enabled=1").fetchone()[0]==1
         finally:
             browser.close()
+
+
+def test_financial_season_available_everywhere_and_roundtrips_without_collection(live):
+    from playwright.sync_api import sync_playwright,expect
+    base,db,state,web=live
+    with db.connection(write=True) as conn:
+        identity=conn.execute("INSERT INTO stock_groups(name,position) VALUES('season',0)").lastrowid
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+            page.goto(base+'/harness')
+            forms=page.locator('[data-task-schedule]')
+            expect(forms).to_have_count(len([task for task in TASKS.values() if not task.get('manual_only')]))
+            for form in forms.all():
+                expect(form.locator('[name=frequency] option[value=financial_season]')).to_have_count(1)
+            for task in ('indices','stocks'):
+                card=page.locator(f'[data-task="{task}"]');form=card.locator('[data-task-schedule]')
+                form.locator('..').locator(':scope > summary').click()
+                if task=='stocks':
+                    form.locator('[name=group_id]').select_option(str(identity))
+                    for checkbox in form.locator('[name=dataset]').all():checkbox.uncheck()
+                    form.locator('[name=dataset][value=financial]').check()
+                expect(form.locator('[name=days_before]')).to_be_hidden()
+                form.locator('[name=frequency]').select_option('financial_season')
+                expect(form.locator('[name=days_before]')).to_be_visible()
+                expect(form.locator('[name=days_before]')).to_have_value('30')
+                expect(form.locator('[name=days_after]')).to_have_value('7')
+                expect(form.locator('[name=day]')).to_be_hidden()
+                expect(form.locator('[name=weekday]')).to_be_hidden()
+                form.locator('[name=days_before]').fill('15')
+                form.locator('[name=days_after]').fill('0')
+                with page.expect_response('**/api/maintenance/collections/schedule') as response:
+                    form.locator('button[type=submit]').click()
+                assert response.value.ok
+                assert not errors, errors
+                assert '未更新' not in page.locator('#maintenance-collection-status').inner_text(), page.locator('#maintenance-collection-status').inner_text()
+                expect(form.locator('[name=days_before]')).to_have_value('15')
+                selector=form.locator('[name=schedule_key]');saved=selector.input_value()
+                page.click('#maintenance-refresh')
+                expect(form.locator('[name=days_after]')).to_have_value('0')
+                selector.select_option('')
+                expect(form.locator('[name=days_before]')).to_be_hidden()
+                selector.select_option(saved)
+                expect(form.locator('[name=frequency]')).to_have_value('financial_season')
+                expect(form.locator('[name=days_before]')).to_have_value('15')
+                form.locator('[name=frequency]').select_option('monthly')
+                expect(form.locator('[name=days_after]')).to_be_hidden()
+                expect(form.locator('[name=day]')).to_be_visible()
+                # Stale invalid season values must not block a different frequency.
+                form.locator('[name=days_after]').evaluate("input => input.value='-1'")
+                with page.expect_response('**/api/maintenance/collections/schedule') as response:
+                    form.locator('button[type=submit]').click()
+                assert response.value.ok
+                selector.select_option('')
+                selector.select_option(saved)
+                form.locator('[name=frequency]').select_option('financial_season')
+                expect(form.locator('[name=days_before]')).to_have_value('30')
+                with page.expect_response('**/api/maintenance/collections/schedule') as response:
+                    form.locator('button[type=submit]').click()
+                assert response.value.ok
+            page.reload()
+            with db.connection() as conn:
+                assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
+                rows=conn.execute('SELECT rule_json FROM collection_schedules WHERE deleted=0').fetchall()
+                assert len(rows)==2 and all(json.loads(row[0])==dict(frequency='financial_season',days_before=30,days_after=7) for row in rows)
+            assert not errors and state['storage']==0
+        finally:browser.close()

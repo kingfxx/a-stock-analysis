@@ -257,3 +257,11 @@
 - maintenance 的表发现、分类、用途、大小、数量和真实时间正确，删除表不再展示；代表性数据记录表/索引总占用、写入和列表/详情耗时，并与基线比较。进度聚合覆盖全部分段，不受展示条数上限截断，不靠全事实扫描。
 - 旧 index_collection_operations、stock_collection_operations、stock_collection_items、collection_schedule_rules 最终不再作为物理表或永久可写副本；没有旧读写/恢复链遗留。保留 sync_runs/state、slots 和公共 batch/source/provider_state 的独立职责。
 - 报告放 data/verification/reports/，常用复测工具放 tools/，当前后台日志放 logs/；清理一次性隔离库、截图和浏览器缓存，保留正式备份及日常资料。PROGRESS记录实际测试、迁移及未解决项，不把计划当已交付。
+
+
+## 2026-10-27 财报季公共调度频率（已完成）
+
+- 扩展公共 schedule 校验及时间计算，所有已支持定时的模块共用 financial_season。截止日固定每年4月30日、8月31日、10月31日，默认提前30天、延后7天，范围0—90天，窗口内每日在保存的北京时间检查。
+- 纯日历计算归 collection/collection_schedule.py；规则校验及既有槽位调度归 collection_management.py；表单归 maintenance.js。继续复用唯一 Scheduler 和现有 schedule JSON，不新增表、路由、采集器或运行状态。
+- 不改变增量、水位、缓存、失败、限速、冷却及采集范围；不自动切换报告期、不按覆盖提前停止、不启用旧规则。沿用漏跑合并到最近一个槽位和首次保存后未来槽位。
+- 验证默认及零偏移、跨年、重叠窗口、北京时间、起止边界、下一次、漏跑合并；隔离库覆盖公共/个股保存与执行及页面新增/编辑/刷新；相关回归后安全重启原8765并只读验收。

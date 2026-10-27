@@ -10,7 +10,7 @@ from threading import Event, Thread
 
 from stock_analysis.domains.indices import index_collection; from stock_analysis.domains.market import market_congestion; from stock_analysis.domains.research.sectors.shipping import shipping_collection
 from stock_analysis.collection.collection import encoded
-from stock_analysis.collection.collection_schedule import latest_daily_date
+from stock_analysis.collection.collection_schedule import latest_daily_date, latest_financial_season_date
 from stock_analysis.collection.collection_progress import attach_data_counts
 from stock_analysis.infrastructure.storage import utc_now
 from stock_analysis.collection import schedules as schedule_store
@@ -94,15 +94,22 @@ def validate_params(key, params, *, scheduled=False):
 
 
 def validate_rule(rule):
-    if not isinstance(rule, dict) or set(rule) - {'frequency', 'weekday', 'day', 'window'}:
+    if not isinstance(rule, dict) or set(rule) - {'frequency', 'weekday', 'day', 'window', 'days_before', 'days_after'}:
         raise ValueError('检查规则无效')
     rule = dict(rule)
     frequency = rule.get('frequency', 'daily')
     rule['frequency'] = frequency
-    if frequency not in ('daily', 'weekly', 'monthly'):
-        raise ValueError('仅支持日、周、月规则')
+    if frequency not in ('daily', 'weekly', 'monthly', 'financial_season'):
+        raise ValueError('仅支持日、周、月、财报季规则')
     if frequency != 'weekly' and 'weekday' in rule or frequency != 'monthly' and ('day' in rule or 'window' in rule):
         raise ValueError('规则字段与频率不匹配')
+    if frequency != 'financial_season' and set(rule) & {'days_before', 'days_after'}:
+        raise ValueError('规则字段与频率不匹配')
+    if frequency == 'financial_season':
+        for field, default in (('days_before', 30), ('days_after', 7)):
+            value = rule.setdefault(field, default)
+            if type(value) is not int or not 0 <= value <= 90:
+                raise ValueError('财报季提前／延后天数须为0—90')
     if frequency == 'weekly':
         value = rule.setdefault('weekday', 0)
         if type(value) is not int or not 0 <= value <= 6:
@@ -124,7 +131,9 @@ def due_slot(schedule, now):
     day = latest_daily_date(now, schedule['local_time'])
     rule = schedule['rule']
     frequency = rule['frequency']
-    if frequency == 'weekly':
+    if frequency == 'financial_season':
+        day = latest_financial_season_date(day, rule['days_before'], rule['days_after'])
+    elif frequency == 'weekly':
         day -= timedelta(days=(day.weekday() - rule['weekday']) % 7)
     elif frequency == 'monthly':
         if 'window' in rule:

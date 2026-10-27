@@ -1,5 +1,5 @@
 """Isolated scheduling and registry contracts: no source HTTP calls."""
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Event, Thread
 
 import pytest
@@ -440,3 +440,79 @@ def test_congestion_next_morning_catches_yesterday_and_deduplicates(management,m
     assert len(calls)==2
     with management.db.connection() as conn:
         assert [r[0] for r in conn.execute("SELECT json_extract(scope_json,'$.scheduled_date') FROM collection_operations ORDER BY started_at")]==['2026-10-25','2026-10-26']
+
+
+@pytest.mark.parametrize('stamp,expected', [
+    ('2026-03-30T19:00:00', '2025-11-07'),
+    ('2026-03-31T17:59:00', '2025-11-07'),
+    ('2026-03-31T18:00:00', '2026-03-31'),
+    ('2026-04-30T19:00:00', '2026-04-30'),
+    ('2026-05-07T19:00:00', '2026-05-07'),
+    ('2026-05-08T19:00:00', '2026-05-07'),
+    ('2026-08-01T19:00:00', '2026-08-01'),
+    ('2026-09-07T19:00:00', '2026-09-07'),
+    ('2026-10-01T19:00:00', '2026-10-01'),
+    ('2026-11-07T19:00:00', '2026-11-07'),
+    ('2027-01-01T19:00:00', '2026-11-07'),
+])
+def test_financial_season_daily_boundaries_and_coalescing(stamp, expected):
+    schedule=dict(enabled=True,local_time='18:00',rule=validate_rule({'frequency':'financial_season'}))
+    assert due_slot(schedule,now(stamp)) == expected
+    assert due_slot(schedule,now(stamp).astimezone(timezone.utc)) == expected
+
+
+def test_financial_season_next_check_zero_offsets_overlap_and_cross_year():
+    schedule=dict(enabled=True,local_time='18:00',rule=validate_rule({'frequency':'financial_season'}))
+    assert next_check(schedule,now('2026-05-07T19:00:00')).startswith('2026-08-01T18:00')
+    assert next_check(schedule,now('2026-11-07T19:00:00')).startswith('2027-03-31T18:00')
+    schedule['rule']=validate_rule(dict(frequency='financial_season',days_before=0,days_after=0))
+    assert due_slot(schedule,now('2026-04-29T19:00:00'))=='2025-10-31'
+    assert next_check(schedule,now('2026-04-30T19:00:00')).startswith('2026-08-31T18:00')
+    schedule['rule']=validate_rule(dict(frequency='financial_season',days_before=90,days_after=90))
+    assert due_slot(schedule,now('2027-01-15T19:00:00'))=='2027-01-15'
+    assert due_slot(schedule,now('2026-09-01T19:00:00'))=='2026-09-01'
+    schedule['enabled']=False
+    assert next_check(schedule,now()) is None
+
+
+@pytest.mark.parametrize('rule', [
+    dict(frequency='daily',days_before=30), dict(frequency='monthly',days_after=7),
+    dict(frequency='financial_season',day=1), dict(frequency='financial_season',window=[1,5]),
+    dict(frequency='financial_season',weekday=1), dict(frequency='financial_season',days_before=True),
+    dict(frequency='financial_season',days_before=-1), dict(frequency='financial_season',days_after=91),
+    dict(frequency='financial_season',days_after=1.5), dict(frequency='financial_season',days_before='30'),
+])
+def test_financial_season_rejects_invalid_or_mixed_fields(rule):
+    with pytest.raises(ValueError): validate_rule(rule)
+
+
+@pytest.mark.parametrize('key,params', [
+    ('indices', dict(mode='incremental',providers=['csindex'])),
+    ('market_financial',dict(mode='incremental',target='2026-06-30')),
+    ('trade_snapshot',dict(mode='incremental',target='2026Q2')),
+    ('shipping_weekly',dict(mode='incremental')),
+    ('shipping_monthly',dict(mode='incremental')),
+    ('sovereign_yields',dict(mode='incremental')),
+    ('market_congestion',dict(mode='incremental')),
+])
+def test_financial_season_shared_save_and_unchanged_execution(management,monkeypatch,key,params):
+    monkeypatch.setattr(market_congestion,'initialized',lambda conn:True)
+    saved=enable(management,key,rule={'frequency':'financial_season'},params=params)
+    assert saved['rule']==dict(frequency='financial_season',days_before=30,days_after=7)
+    with management.db.connection() as conn:
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
+    calls=[]
+    def execute(task, actual, ref):
+        calls.append((task,actual));complete(management,task,actual,ref)
+    management.execute=execute
+    management.tick(now=now('2026-03-30T19:00:00'))
+    assert calls==[]  # Last year's slot precedes save: no backfill.
+    management.tick(now=now('2026-04-01T19:00:00'))
+    management.tick(now=now('2026-04-01T20:00:00'))
+    management.tick(now=now('2026-04-02T19:00:00'))
+    assert calls==[(key,params),(key,params)]
+    management.tick(now=now('2026-06-15T19:00:00'))
+    management.tick(now=now('2026-07-15T19:00:00'))
+    assert calls==[(key,params)]*3  # One final missed May 7 slot, no daily slots outside windows.
+    with management.db.connection() as conn:
+        assert [r[0] for r in conn.execute('SELECT slot_key FROM collection_schedule_slots ORDER BY slot_key')]==['2026-04-01','2026-04-02','2026-05-07']
