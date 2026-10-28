@@ -167,6 +167,16 @@ def calculated(label, inputs, formula, operation, period, unit='元'):
 
 def metric(reports, period, key, mode, *, balance_first=False):
     source, code = FIELDS[key]
+    entry = reports.get(period, {})
+    override = (entry.get('_manual_overrides', {}).get('adjusted_profit_ytd')
+                if key == 'deducted_profit' and mode == 'ytd' else None)
+    if override is not None:
+        return {'label': LABELS[key], 'field': 'adjusted_profit_ytd',
+                'source': 'report_overrides', 'item_source': None,
+                'value': _number(override.get('value')), 'unit': '元',
+                'method': '人工覆盖', 'period': period, 'currency': 'CNY',
+                'scope': '合并期末', 'reason': None,
+                'source_path': override.get('source_path')}
     if mode == 'quarter' and source != 'fzb' and period[5:] != '03-31' and key != 'cash_end':
         current = metric(reports, period, key, 'ytd')
         prior_period = previous_quarter(period)
@@ -177,7 +187,6 @@ def metric(reports, period, key, mode, *, balance_first=False):
                 'method':'上季末余额' if key == 'cash_start' else '本期累计 − 上季累计',
                 'baseline_period':prior_period, 'baseline_field':previous['field'],
                 'baseline_source':previous['source'], 'inputs':[current,previous], 'reason':None}
-    entry = reports.get(period, {})
     # Only accept exact, applicable gjzb fields; never substitute similarly named totals.
     for kind in ((source, 'gjzb') if balance_first else ('gjzb', source)):
         raw = entry.get(kind)
@@ -475,10 +484,17 @@ def read_statements(db, code, *, period=None, mode='ytd', comparison='yoy'):
         rows = conn.execute('SELECT report_type,period,raw_json,obtained_at FROM financial_reports '
                             'WHERE instrument_id=? AND source=? AND report_type IN (?,?,?,?) ORDER BY period',
                             (instrument['id'], SOURCE,'gjzb','fzb','lrb','llb')).fetchall() if instrument else []
+        override_rows = conn.execute("SELECT period,value_json,source_path FROM report_overrides "
+                                     "WHERE instrument_id=? AND field_name='adjusted_profit_ytd'",
+                                     (instrument['id'],)).fetchall() if instrument else []
     reports = {}
     for row in rows:
         if row['period'][5:] in {'03-31','06-30','09-30','12-31'}:
             reports.setdefault(row['period'], {})[row['report_type']] = json.loads(decompress_json(row['raw_json']))
+    for row in override_rows:
+        if row['period'] in reports:
+            reports[row['period']].setdefault('_manual_overrides', {})['adjusted_profit_ytd'] = {
+                'value': json.loads(row['value_json']), 'source_path': row['source_path']}
     periods = sorted((p for p,r in reports.items() if any(k in r for k in ('fzb','lrb','llb'))), reverse=True)
     period = period or (periods[0] if periods else None)
     if period and period not in periods:
