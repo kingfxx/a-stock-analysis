@@ -189,6 +189,8 @@ const path=require('node:path');
   await wait('document.getElementById("valuation-chart").layout?.annotations?.filter(x=>x.name?.startsWith("investment-note:")).length===2');
   assert.deepEqual(await evaluate('document.getElementById("valuation-chart").layout.annotations.map(x=>x.x)'),['2026-10-21','2026-10-22'],'title dates are exact; body, code, invalid and out-of-range dates are excluded');
   assert.equal(await evaluate('document.querySelectorAll("#valuation-notes-list button").length'),3);
+  await wait('[...document.querySelectorAll("#valuation-chart .annotation rect.bg")].every(node=>Number(node.getAttribute("rx"))===11)');
+  assert.deepEqual(await evaluate('[...document.querySelectorAll("#valuation-chart .annotation rect.bg")].map(node=>[Number(node.getAttribute("width")),Number(node.getAttribute("height")),Number(node.getAttribute("rx"))])'),[[32,22,11],[22,22,11]],'same-day counts use a rounded pill; single notes use a circle');
   await evaluate('document.getElementById("valuation-chart").scrollIntoView({block:"center"})');
   fs.writeFileSync(desktop.replace(/\.png$/,'-timeline.png'),Buffer.from((await send('Page.captureScreenshot')).data,'base64'));
   await evaluate('document.querySelector(\'[data-valuation-metric="pb"]\').click();document.getElementById("valuation-frequency").value="week";document.getElementById("valuation-frequency").dispatchEvent(new Event("change"))');

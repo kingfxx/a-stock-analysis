@@ -111,11 +111,12 @@ async function loadCrowding(revision){
 function decorateIndexNotes(){
  const chart=el('chart');if(!chart.layout||!window.investmentNotes)return;
  const dates=(chart.data?.[0]?.x||[]).filter(day=>typeof day==='string').sort();
- const annotations=window.investmentNotes.valuationAnnotations(dates[0],dates.at(-1));
+ const noteLayout=window.investmentNotes.valuationLayoutNotes(dates[0],dates.at(-1)),annotations=noteLayout.annotations;
  const base=(chart.layout.annotations||[]).filter(item=>!item.name?.startsWith('investment-note:'));
- const shapes=(chart.layout.shapes||[]).filter(item=>item.name!=='investment-note-guide');
- annotations.forEach(item=>shapes.push({name:'investment-note-guide',type:'line',xref:'x',yref:'paper',x0:item.x,x1:item.x,y0:0,y1:1,line:{color:'rgba(87,212,231,.35)',dash:'dot',width:1},layer:'below'}));
- Plotly.relayout(chart,{annotations:[...base,...annotations],shapes,'margin.t':annotations.length?60+Math.max(...annotations.map(item=>item.yshift||0)):25});
+ const shapes=(chart.layout.shapes||[]).filter(item=>item.name!=='investment-note-guide'&&!item.name?.startsWith('investment-note-guide:')&&!item.name?.startsWith('investment-note-badge:'));
+ shapes.push(...noteLayout.guideShapes);
+ Plotly.relayout(chart,{annotations:[...base,...annotations],shapes,'margin.t':annotations.length?60+Math.max(...annotations.map(item=>item.yshift||0)):25})
+  .then(()=>window.investmentNotes.styleMarkerAnnotations('chart'));
  if(!chart.notesClickBound){chart.notesClickBound=true;chart.on('plotly_clickannotation',event=>{const name=event.annotation?.name||'';if(name.startsWith('investment-note:'))window.investmentNotes.openTimelineDate(name.slice(16));});}
 }
 window.addEventListener('investment-note-markers-changed',decorateIndexNotes);

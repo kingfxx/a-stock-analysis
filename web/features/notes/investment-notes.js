@@ -109,23 +109,60 @@
       entryPicker.querySelector('h3').textContent=date+' · 选择笔记';entryPicker.querySelector('button').onclick=()=>entryPicker.close();
       entries.forEach(entry=>{const button=document.createElement('button');button.type='button';button.textContent=entry.label;button.onclick=()=>{entryPicker.close();openTimelineEntry(entry);};entryPicker.querySelector('.notes-list').append(button);});entryPicker.showModal();
     }
-    function valuationAnnotations(first,last){
+    const noteMarkerStyles={
+      buy:{label:'买',color:'#3a83f7'}, sell:{label:'卖',color:'#ea77b0'},
+      watch:{label:'观',color:'#3db9b0'}, hold:{label:'持',color:'#5ec978'},
+      note:{label:'✎',color:'#57d4e7'}
+    };
+    function noteCategory(label){
+      const title=label.replace(/^\d{4}-\d{2}-\d{2}\s*/,'').trim();
+      if(/(?:不|未|暂不|尚未|待|计划|准备|考虑|可能|等待).{0,2}(?:买入|买进|建仓|加仓|补仓|卖出|卖掉|减仓|清仓|止盈|止损)/.test(title)
+        ||/(?:买入|买进|建仓|加仓|补仓|卖出|卖掉|减仓|清仓|止盈|止损).{0,2}(?:计划|准备|考虑|条件|观察)/.test(title))return 'note';
+      const matches=[];
+      if(/买入|买进|建仓|加仓|补仓/.test(title))matches.push('buy');
+      if(/卖出|卖掉|减仓|清仓|止盈|止损/.test(title))matches.push('sell');
+      if(/观察|跟踪|关注/.test(title))matches.push('watch');
+      if(/持仓|持有/.test(title))matches.push('hold');
+      return matches.length===1?matches[0]:'note';
+    }
+    function valuationLayoutNotes(first,last){
       const entries=timelineDoc?.code===state.code?timelineEntries.filter(entry=>first&&last&&entry.date>=first&&entry.date<=last):[];
       const list=el('valuation-notes-list');list.replaceChildren();
       entries.forEach(entry=>{const button=document.createElement('button');button.type='button';button.textContent=entry.label;button.onclick=()=>openTimelineEntry(entry);list.append(button);});
       el('valuation-notes-summary').textContent=`图内笔记（${entries.length} 条）`;
       el('valuation-notes-status').textContent=timelineError||(!timelineDoc?'正在读取笔记…':entries.length?'点击图中笔记标记查看条目':'当前图表区间暂无日期笔记');
       const showNotes=notesToggle.getAttribute('aria-pressed')==='true';chartNotes.hidden=!showNotes;
-      if(!showNotes)return [];
+      if(!showNotes)return {annotations:[],guideShapes:[]};
       const width=Math.max(160,(el(chartId).clientWidth||600)-160),start=Date.parse(first),span=Math.max(86400000,Date.parse(last)-start),lanes=[-Infinity,-Infinity,-Infinity];
-      return [...new Set(entries.map(entry=>entry.date))].sort().flatMap(date=>{
+      const markers=[];
+      const annotations=[...new Set(entries.map(entry=>entry.date))].sort().flatMap(date=>{
         const items=entries.filter(entry=>entry.date===date);
         const x=(Date.parse(date)-start)/span*width,lane=lanes.findIndex(end=>x-end>38);
         if(lane<0)return [];lanes[lane]=x;
-        return [{name:'investment-note:'+date,x:date,xref:'x',y:1.02,yref:'paper',yanchor:'bottom',yshift:lane*30,text:'✎'+(items.length>1?' '+items.length:''),showarrow:false,captureevents:true,
-          font:{color:'#101719',size:16},bgcolor:'#57d4e7',bordercolor:'#57d4e7',borderpad:3,
+        const categories=[...new Set(items.map(item=>noteCategory(item.label)))],kind=categories.length===1?categories[0]:'note',style=noteMarkerStyles[kind];
+        markers.push({date,color:style.color});
+        return [{name:'investment-note:'+date,x:date,xref:'x',y:1.02,yref:'paper',yanchor:'middle',yshift:lane*30,text:style.label+(items.length>1?' '+items.length:''),showarrow:false,captureevents:true,
+          width:items.length>1?32:22,height:22,align:'center',valign:'middle',
+          font:{color:'#ffffff',size:14},bgcolor:style.color,bordercolor:style.color,borderwidth:0,borderpad:0,
           hovertext:esc(date)+'<br>'+items.slice(0,5).map(item=>esc(item.label.replace(date,'').trim()||'笔记')).join('<br>')+(items.length>5?'<br>…':''),hoverlabel:{bgcolor:'#23343d',font:{color:'#edf4f4'}}}];
       });
+      const guideShapes=markers.map(item=>({name:'investment-note-guide:'+item.date,type:'line',xref:'x',yref:'paper',x0:item.date,x1:item.date,y0:0,y1:1,
+        line:{color:item.color,dash:'dot',width:1},opacity:.32,layer:'below'}));
+      return {annotations,guideShapes};
+    }
+    function valuationAnnotations(first,last){return valuationLayoutNotes(first,last).annotations;}
+    function styleMarkerAnnotations(targetId){
+      const plot=el(targetId);if(!plot?.layout)return;
+      const roundBadges=()=>{
+        plot.querySelectorAll('.annotation[data-index]').forEach(node=>{
+          const annotation=plot.layout.annotations?.[Number(node.getAttribute('data-index'))];
+          if(!annotation?.name?.startsWith('investment-note:'))return;
+          const background=node.querySelector('rect.bg');
+          if(background){const radius=Number(background.getAttribute('height'))/2;background.setAttribute('rx',radius);background.setAttribute('ry',radius);}
+        });
+      };
+      if(!plot.notesBadgeStyleBound){plot.notesBadgeStyleBound=true;plot.on('plotly_afterplot',roundBadges);}
+      roundBadges();
     }
     notesToggle.onclick=()=>{notesToggle.setAttribute('aria-pressed',String(notesToggle.getAttribute('aria-pressed')!=='true'));timelineChanged();};
     let timelineWidth=0;
@@ -489,7 +526,7 @@
       if(event.detail.tab==='trend')refreshTimeline();
       updateFloating();
     });
-    window.investmentNotes={valuationAnnotations,openTimelineDate,selectionChanged:async()=>{if(active&&active.code!==state.code){if(!await flush(active))return false;active=null;}timelineDoc=null;timelineEntries=[];if(state.code)refreshTimeline();updateFloating();return true;},flush:async()=>{for(const ctx of contexts.values())if(!await flush(ctx))return false;return true;},reload:()=>{contexts.clear();active=null;timelineDoc=null;timelineEntries=[];refreshTimeline();return main.hidden&&!quick.open?Promise.resolve():openDocument();}};
+    window.investmentNotes={valuationAnnotations,valuationLayoutNotes,styleMarkerAnnotations,openTimelineDate,selectionChanged:async()=>{if(active&&active.code!==state.code){if(!await flush(active))return false;active=null;}timelineDoc=null;timelineEntries=[];if(state.code)refreshTimeline();updateFloating();return true;},flush:async()=>{for(const ctx of contexts.values())if(!await flush(ctx))return false;return true;},reload:()=>{contexts.clear();active=null;timelineDoc=null;timelineEntries=[];refreshTimeline();return main.hidden&&!quick.open?Promise.resolve():openDocument();}};
     setupSettings();if(!main.hidden)openDocument();else refreshTimeline();
   };
 

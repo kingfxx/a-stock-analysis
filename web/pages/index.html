@@ -1113,7 +1113,8 @@
       x:priceRows.map(row => alignToTradeDay && row.qfq_close_date ? row.qfq_close_date : row.date),y:priceRows.map(row => row.qfq_close ?? null),
       connectgaps:false,line:{color:'#f4d35e',width:2.5},
       hovertemplate:'前复权股价：%{y:.2f} 元/股<extra></extra>'});
-    const noteAnnotations=window.investmentNotes?.valuationAnnotations(first,last)||[];
+    const noteLayout=window.investmentNotes?.valuationLayoutNotes(first,last)||{annotations:[],guideShapes:[]};
+    const noteAnnotations=noteLayout.annotations;
     Plotly.react('valuation-chart', traces, {
       paper_bgcolor:'#1a2227',plot_bgcolor:'#1a2227',font:{color:'#edf4f4'},
       margin:{l:77,r:showPrice ? 82 : 28,t:noteAnnotations.length?60+Math.max(...noteAnnotations.map(item=>item.yshift||0)):30,b:65},hovermode:'x unified',showlegend:false,
@@ -1125,11 +1126,12 @@
         tickfont:{color:'#f4d35e',size:12},overlaying:'y',side:'right',showgrid:false,zeroline:false,automargin:true}} : {}),
       shapes:[...negativeRanges.map(range => ({type:'rect',xref:'x',yref:'paper',x0:range.start,x1:range.end,y0:0,y1:1,
         fillcolor:'rgba(244,211,94,0.10)',line:{color:'rgba(244,211,94,0.25)',width:1},layer:'below'})),
-        ...noteAnnotations.map(item=>({type:'line',xref:'x',yref:'paper',x0:item.x,x1:item.x,y0:0,y1:1,line:{color:'rgba(87,212,231,.35)',width:1,dash:'dot'},layer:'below'}))],
+        ...noteLayout.guideShapes],
       annotations: rows.length ? noteAnnotations : [{text:'暂无可用估值数据',xref:'paper',yref:'paper',x:.5,y:.5,
         showarrow:false,font:{color:'#9aadb3',size:17}}]
     }, {responsive:true,displaylogo:false,locale:'zh-CN'}).then(()=>{
       const chart=document.getElementById('valuation-chart');
+      window.investmentNotes?.styleMarkerAnnotations('valuation-chart');
       if(chart.notesClickBound)return;chart.notesClickBound=true;
       chart.on('plotly_clickannotation',event=>{
         const name=event.annotation?.name||'';

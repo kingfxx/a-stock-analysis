@@ -113,7 +113,15 @@ def test_index_notes_real_browser(index_server, tmp_path):
             page.wait_for_function('!document.getElementById("notes-quick").open')
             assert '滚动 PE/近10年历史分位' in path.read_text(encoding='utf-8')
             page.wait_for_function('document.getElementById("chart").layout.annotations.some(x=>x.name==="investment-note:2026-10-09")')
-            page.locator('#chart .annotation').filter(has_text='✎').click()
+            marker = page.locator('#chart .annotation').filter(has_text='观')
+            badge = marker.locator('rect.bg')
+            page.wait_for_function('''()=>{
+                const badge=document.querySelector('#chart .annotation rect.bg');
+                return badge && Number(badge.getAttribute('rx'))===Number(badge.getAttribute('height'))/2;
+            }''')
+            assert float(badge.get_attribute('width')) == float(badge.get_attribute('height')) == 22
+            assert marker.locator('text.annotation-text').evaluate('(node)=>getComputedStyle(node).fill') == 'rgb(255, 255, 255)'
+            marker.click()
             page.wait_for_function('document.getElementById("notes-quick").open && document.activeElement.textContent==="2026-10-09 观察"')
             page.locator('#notes-full').click()
             assert page.locator('#notes-panel').is_visible()
