@@ -145,7 +145,9 @@ class CompanyReportService:
                 pages = [{"pdf_page":i+1,"text":page.extract_text() or ""} for i,page in enumerate(pdf.pages)]
         preview = "".join(p["text"] for p in pages[:12])
         year = document["report_period"][:4]
-        expected = "年度报告" if document["report_type"]=="annual" else "半年度报告" if document["report_type"]=="interim" else "季度报告"
+        expected = "年度报告" if document["report_type"]=="annual" else "半年度报告" if document["report_type"]=="interim" else (
+            r"(?:第一|一)季度报告" if document['report_period'].endswith('03-31') else r"(?:第三|三)季度报告"
+        )
         compact=re.sub(r"\s+","",preview)
         # Designed headers can extract the year before the company name; the
         # stock profile may follow several cover, contents and section pages.
@@ -163,7 +165,7 @@ class CompanyReportService:
                 re.search(r"本半年度报告",compact) and
                 re.search(r"InterimReport\s*"+year,compact,re.I)
             )
-        if not re.search(r"(?<!\d)"+code+r"(?!\d)",preview) or not title_matches or "年度报告摘要" in compact:
+        if not re.search(r"(?<!\d)"+code+r"(?!\d)",preview) or not title_matches or re.search(r"(?:年度|季度)报告摘要",compact):
             raise ValueError("财报股票或年度不匹配，请核对下载文件")
         if sum(len(p["text"].strip()) for p in pages) < 500:
             raise ValueError("财报文本不足，扫描文件暂需人工核对")
@@ -219,7 +221,7 @@ class CompanyReportService:
             for topic, items in facts.items():
                 conn.execute("INSERT INTO company_report_facts(parse_id,extraction_version,topic,facts_json,created_at) VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING",(parse_id,EXTRACTION_VERSION,topic,json.dumps(items,ensure_ascii=False),utc_now()))
         (directory/"quality.json").write_text(json.dumps(quality,ensure_ascii=False,indent=2),encoding="utf-8")
-        return {"id":parse_id,"page_count":len(pages),"cache_hit":False}
+        return {"id":parse_id,"page_count":len(pages),"relative_path":self._relative(target),"cache_hit":False}
 
     def discover(self, code):
         headers={"User-Agent":"Mozilla/5.0", "Referer":"https://www.cninfo.com.cn/"}

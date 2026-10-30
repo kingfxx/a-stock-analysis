@@ -4,6 +4,37 @@ from stock_analysis.domains.research.reports.company_report_service import Compa
 from stock_analysis.infrastructure.storage import Database
 
 
+@pytest.mark.parametrize('period,title,code,valid', [
+    ('2026-09-30', '2026年第三季度报告', '601919', True),
+    ('2026-09-30', '2026年三季度报告', '601919', True),
+    ('2026-03-31', '2026年第一季度报告', '601919', True),
+    ('2026-09-30', '2026年第一季度报告', '601919', False),
+    ('2026-09-30', '2025年第三季度报告', '601919', False),
+    ('2026-09-30', '2026年第三季度报告', '600900', False),
+    ('2026-09-30', '2026年第三季度报告摘要', '601919', False),
+])
+def test_quarter_report_identity(tmp_path, monkeypatch, period, title, code, valid):
+    import pdfplumber
+    class Page:
+        def extract_text(self): return f'中远海控 {title}\n证券代码：{code}\n' + '公司业务情况 '*100
+    class PDF:
+        pages=[Page()]
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    monkeypatch.setattr(pdfplumber, 'open', lambda path: PDF())
+    db=Database(tmp_path/'identity.sqlite3'); db.initialize()
+    service=CompanyReportService(db)
+    source=tmp_path/'source.pdf'; source.write_bytes(b'%PDF-test-quarter')
+    document=service.import_report('601919',period,source)
+    if valid:
+        parsed=service.parse(document)
+        assert parsed['page_count']==1
+        assert service.resolve(parsed['relative_path']).is_file()
+    else:
+        with pytest.raises(ValueError, match='财报股票或年度不匹配'):
+            service.parse(document)
+
+
 @pytest.mark.parametrize('year,kind,code,summary,valid', [
     ('2025', '年度', '600132', False, True),
     ('2026', '半年度', '600132', False, True),

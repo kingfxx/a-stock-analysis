@@ -20,6 +20,7 @@ TASKS = {
     'stocks': dict(name='个股采集', group='个股', providers=['sina','eastmoney','tencent','baidu','cninfo'], modes=['incremental','full','resume']),
     'shipping_research_import': dict(name='航运既有研究资料导入', group='航运研究', providers=['user_excel'], modes=['incremental'], manual_only=True),
     'shipping_image_review': dict(name='航运月度图片核验导入', group='航运研究', providers=['mot'], modes=['incremental'], manual_only=True),
+    'shipping_route_backfill': dict(name='航运财报航线明细回填', group='航运研究', providers=['company_reports'], modes=['incremental'], manual_only=True, no_file=True),
     'shipping_weekly': dict(name='航运 CCFI / SCFI 周度', group='航运研究', providers=['sse'], modes=['incremental','review']),
     'shipping_monthly': dict(name='航运官方月度指数与吞吐量', group='航运研究', providers=['mot'], modes=['incremental','backfill','review']),
     'market_financial': dict(name='全市场财务四表', group='全市场', providers=['eastmoney'],
@@ -55,14 +56,14 @@ def validate_params(key, params, *, scheduled=False):
         return result
     if not isinstance(params, dict):
         raise ValueError('任务参数须为对象')
-    allowed = {'mode','file'} if spec.get('manual_only') else {'mode', 'target'} if 'action' in spec else {'mode', 'providers', 'start', 'end'} if key == 'indices' else {'mode','start','end'} if key == 'shipping_monthly' else {'mode'}
+    allowed = {'mode'} if spec.get('no_file') else {'mode','file'} if spec.get('manual_only') else {'mode', 'target'} if 'action' in spec else {'mode', 'providers', 'start', 'end'} if key == 'indices' else {'mode','start','end'} if key == 'shipping_monthly' else {'mode'}
     if set(params) - allowed:
         raise ValueError('任务参数不在白名单中')
     params = dict(params)
     mode = params.setdefault('mode', 'incremental')
     if spec.get('manual_only'):
         if scheduled:raise ValueError('本地资料导入不支持定时运行')
-        if not isinstance(params.get('file'),str) or not params['file'].strip() or len(params['file'])>1000:
+        if not spec.get('no_file') and (not isinstance(params.get('file'),str) or not params['file'].strip() or len(params['file'])>1000):
             raise ValueError('请指定本地导入文件')
     if mode not in spec['modes'] or scheduled and mode != 'incremental':
         raise ValueError('模式无效；自动检查仅允许增量')

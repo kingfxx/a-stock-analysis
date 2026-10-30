@@ -71,6 +71,7 @@ class AnnouncementService:
         periods=sorted({self._period(r['period']) for r in reports if r.get('period')})
         if not periods: return self.read(code)
         today=datetime.now(ZoneInfo('Asia/Shanghai')).date(); now=today.isoformat()
+        query_end=(today+timedelta(days=7)).isoformat()
         decade_floor=_ten_year_floor(today)
         floor=min(today,max(date.fromisoformat(start),decade_floor)) if start else min(today,max(date.fromisoformat(periods[0]),decade_floor))
         with self.db.connection() as conn:
@@ -79,9 +80,9 @@ class AnnouncementService:
             identity=conn.execute('SELECT * FROM stock_announcement_identities WHERE instrument_id=?',(instrument['id'],)).fetchone()
             state=conn.execute("SELECT s.checked_at,s.coverage_start,s.coverage_end,r.methodology_version FROM sync_state s LEFT JOIN sync_runs r ON r.id=s.last_success_run_id WHERE s.instrument_id=? AND s.dataset=? AND s.source=? AND s.adjustment='raw'",(instrument['id'],'announcements',sync_source)).fetchone()
             profile_covered=bool(state and state['methodology_version']==f'metadata-only-v1:{profile}:{RULE_VERSION}')
-            existing_periods={row['period'] for row in conn.execute(
-                'SELECT period FROM report_disclosure_dates WHERE instrument_id=? AND is_current=1',
-                (instrument['id'],))}
+            date_rows=conn.execute('SELECT period,status FROM report_disclosure_dates WHERE instrument_id=? AND is_current=1', (instrument['id'],)).fetchall()
+            existing_periods={row['period'] for row in date_rows}
+            pending_periods={row['period'] for row in date_rows if row['status']=='pending'}
             latest_published=None
             if profile_covered:
                 # Only validated source scopes contained in this category set may
@@ -103,8 +104,8 @@ class AnnouncementService:
             floor=min(today,max(date.fromisoformat(start) if start else date.fromisoformat(periods[0]),decade_floor))
         run=self.db.start_sync(SyncKey(instrument['id'],'announcements',sync_source),parser_version=RULE_VERSION,
                                methodology_version=f'metadata-only-v1:{profile}:{RULE_VERSION}',trigger_reason='manual' if refresh else 'automatic',
-                               requested_start=floor.isoformat(),requested_end=now)
-        batch=begin_batch(self.db,f'sync_runs:{run}','stock.announcements','cninfo',floor.isoformat(),now,
+                               requested_start=floor.isoformat(),requested_end=query_end)
+        batch=begin_batch(self.db,f'sync_runs:{run}','stock.announcements','cninfo',floor.isoformat(),query_end,
             scope={'code':code,'sync_run_id':run,'evidence_mode':'metadata_only','reports':periods,
                    'category_codes':[CATEGORY_REGISTRY[x] for x in categories],'category_profile':profile},trigger='manual' if refresh else 'automatic',
             domain='stock',parser_version=RULE_VERSION,definition_version=COLLECTION_DEFINITION_VERSION)
@@ -114,7 +115,7 @@ class AnnouncementService:
                 org_id,source_ids,identity_status=self.sources.identity(batch,'stock.announcements.identity',code)
             else: source_ids=[]; identity_status='matched'
             if not org_id: raise ValueError(f'巨潮股票身份{identity_status}')
-            all_items=self.sources.query_period(batch,'stock.announcements',code,org_id,floor.isoformat(),now,categories=categories)
+            all_items=self.sources.query_period(batch,'stock.announcements',code,org_id,floor.isoformat(),query_end,categories=categories)
             # The complete requested category range passes validation before publication.
             with self.db.connection() as conn:
                 saved=conn.execute("SELECT m.* FROM stock_announcement_metadata m WHERE m.instrument_id=? AND m.id IN (SELECT max(id) FROM stock_announcement_metadata WHERE instrument_id=? GROUP BY announcement_id)",(instrument['id'],instrument['id'])).fetchall()
@@ -145,7 +146,8 @@ class AnnouncementService:
             for report in reports:
                 period=self._period(report['period'])
                 covered=max(floor if audit else coverage_floor,decade_floor).isoformat()<=period<=now
-                if period>now or not (period in changed_periods or covered and (audit or period not in existing_periods)):
+                due_pending=period in pending_periods and any(period in item.get('periods',[]) and item['published_on']<=now for item in merged.values())
+                if period>now or not (period in changed_periods or due_pending or covered and (audit or period not in existing_periods)):
                     continue
                 decision_reports.append({**report,'period':period,
                     '_query_complete':coverage_floor.isoformat()<=period,
@@ -158,7 +160,7 @@ class AnnouncementService:
                 fingerprint=hashlib.sha256(json.dumps(payload,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
                 prepared.append((item,fingerprint))
             coverage_start=min(floor,date.fromisoformat(state['coverage_start'])) if state and state['coverage_start'] else floor
-            coverage_end=max(date.fromisoformat(now),date.fromisoformat(state['coverage_end'])) if state and state['coverage_end'] else date.fromisoformat(now)
+            coverage_end=max(date.fromisoformat(query_end),date.fromisoformat(state['coverage_end'])) if state and state['coverage_end'] else date.fromisoformat(query_end)
             def publish(conn):
                 from stock_analysis.collection.publication_counts import counts, published
                 metadata_counts, date_counts = counts(len(prepared)), counts(len(decisions))

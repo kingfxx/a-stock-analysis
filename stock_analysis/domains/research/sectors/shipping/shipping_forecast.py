@@ -193,7 +193,7 @@ def read_trend(db, *, index='CCFI', frequency='monthly', route='综合', years='
 def business_quarters(conn):
     cumulative = {}
     refs = []
-    for r in conn.execute("SELECT m.*,d.report_period FROM research_shipping_report_metrics m JOIN company_report_documents d ON d.id=m.document_id ORDER BY d.report_period,d.id,m.id"):
+    for r in conn.execute("SELECT m.*,d.report_period FROM research_shipping_report_metrics m JOIN company_report_documents d ON d.id=m.document_id WHERE m.scope IN ('total','domestic') AND m.basis='cumulative' ORDER BY d.report_period,d.id,m.id"):
         r = dict(r)
         cumulative.setdefault(r['report_period'], {})[r['metric']+'_'+r['scope']] = r['value']
         refs.append(r)
@@ -204,7 +204,7 @@ def business_quarters(conn):
         if prev and prev not in cumulative:
             continue
         quarter = {k:v-cumulative[prev][k] if prev and k in cumulative[prev] else v if not prev else None for k,v in values.items()}
-        if any(v is None for v in quarter.values()):
+        if any(quarter.get(k) is None for k in ('rmb_total','rmb_domestic','teu_total','teu_domestic')):
             continue
         if all(k in quarter for k in ('rmb_total','rmb_domestic','teu_total','teu_domestic')):
             quarter['international'] = (quarter['rmb_total']-quarter['rmb_domestic'])/1e5

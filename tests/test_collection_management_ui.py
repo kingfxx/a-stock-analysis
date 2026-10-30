@@ -447,8 +447,13 @@ def test_shipping_one_module_independent_settings_and_monthly_image_fallback(liv
             expect(module).to_have_count(1)
             expect(page.locator('.collection-task[data-task^=shipping_]')).to_have_count(0)
             picker=module.locator('[data-shipping-select]')
-            assert picker.locator('option').evaluate_all('(nodes)=>nodes.map(n=>n.value)')==['shipping_monthly','shipping_weekly','shipping_research_import']
+            assert picker.locator('option').evaluate_all('(nodes)=>nodes.map(n=>n.value)')==['shipping_monthly','shipping_weekly','shipping_research_import','shipping_route_backfill']
             expect(picker).to_have_value('shipping_monthly')
+            picker.select_option('shipping_route_backfill')
+            route_card=module.locator('[data-task=shipping_route_backfill]')
+            expect(route_card).to_be_visible()
+            assert route_card.locator('input[name=file]').count()==0
+            picker.select_option('shipping_monthly')
             monthly=module.locator('[data-task=shipping_monthly]')
             weekly=module.locator('[data-task=shipping_weekly]')
             correction=module.locator('[data-task=shipping_image_review]')

@@ -102,7 +102,18 @@ def run(db,ref):
         return response.text,source
     status='complete'
     try:
-        if key=='shipping_research_import':
+        if key=='shipping_route_backfill':
+            from stock_analysis.domains.research.sectors.shipping.shipping_route_backfill import documents, run_document
+            work=documents(db); total=len(work); progress()
+            for document in work:
+                collector.check_cancelled()
+                try:
+                    count=run_document(db,ref,document)
+                    results.append(dict(period=document['report_period'],document_id=document['id'],published=count,skipped=count==0))
+                except Exception as exc:
+                    errors.append(f"{document['report_period']} #{document['id']}: {exc}")
+                completed+=1; progress()
+        elif key=='shipping_research_import':
             from pathlib import Path
             from stock_analysis.domains.research.sectors.shipping.shipping_import import import_research
             results.append(import_research(db,PROJECT_ROOT,scope['file'],operation_id=ref,cancelled=cancelled))
@@ -120,11 +131,14 @@ def run(db,ref):
                     if checked and scope['mode']=='incremental':
                         results.append(dict(index=index,skipped='今日已核验'));continue
                     html,source=fetch(SSE+index.lower(),'shipping.'+index.lower(),'sse')
-                    points=parse_sse(html,index)
+                    missing_routes=[]
+                    points=parse_sse(html,index,missing_routes=missing_routes)
                     count=publish_rates(db,points,batch,source)
                     parsed_source(db,source,fields=['routes','previous','current','release_dates'])
-                    finish_batch(db,batch,'complete','partial',result=dict(published=count,visible_points=len(points),note='仅当期及上期；全历史覆盖未知'))
-                    results.append(dict(index=index,published=count))
+                    note='仅当期及上期；全历史覆盖未知'
+                    if missing_routes:note+=f'；来源本期未提供 {len(missing_routes)} 条分航线'
+                    finish_batch(db,batch,'complete','partial',result=dict(published=count,visible_points=len(points),missing_routes=missing_routes,note=note))
+                    results.append(dict(index=index,published=count,missing_routes=missing_routes))
                 except (Cancelled,ProviderBlocked):raise
                 except Exception as exc:
                     if source:parsed_source(db,source,error=exc)

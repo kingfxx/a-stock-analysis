@@ -35,6 +35,7 @@
   "shipping-forecast.css": "features/research/sectors/shipping/shipping-forecast.css",
   "shipping-forecast.html": "pages/shipping-forecast.html",
   "shipping-forecast.js": "features/research/sectors/shipping/shipping-forecast.js",
+  "shipping-route-trend.js": "features/research/sectors/shipping/shipping-route-trend.js",
   "stock-cleanup.js": "features/maintenance/stock-cleanup.js",
   "stock-picker.js": "shared/stock-picker.js",
   "vendor/notes/codemirror.css": "vendor/notes/codemirror.css",

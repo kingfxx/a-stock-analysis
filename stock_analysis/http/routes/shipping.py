@@ -13,6 +13,13 @@ from stock_analysis import application as app
 class ShippingRoutes:
 
     def _get_shipping_trend(self, parsed):
+        if parsed.path == '/api/shipping-route-revenues':
+            try:
+                self._ai_host()
+                from stock_analysis.domains.research.sectors.shipping.shipping_route_trend import read_route_revenues
+                self._ai_reply(read_route_revenues(Database(app.settings.DATABASE_PATH)))
+            except (ValueError,StorageError,sqlite3.DatabaseError) as exc:self._ai_reply({'error':str(exc)},400)
+            return True
         if parsed.path == '/api/shipping-trend':
             try:
                 self._ai_host()
@@ -45,7 +52,7 @@ class ShippingRoutes:
         if parsed.path in {"/datetime.js", "/research-layout.css", "/ai-assessment.js", "/ai-assessment.css", "/ai-checklist.js", "/ai-checklist.css", '/business-judgment.js',
                              "/financial-statements.js", "/financial-statements.css", "/business-segments.js", "/business-segments.css", "/business-segment-aliases.js", "/business-segment-names.js", "/industry.js", "/industry.css",
                              "/maintenance.js", "/maintenance.css", "/collection-overview.js", "/collection-progress.js", "/collection-progress.css", "/investment-notes.js", "/investment-notes.css", "/stock-cleanup.js", "/dcf.js", "/dcf.css",
-                             "/dividend-forecast.js", "/dividend-forecast.css", "/shipping-forecast.js", "/shipping-forecast.css"}:
+                             "/dividend-forecast.js", "/dividend-forecast.css", "/shipping-forecast.js", "/shipping-forecast.css", "/shipping-route-trend.js"}:
             body = (asset_path(parsed.path.lstrip("/"))).read_bytes()
             content_type = "text/javascript; charset=utf-8" if parsed.path.endswith(".js") else "text/css; charset=utf-8"
             self._send_body(status, body, content_type)

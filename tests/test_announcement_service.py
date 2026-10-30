@@ -47,6 +47,37 @@ def setup(tmp_path):
     return db,svc,reports
 
 
+def test_forward_window_stores_future_metadata_without_confirming_future_disclosure(tmp_path, monkeypatch):
+    db,svc,_=setup(tmp_path)
+    today=datetime.now(ZoneInfo('Asia/Shanghai')).date()
+    future=today+timedelta(days=1)
+    svc.sources.items=[item('中远海控：2025年第三季度报告',future.isoformat(),ident='future')]
+    svc.sources.items.append(item('中远海控：2025年半年度报告',(today+timedelta(days=8)).isoformat(),ident='outside'))
+    period='2025-09-30'
+    result=svc.update('601919',[{'period':period}],allow_initial=True)
+    assert svc.sources.calls[-1][1]==(today+timedelta(days=7)).isoformat()
+    assert result['dates'][period]['status']=='pending'
+    assert result['dates'][period]['first_published_on'] is None
+    with db.connection() as conn:
+        row=conn.execute("SELECT published_on FROM stock_announcement_metadata WHERE announcement_id='future'").fetchone()
+        run=conn.execute("SELECT requested_end FROM sync_runs WHERE dataset='announcements' ORDER BY id DESC LIMIT 1").fetchone()
+        batch=conn.execute("SELECT scope_end FROM collection_batches WHERE dataset='stock.announcements' ORDER BY id DESC LIMIT 1").fetchone()
+        assert conn.execute("SELECT count(*) FROM stock_announcement_metadata WHERE announcement_id='outside'").fetchone()[0]==0
+    assert row['published_on']==future.isoformat()
+    assert run['requested_end']==batch['scope_end']==(today+timedelta(days=7)).isoformat()
+    import stock_analysis.domains.stocks.announcement_service as service_module
+    import stock_analysis.domains.stocks.disclosure_dates as dates_module
+    class NextDay(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.combine(future, datetime.min.time(), tzinfo=tz)
+    monkeypatch.setattr(service_module,'datetime',NextDay)
+    monkeypatch.setattr(dates_module,'datetime',NextDay)
+    result=svc.update('601919',[{'period':period}],refresh=True)
+    assert result['dates'][period]['status']=='matched_original'
+    assert result['dates'][period]['first_published_on']==future.isoformat()
+
+
 def test_success_uses_complete_original_and_indexes_metadata_source(tmp_path):
     db,svc,reports=setup(tmp_path)
     result=svc.update('601919',reports,allow_initial=True)
@@ -223,7 +254,7 @@ def test_empty_validated_catalog_uses_successful_query_end(tmp_path):
     svc.update('601919',reports,allow_initial=True)
     success_end=svc.sources.calls[-1][1]
     svc.update('601919',reports,refresh=True)
-    assert svc.sources.calls[-1][0]==success_end
+    assert svc.sources.calls[-1][0]==min(success_end,datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat())
     with db.connection() as conn:
         assert conn.execute("SELECT data_watermark FROM sync_state WHERE dataset='announcements'").fetchone()[0] is None
 
@@ -246,4 +277,4 @@ def test_unrelated_cached_category_does_not_advance_tail(tmp_path):
         conn.execute('UPDATE collection_batches SET scope_json=? WHERE id=?',('{"category_codes":["category_yjygjxz_szsh"]}',batch))
     previous_end=svc.sources.calls[-1][1]
     svc.update('601919',reports,refresh=True,categories=['annual'])
-    assert svc.sources.calls[-1][0]==previous_end
+    assert svc.sources.calls[-1][0]==min(previous_end,datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat())

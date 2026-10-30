@@ -37,6 +37,28 @@ def test_real_free_weekly_shape():
     assert len({p['period_start'] for p in ccfi})==2
 
 
+def test_weekly_missing_current_routes_preserve_only_published_values():
+    from bs4 import BeautifulSoup
+    soup=BeautifulSoup((FIX/'ccfi.html').read_text(encoding='utf8'),'html.parser')
+    rows=[tr for tr in soup.find_all('tr') if '日本航线' in tr.get_text()]
+    cols=rows[0].find_all(['td','th'],recursive=False)
+    cols[-2].string='';cols[-1].string=''
+    missing=[]
+    points=parse_sse(str(soup),'CCFI',missing_routes=missing)
+    assert len(missing)==1 and missing[0].startswith('日本航线')
+    japan=[p for p in points if p['route'].startswith(missing[0])]
+    assert len(japan)==1 and japan[0]['period_end']==min(p['period_end'] for p in points)
+    assert len([p for p in points if p['route']=='综合'])==2
+    cols[-2].string='invalid'
+    with pytest.raises(ValueError):parse_sse(str(soup),'CCFI')
+    cols[-2].string=''
+    for tr in soup.find_all('tr'):
+        if '综合指数' in tr.get_text():
+            tr.find_all(['td','th'],recursive=False)[-2].string=''
+            break
+    with pytest.raises(ValueError):parse_sse(str(soup),'CCFI')
+
+
 def test_month_statistics_and_route_identity():
     points=parse_mot((FIX/'month.html').read_text(encoding='utf8'),'2024-01')
     assert len(points)==39
@@ -286,6 +308,32 @@ def test_weekly_managed_incremental_and_refusal_stops_shared_source(db,monkeypat
     def blocked(*a,**k):sent.append('blocked');raise ProviderBlocked('拒绝后冷却')
     monkeypatch.setattr(Collector,'get',blocked)
     assert run('review')['status']=='failed' and sent.count('blocked')==1
+
+
+def test_weekly_partial_route_coverage_is_recorded(db,monkeypatch):
+    from bs4 import BeautifulSoup
+    soup=BeautifulSoup((FIX/'ccfi.html').read_text(encoding='utf8'),'html.parser')
+    for tr in soup.find_all('tr'):
+        if '日本航线' in tr.get_text():
+            cols=tr.find_all(['td','th'],recursive=False);cols[-2].string='';cols[-1].string=''
+    class Collector:
+        def __init__(self,db,**kwargs):self.db=db
+        def check_cancelled(self):pass
+        def report(self):return {}
+        def get(self,batch,provider,dataset,url,**kwargs):
+            html=str(soup) if dataset=='shipping.ccfi' else (FIX/'scfi.html').read_text(encoding='utf8')
+            source=archive_source(self.db,batch,provider,dataset,dict(url=url),1,raw=html.encode())
+            return type('Response',(),dict(text=html))(),source
+    monkeypatch.setattr(shipping_collection,'RequestCollector',Collector)
+    with db.connection(write=True) as c:ref=shipping_collection.reserve(c,'shipping_weekly',dict(mode='review'))
+    result=shipping_collection.run(db,ref)
+    assert result['status']=='complete' and result['results'][0]['missing_routes']==['日本航线']
+    with db.connection() as c:
+        batch=c.execute("select * from collection_batches where operation_id=? and dataset='shipping.ccfi'",(ref,)).fetchone()
+        assert batch['coverage_status']=='partial' and json.loads(batch['result_json'])['missing_routes']==['日本航线']
+        assert c.execute("select count(*) from research_shipping_rate_points where route like '日本%' ").fetchone()[0]==1
+    task=next(t for t in CollectionManagement(db,None,None).read()['tasks'] if t['task_key']=='shipping_weekly')
+    assert task['history'][0]['result']['channels'][0]['missing_routes']==['日本航线']
 
 
 def test_cancel_before_source_keeps_no_facts(db):

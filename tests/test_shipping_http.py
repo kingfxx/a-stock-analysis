@@ -8,6 +8,72 @@ from stock_analysis.domains.research.sectors.shipping import shipping_forecast a
 from stock_analysis.collection.collection import begin_batch,archive_source
 
 
+def test_trend_connects_quality_transitions_without_crossing_missing_weeks(live,monkeypatch):
+    base,db,state,web=live;seed(db,monkeypatch)
+    from playwright.sync_api import sync_playwright
+    payload=requests.get(base+'/api/shipping-trend?index=CCFI&frequency=weekly&quality=preferred&profit=none',timeout=5).json()
+    template=payload['points'][0]
+    payload['points']=[dict(template,date=d,period_start=d,period_end=d,value=v,quality=q) for d,v,q in [
+        ('2026-09-24',1918,'calendar_inferred'),('2026-09-30',1923,'calendar_inferred_flagged'),
+        ('2026-10-09',1912,'calendar_inferred_flagged'),('2026-10-16',1922.64,'official'),
+        ('2026-10-30',1881.82,'official')]]
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page();page.route('**/api/shipping-trend?**',lambda route:route.fulfill(json=payload))
+            page.goto(base+'/?code=601919&tab=shipping-forecast&view=trend')
+            page.wait_for_function("document.getElementById('trend-chart').data?.length===3")
+            traces=page.locator('#trend-chart').evaluate('e=>e.data.map(t=>({name:t.name,x:t.x,y:t.y,size:t.marker.size}))')
+            flagged=next(t for t in traces if 'flagged' in t['name']);official=next(t for t in traces if '官方' in t['name'])
+            assert flagged['y'][:3]==[1918,1923,1912] and flagged['size'][0]==0
+            assert official['y'][2:4]==[1912,1922.64] and official['size'][2]==0
+            assert official['y'][4] is None and official['y'][5]==1881.82
+        finally:browser.close()
+
+
+def test_route_revenue_chart_basis_and_route_controls(live,monkeypatch):
+    base,db,state,web=live;seed(db,monkeypatch)
+    from playwright.sync_api import sync_playwright,expect
+    fixture={'routes':[{'scope':'transpacific','name':'跨太平洋'},{'scope':'domestic','name':'中国大陆'}],
+             'series':{'quarter':[{'label':'2025Q1','scope':'transpacific','value':10,'yoy':None},
+                                  {'label':'2026Q1','scope':'transpacific','value':15,'yoy':50},
+                                  {'label':'2026Q1','scope':'domestic','value':5,'yoy':-20}],
+                       'ytd':[{'label':'2026Q2','scope':'transpacific','value':40,'yoy':25}],
+                       'annual':[{'label':'2025','scope':'transpacific','value':80,'yoy':None}]}}
+    fixture['metrics']={'revenue':{'series':fixture['series'],'unit':'亿元'},
+        'volume':{'series':{'quarter':[{'label':'2026Q1','scope':'transpacific','value':25,'yoy':5}],'ytd':[],'annual':[]},'unit':'万TEU'},
+        'unit_revenue':{'series':{'quarter':[{'label':'2026Q1','scope':'transpacific','value':1500,'yoy':10}],'ytd':[],'annual':[]},'unit':'美元/TEU'}}
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            for width in (1440,390):
+                page=browser.new_page(viewport={'width':width,'height':900}); errors=[]
+                page.on('pageerror',lambda error:errors.append(str(error)))
+                page.route('**/api/shipping-route-revenues',lambda route:route.fulfill(json=fixture))
+                page.goto(base+'/?code=601919&tab=shipping-forecast&view=trend')
+                page.wait_for_function("document.getElementById('route-revenue-chart').data?.length===2")
+                chart=page.locator('#route-revenue-chart')
+                assert chart.evaluate("e=>e.data[0].text.includes('+50.0%') && e.layout.hovermode==='x unified'")
+                expect(page.locator('#route-revenue-table')).to_contain_text('+50.00%')
+                page.locator('[data-route-metric=volume]').click()
+                page.wait_for_function("document.getElementById('route-revenue-chart').layout?.yaxis.title.text==='箱量（万TEU）'")
+                expect(page.locator('[data-route-metric=volume]')).to_have_attribute('aria-pressed','true')
+                page.locator('[data-route-metric=unit_revenue]').click()
+                page.wait_for_function("document.getElementById('route-revenue-chart').layout?.yaxis.title.text==='单箱收入（美元/TEU）'")
+                assert chart.evaluate("e=>e.data[0].y[0]===1500")
+                page.locator('[data-route-metric=revenue]').click()
+                page.select_option('#route-revenue-basis','annual')
+                page.wait_for_function("document.getElementById('route-revenue-chart').data?.[0].x[0]==='2025'")
+                page.locator('#route-revenue-filter input[value=domestic]').uncheck()
+                page.wait_for_function("document.getElementById('route-revenue-chart').data?.length===1")
+                page.select_option('#route-revenue-basis','ytd')
+                page.wait_for_function("document.getElementById('route-revenue-chart').data?.[0].y[0]===40")
+                expect(page.locator('#route-revenue-status')).to_contain_text('同比')
+                assert not errors
+                page.close()
+        finally:browser.close()
+
+
 def seed(db,monkeypatch):
     b=begin_batch(db,'browser-fixture','shipping.fixture','user_excel',domain='research_shipping')
     source=archive_source(db,b,'user_excel','shipping.fixture',dict(transport='fixture'),1,raw=b'isolated fixture')
@@ -66,6 +132,7 @@ def test_http_read_only_auth_and_saved_snapshot(live,monkeypatch):
     assert three['context']['weekly_window']['start']=='2026-06-10'
     assert three['defaults']['base']['rate']==three['context']['weekly_window']['value']
     trend=s.get(base+'/api/shipping-trend?index=CCFI&frequency=monthly&quality=preferred&profit=quarter',timeout=5)
+    assert s.get(base+'/api/shipping-route-revenues',timeout=5).json()['series']['quarter']==[]
     assert trend.ok
     data=trend.json()
     assert data['statistic']=='monthly_mean' and len(data['points'])==46

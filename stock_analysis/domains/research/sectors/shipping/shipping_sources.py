@@ -18,7 +18,7 @@ def cells(row):
     return [c.get_text(' ', strip=True) for c in row.find_all(['td', 'th'], recursive=False)]
 
 
-def parse_sse(html, index):
+def parse_sse(html, index, *, missing_routes=None):
     soup = BeautifulSoup(html, 'html.parser')
     for table in soup.find_all('table'):
         text = table.get_text(' ', strip=True)
@@ -38,6 +38,13 @@ def parse_sse(html, index):
             if a is None and b is None:
                 continue
             route = '综合' if '综合指数' in row[0] else re.sub(r'[A-Za-z].*', '', row[0]).strip()
+            if route and route != '综合' and a is not None and a > 0 and not row[-2].strip() and not row[-1].strip():
+                if missing_routes is not None:
+                    missing_routes.append(route.rstrip(' (（'))
+                points.append(dict(index_name=index, frequency='weekly', route=route, statistic='release',
+                    period_start=previous, period_end=previous, value=a, unit='点' if index == 'CCFI' else row[1],
+                    change_value=None, change_kind=None, published_on=previous, quality='official', channel='sse'))
+                continue
             if not route or a is None or b is None or a <= 0 or b <= 0:
                 raise ValueError('周度航线不完整或指数非正')
             kind = 'percent' if index == 'CCFI' else 'points'
@@ -49,7 +56,7 @@ def parse_sse(html, index):
                     period_start=day, period_end=day, value=value, unit='点' if index == 'CCFI' or route == '综合' else row[1],
                     change_value=change if day == current else None, change_kind=kind if day == current else None,
                     published_on=day, quality='official', channel='sse'))
-        if not any(p['route'] == '综合' for p in points):
+        if not any(p['route'] == '综合' and p['period_end'] == current for p in points):
             raise ValueError('周度缺综合指数')
         return points
     raise ValueError('未找到带真实日期的周度指数表')

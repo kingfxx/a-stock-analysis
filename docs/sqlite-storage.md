@@ -546,6 +546,8 @@ python -m stock_analysis.infrastructure.storage check --database $restorePath
 
 `research_shipping_report_metrics`：正式document/parse、指标、集团范围、累计口径、单位/币种、证据页及提取版本；单季差分和单箱收入读取时计算。`research_shipping_industry_metrics`：港口吞吐量、指标期、报告月、披露日、单位、同比与来源修订；scope分别保留全国/沿海/内河及原文规模以上/主要限定，basis区分monthly当月、ytd年初累计、annual全年，period为统计区间终月，不将累计量冒充当月值；现有行业表无适用港口统计口径，单设此表，不混入运价或公司财务。
 
+v46新增只读视图 `research_shipping_report_metrics_readable`，关联股票、报告期、公告日、PDF路径与哈希、解析版本，并对指标和航线名称提供中文映射；保留各原始版本，不能将视图行数直接视为无修订的报告期覆盖。`scope` 除 total/domestic 外支持 transpacific、asia_europe、intra_asia、other_international；四条集团航线保留teu、rmb、usd年初累计事实，提取版本 `ccfi-routes-v1` 和行所在证据页。单季值需相邻累计期差分，缺期留空。
+
 `research_shipping_forecast_versions`：601919专用目标季度、名称、模型和输入hash、紧凑输入引用/参数/结果快照；禁止UPDATE，保存新版本而非覆盖历史。四表均为「行业研究」，维护时间来自真实created_at；空表/空时间不以报告期或观察日补齐，显示未记录。业务表无完整源库副本，PDF/解析复用正式存储，原文归档与来源预算复用公共表。细节见[航运预测](shipping-forecast.md)。
 
 
