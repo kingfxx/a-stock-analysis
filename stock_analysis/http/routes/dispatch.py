@@ -7,6 +7,8 @@ from stock_analysis.http.routes.commands import command_post
 
 def get(self):
     parsed = urlparse(self.path)
+    if self._get_source_archive(parsed):
+        return
     if self._get_stock_collection(parsed):
         return
     if self._get_shipping_trend(parsed):
@@ -83,6 +85,8 @@ def get(self):
 
 def post(self):
     path = urlparse(self.path).path
+    if self._post_source_archive(path):
+        return
     if self._post_shipping_forecast_save(path):
         return
     if self._post_notes(path):

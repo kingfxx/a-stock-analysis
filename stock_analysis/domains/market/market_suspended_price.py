@@ -273,14 +273,15 @@ def publish_reference(db,*,rehearsal=False):
         save(REPORT/('rehearsal.json' if rehearsal else 'publication.json'),result);raise
 
 def rehearse(db):
-    import shutil,tempfile
+    import tempfile
     manifest=load(RUN/'manifest.json')
     ids=[manifest['financial_input_source_id'],*[sid for meta in [*manifest['sdk'].values(),*manifest['base_sdk'].values()] for sid in meta['sources']]]
     with tempfile.TemporaryDirectory(prefix='sp-',dir=ROOT/'data/verification') as tmp:
         path=Path(tmp)/'isolated.sqlite3';db.backup(path)
         for sid in ids:
             _,meta=read_source(db,sid);relative=Path(meta['file_path']);target=path.parent/relative;target.parent.mkdir(parents=True,exist_ok=True)
-            shutil.copyfile(db.path.parent/relative,target)
+            from stock_analysis.collection.source_archive_read import read_stored_source
+            target.write_bytes(read_stored_source(db,meta))
         isolated=Database(path,busy_timeout_ms=60000);isolated.initialize()
         first=publish_reference(isolated,rehearsal=True);second=publish_reference(isolated,rehearsal=True)
         if any(r['inserted'] or r['revised'] for r in second['periods']):raise ValueError('停牌发布重跑不幂等')

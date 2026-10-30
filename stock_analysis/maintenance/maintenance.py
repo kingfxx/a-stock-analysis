@@ -59,6 +59,7 @@ DESCRIPTIONS={
  'index_price_observations':('指数数据','指数OHLC及交易字段，每序列日期一行；字段来源、同行估算标记/依赖和真实取得/写入时间，修订仅计数'),
  'collection_batches':('运行与配置','公共真实数据分段、排队/领取/复用、父运行与业务同步引用、范围和独立覆盖判定'),
  'collection_sources':('运行与配置','公共逐次请求来源；归档保留双哈希，个股及拥挤度日更按授权仅登记 metadata-only 请求结果'),
+ 'collection_source_archive_members':('运行与配置','公共响应文件与月度归档包成员的映射及校验信息'),
  'collection_provider_state':('运行与配置','公共来源共享请求预算、拒绝原因及跨任务冷却截止时间'),
  'market_trade_snapshot':('行业数据','全市场交易日快照：东财原值、历史合成及经停牌和股本校验的参考价估值；含价格、股本、市值及估值，当前仅季末'),
  'market_cap_latest':('行业数据','东财、经验证停牌参考价、普通历史合成及旧同日市值依次读取的逻辑视图'),
@@ -127,7 +128,7 @@ DESCRIPTIONS={
  'stock_unfollowed_groups':('运行与配置','取消关注前的分组归属及顺序，用于恢复关注'),
  'stock_cleanup_runs':('运行与配置','未关注股票清理的提交记录、范围、备份及结果；用于中断恢复'),
 }
-TIME_COLUMNS=('updated_at','obtained_at','checked_at','completed_at','finished_at','started_at','validated_at',
+TIME_COLUMNS=('updated_at','obtained_at','archived_at','checked_at','completed_at','finished_at','started_at','validated_at',
               'captured_at','imported_at','applied_at','viewed_at','created_at','unfollowed_at')
 PARENT_TIMES={
  'business_segment_items':('business_segment_versions','version_id','id','obtained_at'),

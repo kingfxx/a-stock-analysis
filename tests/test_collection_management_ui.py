@@ -12,6 +12,7 @@ import requests
 from stock_analysis.collection.collection_management import CollectionManagement, TASKS
 from stock_analysis.maintenance.database_restore import RequestGate, RestoreManager
 from stock_analysis.infrastructure.storage import Database
+from stock_analysis.collection.source_archive_service import SourceArchiveService
 
 
 def refresh_collections(page):
@@ -58,7 +59,7 @@ def live(tmp_path,monkeypatch):
         try:web=ThreadingHTTPServer(('127.0.0.1',port),Handler);break
         except OSError:continue
     else:raise RuntimeError('No free isolated port')
-    web.request_gate=RequestGate();web.restore_manager=RestoreManager(db)
+    web.request_gate=RequestGate();web.restore_manager=RestoreManager(db);web.source_archive=SourceArchiveService(db,web.request_gate)
     worker=Thread(target=web.serve_forever,daemon=True);worker.start()
     try:yield f'http://127.0.0.1:{web.server_port}',db,state,web
     finally:web.shutdown();web.server_close();worker.join()
@@ -83,6 +84,61 @@ def test_http_whitelist_shared_state_and_maintenance_gate(live):
     assert result.ok
 
 
+def test_archive_tab_preview_and_schedule(live):
+    from playwright.sync_api import sync_playwright, expect
+    base, db, state, web = live
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel='msedge', headless=True)
+        try:
+            page = browser.new_page()
+            page.goto(base + '/harness')
+            page.locator('#maintenance-archive-tab').click()
+            expect(page.locator('#maintenance-archive-panel')).to_be_visible()
+            expect(page.locator('#archive-enabled')).not_to_be_checked()
+            page.locator('#archive-cutoff').fill('2020-01')
+            page.locator('#archive-preview').click()
+            expect(page.locator('#archive-preview-result')).to_contain_text('没有待归档文件')
+            expect(page.locator('#archive-run')).to_be_enabled()
+            page.locator('#archive-day').fill('15')
+            page.locator('#archive-save').click()
+            expect(page.locator('#archive-status')).to_have_text('计划已保存')
+            with db.connection() as conn:
+                row = conn.execute("SELECT enabled,rule_json FROM collection_schedules WHERE schedule_id='source_archive'").fetchone()
+                assert not row['enabled'] and json.loads(row['rule_json'])['day'] == 15
+                assert conn.execute("SELECT count(*) FROM collection_schedule_slots WHERE schedule_id='source_archive'").fetchone()[0] == 0
+        finally:
+            browser.close()
+
+
+def test_archive_tab_run_archives_real_isolated_response(live):
+    from playwright.sync_api import sync_playwright, expect
+    from stock_analysis.collection.collection import archive_source, begin_batch, read_source
+    base, db, state, web = live
+    batch = begin_batch(db, 'test', 'rate', 'eastmoney')
+    sid = archive_source(db, batch, 'eastmoney', 'rate', {'page': 1}, 1,
+                         raw=b'test-response', obtained_at='2020-01-01T00:00:00+00:00')
+    with db.connection() as conn:
+        original = db.path.parent / conn.execute('SELECT file_path FROM collection_sources WHERE id=?',(sid,)).fetchone()[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel='msedge', headless=True)
+        try:
+            page = browser.new_page()
+            page.on('dialog', lambda dialog: dialog.accept())
+            page.goto(base + '/harness')
+            page.locator('#maintenance-archive-tab').click()
+            page.locator('#archive-cutoff').fill('2020-01')
+            page.locator('#archive-preview').click()
+            expect(page.locator('#archive-preview-result')).to_contain_text('1 个文件')
+            page.locator('#archive-run').click()
+            expect(page.locator('#archive-history')).to_contain_text('移除散文件 1 个', timeout=15000)
+            assert not original.exists()
+            assert read_source(db, sid)[0] == b'test-response'
+            page.locator('#archive-source-id').fill(str(sid))
+            page.locator('#archive-restore').click()
+            expect(page.locator('#archive-status')).to_contain_text('已恢复')
+            assert original.exists() and read_source(db, sid)[0] == b'test-response'
+        finally:
+            browser.close()
 def test_browser_rate_templates_custom_save_polling_and_guards(live):
     from playwright.sync_api import sync_playwright, expect
     base, db, state, web = live
@@ -156,7 +212,7 @@ def test_browser_default_lazy_scans_events_polling_and_keyboard(live):
             page=browser.new_page(timezone_id='America/Los_Angeles');errors=[]
             page.on('pageerror',lambda error:errors.append(str(error)))
             page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-3)
-            assert page.locator('.maintenance-tabs [role=tab]').all_text_contents()==['采集管理','数据库预览','未关注股票管理']
+            assert page.locator('.maintenance-tabs [role=tab]').all_text_contents()==['采集管理','数据库预览','未关注股票管理','响应归档']
             expect(page.locator('#maintenance-collection-tab')).to_have_attribute('aria-selected','true')
             assert state['storage']==0
             page.locator('[data-task="indices"] > details').nth(1).locator('summary').first.click()

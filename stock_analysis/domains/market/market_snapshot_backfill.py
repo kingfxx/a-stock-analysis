@@ -333,7 +333,6 @@ def publish_cache(db,folder=RUN,*,rehearsal=False):
         raise
 
 def rehearse(db,folder=RUN):
-    import shutil
     import tempfile
     with tempfile.TemporaryDirectory(prefix='sr-',dir=ROOT/'data/verification') as tmp:
         path=Path(tmp)/'rehearsal.sqlite3';db.backup(path)
@@ -343,7 +342,8 @@ def rehearse(db,folder=RUN):
             _,source=read_source(db,sid)
             relative=Path(source['file_path']);destination=path.parent/relative
             destination.parent.mkdir(parents=True,exist_ok=True)
-            shutil.copyfile(db.path.parent/relative,destination)
+            from stock_analysis.collection.source_archive_read import read_stored_source
+            destination.write_bytes(read_stored_source(db,source))
         isolated=Database(path,busy_timeout_ms=60000)
         first=publish_cache(isolated,folder,rehearsal=True)
         second=publish_cache(isolated,folder,rehearsal=True)

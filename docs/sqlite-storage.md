@@ -1,5 +1,7 @@
 # SQLite 存储、数据更新与备份
 
+v47 在源码中新增 `collection_source_archive_members`，以原文件相对路径为唯一键记录归档包、成员、哈希、大小及实际归档时间；维护统计分类为运行与配置，时间依据为 `archived_at`。归档使用已有计划与槽位表；原来源记录和双哈希不变。使用及备份边界见[公共响应归档](source-response-archive.md)，部署和验收状态见[计划进度](plans/20261030_公共响应按月归档/PROGRESS.md)。SQLite 备份仍不包含来源文件。
+
 当前结构版本为v44，部署与验收状态见[当前计划进度](plans/20261025_统一采集管理/PROGRESS.md)。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
 
 v37仅扩展既有`index_price_observations`，新增volume、amount、change_points、change_pct、turnover_rate、amount_ratio、constituent_count、mean_price、float_market_cap和mean_float_market_cap十个可空字段，另增field_lineage_json字段级来源/估算JSON，不新增业务表。中证/申万原series及行情行就地升级v2，保留ID及OHLC，不保留v1行情副本；Legu/Sina继续v1。每个series_id/observation_date物理唯一，历史修订就地更新，version只作计数；不建立独立derived行情。估算字段标记及父依赖同行存储，官方值优先；仅补算保留原source/batch/obtained_at，computed_at在估算JSON中，updated_at是真实写入时间；缺依赖保持NULL或撤回。单位、字段映射、缺值和派生估算规则见[指数行情字段映射](index-data-collection.md#field-mapping)。v38后逻辑来源/时间语义保持，物理来源/时间格式见下节。

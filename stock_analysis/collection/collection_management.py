@@ -482,13 +482,16 @@ class CollectionManagement:
 
 
 class Scheduler:
-    def __init__(self, management, *, gate=None):
+    def __init__(self, management, *, gate=None, archive=None):
         self.management, self.gate = management, gate
+        self.archive = archive
         self.stop_event = Event()
         self.thread = Thread(target=self._loop, daemon=True, name='collection-scheduler')
 
     def start(self):
         self.management.recover()
+        if self.archive:
+            self.archive.recover()
         self.thread.start()
 
     def _loop(self):
@@ -498,6 +501,11 @@ class Scheduler:
                 if admitted:
                     try:
                         if not self.stop_event.is_set():
+                            if self.archive:
+                                try:
+                                    self.archive.tick()
+                                except (ValueError, OSError, sqlite3.DatabaseError) as exc:
+                                    print('响应归档检查：' + str(exc), flush=True)
                             self.management.tick(stopped=self.stop_event.is_set)
                     finally:
                         if self.gate:
@@ -516,6 +524,8 @@ class Scheduler:
         self.thread.join(timeout=90)
         if self.thread.is_alive():
             raise RuntimeError('统一采集尚未停止，不能关闭数据库')
+        if self.archive:
+            self.archive.close()
         if self.management.stocks:
             import time
             deadline = time.monotonic() + 60

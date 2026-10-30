@@ -14,6 +14,45 @@ from stock_analysis import application as app
 
 class MaintenanceRoutes:
 
+    def _get_source_archive(self, parsed):
+        if parsed.path != '/api/maintenance/source-archive':
+            return False
+        try:
+            self._ai_host()
+            query = parse_qs(parsed.query)
+            data = self.server.source_archive.state()
+            if 'cutoff' in query:
+                data['preview'] = self.server.source_archive.preview(query['cutoff'][0])
+            data['session_token'] = app.LOCAL_SESSION_TOKEN
+            self._ai_reply(data)
+        except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
+            self._ai_reply({'error': str(exc)}, 400)
+        return True
+
+    def _post_source_archive(self, path):
+        if path not in {'/api/maintenance/source-archive/run', '/api/maintenance/source-archive/schedule', '/api/maintenance/source-archive/restore'}:
+            return False
+        try:
+            self._maintenance_auth()
+            size = int(self.headers.get('Content-Length','0'))
+            if self.headers.get_content_type() != 'application/json' or not 0 < size <= 8192:
+                raise ValueError('请求格式无效')
+            command = json.loads(self.rfile.read(size).decode('utf-8'))
+            if path.endswith('/schedule'):
+                data = self.server.source_archive.configure(command)
+            elif path.endswith('/restore'):
+                if not isinstance(command,dict) or set(command) != {'source_id'}:
+                    raise ValueError('恢复参数无效')
+                data = self.server.source_archive.restore(command['source_id'])
+            else:
+                if not isinstance(command,dict) or set(command) != {'cutoff','token'}:
+                    raise ValueError('归档范围无效')
+                data = self.server.source_archive.start(command['cutoff'],command['token'])
+            self._ai_reply(data)
+        except (ValueError,TypeError,UnicodeError,OSError,RuntimeError,StorageError,sqlite3.DatabaseError) as exc:
+            self._ai_reply({'error':str(exc)},400)
+        return True
+
     def _cleanup_service(self):
             with app._SERVICE_LOCK:
                 if not hasattr(self.server, 'stock_cleanup'):

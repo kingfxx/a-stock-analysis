@@ -13,6 +13,7 @@ from time import perf_counter
 from stock_analysis.domains.market.bond_yields import DATASET, FIELDS, _hash, parse_page
 from stock_analysis.maintenance.maintenance import MaintenanceService
 from stock_analysis.infrastructure.storage import DEFAULT_DATABASE, Database
+from stock_analysis.collection.source_archive_read import read_stored_source
 
 
 def _measure(call, repetitions=5):
@@ -56,7 +57,6 @@ def audit(database=DEFAULT_DATABASE, *, verify_files=True):
         plan=[tuple(row) for row in conn.execute("EXPLAIN QUERY PLAN SELECT observation_date FROM sovereign_yield_observations "
             "WHERE is_latest=1 AND observation_date BETWEEN '2020-01-01' AND '2026-12-31' ORDER BY observation_date")]
     source_checks=[];parsed_by_source={};batch_pages={}
-    root=db.path.parent.resolve()
     for item in source_rows:
         try:scope=json.loads(item['scope_json'] or '{}')
         except (TypeError,ValueError):scope={}
@@ -65,9 +65,7 @@ def audit(database=DEFAULT_DATABASE, *, verify_files=True):
                'stored_sha256_verified':False,'parsed_rows':0}
         try:
             if not verify_files:raise RuntimeError('hash verification skipped')
-            path=(root/item['file_path']).resolve()
-            if not path.is_relative_to((root/'collection_sources').resolve()):raise ValueError('路径越界')
-            stored=path.read_bytes()
+            stored=read_stored_source(db,item)
             entry['stored_sha256_verified']=hashlib.sha256(stored).hexdigest()==item['stored_sha256']
             raw=gzip.decompress(stored)
             entry['raw_sha256_verified']=hashlib.sha256(raw).hexdigest()==item['raw_sha256']

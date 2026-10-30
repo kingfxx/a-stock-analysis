@@ -4,6 +4,7 @@ import json
 from stock_analysis.infrastructure.storage import Database, instance_lock
 from stock_analysis.maintenance.database_restore import RestoreManager, RequestGate
 from stock_analysis.collection.collection_management import Scheduler
+from stock_analysis.collection.source_archive_service import SourceArchiveService
 
 
 def run_server(port, open_browser, *, database_path, handler, server_factory,
@@ -20,7 +21,8 @@ def run_server(port, open_browser, *, database_path, handler, server_factory,
             scheduler = None
             try:
                 initialize(db, skip_legacy=reloaded)
-                scheduler = Scheduler(management_factory(db), gate=server.request_gate)
+                server.source_archive = SourceArchiveService(db, server.request_gate)
+                scheduler = Scheduler(management_factory(db), gate=server.request_gate, archive=server.source_archive)
                 scheduler.start()
                 print(f'季度分析页面：http://127.0.0.1:{port}/', flush=True)
                 if open_browser and not reloaded:

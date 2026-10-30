@@ -8,7 +8,8 @@
   window.initMaintenance=()=>{
     const panel=document.getElementById('maintenance-panel');
     panel.innerHTML=`<div class="maintenance-head"><div><h2>后台维护</h2><p>本地数据与股票维护</p></div><button id="maintenance-refresh" type="button" hidden>刷新本地统计</button></div>
-      <div class="maintenance-tabs" role="tablist" aria-label="后台维护分类"><button id="maintenance-collection-tab" type="button" role="tab" aria-selected="true" aria-controls="maintenance-collection-panel">采集管理</button><button id="maintenance-database-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-database-panel" tabindex="-1">数据库预览</button><button id="maintenance-stocks-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-stocks-panel" tabindex="-1">未关注股票管理</button></div>
+      <div class="maintenance-tabs" role="tablist" aria-label="后台维护分类"><button id="maintenance-collection-tab" type="button" role="tab" aria-selected="true" aria-controls="maintenance-collection-panel">采集管理</button><button id="maintenance-database-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-database-panel" tabindex="-1">数据库预览</button><button id="maintenance-stocks-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-stocks-panel" tabindex="-1">未关注股票管理</button><button id="maintenance-archive-tab" type="button" role="tab" aria-selected="false" aria-controls="maintenance-archive-panel" tabindex="-1">响应归档</button></div>
+      <section id="maintenance-archive-panel" role="tabpanel" aria-labelledby="maintenance-archive-tab" hidden><div class="panel"><h3>公共响应按月归档</h3><p>合并已结束月份的来源响应文件，保留原文和校验信息。SQLite 备份不包含归档包，请同时备份来源目录。</p><label>截止月份 <input id="archive-cutoff" type="month"></label> <button id="archive-preview" type="button">预览</button> <button id="archive-run" type="button" disabled>执行归档</button><pre id="archive-preview-result"></pre><h3>计划归档</h3><p>按北京时间每月运行；当月日期不足时在月末执行。停机漏跑在启动后合并处理一次。</p><label><input id="archive-enabled" type="checkbox"> 启用计划</label> <label>每月日期 <input id="archive-day" type="number" min="1" max="31" value="1"></label> <label>时间 <input id="archive-time" type="time" value="02:00"></label> <button id="archive-save" type="button">保存计划</button><h3>恢复单个来源文件</h3><p>填写来源记录 ID，将文件恢复到原路径并校验哈希；下次归档仍可能重新收纳。</p><label>来源 ID <input id="archive-source-id" type="number" min="1" step="1"></label> <button id="archive-restore" type="button">恢复文件</button><p id="archive-status" role="status" aria-live="polite"></p><h3>最近执行</h3><pre id="archive-history"></pre><h3>归档包</h3><pre id="archive-packages"></pre></div></section>
       <section id="maintenance-collection-panel" role="tabpanel" aria-labelledby="maintenance-collection-tab"><p id="maintenance-collection-status" role="status" aria-live="polite">切换到此页后读取本地采集状态。</p><div class="collection-view-tabs" role="tablist" aria-label="采集管理视图"><button id="collection-settings-tab" type="button" role="tab" aria-selected="true" aria-controls="collection-settings-panel">个体设定 / 运行</button><button id="collection-overview-tab" type="button" role="tab" aria-selected="false" aria-controls="collection-overview-panel" tabindex="-1">计划概览</button></div><div id="collection-settings-panel" role="tabpanel" aria-labelledby="collection-settings-tab"><div id="maintenance-collection-list"></div></div><div id="collection-overview-panel" role="tabpanel" aria-labelledby="collection-overview-tab" hidden></div></section>
       <section id="maintenance-stocks-panel" role="tabpanel" aria-labelledby="maintenance-stocks-tab" hidden>
       <section class="panel maintenance-unfollowed"><div class="maintenance-controls"><h3>已取消关注 <span id="maintenance-unfollowed-count"></span></h3><button id="maintenance-unfollowed-refresh" type="button">刷新列表</button></div>
@@ -520,17 +521,43 @@
     const collectionVisibility=()=>{clearTimeout(collectionTimer);if(collectionVisible())loadCollections();};
     new MutationObserver(collectionVisibility).observe(panel,{attributes:true,attributeFilter:['hidden'],subtree:true});
     document.addEventListener('visibilitychange',collectionVisibility);
-    const tabs=[el('maintenance-collection-tab'),el('maintenance-database-tab'),el('maintenance-stocks-tab')];
+    let archiveToken='',archivePreview='',archivePreviewToken='',archiveTimer,archiveScheduleLoaded=false;
+    async function archiveLoad(showPreview=false){
+      try{
+        const cutoff=el('archive-cutoff').value;
+        const response=await fetch('/api/maintenance/source-archive'+(showPreview?'?'+new URLSearchParams({cutoff}):''),{cache:'no-store'}),data=await response.json();
+        if(!response.ok)throw Error(data.error||'读取失败');
+        archiveToken=data.session_token;
+        if(!cutoff&&!el('archive-cutoff').value)el('archive-cutoff').value=data.default_cutoff;
+        if(!archiveScheduleLoaded){el('archive-enabled').checked=data.schedule.enabled;el('archive-day').value=data.schedule.rule.day;el('archive-time').value=data.schedule.local_time;archiveScheduleLoaded=true;}
+        el('archive-history').textContent=data.runs.length?data.runs.map(r=>{let detail=r.error||'';try{const x=JSON.parse(detail);detail=`截止 ${x.cutoff}，归档包 ${x.archives} 个，移除散文件 ${x.removed} 个，异常 ${x.errors} 个；报告 ${x.report}`;}catch{}return `${r.slot_key.startsWith('manual:')?'手动':'计划 '+r.slot_key} · ${{running:'运行中',complete:'完成',failed:'失败',pending:'待恢复'}[r.status]||r.status} · ${date(r.started_at)}${detail?'\n'+detail:''}`;}).join('\n'):'暂无执行记录';
+        el('archive-packages').textContent=data.packages.length?data.packages.map(p=>`${p.archive_path} · ${p.files} 个文件`).join('\n'):'暂无归档包';
+        if(data.progress)el('archive-status').textContent=`${data.progress.phase}：${data.progress.done} / ${data.progress.total}`;
+        if(showPreview){archivePreview=cutoff;archivePreviewToken=data.preview.token;el('archive-run').disabled=false;const p=data.preview,lines=[...p.groups.map(g=>`${g.provider} / ${g.dataset} / ${g.month}：${g.files} 个文件，${size(g.bytes)}，预计 ${g.packages} 个包`),...p.errors.map(e=>`${e.path}：${e.error}`)];el('archive-preview-result').textContent=(lines.length?lines.join('\n'):'此范围没有待归档文件。')+`\n无响应文件的来源记录：${p.without_file} 条，其中 metadata_only：${p.metadata_only} 条。`;}
+        if(data.runs.some(r=>r.status==='running')&&!el('maintenance-archive-panel').hidden)archiveTimer=setTimeout(()=>archiveLoad(),3000);
+      }catch(error){el('archive-status').textContent=error.message;}
+    }
+    async function archivePost(action,body){
+      const response=await fetch('/api/maintenance/source-archive/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-Local-Session':archiveToken},body:JSON.stringify(body)}),data=await response.json();
+      if(!response.ok)throw Error(data.error||'操作失败');return data;
+    }
+    el('archive-cutoff').oninput=()=>{archivePreview='';el('archive-run').disabled=true;};
+    el('archive-preview').onclick=()=>archiveLoad(true);
+    el('archive-run').onclick=async()=>{if(!archivePreview||archivePreview!==el('archive-cutoff').value||!confirm('执行预览范围内的响应归档？'))return;el('archive-run').disabled=true;try{await archivePost('run',{cutoff:archivePreview,token:archivePreviewToken});archivePreview='';el('archive-status').textContent='归档已启动';await archiveLoad();}catch(error){el('archive-status').textContent=error.message;}};
+    el('archive-save').onclick=async()=>{try{await archivePost('schedule',{enabled:el('archive-enabled').checked,day:Number(el('archive-day').value),local_time:el('archive-time').value});el('archive-status').textContent='计划已保存';await archiveLoad();}catch(error){el('archive-status').textContent=error.message;}};
+    el('archive-restore').onclick=async()=>{try{const result=await archivePost('restore',{source_id:Number(el('archive-source-id').value)});el('archive-status').textContent=(result.restored?'已恢复：':'原文件已存在：')+result.path;}catch(error){el('archive-status').textContent=error.message;}};
+    const tabs=[el('maintenance-collection-tab'),el('maintenance-database-tab'),el('maintenance-stocks-tab'),el('maintenance-archive-tab')];
     function loadActiveTab(){
       if(panel.hidden)return;
       if(!el('maintenance-collection-panel').hidden)loadCollections();
       else if(!el('maintenance-database-panel').hidden){if(!snapshot||storageDirty)load(storageDirty);}
       else if(!el('maintenance-stocks-panel').hidden&&!unfollowedLoaded)loadUnfollowed();
+      else if(!el('maintenance-archive-panel').hidden)archiveLoad();
     }
     tabs.forEach((tab,index)=>{
       tab.addEventListener('click',()=>{
         tabs.forEach(item=>{const active=item===tab;item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;el(item.getAttribute('aria-controls')).hidden=!active;});
-        el('maintenance-refresh').hidden=index!==1;loadActiveTab();
+        clearTimeout(archiveTimer);if(index===3)archiveScheduleLoaded=false;el('maintenance-refresh').hidden=index!==1;loadActiveTab();
       });
       tab.addEventListener('keydown',event=>{
         if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;

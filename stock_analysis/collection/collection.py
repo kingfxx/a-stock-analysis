@@ -238,14 +238,14 @@ def parsed_source(db, source_id, *, fields=None, error=None):
 
 def read_source(db, source_id):
     with db.connection() as conn:
-        item=dict(conn.execute('SELECT * FROM collection_sources WHERE id=?',(source_id,)).fetchone())
+        row=conn.execute('SELECT * FROM collection_sources WHERE id=?',(source_id,)).fetchone()
+    if row is None:
+        raise ValueError('来源记录不存在')
+    item=dict(row)
     if not item['file_path']:
         raise ValueError('仅请求记录，无响应文件，不能离线重放')
-    path=(db.path.parent/item['file_path']).resolve()
-    root=(db.path.parent/'collection_sources').resolve()
-    if not path.is_relative_to(root):
-        raise ValueError('来源文件不在登记的公共来源目录内')
-    stored=path.read_bytes()
+    from stock_analysis.collection.source_archive_read import read_stored_source
+    stored=read_stored_source(db,item)
     if digest(stored)!=item['stored_sha256']:
         raise ValueError('来源存储哈希不符')
     raw=gzip.decompress(stored)
