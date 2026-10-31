@@ -31,7 +31,7 @@
 | `domains/industries/` | 通用行业分类、成员、财务／市值汇总与比较；company_preview.py 只读组装单公司快览 |
 | `domains/financials/company_preview_metrics.py` | 行业公司快览纯周期、同比及派生计算；不引入网络或存储 |
 | `domains/financials/company_preview_dividends.py` | 快览上年分红方案纯解析、保守年度合并及季末股息率估算，不取数、不写库 |
-| `domains/market/` | 全市场财务、交易快照、拥挤度、国债及市场数据工具 |
+| `domains/market/` | 全市场财务、交易快照、拥挤度、国债及市场数据工具；market_financial_missing.py负责按公司／接口缺行的手动补缺，不修改既有行 |
 | `domains/notes/` | 投资笔记与数据快照 |
 | `domains/research/` | 研究报告、Checklist、经营判断、模型适配及行业专题 |
 

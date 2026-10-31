@@ -275,7 +275,7 @@ class IndustryService:
         threading.Thread(target=self._refresh,args=(action,target,recheck,run_id),daemon=True,name='sw-industry-refresh').start()
         return self.status()
 
-    def _refresh(self, action, target, recheck, run_id=None):
+    def _refresh(self, action, target, recheck, run_id=None, *, missing_only=False):
         from stock_analysis.domains.industries.industry_updates import merge_run_result, perform
         reserved=run_id is not None
         def persist_progress(update):
@@ -313,7 +313,8 @@ class IndustryService:
             with self.db.connection(write=True) as conn:
                 if not reserved:
                     run_id=self.reserve_refresh(conn,action,target,recheck)
-            result=perform(self,action,target,recheck,progress,run_id=run_id,progress_state=persist_progress)
+            options={'missing_only':True} if missing_only else {}
+            result=perform(self,action,target,recheck,progress,run_id=run_id,progress_state=persist_progress,**options)
             with self.db.connection(write=True) as conn:
                 conn.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE id=?",
                              (datetime.now(timezone.utc).isoformat(),merge_run_result(conn,run_id,result),run_id))
@@ -321,7 +322,7 @@ class IndustryService:
                 warning=result.get('membership_check',{}).get('warning')
                 statements=result.get('statements',{})
                 detail=financial_change_summary(statements) if action=='financial_period' else ''
-                self._status.update(running=False,message=f"行业更新完成 · {target} · 请求 {result['requested_count']} 家 · 待补 {len(result['failures'])} 家"+
+                self._status.update(running=False,message=f"行业更新完成 · {target} · 请求 {result['requested_count']} 家 · 待补 {result.get('remaining_count',len(result['failures']))} 家"+
                                     (' · '+detail if detail else '')+
                                     (' · '+warning if warning else ''),
                                     error=None,result=result)

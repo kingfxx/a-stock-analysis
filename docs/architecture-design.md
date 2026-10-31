@@ -99,3 +99,8 @@ P4 后，正常加载以 data/stock_analysis.sqlite3 为唯一业务事实库。
 数据库置于本地磁盘。启动先取得实例锁、迁移、完整性检查、恢复中断运行，再做当日 Backup API 备份；成功业务提交后刷新日备份。每天首次备份位于 `backups/stock_cloud_bkp`，只保留一个版本，旧日备份归档到 `backups`；专项备份直接保存在 `backups`。维护页可从这两个位置恢复。备份恢复到新路径进行完整性检查，不直接覆盖活动库。数据文件和备份由 .gitignore 排除。维护命令、DELETE/WAL 运行时约束见 [SQLite 存储说明](sqlite-storage.md)。
 
 2026-09-30 的 P4 集成在运行库的隔离备份副本上完成，未直接升级结构版本 2 的现有运行库。三只代表股票的冷暖请求、旧新估值差异及未完成的 P5 跨机/WAL 验收见 [P4/P5 验收记录](data-sources/p4-acceptance.md)。
+
+
+## 全市场财务补缺（2026-10-31）
+
+采集管理注册manual missing模式，通过已有行业更新调用链传入missing_only；具体缺口范围、定向请求、归档复用及只插缺行发布归domains/market/market_financial_missing.py。复用公共collector／来源预算及现有生命周期，无新增表、缓存、锁或调度器。原全量采集／发布保持既有保护，补缺范围和原文另由parser_version及scope区分；UI只增加模式及范围说明，HTTP协议／门禁不变。详见[补缺计划](plans/20261031_全市场财务补缺/PLAN.md)。

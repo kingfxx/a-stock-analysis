@@ -110,7 +110,7 @@ def fetch_cap_quarter(db, directory, stocks, target_date, progress, *, reuse_loc
     return facts,failures
 
 
-def perform(service, action, target, recheck, progress, *, run_id=None, progress_state=None):
+def perform(service, action, target, recheck, progress, *, run_id=None, progress_state=None, missing_only=False):
     validate_request(action,target,recheck)
     from stock_analysis.domains.market.market_financial import now,encoded
     batch_id=None
@@ -123,7 +123,8 @@ def perform(service, action, target, recheck, progress, *, run_id=None, progress
                 "VALUES(?,?,? ,?,'running')",(action,target,int(recheck),now())).lastrowid
             owns_run=True
     try:
-        result=_perform(service,action,target,recheck,progress,batch_id,run_id=run_id,progress_state=progress_state)
+        options={'missing_only':True} if missing_only else {}
+        result=_perform(service,action,target,recheck,progress,batch_id,run_id=run_id,progress_state=progress_state,**options)
         if owns_run:
             with service.db.connection(write=True) as conn:
                 conn.execute("UPDATE collection_operations SET status='complete',finished_at=?,result_json=? WHERE id=?",
@@ -163,10 +164,22 @@ def merge_run_result(conn, run_id, result):
     return json.dumps(merged,ensure_ascii=False,separators=(',',':'))
 
 
-def _perform(service, action, target, recheck, progress, batch_id, *, run_id=None, progress_state=None):
+def _perform(service, action, target, recheck, progress, batch_id, *, run_id=None, progress_state=None, missing_only=False):
     from stock_analysis.domains.industries.industry_memberships import ensure_daily_memberships
     from stock_analysis.domains.market import market_financial
     validate_request(action,target,recheck)
+    if missing_only:
+        if action!='financial_period' or recheck:
+            raise ValueError('补缺仅适用于财务报告期，不能与修订核对合用')
+        from stock_analysis.collection.collection import RequestCollector
+        from stock_analysis.domains.market.market_financial_missing import run_missing
+        # Use the local known universe; opening or filling gaps never refreshes a second roster.
+        collector=RequestCollector(service.db,progress=progress,cancelled=lambda:service.collection_cancelled(run_id))
+        operation_id='sw_update_runs:'+str(run_id)
+        try:
+            return run_missing(service.db,operation_id,target,collector,progress,progress_state)
+        finally:
+            collector.session.close()
     membership_check=ensure_daily_memberships(service,progress,run_id=run_id)
     foundation=service.foundation()
     if action=='cap_quarter':

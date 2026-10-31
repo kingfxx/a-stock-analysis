@@ -596,3 +596,10 @@ collection_schedules的schedule_id为规则主键，task_key为可重复模块�
 每股事实及sync状态与对应stock_results在同一短事务提交，全部成员结束才关闭batch；部分失败可保留成功成员，数据库一致性检查按逐股成功结果验证。每次真实HTTP只登记一条collection_sources并保持同batch外键；不复制共享来源，不增加父子batch或公共item。合并只发生于尚无source的本次新分段，原历史不迁移/重建。
 
 主营版本身份触发器兼容原单股sync_run或stock_members中同股票/同run；主营明细继续验证source/batch/provider/dataset和请求SECUCODE单股/IN名单。公告元数据身份触发器精确匹配单股或分号名单中的code,orgId，不再只识别名单第一只；原run/来源/同batch验证保留。迁移沿用既有初始化备份与事务回滚，SQLite备份不包含来源文件/PDF。本轮不移动这些资料。
+
+
+### 全市场财务补缺元数据（2026-10-31）
+
+没有新增表或迁移。复用collection_operations.mode=missing及既有financial_period动作，collection_batches仍使用market.financial.income/balance/cashflow/performance，parser_version=market-financial-missing-v1区分补缺与全量缓存。scope_json登记报告期、至多200公司／交易所、成员版本及快照日期参考；来源仍引用公共collection_sources，并保留ALL原文及双哈希。
+
+已完整返回的分段result_json.full_scope可用于失败重试归档复用；部分／空响应不可复用。四类事实只插尚无最新行的键，使用新的公共批次／来源引用，已有行不改写；所有实际需要分段同事务发布。补缺batch的coverage_status为unknown，只证明本次选定范围执行，避免自动日程误认整期全市场完整。详细行为见[采集管理补缺](collection-management.md#全市场财务手动补缺2026-10-31)。

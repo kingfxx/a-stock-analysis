@@ -24,7 +24,7 @@ TASKS = {
     'shipping_weekly': dict(name='航运 CCFI / SCFI 周度', group='航运研究', providers=['sse'], modes=['incremental','review']),
     'shipping_monthly': dict(name='航运官方月度指数与吞吐量', group='航运研究', providers=['mot'], modes=['incremental','backfill','review']),
     'market_financial': dict(name='全市场财务四表', group='全市场', providers=['eastmoney'],
-                             action='financial_period', modes=['incremental', 'review']),
+                             action='financial_period', modes=['incremental', 'review', 'missing']),
     'trade_snapshot': dict(name='季度交易快照', group='全市场', providers=['eastmoney'],
                           action='cap_quarter', modes=['incremental', 'review']),
     'indices': dict(name='指数估值与行情', group='指数', providers=['csindex', 'legu', 'sws'],
@@ -36,7 +36,7 @@ TASKS = {
 # Project only summary fields inside SQLite: old result_json can contain megabytes
 # of source manifests, per-company failures and statement field counts.
 SUMMARY_FIELDS = ('message', 'network_requests', 'retries', 'scope_count', 'requested_count',
-                  'returned_count', 'collection_progress', 'errors', 'channels', 'skipped')
+                  'returned_count', 'collection_progress', 'errors', 'channels', 'skipped', 'mode', 'remaining_count', 'missing_by_dataset')
 RESULT_SUMMARY = 'json_object(' + ','.join("'" + key + "',json_extract(result_json,'$." + key + "')" for key in SUMMARY_FIELDS) + ", 'snapshot',json_object('skipped',json_extract(result_json,'$.snapshot.skipped')), 'work_progress',json_remove(json_extract(result_json,'$.work_progress'),'$.tasks'))"
 
 
@@ -227,7 +227,11 @@ class CollectionManagement:
         if key.startswith('shipping_'):
             return shipping_collection.reserve(conn,key,params)
         if 'action' in spec:
+            if key == 'market_financial' and params['mode'] == 'missing':
+                from stock_analysis.domains.market.market_financial_missing import require_initialised
+                require_initialised(conn, params['target'])
             run = self.industry.reserve_refresh(conn, spec['action'], params['target'], params['mode'] == 'review')
+            conn.execute('UPDATE collection_operations SET mode=? WHERE id=?', (params['mode'], run))
             return 'sw_update_runs:' + str(run)
         if key == 'market_congestion':
             operation = market_congestion.start(self.db, params['mode'], connection=conn)
@@ -245,7 +249,8 @@ class CollectionManagement:
             elif key.startswith('shipping_'):
                 shipping_collection.run(self.db,ref)
             elif 'action' in task(key):
-                self.industry._refresh(TASKS[key]['action'], params['target'], params['mode'] == 'review', int(ref.split(':')[1]))
+                options = {'missing_only': True} if key == 'market_financial' and params['mode'] == 'missing' else {}
+                self.industry._refresh(TASKS[key]['action'], params['target'], params['mode'] == 'review', int(ref.split(':')[1]), **options)
             else:
                 index_collection.run_operation(self.db, ref)
         except Exception as exc:
@@ -302,7 +307,7 @@ class CollectionManagement:
                         items.append(task_summary(self.stocks, conn))
                     continue
                 if 'action' in spec:
-                    rows = [dict(r) for r in conn.execute('SELECT id,action,target,recheck,started_at,finished_at,status,error,' + RESULT_SUMMARY + ' AS result_json FROM collection_operations WHERE action=? ORDER BY id DESC LIMIT 20', (spec['action'],))]
+                    rows = [dict(r) for r in conn.execute('SELECT id,action,target,recheck,mode,started_at,finished_at,status,error,' + RESULT_SUMMARY + ' AS result_json FROM collection_operations WHERE action=? ORDER BY id DESC LIMIT 20', (spec['action'],))]
                     for row in rows:
                         row['operation_ref'] = 'sw_update_runs:' + str(row['id'])
                 else:
