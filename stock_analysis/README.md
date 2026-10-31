@@ -28,7 +28,8 @@
 | `domains/financials/` | 财务周期、报表、指标与主营构成；payloads 组装财务视图数据 |
 | `domains/valuation/` | 估值、DCF、股息预测；纯计算在 calculations，视图数据组装在 payloads |
 | `domains/indices/` | 指数定义、采集、查询、行情与编码 |
-| `domains/industries/` | 通用行业分类、成员、财务／市值汇总与比较 |
+| `domains/industries/` | 通用行业分类、成员、财务／市值汇总与比较；company_preview.py 只读组装单公司快览 |
+| `domains/financials/company_preview_metrics.py` | 行业公司快览纯周期、同比及派生计算；不引入网络或存储 |
 | `domains/market/` | 全市场财务、交易快照、拥挤度、国债及市场数据工具 |
 | `domains/notes/` | 投资笔记与数据快照 |
 | `domains/research/` | 研究报告、Checklist、经营判断、模型适配及行业专题 |

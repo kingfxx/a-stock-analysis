@@ -24,6 +24,8 @@
   "indices.html": "pages/indices.html",
   "indices.js": "features/indices/indices.js",
   "industry.css": "features/industries/industry.css",
+  "company-preview.js": "features/industries/company-preview.js",
+  "company-preview.css": "features/industries/company-preview.css",
   "industry.js": "features/industries/industry.js",
   "investment-notes.css": "features/notes/investment-notes.css",
   "investment-notes.js": "features/notes/investment-notes.js",

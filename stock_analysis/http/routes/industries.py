@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 import sqlite3
 from urllib.parse import parse_qs
-from stock_analysis.infrastructure.storage import StorageError
+from stock_analysis.infrastructure.storage import Database, StorageError
+from stock_analysis.domains.industries.company_preview import read_company_preview
 from stock_analysis import application as app
 
 
@@ -12,13 +13,17 @@ class IndustriesRoutes:
 
     def _get_industry(self, parsed):
         status = 200
-        if parsed.path in {'/api/industry','/api/industry/status'}:
+        if parsed.path in {'/api/industry','/api/industry/status','/api/industry-company-preview'}:
             query = parse_qs(parsed.query)
             try:
-                data = app.industry_service().status() if parsed.path.endswith('/status') else app.industry_service().read(
-                    code=query.get('code',[None])[0], industry=query.get('industry',[None])[0],
-                    level=int(query.get('level',['3'])[0]), parent=query.get('parent',[None])[0],
-                    mode=query.get('mode',['ttm'])[0], period=query.get('period',[None])[0])
+                if parsed.path == '/api/industry-company-preview':
+                    data = read_company_preview(Database(app.settings.DATABASE_PATH),
+                        query.get('code', [''])[0], query.get('mode', ['ttm'])[0])
+                else:
+                    data = app.industry_service().status() if parsed.path.endswith('/status') else app.industry_service().read(
+                        code=query.get('code',[None])[0], industry=query.get('industry',[None])[0],
+                        level=int(query.get('level',['3'])[0]), parent=query.get('parent',[None])[0],
+                        mode=query.get('mode',['ttm'])[0], period=query.get('period',[None])[0])
             except (ValueError,TypeError) as exc:
                 status,data=400,{'error':str(exc)}
             except (OSError,StorageError,sqlite3.DatabaseError) as exc:
