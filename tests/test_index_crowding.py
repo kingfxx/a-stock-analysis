@@ -1,6 +1,7 @@
 from stock_analysis.http import rendering
 """Crowding reads existing daily amount ratios and uses the actual page scripts."""
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from stock_analysis.http.assets import asset_path
 from urllib.parse import urlparse, parse_qs
@@ -54,13 +55,15 @@ def test_browser_crowding_switch_statistics_gaps_and_valuation(db):
     code,industry=populate(db)
     reader=IndexReadService(db)
     root=Path(__file__).resolve().parents[1]
-    calls=[]
+    calls=[];missing_assets=[]
     def route(request):
         url=urlparse(request.request.url);path=url.path;query=parse_qs(url.query)
         calls.append(path)
         if path=='/indices':
             body=(root/'web/pages/indices.html').read_text(encoding='utf-8').replace('__RESEARCH_SIDEBAR__',rendering.research_sidebar('indices'))
             request.fulfill(body=body,content_type='text/html');return
+        if path == '/favicon.ico':
+            request.fulfill(status=404, body='');return
         if path=='/api/indices/catalog':body=reader.catalog()
         elif path=='/api/indices/status':body=reader.status()
         elif path=='/api/indices/crowding':body=reader.price_overlay(query['code'][0],field='amount_ratio')
@@ -69,7 +72,11 @@ def test_browser_crowding_switch_statistics_gaps_and_valuation(db):
         elif path=='/api/indices/congestion':body=json.dumps(market_congestion.read(db))
         elif path.startswith('/api/'):body='{}'
         else:
-            file=Path(plotly.__file__).parent/'package_data/plotly.min.js' if path=='/plotly.min.js' else asset_path(path.lstrip('/'))
+            try:
+                file=Path(plotly.__file__).parent/'package_data/plotly.min.js' if path=='/plotly.min.js' else asset_path(path.lstrip('/'))
+            except KeyError:
+                missing_assets.append(path)
+                request.fulfill(status=404,body='');return
             request.fulfill(path=str(file),content_type='text/javascript' if path.endswith('.js') else 'text/css');return
         request.fulfill(body=body,content_type='application/json')
     try:
@@ -77,23 +84,24 @@ def test_browser_crowding_switch_statistics_gaps_and_valuation(db):
             browser=p.chromium.launch(channel='msedge',headless=True)
             try:
                 page=browser.new_page();errors=[]
+                page.clock.install(time=datetime(2026,10,17,7,0,tzinfo=timezone.utc))
                 page.on('pageerror',lambda error:errors.append(str(error)))
                 page.route('https://indices.test/**',route)
-                page.goto('https://indices.test/indices',wait_until='networkidle')
+                page.goto('https://indices.test/indices',wait_until='domcontentloaded')
                 page.wait_for_function("document.getElementById('current').textContent==='13.10 倍'")
                 page.locator('[data-metric-family=crowding]').click()
                 page.wait_for_function("document.getElementById('current').textContent==='20.00%'")
-                assert '66.7%' in page.locator('#basis').inner_text()
+                page.wait_for_function("document.getElementById('basis').textContent.includes('66.7%')")
                 basis=page.locator('#basis').inner_text()
                 page.locator('#frequency').select_option('day')
-                assert page.locator('#chart').evaluate('n=>n.data[0].y')==[0,10,None,20]
+                page.wait_for_function("JSON.stringify(document.getElementById('chart').data?.[0]?.y)==='[0,10,null,20]'")
                 page.locator('#frequency').select_option('month')
-                assert page.locator('#basis').inner_text()==basis
-                assert page.locator('#chart').evaluate('n=>n.data[0].y')==[None,20]
+                page.wait_for_function("JSON.stringify(document.getElementById('chart').data?.[0]?.y)==='[null,20]'")
+                page.wait_for_function('(basis)=>document.getElementById("basis").textContent===basis',arg=basis)
                 page.locator('#benchmark').select_option('stddev')
-                assert page.locator('#basis').inner_text()==basis
+                page.wait_for_function('(basis)=>document.getElementById("basis").textContent===basis',arg=basis)
                 page.locator('#point-overlay').click()
-                assert page.locator('#chart').evaluate("n=>n.data[1].yaxis")=='y2'
+                page.wait_for_function("document.getElementById('chart').data?.[1]?.yaxis==='y2'")
                 page.locator('#kind').select_option('industry')
                 page.wait_for_function("document.getElementById('current').textContent==='4.82%'")
                 assert not page.locator('#series-control').is_visible()
@@ -102,12 +110,13 @@ def test_browser_crowding_switch_statistics_gaps_and_valuation(db):
                 page.locator('#code').select_option('cn:000001')
                 page.wait_for_function("document.getElementById('coverage').textContent==='该指数暂无本地成交额占比数据。'")
                 assert page.locator('#current').inner_text()=='—'
-                assert page.locator('#chart').evaluate('n=>n.data[0].y')==[]
+                page.wait_for_function("JSON.stringify(document.getElementById('chart').data?.[0]?.y)==='[]'")
                 page.locator('#code').select_option(code)
                 page.wait_for_function("document.getElementById('current').textContent==='20.00%'")
                 page.locator('[data-metric-family=pe]').click()
                 page.wait_for_function("document.getElementById('current').textContent==='13.10 倍'")
                 assert not errors
+                assert not missing_assets,missing_assets
                 assert not any('/api/indices/collect' in path for path in calls)
             finally:browser.close()
     finally:reader.close()

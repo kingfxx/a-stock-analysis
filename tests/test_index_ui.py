@@ -111,7 +111,9 @@ def test_browser_cooldown_time_is_beijing_to_seconds(index_server,monkeypatch):
             page.on('pageerror',lambda error:errors.append(str(error)))
             page.clock.install(time=datetime(2026,10,17,7,0,tzinfo=timezone.utc))
             page.goto(base+'/indices',wait_until='networkidle')
-            assert page.locator('#cooldowns').inner_text()=='乐咕乐股：HTTP 429，冷却截止（北京时间）2026-10-17 15:29:57'
+            assert page.locator('#cooldowns').count()==0
+            assert page.locator('a[href="/?tab=maintenance"]').count()>0
+            assert '2026-10-17T07:29:57.867636+00:00' in requests.get(base+'/api/indices/status',timeout=5).text
             assert not errors and not calls
         finally:
             browser.close()
@@ -425,7 +427,8 @@ def test_browser_index_page_omits_collection_progress_and_refreshes_catalog(inde
                             'failed':0,'cancelled':0,'pending':1,'running':1,'current':'中证指数历史 000300'}}}}),operation))
             page.evaluate("window.dispatchEvent(new Event('focus'))")
             page.wait_for_function("document.getElementById('catalog-error').hidden")
-            assert page.evaluate('window.valuationRedraws||0')==0
+            page.wait_for_function("window.valuationRedraws>0 && document.getElementById('current').textContent==='13.10 倍'")
+            assert page.locator('#chart').evaluate('n=>[n._fullLayout.xaxis.range,n._fullLayout.yaxis.range]')==zoom
             with db.connection(write=True) as conn:
                 conn.execute("UPDATE collection_operations SET status='complete' WHERE operation_id=?",(operation,))
             page.evaluate("window.dispatchEvent(new Event('focus'))")

@@ -110,6 +110,22 @@ def test_archive_tab_preview_and_schedule(live):
             browser.close()
 
 
+def test_cooldown_time_is_beijing_on_collection_management(live):
+    from playwright.sync_api import sync_playwright, expect
+    base, db, state, web = live
+    with db.connection(write=True) as conn:
+        conn.execute('INSERT INTO collection_provider_state VALUES(?,?,?,?,?,?)',
+            ('legu','2099-10-17T07:29:57.867636+00:00','HTTP 429',1,'{}','2099-10-17T06:29:57+00:00'))
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page(timezone_id='America/Los_Angeles')
+            page.goto(base+'/harness')
+            expect(page.locator('[data-task="indices"] [data-task-status]')).to_contain_text('2099-10-17 15:29:57')
+            expect(page.locator('[data-task="indices"] [data-task-status]')).to_contain_text('HTTP 429')
+        finally:browser.close()
+
+
 def test_archive_tab_run_archives_real_isolated_response(live):
     from playwright.sync_api import sync_playwright, expect
     from stock_analysis.collection.collection import archive_source, begin_batch, read_source
@@ -211,7 +227,7 @@ def test_browser_default_lazy_scans_events_polling_and_keyboard(live):
         try:
             page=browser.new_page(timezone_id='America/Los_Angeles');errors=[]
             page.on('pageerror',lambda error:errors.append(str(error)))
-            page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-3)
+            page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-4)
             assert page.locator('.maintenance-tabs [role=tab]').all_text_contents()==['采集管理','数据库预览','未关注股票管理','响应归档']
             expect(page.locator('#maintenance-collection-tab')).to_have_attribute('aria-selected','true')
             assert state['storage']==0
@@ -240,7 +256,7 @@ def test_browser_default_lazy_scans_events_polling_and_keyboard(live):
             page.click('#maintenance-refresh');page.wait_for_timeout(150);assert state['storage']==2
             page.locator('#maintenance-database-tab').focus();page.keyboard.press('ArrowLeft')
             expect(page.locator('#maintenance-collection-tab')).to_be_focused()
-            page.keyboard.press('End');expect(page.locator('#maintenance-stocks-tab')).to_be_focused()
+            page.keyboard.press('End');expect(page.locator('#maintenance-archive-tab')).to_be_focused()
             assert not errors
         finally:browser.close()
 
@@ -254,7 +270,7 @@ def test_browser_reuses_index_progress_and_task_specific_confirmation(live):
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
-            page=browser.new_page();page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-3)
+            page=browser.new_page();page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-4)
             card=page.locator('[data-task="indices"]')
             card.locator(':scope > details').nth(1).locator('summary').first.click()
             expect(card.locator('[data-run]').first).to_contain_text('已处理 42/42 项')
@@ -369,7 +385,7 @@ def test_browser_latest_once_collapsed_batches_and_dropdown_multi_select(live):
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
-            page=browser.new_page();page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-3)
+            page=browser.new_page();page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-4)
             card=page.locator('[data-task="indices"]')
             expect(card.locator('[data-latest-progress]')).to_have_count(0)
             expect(card.locator('[data-run=latest]')).to_have_attribute('open','')
@@ -423,7 +439,7 @@ def test_browser_recent_four_targets_default_latest_and_custom_preserved(live):
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
             page=browser.new_page(timezone_id='America/Los_Angeles');page.clock.install(time=datetime(2026,10,25,tzinfo=timezone.utc))
-            page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-3)
+            page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-4)
             financial=page.locator('[data-task=market_financial] [data-task-run]')
             snapshot=page.locator('[data-task=trade_snapshot] [data-task-run]')
             assert financial.locator('[data-target-preset] option').evaluate_all('(nodes)=>nodes.map(n=>n.value)')==['2026-09-30','2026-06-30','2026-03-31','2025-12-31','custom']
@@ -448,7 +464,7 @@ def test_browser_provider_options_not_clipped_by_card_or_viewport(live):
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
-            page=browser.new_page(viewport={'width':1100,'height':600});page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-3)
+            page=browser.new_page(viewport={'width':1100,'height':600});page.goto(base+'/harness');expect(page.locator('.collection-task')).to_have_count(len(TASKS)-4)
             card=page.locator('[data-task=indices]')
             assert card.evaluate('node=>getComputedStyle(node).overflow')=='visible'
             for form in ('[data-task-run]','[data-task-schedule]'):
@@ -483,7 +499,12 @@ def test_business_pages_have_navigation_only_no_batch_collection_controls(live):
             for url in ('/indices','/?tab=industry'):
                 page.goto(base+url,wait_until='networkidle')
                 expect(page.locator('#incremental,#full,#review,#audit,#cancel,#congestion-full,#congestion-update,#congestion-cancel,#congestion-save,#sw-refresh-financial,#sw-refresh-cap')).to_have_count(0)
-                assert page.locator('a[href="/?tab=maintenance"]').count()>0
+                if url == '/indices':
+                    assert page.locator('a[href="/?tab=maintenance"]').count()>0
+                else:
+                    expect(page.locator('#maintenance-tab')).to_be_visible()
+                    page.locator('#maintenance-tab').click()
+                    expect(page.locator('#maintenance-collection-panel')).to_be_visible()
             assert not errors,errors
             assert not any('/api/indices/collect' in url or '/api/industry/refresh' in url for url in writes)
         finally:browser.close()

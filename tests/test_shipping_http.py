@@ -276,7 +276,7 @@ def test_browser_desktop_mobile_controls_versions_and_parity(live,monkeypatch):
             page.set_viewport_size(dict(width=390,height=844));page.wait_for_timeout(600)
             overflow=page.evaluate('''() => [...document.querySelectorAll('*')].map(e=>({tag:e.tagName,id:e.id,cls:String(e.className).slice(0,60),right:e.getBoundingClientRect().right,width:e.getBoundingClientRect().width})).filter(x=>x.right>innerWidth+1).slice(0,12)''')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),overflow
-            assert page.locator('.trend-filters').evaluate('(e)=>e.getBoundingClientRect().height>250')
+            assert page.locator('.trend-filters.panel').evaluate('(e)=>e.getBoundingClientRect().height>250')
             assert_monthly_quarter_alignment(page)
             mobile_latest=page.locator('#trend-chart .scatterlayer .trace .points path').last
             mobile_box=mobile_latest.bounding_box();assert mobile_box and mobile_box['width']>0

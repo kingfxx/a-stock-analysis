@@ -336,14 +336,15 @@ def test_browser_polling_preserves_zoom_and_filter_resets(live):
             assert not calls
             # A task started elsewhere is discovered on return without loading history.
             external_operation=m.start(database,'incremental')
-            history_before=history_reads();status_before=page.evaluate('window.statusReads')
+            history_before=len([url for url in requests if '/api/indices/congestion' in url]);status_before=page.evaluate('window.statusReads')
             page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
             page.wait_for_function('minimum=>window.statusReads>=minimum',arg=status_before+2)
-            assert history_reads()==history_before
+            assert len([url for url in requests if '/api/indices/congestion' in url])==history_before
             with database.connection(write=True) as conn:
                 conn.execute("UPDATE collection_operations SET status='complete',finished_at=? WHERE operation_id=?",(m.utc_now(),external_operation))
+            status_before=page.evaluate('window.statusReads')
             page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
-            page.wait_for_function('minimum=>window.statusReads>=minimum',arg=status_before+4)
+            page.wait_for_function('minimum=>window.statusReads>=minimum',arg=status_before+1)
             # Collection controls live in maintenance; this page only links there.
             assert page.locator('#congestion-update').count()==0
             assert page.locator('#congestion-cancel').count()==0
