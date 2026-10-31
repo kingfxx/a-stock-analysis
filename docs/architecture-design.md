@@ -14,6 +14,8 @@
 
 `http/routes/industries.py` 接入只读快览GET，显式传入配置路径的Database句柄；`domains/industries/company_preview.py` 负责单公司查询、分类适用性和数据组装，`domains/financials/company_preview_metrics.py` 负责无IO的周期及指标计算。GET不调用行业服务工厂、数据库初始化或完整个股数据链。无新表、常驻缓存、锁或调度器，application／runtime生命周期保持现有归属。前端浮层在独立company-preview.js／css中，行业主脚本仅传递入口、排序后的公司范围和周期；资源沿用asset-map及现有白名单。
 
+企业经营趋势与行业公司快览通过 `web/features/financials/trend-view.js`／`trend-view.css` 共用控件及图表／历史表模板、形状事件、绘图和表格展示。`enterprise-trend.js` 适配个股载荷、原有会话设置与主图说明；`company-preview.js` 负责弹窗、只读请求及快览数据适配。两处使用各自 DOM 和状态，快览关闭时释放图表与监听；财务来源、周期计算与范围规则仍由各自路径负责。
+
 ## 当前数据源
 
 2026-10-27个股触发变更：页面GET只读缓存，首次新股初始化及手动刷新通过明确POST进入domains/stocks/collection_operations.py；分组日程由collection_schedules.py适配现有公共Scheduler和槽位。数据集仍调用原领域服务，公共execution_context传递父operation/item和取消回调，batch保留旧sync run身份。两张控制元数据表不保存业务数据或HTTP正文，详见[个股采集](stock-collection.md)。下文旧页面到期说明以此为准。
