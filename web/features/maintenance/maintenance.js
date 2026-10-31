@@ -533,15 +533,15 @@
         el('archive-history').textContent=data.runs.length?data.runs.map(r=>{let detail=r.error||'';try{const x=JSON.parse(detail);detail=`截止 ${x.cutoff}，归档包 ${x.archives} 个，移除散文件 ${x.removed} 个，异常 ${x.errors} 个；报告 ${x.report}`;}catch{}return `${r.slot_key.startsWith('manual:')?'手动':'计划 '+r.slot_key} · ${{running:'运行中',complete:'完成',failed:'失败',pending:'待恢复'}[r.status]||r.status} · ${date(r.started_at)}${detail?'\n'+detail:''}`;}).join('\n'):'暂无执行记录';
         el('archive-packages').textContent=data.packages.length?data.packages.map(p=>`${p.archive_path} · ${p.files} 个文件`).join('\n'):'暂无归档包';
         if(data.progress)el('archive-status').textContent=`${data.progress.phase}：${data.progress.done} / ${data.progress.total}`;
-        if(showPreview){archivePreview=cutoff;archivePreviewToken=data.preview.token;el('archive-run').disabled=false;const p=data.preview,lines=[...p.groups.map(g=>`${g.provider} / ${g.dataset} / ${g.month}：${g.files} 个文件，${size(g.bytes)}，预计 ${g.packages} 个包`),...p.errors.map(e=>`${e.path}：${e.error}`)];el('archive-preview-result').textContent=(lines.length?lines.join('\n'):'此范围没有待归档文件。')+`\n无响应文件的来源记录：${p.without_file} 条，其中 metadata_only：${p.metadata_only} 条。`;}
+        if(showPreview){archivePreview=cutoff;archivePreviewToken=data.preview.token;el('archive-run').disabled=false;const p=data.preview,lines=[...p.groups.map(g=>`${g.provider} / ${g.dataset} / ${g.month}：${g.files} 个文件，${size(g.bytes)}，预计 ${g.packages} 个包`),...p.errors.map(e=>`${e.path}：${e.error}`)];el('archive-preview-result').textContent=lines.length?lines.join('\n'):'此范围没有待归档文件。';}
         if(data.runs.some(r=>r.status==='running')&&!el('maintenance-archive-panel').hidden)archiveTimer=setTimeout(()=>archiveLoad(),3000);
-      }catch(error){el('archive-status').textContent=error.message;}
+      }catch(error){if(showPreview){archivePreview='';archivePreviewToken='';el('archive-run').disabled=true;el('archive-preview-result').textContent=error.message==='截止月份必须是已结束的月份，格式 YYYY-MM'?'只能归档已结束的月份，当前月和未来月份暂不能归档。':error.message;}else el('archive-status').textContent=error.message;}
     }
     async function archivePost(action,body){
       const response=await fetch('/api/maintenance/source-archive/'+action,{method:'POST',headers:{'Content-Type':'application/json','X-Local-Session':archiveToken},body:JSON.stringify(body)}),data=await response.json();
       if(!response.ok)throw Error(data.error||'操作失败');return data;
     }
-    el('archive-cutoff').oninput=()=>{archivePreview='';el('archive-run').disabled=true;};
+    el('archive-cutoff').oninput=()=>{archivePreview='';archivePreviewToken='';el('archive-run').disabled=true;el('archive-preview-result').textContent='';};
     el('archive-preview').onclick=()=>archiveLoad(true);
     el('archive-run').onclick=async()=>{if(!archivePreview||archivePreview!==el('archive-cutoff').value||!confirm('执行预览范围内的响应归档？'))return;el('archive-run').disabled=true;try{await archivePost('run',{cutoff:archivePreview,token:archivePreviewToken});archivePreview='';el('archive-status').textContent='归档已启动';await archiveLoad();}catch(error){el('archive-status').textContent=error.message;}};
     el('archive-save').onclick=async()=>{try{await archivePost('schedule',{enabled:el('archive-enabled').checked,day:Number(el('archive-day').value),local_time:el('archive-time').value});el('archive-status').textContent='计划已保存';await archiveLoad();}catch(error){el('archive-status').textContent=error.message;}};
