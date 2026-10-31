@@ -1,5 +1,6 @@
 """Pure metrics for the local industry-company preview; amounts stay in yuan."""
 from stock_analysis.domains.financials.core import _quarter_before, _year_before, _growth
+from stock_analysis.domains.financials.company_preview_dividends import previous_year_yield
 
 
 # key, label, unit, method; these are the preview's fixed public indicators.
@@ -19,6 +20,9 @@ METRICS = (
     ('capex', '资本开支CapEx', '亿元', '东方财富现金流量表；购建长期资产支付的现金'),
     ('market_cap', '季末总市值', '亿元', '本地已发布季末交易快照；非披露日估算值'),
     ('price', '季末未复权股价', '元/股', '季末交易快照优先，其次已有同季未复权价格；保留实际价格日'),
+    ('pe_ttm', 'PE（TTM，季末）', '倍', '本地季末交易快照PE(TTM)；保持来源原值，不随财务周期重算，与行业列表按报告期利润重算口径不同'),
+    ('pb_mrq', 'PB（MRQ，季末）', '倍', '本地季末交易快照PB(MRQ)；保持来源原值，不随财务周期重算，与行业列表按报告期每股净资产重算口径不同'),
+    ('annual_dividend_yield', '年度股息率（上年方案，估算）', '%', '上一自然年归属的税前每股已存方案合计÷当前季末未复权股价；事后归属估算，非季末当时已知值，非滚动TTM，特别分红可能不完整'),
 )
 NONFINANCIAL = {'main_business_cash_flow', 'free_cash_flow', 'gross_margin', 'net_margin'}
 FLOW_FIELDS = ('revenue', 'profit', 'adjusted_profit', 'operating_cash_flow',
@@ -44,7 +48,7 @@ def flow_value(facts, period, key, mode):
     return current + delta if delta is not None else None
 
 
-def build_series(facts, market, mode):
+def build_series(facts, market, mode, dividend_years=None):
     """Convert before filtering; missing quarterly periods break lines, not bridge them."""
     if mode not in {'quarter', 'ytd', 'annual', 'ttm'}:
         raise ValueError('不支持的财务口径')
@@ -69,6 +73,8 @@ def build_series(facts, market, mode):
         for metric in ('revenue', 'profit'):
             values[metric + '_growth'] = _growth(values[metric], flow_value(facts, _year_before(period), metric, mode))
         values.update(net_assets=fact.get('net_assets'), roe=fact.get('roe'),
-                      market_cap=market.get(period, {}).get('market_cap'), price=market.get(period, {}).get('price'))
+                      market_cap=market.get(period, {}).get('market_cap'), price=market.get(period, {}).get('price'),
+                      pe_ttm=market.get(period, {}).get('pe_ttm'), pb_mrq=market.get(period, {}).get('pb_mrq'))
+        values['annual_dividend_yield'] = previous_year_yield(dividend_years or {}, period, values['price'])
         rows.append({'period': period, 'values': {key: values[key] for key, *_ in METRICS}})
     return rows

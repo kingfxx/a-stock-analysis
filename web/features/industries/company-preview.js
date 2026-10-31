@@ -16,7 +16,7 @@
       <div id="cp-mode" class="period" role="group" aria-label="财务口径">${Object.entries(modes).map(([key,label])=>`<button type="button" data-cp-mode="${key}" aria-pressed="false">${label}</button>`).join('')}</div><label class="cp-range-control"><span class="metric-choice-name">时间范围</span><select id="cp-range"><option value="5">最近5年</option><option value="10" selected>最近10年</option><option value="all">全部</option></select></label></div>
       <div class="cp-chart-scroll" role="region" aria-label="公司财务趋势，窄屏可横向滚动" tabindex="0"><div id="cp-chart" class="cp-chart"></div></div><p class="cp-mobile-note">图表可左右滑动查看</p>
       <section class="cp-history" aria-labelledby="cp-history-title"><div class="cp-history-heading"><h3 id="cp-history-title">历史数据</h3><span id="cp-history-note"></span></div><div id="cp-table" class="cp-history-scroll trend-history-scroll" tabindex="0" role="region" aria-label="历史数据，报告期从新到旧，可横向滚动"></div></section>
-      <details id="cp-details"><summary>实际日期与收入依据</summary><div id="cp-dates" class="cp-table"></div></details><details class="cp-source-notes"><summary>来源与口径说明</summary><p id="cp-coverage" class="cp-note"></p><div id="cp-methods" class="cp-note"></div><div id="cp-notes"></div></details></div>`;
+      <details id="cp-details"><summary>实际日期与收入依据</summary><div id="cp-dates" class="cp-table"></div></details><details class="cp-source-notes"><summary>来源与口径说明</summary><p id="cp-coverage" class="cp-note"></p><div id="cp-methods" class="cp-note"></div><div id="cp-notes"></div><div id="cp-dividends"></div></details></div>`;
     document.body.append(dialog);
     el('close').addEventListener('click',()=>dialog.close());
     const outside=event=>{const r=dialog.getBoundingClientRect();return event.target===dialog&&(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom);};
@@ -52,7 +52,7 @@
   }
   function renderTable(){
     const slots=selected(),rows=[...visibleRows()].reverse(),all=new Map(data.rows.map(r=>[r.period,r]));
-    const showQoq=key=>mode!=='ytd'||['market_cap','price'].includes(key);
+    const showQoq=key=>mode!=='ytd'||['market_cap','price','pe_ttm','pb_mrq','annual_dividend_yield'].includes(key);
     const change=(row,key,months)=>{
       const date=new Date(row.period+'T00:00:00Z');date.setUTCDate(1);date.setUTCMonth(date.getUTCMonth()-months);
       const target=new Date(Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+1,0)).toISOString().slice(0,10);
@@ -63,7 +63,7 @@
       return `<span class="${value>0?'positive':value<0?'negative':''}">${value.toFixed(1)}%</span>`;
     };
     const label=period=>mode==='annual'?period.slice(0,4):period.slice(0,4)+' Q'+Math.ceil(Number(period.slice(5,7))/3);
-    el('history-note').textContent=`口径：${modes[mode]} · 金额：亿元 · ${mode==='ytd'?'财务仅同比，市值／股价另列环比':'同比／环比并排'} · 时间由新到旧`;
+    el('history-note').textContent=`口径：${modes[mode]} · 金额：亿元 · ${mode==='ytd'?'财务仅同比，行情／估值另列环比':'同比／环比并排'} · 时间由新到旧`;
     el('table').innerHTML=slots.length&&rows.length?`<table class="trend-history-table"><thead><tr><th scope="col">指标 / 单位（金额：亿元）</th>${rows.map((r,i)=>`<th scope="col"${i===0?' class="trend-history-latest"':''}>${esc(label(r.period))}${i===0?'<small>最新一期</small>':''}</th>`).join('')}</tr></thead><tbody>${slots.map(({metric})=>`<tr><th scope="row"><div class="trend-history-metric-name">${esc(metric.label)}${metric.unit==='亿元'?'':'（'+esc(metric.unit)+'）'}</div><div class="trend-history-row-labels">${showQoq(metric.key)?'同比 / 环比':'同比'}</div></th>${rows.map((r,i)=>{
       const value=r.values[metric.key],text=value==null?'—':(value/(metric.unit==='亿元'?1e8:1)).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
       return `<td${i===0?' class="trend-history-latest"':''}><strong>${esc(text)}</strong><div class="trend-history-change">${change(r,metric.key,12)}${showQoq(metric.key)?'<span class="trend-history-separator">/</span>'+change(r,metric.key,mode==='annual'?12:3):''}</div></td>`;
@@ -71,10 +71,19 @@
   }
   function renderDates(){
     const rows=[...visibleRows()].reverse();
-    el('dates').innerHTML=`<table><thead><tr><th>报告期</th><th>市值观察日</th><th>实际股价日</th><th>利润率收入依据</th></tr></thead><tbody>${rows.map(r=>{
+    el('dates').innerHTML=`<table><thead><tr><th>报告期</th><th>市值观察日</th><th>实际股价日</th><th>PE观察日</th><th>PB观察日</th><th>利润率收入依据</th></tr></thead><tbody>${rows.map(r=>{
       const market=data.market[r.period]||{},basis=data.sources[r.period]?.methods?.margin_revenue;
-      return `<tr><th>${esc(r.period)}</th><td>${esc(market.cap_date||'—')}</td><td>${esc(market.price_date||'—')}</td><td>${basis==='TOTAL_OPERATE_INCOME'?'营业总收入':basis==='OPERATE_INCOME'?'营业收入（缺失时留空）':'—'}</td></tr>`;
+      return `<tr><th>${esc(r.period)}</th><td>${esc(market.cap_date||'—')}</td><td>${esc(market.price_date||'—')}</td><td>${esc(market.pe_ttm_date||'—')}</td><td>${esc(market.pb_mrq_date||'—')}</td><td>${basis==='TOTAL_OPERATE_INCOME'?'营业总收入':basis==='OPERATE_INCOME'?'营业收入（缺失时留空）':'—'}</td></tr>`;
     }).join('')}</tbody></table>`;
+  }
+  function renderDividendPlans(){
+    if(!selected().some(s=>s.metric.key==='annual_dividend_yield')){el('dividends').replaceChildren();return;}
+    const years=[...new Set(visibleRows().map(r=>String(Number(r.period.slice(0,4))-1)))].sort().reverse();
+    el('dividends').innerHTML=`<h4>年度分红方案合计（税前元／股）</h4><p>本季使用上一自然年归属方案。未提供方案的Q1／Q3未计入合计；中报、年报和四期报告覆盖须完整。合计仍可能缺特别分红；含送转或无法解析时留空。</p><div class="cp-table"><table><thead><tr><th>归属年</th><th>每股合计</th><th>已存组成方案</th><th>校验说明</th></tr></thead><tbody>${years.map(year=>{
+      const info=data.dividend_years?.[year],cash=info?.total_per_share;
+      const plans=(info?.plans||[]).filter(p=>p.assigndscrpt).map(p=>`${esc(p.report_date)}：${esc(p.assigndscrpt)}`).join('<br>');
+      return `<tr><th>${esc(year)}</th><td>${cash==null?'—':esc(cash.toLocaleString('zh-CN',{maximumFractionDigits:6}))}</td><td class="cp-plan-description">${plans||'—'}</td><td class="cp-plan-description">${esc(info?.reason||'缺少该年度方案')}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
   }
   function draw(){
     if(!data||!dialog.open)return;
@@ -115,6 +124,7 @@
     Plotly.react(el('chart'),traces,layout,{responsive:true,displayModeBar:false});
     el('coverage').textContent=slots.map(s=>`${s.metric.label}：${rows.filter(r=>r.values[s.metric.key]!==null&&r.values[s.metric.key]!==undefined).length}/${rows.length}期`).join(' · ')+`。${data.missing_reason} 仅1期时显示单点。`;
     el('methods').innerHTML=slots.map(s=>`<p><b>${esc(s.metric.label)}</b>：${esc(s.metric.method)}</p>`).join('');
+    renderDividendPlans();
     renderTable();
     if(el('details').open)renderDates();else el('dates').replaceChildren();
   }
@@ -125,7 +135,7 @@
     el('full').dataset.url='/?code='+encodeURIComponent(company.code)+'&tab=trend';
     el('prev').disabled=index===0;el('next').disabled=index===companies.length-1;
     el('status').textContent='正在读取本地数据…';el('controls').querySelectorAll('select,[data-cp-type]').forEach(n=>n.disabled=true);
-    Plotly.purge(el('chart'));el('table').replaceChildren();el('dates').replaceChildren();el('history-note').textContent='';el('coverage').textContent='';el('methods').replaceChildren();el('notes').replaceChildren();
+    Plotly.purge(el('chart'));el('table').replaceChildren();el('dates').replaceChildren();el('dividends').replaceChildren();el('history-note').textContent='';el('coverage').textContent='';el('methods').replaceChildren();el('notes').replaceChildren();
     try{
       const response=await fetch('/api/industry-company-preview?'+new URLSearchParams({code:company.code,mode}),{signal:controller.signal});
       const result=await response.json();if(token!==request||!dialog.open)return;

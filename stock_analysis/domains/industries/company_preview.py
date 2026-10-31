@@ -6,6 +6,7 @@ from calendar import monthrange
 from stock_analysis.domains.financials.company_preview_metrics import (
     METRICS, NONFINANCIAL, build_series, difference,
 )
+from stock_analysis.domains.financials.company_preview_dividends import annual_dividend_plans
 
 
 FINANCIAL_COLUMNS = {
@@ -79,7 +80,7 @@ def read_company_preview(db, code, mode='ttm'):
                 'net_profit': 'TOTAL_PROFIT - INCOME_TAX',
             }
         market = {}
-        # Reuse the industry's approved version priority, separately for cap/price.
+        # Reuse the industry's approved version priority, separately for each metric.
         rows = conn.execute('SELECT s.*,b.result_json FROM market_trade_snapshot s '
                             'JOIN collection_batches b ON b.id=s.batch_id '
                             'WHERE s.security_code=? AND s.exchange=? AND s.is_latest=1 '
@@ -90,6 +91,9 @@ def read_company_preview(db, code, mode='ttm'):
             period = quarter_end(row['trade_date'])
             point = market.setdefault(period, {})
             source = {'table': 'market_trade_snapshot', **reference(row), 'definition': row['definition_version']}
+            for metric in ('pe_ttm', 'pb_mrq'):
+                if row[metric] is not None:
+                    point.update({metric: row[metric], metric+'_date': row['trade_date'], metric+'_source': source})
             if row['total_market_cap'] is not None:
                 point.update(market_cap=row['total_market_cap'], cap_date=row['trade_date'], cap_source=source)
             if row['close_price'] is not None:
@@ -103,19 +107,27 @@ def read_company_preview(db, code, mode='ttm'):
             if point.get('price') is None:
                 point.update(price=row['close'], price_date=row['trade_date'],
                              price_source={'table': 'market_quarterly_prices', **reference(row)})
+        dividend_records = [dict(r) for r in conn.execute(
+            'SELECT id,report_date,assigndscrpt,payyear,source_id,batch_id,collection_source_id,collection_batch_id '
+            'FROM market_financial_performance WHERE security_code=? AND exchange=? AND is_latest=1 ORDER BY report_date',
+            (code, exchange))]
+        dividend_years = annual_dividend_plans(dividend_records)
         metrics = [{'key': key, 'label': label, 'unit': unit, 'method': method}
                    for key, label, unit, method in METRICS if not (financial and key in NONFINANCIAL)]
-        series = build_series(facts, market, mode)
+        series = build_series(facts, market, mode, dividend_years)
         allowed = {item['key'] for item in metrics}
         for row in series:
             row['values'] = {k: v for k, v in row['values'].items() if k in allowed}
         return {'code': code, 'exchange': exchange, 'name': member['name'] if member else code,
                 'financial_company': financial, 'classification_known': node is not None,
                 'mode': mode, 'metrics': metrics, 'rows': series, 'sources': origins, 'market': market,
+                'dividend_years': dividend_years,
                 'financial_periods': sorted(facts), 'market_periods': sorted(market),
                 'coverage': {key: sum(r['values'].get(key) is not None for r in series) for key in allowed},
                 'missing_reason': '来源字段或必要前期缺失；增长率另要求基期为正，利润率要求收入为正。',
                 'notes': ['仅使用本地已保存数据；报告期不等于披露日，不能据此进行当时可交易的回测。',
                           '毛利率／净利率沿用行业收入规则：营业收入缺失时，明确非金融公司采用营业总收入，可能与完整个股页不同。',
                           '净利率使用合并净利润（利润总额－所得税），不使用归母利润；累计加权ROE不做TTM转换。',
-                          '市值和股价为独立季末观察；股价未复权，受分红送转影响。缺失不补零、不插值。']}
+                          '市值和股价为独立季末观察；股价未复权，受分红送转影响。缺失不补零、不插值。',
+                          'PE(TTM)及PB(MRQ)直接使用季末快照原值（倍），有效零／负值保留，缺值不以财务数据重算；与行业列表按报告期财务重算的估值可能不同。',
+                          '年度股息率以去年归属的税前每股已存方案合计除本季末未复权股价；可能包含季末之后才公布的方案，不能用于无前视回测。非已实施分红TTM；特别分红可能缺漏，缺年报／中报方案、送转或未知格式时留空。']}

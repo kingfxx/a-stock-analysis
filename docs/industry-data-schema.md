@@ -275,7 +275,7 @@ v30读取同表独立 `historical-composite-v1` 系列；市值／价格逐字�
 | `assigndscrpt` | `ASSIGNDSCRPT` | TEXT | 利润分配方案描述 | 原始文本/代码/日期；不做枚举转换 |
 | `payyear` | `PAYYEAR` | TEXT | 分配相关年度标识；来源文本 | 原始文本/代码/日期；不做枚举转换 |
 | `publishname` | `PUBLISHNAME` | TEXT | 来源行业/发布分类名称；不替代申万分类 | 原始文本/代码/日期；不做枚举转换 |
-| `zxgxl` | `ZXGXL` | REAL | 来源股息率；价格基准、分红范围及观察时点待核对 | % |
+| `zxgxl` | `ZXGXL` | REAL | 来源股息率；本地样本推断多为单次方案税前派息÷登记日收盘价，未到登记日样本用采集时最近收盘价；非统一季末／TTM口径，存在例外，见industry-performance.md | % |
 | `notice_date` | `NOTICE_DATE` | TEXT | 来源公告日期；不保证是首次披露日期 | 原始文本/代码/日期；不做枚举转换 |
 | `org_code` | `ORG_CODE` | TEXT | 来源机构代码 | 原始文本/代码/日期；不做枚举转换 |
 | `trade_market_zjg` | `TRADE_MARKET_ZJG` | TEXT | 来源市场辅助标识；枚举未登记 | 原始文本/代码/日期；不做枚举转换 |

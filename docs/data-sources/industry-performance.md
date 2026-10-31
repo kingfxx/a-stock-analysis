@@ -9,7 +9,7 @@
 | weighted_roe | WEIGHTAVG_ROE | 加权净资产收益率，%，本年累计，不年化 |
 | operating_cashflow_per_share | MGJYXJJE | 每股经营现金流量，元/股，本年累计 |
 | deduct_basic_eps | DEDUCT_BASIC_EPS | 扣非基本每股收益，元/股，本年累计 |
-| dividend_yield | ZXGXL | 来源股息率，%；价格基准及分红期间未核实，只保留采集时原值 |
+| dividend_yield | ZXGXL | 来源股息率，%；本地样本推断多为单次分红方案派息率，非统一TTM／季末股息率；详见下方核验 |
 | reported_gross_margin | XSMLL | 来源销售毛利率，%，本年累计；独立于现有三表计算毛利率 |
 | performance_notice_date | NOTICE_DATE | 来源公告日期；不替换原 notice_date，不以 UPDATE_DATE 代替 |
 
@@ -43,3 +43,10 @@ python -m quarterly_dashboard.industry_snapshot data/industry_sources/baselines/
 ## 字段补全旧版本清理
 
 离线整理仅删除被明确字段补采批次完整替代的相邻旧版本：原有有效金额、披露日期、所有有效字段及其定义不变（原先为空的字段或披露日期补齐不算修订），且旧来源证据在后继版本中完整保留。真实修订、缺少原有效字段、口径变化或来源证据不完整的候选记录保留。整理前正式备份，整理后核对最新全部字段与完整来源指纹、SQLite 完整性及外键；原始响应及来源索引不删除。
+
+
+## ZXGXL本地样本核验（2026-10-31）
+
+只读核对30家公司、331条非零且方案可解析的记录，315条有匹配方案登记日原始收盘价，其中314条满足「该次方案税前每股派息÷登记日未复权收盘价×100%」。采集时尚未到登记日的样本可匹配采集前最后完整交易日价格。同年多次分红的52条判别样本支持单次方案，不支持全年合计；报告期末价格候选无匹配。
+
+这仍是样本推断而非官方统一算法定义：宁德时代2023年报记录有未解释差异，部分记录缺适用日期或日价；零／缺失字段未纳入本次口径推断。不能将其按报告期直接画成季末／TTM股息率，也不能差分或累加。完整过程、反证和数字见[核验报告](../../data/verification/reports/20261031_zxgxl_audit.md)及同名JSON；工具位于data/verification/tools/audit_zxgxl.py。未新增页面指标、来源请求或采集任务。

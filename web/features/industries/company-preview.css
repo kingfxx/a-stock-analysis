@@ -27,6 +27,7 @@
 .cp-table th,.cp-table td{border:1px solid #344852;padding:8px 12px;text-align:right}
 .cp-table thead{position:sticky;top:0;background:#25363e}
 .cp-table th:first-child{text-align:left}
+.cp-table td.cp-plan-description{white-space:normal;min-width:250px;max-width:450px;text-align:left}
 .cp-chart-scroll{overflow-x:auto}
 .cp-mobile-note{display:none}
 .cp-history{margin-top:22px}
