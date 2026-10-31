@@ -21,6 +21,7 @@ from stock_analysis.domains.stocks.sync_support import audit_due, backup_before_
 SOURCE = "sina:CompanyFinanceService.getFinanceReport2022"
 STATEMENT_TYPES = ("lrb", "fzb", "llb")
 REPORT_TYPES = STATEMENT_TYPES + ("gjzb",)
+INCREMENTAL_REPORT_PAGE_SIZE = 4
 
 
 def _income_fields(raw):
@@ -56,7 +57,8 @@ class FundamentalService:
         return FundamentalService._iso_period(str(value)[:10])
 
     def _collect(self, code, kind, *, full, saved):
-        size = 200 if full else 2
+        # Leave room for newly published quarters plus the two saved overlap periods.
+        size = 200 if full else INCREMENTAL_REPORT_PAGE_SIZE
         expected_overlap = {row["period"] for row in (saved if full else saved[-2:])}
         by_period, first_page, page, total = {}, None, 1, None
         while True:
@@ -99,7 +101,9 @@ class FundamentalService:
             fresh_fields = {(item.get("item_title"), item.get("item_field"))
                             for item in raw.get("data", []) if item.get("item_value") not in (None, "", "--")}
             if old_fields - fresh_fields:
-                raise ValueError(f"新浪{kind} {period} 丢失已有字段，保留旧事实")
+                missing = sorted(old_fields - fresh_fields, key=lambda field: (str(field[0]), str(field[1])))
+                details = json.dumps(missing[:10], ensure_ascii=False)
+                raise ValueError(f"新浪{kind} {period} 丢失已有字段，保留旧事实；缺失{len(missing)}项（名称、代码）：{details}")
         return [{"period": period, "publish_date": self._date(raw.get("publish_date")),
                  "update_time": str(raw.get("update_time")) if raw.get("update_time") is not None else None,
                  "raw_json": raw} for period, raw in sorted(by_period.items())]

@@ -53,6 +53,40 @@ def _record(period, revenue, published):
                      {"item_title": "归属于母公司所有者的净利润", "item_value": "10"}]}
 
 
+def test_new_quarter_refresh_covers_old_overlap_in_one_request(tmp_path,monkeypatch):
+    service = FundamentalService(None, tmp_path)
+    periods = ['20260930','20260630','20260331','20251231','20250930']
+    calls = []
+    def fetch(code, kind, num, page):
+        calls.append((num,page))
+        return dict(total=len(periods),records={p:_record(p,100,'2026-10-30')
+            for p in periods[(page-1)*num:page*num]})
+    service.fetch_page = fetch
+    saved = [dict(period=p,raw_json=json.dumps(_record(p,100,'2026-08-30')))
+             for p in ('2025-12-31','2026-03-31','2026-06-30')]
+    from stock_analysis.domains.financials import fundamental_service
+    monkeypatch.setattr(fundamental_service,'INCREMENTAL_REPORT_PAGE_SIZE',2)
+    baseline = service._collect('600519','lrb',full=False,saved=saved)
+    assert calls == [(2,1),(2,2),(2,1)]
+    calls.clear()
+    monkeypatch.setattr(fundamental_service,'INCREMENTAL_REPORT_PAGE_SIZE',4)
+    result = service._collect('600519','lrb',full=False,saved=saved)
+    assert calls == [(4,1)]
+    assert result == baseline
+    assert [row['period'] for row in result] == ['2025-12-31','2026-03-31','2026-06-30','2026-09-30']
+
+
+def test_incremental_missing_field_diagnostic_keeps_name_and_code(tmp_path):
+    import pytest
+    service = FundamentalService(None, tmp_path,fetch_page=lambda *args:
+        dict(total=1,records={'20260630':dict(data=[])}))
+    saved = [dict(period='2026-06-30',raw_json=json.dumps(dict(data=[
+        dict(item_title='示例有效字段',item_field='FIELD_X',item_value='0')])))]
+    with pytest.raises(ValueError,match='FIELD_X') as error:
+        service._collect('688825','gjzb',full=False,saved=saved)
+    assert '示例有效字段' in str(error.value) and '保留旧事实' in str(error.value)
+
+
 def test_publish_date_override_survives_cached_projection_and_normalization(tmp_path):
     db = Database(tmp_path / "facts.sqlite3")
     db.initialize()
@@ -122,7 +156,7 @@ def test_null_publish_date_override_and_regular_sina_correction_are_stable():
     assert normalize_report_dates(reports) == reports
 
 
-def test_refresh_uses_two_period_window_and_keeps_old_report(tmp_path):
+def test_refresh_reserves_capacity_for_new_periods_and_keeps_old_report(tmp_path):
     db = Database(tmp_path / "facts.sqlite3")
     db.initialize()
     periods = {"20250331": _record("20250331", 100, "2025-04-30"),
@@ -146,7 +180,7 @@ def test_refresh_uses_two_period_window_and_keeps_old_report(tmp_path):
     requested.clear()
     periods["20250331"] = _record("20250331", 120, "2025-04-30")
     second = service.update("601919", refresh=True)
-    assert {num for _, num, _ in requested} == {2}
+    assert {num for _, num, _ in requested} == {4}
     assert [row["revenue_ytd"] for row in second["reports"]] == [80, 120]
     assert second["reports"][0]["period"] == "2024-12-31"
 
@@ -277,7 +311,7 @@ def test_full_history_keeps_sparse_ancient_income_without_blocking_recent_report
     assert not any("更新失败" in warning for warning in service.update("000001", refresh=True)["warnings"])
 
 
-def test_two_period_refresh_pages_back_to_existing_history_after_long_gap(tmp_path):
+def test_refresh_pages_back_to_existing_history_after_long_gap(tmp_path):
     db = Database(tmp_path / "facts.sqlite3")
     db.initialize()
     periods = ["20240331", "20240630", "20240930", "20241231", "20250331", "20250630"]
@@ -292,8 +326,8 @@ def test_two_period_refresh_pages_back_to_existing_history_after_long_gap(tmp_pa
     calls.clear()
     data = service.update("600887", refresh=True)
     assert not data["warnings"] and len(data["reports"]) == 10
-    assert {num for _,num,_ in calls} == {2}
-    assert max(page for _,_,page in calls) == 3
+    assert {num for _,num,_ in calls} == {4}
+    assert max(page for _,_,page in calls) == 2
     assert sum(page==1 for _,_,page in calls) == 8  # Recheck each source's first page.
 
 
@@ -338,7 +372,7 @@ def test_existing_three_statements_backfill_key_indicators_in_same_table(tmp_pat
     service.update("601919")
     assert calls == []
     service.update("601919", refresh=True)
-    assert calls == [(kind, 2, 1) for kind in ("lrb", "fzb", "llb", "gjzb")]
+    assert calls == [(kind, 4, 1) for kind in ("lrb", "fzb", "llb", "gjzb")]
     assert len(db.financial_reports(identity, SOURCE, "gjzb")) == 1
 
 

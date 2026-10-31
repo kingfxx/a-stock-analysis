@@ -3,7 +3,7 @@ import json
 import re
 import time
 from itertools import count
-from threading import Barrier, Lock
+from threading import Barrier, Lock, Event
 
 import pytest
 import requests
@@ -11,6 +11,89 @@ import requests
 from test_stock_collection_management import service, reserve
 from stock_analysis.collection.collection import RequestCollector, PacingPolicy
 from stock_analysis.domains.stocks import collection_operations
+
+
+def test_dividends_start_while_financials_run_but_report_consumers_wait(service,monkeypatch):
+    codes=['600519','601919']
+    dividend_started={code:Event() for code in codes}
+    financial_done={code:Event() for code in codes}
+    observed=[]
+    def collect(code,dataset,full,collector):
+        if dataset=='financial':
+            assert dividend_started[code].wait(timeout=3), 'dividend unnecessarily waits for financials'
+            financial_done[code].set()
+        elif dataset=='dividends':dividend_started[code].set()
+        else:
+            assert financial_done[code].is_set(), 'report consumer started too early'
+            observed.append((code,dataset))
+    monkeypatch.setattr(service,'collect',collect)
+    ref=reserve(service,codes=codes,datasets=['financial','dividends','announcements','valuation'])
+    service.run(ref)
+    assert service.detail(ref)['status']=='complete'
+    assert len(observed)==4
+
+
+def test_group_claims_roll_back_if_second_claim_fails(service,monkeypatch):
+    from stock_analysis.domains.stocks.group_batches import GroupBatches
+    batches=GroupBatches(None)
+    original=batches.create
+    count=0
+    def create(call,conn=None):
+        nonlocal count
+        count+=1
+        if count==2:raise RuntimeError('injected claim failure')
+        return original(call,conn)
+    monkeypatch.setattr(batches,'create',create)
+    calls=[(service.db,'test','stock.business_segments','eastmoney',None,None,
+            dict(scope=dict(code=code)),{}) for code in ('600519','601919')]
+    with pytest.raises(RuntimeError,match='injected'):
+        batches.merge(calls)
+    with service.db.connection() as conn:
+        assert conn.execute('SELECT count(*) FROM collection_batches').fetchone()[0]==0
+
+
+@pytest.mark.parametrize('recover',[False,True])
+def test_orphan_claim_uses_failed_sync_outcome(service,recover):
+    from stock_analysis.infrastructure.storage import SyncKey
+    identity=service.db.ensure_instrument('600519')
+    run=service.db.start_sync(SyncKey(identity,'business_segments','eastmoney:RPT_F10_FN_MAINOP'),
+        parser_version='test',methodology_version='test')
+    service.db.fail_sync(run,RuntimeError('database is locked'))
+    ref=reserve(service,codes=['600519'],datasets=['business_segments'])
+    with service.db.connection(write=True) as conn:
+        conn.execute("UPDATE collection_batches SET status='running',sync_run_id=? WHERE operation_id=?",(run,ref))
+        if recover:
+            conn.execute("UPDATE collection_operations SET status='cancelled',cancel_requested=1 WHERE operation_id=?",(ref,))
+    if recover:
+        service.db.recover_interrupted_runs()
+        service.recover()
+    else:service._finish(ref)
+    with service.db.connection() as conn:
+        row=conn.execute('SELECT status,error FROM collection_batches WHERE operation_id=?',(ref,)).fetchone()
+        assert row['status']=='failed' and 'database is locked' in row['error']
+
+
+@pytest.mark.parametrize('phase',['cache','error_recording'])
+def test_channel_failure_completes_waiters_and_closes(service,monkeypatch,phase):
+    from stock_analysis.domains.stocks.group_requests import GroupRequests
+    broker=GroupRequests(service.db,lambda:False)
+    broker.open(['sina'])
+    channel=broker.channels['sina']
+    if phase=='cache':channel.cache[(123,)]=object()
+    else:
+        def request_failure(jobs):raise ValueError('injected request failure')
+        monkeypatch.setattr(channel,'requests',request_failure)
+    def fail(*args,**kwargs):raise RuntimeError('injected cache failure')
+    monkeypatch.setattr(service.db,'connection',fail)
+    try:
+        with pytest.raises(RuntimeError,match='injected cache failure'):
+            payload=None if phase=='cache' else (123,'sina','stock.test','GET','https://example.test',{}, {}, {})
+            broker.submit('sina','begin' if phase=='cache' else 'request',payload)
+        with pytest.raises(RuntimeError,match='injected cache failure'):
+            broker.submit('sina','begin',None)
+    finally:
+        broker.close()
+    assert not channel.thread.is_alive()
 
 
 def response(body):

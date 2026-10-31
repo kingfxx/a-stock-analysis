@@ -234,6 +234,8 @@ class StockCollections:
     def _finish(self, ref):
         with self.db.connection(write=True) as conn:
             cancelled = conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?', (ref,)).fetchone()[0]
+            from stock_analysis.domains.stocks.group_batches import finish_unresolved
+            finish_unresolved(conn, ref, cancelled)
             conn.execute("UPDATE collection_batches SET status='cancelled',finished_at=? WHERE operation_id=? AND status='pending'", (utc_now(),ref))
             failed = conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND status IN ('failed','running')", (ref,)).fetchone()[0]
             conn.execute('UPDATE collection_operations SET status=?,finished_at=?,error=? WHERE operation_id=?',
@@ -241,6 +243,11 @@ class StockCollections:
 
     def recover(self):
         with self.db.connection(write=True) as conn:
+            from stock_analysis.domains.stocks.group_batches import finish_unresolved
+            for operation in conn.execute("SELECT operation_id,cancel_requested FROM collection_operations "
+                    "WHERE task_key='stocks' AND status<>'running' AND EXISTS (SELECT 1 FROM collection_batches b "
+                    "WHERE b.operation_id=collection_operations.operation_id AND b.status='running')").fetchall():
+                finish_unresolved(conn, operation['operation_id'], operation['cancel_requested'])
             conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error='后台中断，已提交数据保留' WHERE status IN ('pending','running') AND operation_id IN (SELECT operation_id FROM collection_operations WHERE task_key='stocks')", (utc_now(),))
             conn.execute("UPDATE collection_operations SET status='failed',finished_at=?,error='后台中断，需显式继续；定时槽位按公共规则恢复' WHERE task_key='stocks' AND status='running'", (utc_now(),))
 

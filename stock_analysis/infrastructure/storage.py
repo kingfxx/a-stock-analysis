@@ -569,7 +569,8 @@ class Database:
             recovered = conn.execute("UPDATE sync_runs SET status='failed', finished_at=?, "
                                      "error='Application exited before synchronization completed' "
                                      "WHERE status='running'", (utc_now(),)).rowcount
-            conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error='Interrupted stock sync' "
+            conn.execute("UPDATE collection_batches SET status='failed',finished_at=?,error=coalesce(error,"
+                         "(SELECT error FROM sync_runs WHERE id=collection_batches.sync_run_id),'Interrupted stock sync') "
                          "WHERE domain='stock' AND status='running' AND sync_run_id IN "
                          "(SELECT id FROM sync_runs WHERE status IN ('failed','success','no_data'))",
                          (utc_now(),))

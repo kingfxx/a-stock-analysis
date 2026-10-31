@@ -12,10 +12,12 @@ from email.utils import parsedate_to_datetime
 import gzip
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import random
 import time
+import traceback
 from threading import Lock
 from uuid import uuid4
 
@@ -155,45 +157,56 @@ def begin_batch(db, operation_id, dataset, provider, start=None, end=None, *, sc
         return execution['group_batches'].begin(db, operation_id, dataset, provider, start, end,
             scope=scope, frequency=frequency, trigger=trigger, idempotency_key=idempotency_key, domain=domain,
             parser_version=parser_version, definition_version=definition_version, universe_version=universe_version)
+    with db.connection(write=True) as conn:
+        return _begin_batch(conn, operation_id, dataset, provider, start, end,
+            scope=scope, frequency=frequency, trigger=trigger, idempotency_key=idempotency_key, domain=domain,
+            parser_version=parser_version, definition_version=definition_version, universe_version=universe_version)
+
+
+def _begin_batch(conn, operation_id, dataset, provider, start=None, end=None, *, scope=None,
+                 frequency=None, trigger='manual', idempotency_key=None, domain='market',
+                 parser_version='index-v2', definition_version='v1', universe_version=None):
+    """Claim a batch on the caller's transaction; grouped claims commit together."""
+    from stock_analysis.collection.execution_context import current_execution
+    execution = current_execution.get()
     if execution:
         scope = {**(scope or {}), **execution['scope']}
         trigger = execution['trigger']
-    with db.connection(write=True) as conn:
-        legacy_operation = operation_id
-        operation_id = execution['operation_id'] if execution and execution.get('operation_id') else operation_id
-        owner = conn.execute('SELECT 1 FROM collection_operations WHERE operation_id=?', (operation_id,)).fetchone()
-        if not owner:
-            operation_id = None
-        sync_run_id = (scope or {}).get('sync_run_id')
-        if sync_run_id is None and isinstance(legacy_operation,str) and legacy_operation.startswith('sync_runs:'):
-            candidate=legacy_operation.split(':',1)[1]
-            if candidate.isdigit() and conn.execute('SELECT 1 FROM sync_runs WHERE id=?',(int(candidate),)).fetchone():
-                sync_run_id=int(candidate)
-        work_dataset = execution.get('work_dataset') if execution else None
-        code = (scope or {}).get('code')
-        if execution and work_dataset:
-            interface = (scope or {}).get('source_interface', '')
-            planned = conn.execute("SELECT id,scope_json FROM collection_batches WHERE operation_id=? AND code=? "
-                "AND work_dataset=? AND dataset=? AND source_system=? AND status='pending' "
-                "AND coalesce(json_extract(scope_json,'$.source_interface'),'')=? ORDER BY sequence,id LIMIT 1",
-                (operation_id, code, work_dataset, dataset, provider, interface)).fetchone()
-            if planned:
-                merged = {**json.loads(planned['scope_json']), **(scope or {})}
-                conn.execute("UPDATE collection_batches SET status='running',started_at=?,scope_start=?,scope_end=?,scope_json=?,"
-                    "sync_run_id=?,parser_version=?,definition_version=?,frequency=?,universe_version=?,idempotency_key=? WHERE id=? AND status='pending'",
-                    (utc_now(), start, end, encoded(merged), sync_run_id, parser_version, definition_version,
-                     frequency, universe_version, idempotency_key, planned['id']))
-                return planned['id']
-        scheduled=conn.execute("SELECT schedule_id,slot_key FROM collection_schedule_slots WHERE operation_ref=? AND status='running' LIMIT 1",
-                               (operation_id,)).fetchone()
-        if scheduled:
-            trigger='scheduled'
-            scope={**(scope or {}),'schedule':dict(task_key=scheduled['schedule_id'],slot_key=scheduled['slot_key'])}
-        return conn.execute('INSERT INTO collection_batches(operation_id,legacy_operation_ref,sync_run_id,domain,dataset,source_system,scope_start,scope_end,'
-            'scope_json,frequency,trigger_type,status,created_at,started_at,parser_version,definition_version,idempotency_key,universe_version,code,work_dataset) '
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,'running',?,?,?,?,?,?,?,?)",
-            (operation_id,legacy_operation if operation_id is None and sync_run_id is None else None,sync_run_id,domain,dataset,provider,start,end,encoded(scope or {}),frequency,trigger,utc_now(),utc_now(),
-             parser_version,definition_version,idempotency_key,universe_version,code,work_dataset)).lastrowid
+    legacy_operation = operation_id
+    operation_id = execution['operation_id'] if execution and execution.get('operation_id') else operation_id
+    owner = conn.execute('SELECT 1 FROM collection_operations WHERE operation_id=?', (operation_id,)).fetchone()
+    if not owner:
+        operation_id = None
+    sync_run_id = (scope or {}).get('sync_run_id')
+    if sync_run_id is None and isinstance(legacy_operation,str) and legacy_operation.startswith('sync_runs:'):
+        candidate=legacy_operation.split(':',1)[1]
+        if candidate.isdigit() and conn.execute('SELECT 1 FROM sync_runs WHERE id=?',(int(candidate),)).fetchone():
+            sync_run_id=int(candidate)
+    work_dataset = execution.get('work_dataset') if execution else None
+    code = (scope or {}).get('code')
+    if execution and work_dataset:
+        interface = (scope or {}).get('source_interface', '')
+        planned = conn.execute("SELECT id,scope_json FROM collection_batches WHERE operation_id=? AND code=? "
+            "AND work_dataset=? AND dataset=? AND source_system=? AND status='pending' "
+            "AND coalesce(json_extract(scope_json,'$.source_interface'),'')=? ORDER BY sequence,id LIMIT 1",
+            (operation_id, code, work_dataset, dataset, provider, interface)).fetchone()
+        if planned:
+            merged = {**json.loads(planned['scope_json']), **(scope or {})}
+            conn.execute("UPDATE collection_batches SET status='running',started_at=?,scope_start=?,scope_end=?,scope_json=?,"
+                "sync_run_id=?,parser_version=?,definition_version=?,frequency=?,universe_version=?,idempotency_key=? WHERE id=? AND status='pending'",
+                (utc_now(), start, end, encoded(merged), sync_run_id, parser_version, definition_version,
+                 frequency, universe_version, idempotency_key, planned['id']))
+            return planned['id']
+    scheduled=conn.execute("SELECT schedule_id,slot_key FROM collection_schedule_slots WHERE operation_ref=? AND status='running' LIMIT 1",
+                           (operation_id,)).fetchone()
+    if scheduled:
+        trigger='scheduled'
+        scope={**(scope or {}),'schedule':dict(task_key=scheduled['schedule_id'],slot_key=scheduled['slot_key'])}
+    return conn.execute('INSERT INTO collection_batches(operation_id,legacy_operation_ref,sync_run_id,domain,dataset,source_system,scope_start,scope_end,'
+        'scope_json,frequency,trigger_type,status,created_at,started_at,parser_version,definition_version,idempotency_key,universe_version,code,work_dataset) '
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,'running',?,?,?,?,?,?,?,?)",
+        (operation_id,legacy_operation if operation_id is None and sync_run_id is None else None,sync_run_id,domain,dataset,provider,start,end,encoded(scope or {}),frequency,trigger,utc_now(),utc_now(),
+         parser_version,definition_version,idempotency_key,universe_version,code,work_dataset)).lastrowid
 
 
 def finish_batch(db, batch_id, status, coverage='unknown', *, result=None, error=None):
@@ -436,93 +449,98 @@ class RequestCollector:
             delay=.05
             obtained=None
             held=[]
-            with self.provider_lock(provider):
-                if provider in self.halted:
-                    raise ProviderBlocked(f'{provider} 本轮已停止')
-                state=self.state(provider)
-                pending=state.get('reason')
-                if pending and pending.startswith('recovery_pending:') and pending!=f'recovery_pending:{recovery_token or token}':
-                    updated=datetime.fromisoformat(state.get('updated_at') or utc_now())
-                    if (datetime.now(timezone.utc)-updated).total_seconds()<300:
-                        self.halted[provider]=dict(reason='恢复验证进行中',cooldown_until=state['cooldown_until'])
-                        raise ProviderBlocked(f'{provider} 另一请求正在进行恢复验证')
-                    state['reason']='恢复验证超时'
-                    pending=state['reason']
-                    self.save_state(state)
-                if state['cooldown_until'] and datetime.fromisoformat(state['cooldown_until']).timestamp()>self.clock():
-                    self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
-                    raise ProviderBlocked(f'{provider} 仍在冷却至 {state["cooldown_until"]}')
-                if state['cooldown_until']:
-                    probe_token=recovery_token or token
-                    state['reason']=f'recovery_pending:{probe_token}'
-                    self.save_state(state)
-                budget=json.loads(state['budget_json'])
-                # Older shared budgets only recorded reserved request count. Use it
-                # as the completed baseline during lazy migration so the 20-request
-                # rest cadence survives deployment without resetting.
-                budget.setdefault('completed',budget.get('count',0))
-                now=self.clock()
-                inflight=[item for item in budget.get('inflight',[]) if item.get('until',0)>now]
-                budget['inflight']=inflight
-                if not inflight:
-                    budget['parallel_pair_used']=False
-                required=2 if limit==1 else 1
-                lock_base=self.db.path.parent/'collection_sources'/('provider-'+provider+'-slot-')
-                for slot in range(2):
-                    context=instance_lock(str(lock_base)+str(slot))
-                    try:context.__enter__()
-                    except StorageError:continue
-                    held.append(context)
-                    if len(held)>=required:break
-                if len(held)<required:
-                    for context in reversed(held):context.__exit__(None,None,None)
-                    held=[]
-                    delay=.1
-                else:
-                    starts=[stamp for stamp in budget.get('starts',[]) if stamp>now-policy.window]
-                    ready=budget.get('ready_at',0)
-                    fast_exempt=stock_fast and provider!='cninfo'
-                    if not fast_exempt and budget.get('completed_at'):
-                        ready=max(ready,budget['completed_at']+policy.interval)
-                    if not fast_exempt and len(starts)>=policy.window_requests:
-                        ready=max(ready,starts[-policy.window_requests]+policy.window+.001)
-                    # One sibling may join an active wave to reach concurrency two. Once
-                    # that pair is formed, a completion cannot admit a third early request.
-                    overlap=(policy.max_concurrency==2 and len(inflight)==1 and
-                             not budget.get('parallel_pair_used',False) and
-                             inflight[0].get('started_at',0)>=budget.get('completed_at',0))
-                    if not fast_exempt and not overlap and ready>now:
-                        for context in reversed(held):context.__exit__(None,None,None)
-                        held=[]
-                        delay=ready-now
-                    elif not fast_exempt and len(starts)>=policy.window_requests and ready>now:
-                        for context in reversed(held):context.__exit__(None,None,None)
-                        held=[]
-                        delay=ready-now
-                    else:
-                        obtained=datetime.fromtimestamp(now,timezone.utc).isoformat()
-                        starts.append(now)
-                        count=budget.get('count',0)+1
-                        attempt_no=None
-                        slot_item=dict(token=token,until=now+180,started_at=now,limit=limit)
-                        if source_ref:
-                            batch_id,dataset,request_key=source_ref
-                            with self.db.connection() as conn:
-                                archived=conn.execute('SELECT coalesce(max(attempt_no),0) FROM collection_sources '
-                                    'WHERE batch_id=? AND dataset=? AND request_key=?',(batch_id,dataset,request_key)).fetchone()[0]
-                            pending=[item.get('attempt_no',0) for item in inflight
-                                if item.get('source_ref')==list(source_ref)]
-                            attempt_no=max([archived,*pending])+1
-                            slot_item.update(source_ref=list(source_ref),attempt_no=attempt_no)
-                        budget.update(starts=starts,count=count,ready_at=max(ready,now+policy.interval),
-                                      inflight=inflight+[slot_item])
-                        if overlap:
-                            budget['parallel_pair_used']=True
-                        state['budget_json']=encoded(budget)
+            transferred=False
+            try:
+                with self.provider_lock(provider):
+                    if provider in self.halted:
+                        raise ProviderBlocked(f'{provider} 本轮已停止')
+                    state=self.state(provider)
+                    pending=state.get('reason')
+                    if pending and pending.startswith('recovery_pending:') and pending!=f'recovery_pending:{recovery_token or token}':
+                        updated=datetime.fromisoformat(state.get('updated_at') or utc_now())
+                        if (datetime.now(timezone.utc)-updated).total_seconds()<300:
+                            self.halted[provider]=dict(reason='恢复验证进行中',cooldown_until=state['cooldown_until'])
+                            raise ProviderBlocked(f'{provider} 另一请求正在进行恢复验证')
+                        state['reason']='恢复验证超时'
+                        pending=state['reason']
                         self.save_state(state)
-                        self.requests+=1
-                        return token,state,obtained,count,held,attempt_no
-            for context in reversed(held):context.__exit__(None,None,None)
+                    if state['cooldown_until'] and datetime.fromisoformat(state['cooldown_until']).timestamp()>self.clock():
+                        self.halted[provider]=dict(reason=state['reason'],cooldown_until=state['cooldown_until'])
+                        raise ProviderBlocked(f'{provider} 仍在冷却至 {state["cooldown_until"]}')
+                    if state['cooldown_until']:
+                        probe_token=recovery_token or token
+                        state['reason']=f'recovery_pending:{probe_token}'
+                        self.save_state(state)
+                    budget=json.loads(state['budget_json'])
+                    # Older shared budgets only recorded reserved request count. Use it
+                    # as the completed baseline during lazy migration so the 20-request
+                    # rest cadence survives deployment without resetting.
+                    budget.setdefault('completed',budget.get('count',0))
+                    now=self.clock()
+                    inflight=[item for item in budget.get('inflight',[]) if item.get('until',0)>now]
+                    budget['inflight']=inflight
+                    if not inflight:
+                        budget['parallel_pair_used']=False
+                    required=2 if limit==1 else 1
+                    lock_base=self.db.path.parent/'collection_sources'/('provider-'+provider+'-slot-')
+                    for slot in range(2):
+                        context=instance_lock(str(lock_base)+str(slot))
+                        try:context.__enter__()
+                        except StorageError:continue
+                        held.append(context)
+                        if len(held)>=required:break
+                    if len(held)<required:
+                        delay=.1
+                    else:
+                        starts=[stamp for stamp in budget.get('starts',[]) if stamp>now-policy.window]
+                        ready=budget.get('ready_at',0)
+                        fast_exempt=stock_fast and provider!='cninfo'
+                        if not fast_exempt and budget.get('completed_at'):
+                            ready=max(ready,budget['completed_at']+policy.interval)
+                        if not fast_exempt and len(starts)>=policy.window_requests:
+                            ready=max(ready,starts[-policy.window_requests]+policy.window+.001)
+                        # One sibling may join an active wave to reach concurrency two. Once
+                        # that pair is formed, a completion cannot admit a third early request.
+                        overlap=(policy.max_concurrency==2 and len(inflight)==1 and
+                                 not budget.get('parallel_pair_used',False) and
+                                 inflight[0].get('started_at',0)>=budget.get('completed_at',0))
+                        if not fast_exempt and not overlap and ready>now:
+                                    delay=ready-now
+                        elif not fast_exempt and len(starts)>=policy.window_requests and ready>now:
+                                    delay=ready-now
+                        else:
+                            obtained=datetime.fromtimestamp(now,timezone.utc).isoformat()
+                            starts.append(now)
+                            count=budget.get('count',0)+1
+                            attempt_no=None
+                            slot_item=dict(token=token,until=now+180,started_at=now,limit=limit)
+                            if source_ref:
+                                batch_id,dataset,request_key=source_ref
+                                with self.db.connection() as conn:
+                                    archived=conn.execute('SELECT coalesce(max(attempt_no),0) FROM collection_sources '
+                                        'WHERE batch_id=? AND dataset=? AND request_key=?',(batch_id,dataset,request_key)).fetchone()[0]
+                                pending=[item.get('attempt_no',0) for item in inflight
+                                    if item.get('source_ref')==list(source_ref)]
+                                attempt_no=max([archived,*pending])+1
+                                slot_item.update(source_ref=list(source_ref),attempt_no=attempt_no)
+                            budget.update(starts=starts,count=count,ready_at=max(ready,now+policy.interval),
+                                          inflight=inflight+[slot_item])
+                            if overlap:
+                                budget['parallel_pair_used']=True
+                            state['budget_json']=encoded(budget)
+                            self.save_state(state)
+                            self.requests+=1
+                            transferred=True
+                            return token,state,obtained,count,held,attempt_no
+            except BaseException as exc:
+                # Keep call sites, but omit exception text (it may contain request URLs).
+                logging.getLogger(__name__).error('provider reservation failed: provider=%s source=%s type=%s\n%s',
+                    provider, source_ref, type(exc).__name__,
+                    ''.join(traceback.format_list(traceback.extract_tb(exc.__traceback__))))
+                raise
+            finally:
+                if not transferred:
+                    for context in reversed(held):context.__exit__(None,None,None)
             self.wait(max(0,delay))
 
     def release_slot(self, provider, token, policy, count, slots, *, refusal=None, response=None):

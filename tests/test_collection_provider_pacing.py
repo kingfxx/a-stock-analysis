@@ -1,10 +1,38 @@
 import json
+import sqlite3
+import subprocess
+import sys
+from concurrent.futures import Future
 
 import pytest
 
 from stock_analysis.collection.collection import (PacingPolicy, ProviderBlocked, RequestCollector,
     begin_batch)
 from stock_analysis.infrastructure.storage import Database
+
+
+@pytest.mark.parametrize('concurrency',[1,2])
+def test_reservation_error_releases_slots_while_traceback_is_retained(tmp_path,monkeypatch,concurrency):
+    db,_,_,session,collector=setup(tmp_path)
+    def fail(state):raise sqlite3.OperationalError('injected database is locked')
+    monkeypatch.setattr(collector,'save_state',fail)
+    retained=Future()
+    try:
+        policy=collector.policy_for('csindex',index_parallel=True) if concurrency==2 else PacingPolicy()
+        collector.reserve_slot('sina',policy)
+    except sqlite3.OperationalError as exc:
+        retained.set_exception(exc)
+    assert retained.done() and not session.calls
+    script='''
+import sys
+from pathlib import Path
+from stock_analysis.infrastructure.storage import instance_lock
+for slot in (0,1):
+    with instance_lock(Path(sys.argv[1])/'collection_sources'/f'provider-sina-slot-{slot}'):pass
+'''
+    result=subprocess.run([sys.executable,'-c',script,str(db.path.parent)],capture_output=True,text=True,timeout=10)
+    assert result.returncode==0,result.stderr
+    assert retained.exception().__traceback__ is not None
 
 
 class Clock:

@@ -51,7 +51,7 @@ def run_group(service, ref, operation, groups, factory=RequestCollector):
             dependents={code:[] for code in financial}
             roots=[]
             for group in groups:
-                if group['code'] in financial and group['work_dataset'] in ('announcements','valuation','dividends'):
+                if group['code'] in financial and group['work_dataset'] in ('announcements','valuation'):
                     dependents[group['code']].append(group)
                 else:roots.append(group)
             condition=Condition();remaining=len(groups);errors=[]

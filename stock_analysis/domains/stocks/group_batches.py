@@ -2,7 +2,7 @@
 import json
 from collections import defaultdict
 
-from stock_analysis.collection.collection import begin_batch, encoded
+from stock_analysis.collection.collection import begin_batch, _begin_batch, encoded
 from stock_analysis.collection.execution_context import current_execution, execution_context
 from stock_analysis.infrastructure.storage import utc_now
 
@@ -56,6 +56,31 @@ def complete_member(conn, batch_id, run_id, status, result=None, error=None):
     return True
 
 
+def finish_unresolved(conn, operation_id, cancelled):
+    """Workers have exited; close orphan claims using their actual business outcome."""
+    rows = conn.execute("SELECT * FROM collection_batches WHERE operation_id=? AND status='running'",
+                        (operation_id,)).fetchall()
+    for row in rows:
+        members = json.loads(row['scope_json']).get('stock_members')
+        targets = members or [dict(sync_run_id=row['sync_run_id'])]
+        results = json.loads(row['result_json']).get('stock_results', {})
+        for member in targets:
+            if members and results.get(member['code'], {}).get('status') in ('complete','failed','cancelled'):
+                continue
+            run = conn.execute('SELECT status,error FROM sync_runs WHERE id=?', (member['sync_run_id'],)).fetchone()
+            status = ('complete' if run and run['status'] in ('success','no_data') else
+                      'failed' if run and run['status'] in ('failed','superseded') else
+                      'cancelled' if cancelled else 'failed')
+            error = run['error'] if run else None
+            if status != 'complete' and not error:
+                error = '用户取消采集' if cancelled else '工作结束但分段未完成'
+            if members:
+                complete_member(conn, row['id'], member['sync_run_id'], status, error=error)
+            else:
+                conn.execute('UPDATE collection_batches SET status=?,finished_at=?,error=? WHERE id=?',
+                             (status, utc_now(), error, row['id']))
+
+
 class GroupBatches:
     def __init__(self, broker):
         self.broker = broker
@@ -68,18 +93,20 @@ class GroupBatches:
         return self.broker.submit(provider, 'begin', call)
 
     @staticmethod
-    def create(call):
+    def create(call, conn=None):
         db, operation, dataset, provider, start, end, kwargs, context = call
         with execution_context(**{k:v for k,v in context.items() if k!='group_batches'}):
+            if conn is not None:
+                return _begin_batch(conn, operation, dataset, provider, start, end, **kwargs)
             return begin_batch(db, operation, dataset, provider, start, end, **kwargs)
 
     def merge(self, calls):
         """Group before returning an ID to callers, so all fact FKs stay exact."""
-        ids = [self.create(call) for call in calls]
-        if len(ids) < 2:
-            return ids
         db = calls[0][0]
         with db.connection(write=True) as conn:
+            ids = [self.create(call, conn) for call in calls]
+            if len(ids) < 2:
+                return ids
             rows = [dict(conn.execute('SELECT * FROM collection_batches WHERE id=?', (i,)).fetchone()) for i in ids]
             if len({r['code'] for r in rows}) != len(rows):
                 return ids

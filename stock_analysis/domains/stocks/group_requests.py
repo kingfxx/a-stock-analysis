@@ -1,11 +1,13 @@
 """Bounded provider channels and in-memory, validated multi-stock responses."""
 import json
+import logging
 import math
 import re
+import traceback
 from decimal import Decimal
-from concurrent.futures import Future
-from queue import Queue, Empty
-from threading import Thread
+from concurrent.futures import Future, wait
+from queue import Queue, Empty, Full
+from threading import Thread, Lock
 
 import requests
 
@@ -53,22 +55,27 @@ class ProviderChannel:
         self.queue = Queue(maxsize=64)
         self.collector = owner.factory(owner.db, cancelled=owner.cancelled)
         self.cache = {}
+        self.guard = Lock()
+        self.failure = None
+        self.closing = False
         self.thread = Thread(target=self.run, name='stock-source-'+provider)
         self.thread.start()
 
     def run(self):
+        items = []
+        failure = RuntimeError("来源通道已关闭")
         try:
             while True:
                 item = self.queue.get()
+                if item is None:
+                    return
+                items = [item]
                 if self.cache:
                     batches={key[0] for key in self.cache}
                     with self.owner.db.connection() as conn:
                         finished={r[0] for r in conn.execute('SELECT id FROM collection_batches WHERE id IN ('+','.join('?' for _ in batches)+") AND status NOT IN ('pending','running')",tuple(batches))}
                     for key in list(self.cache):
                         if key[0] in finished:del self.cache[key]
-                if item is None:
-                    return
-                items = [item]
                 # Coalesce concurrently prepared stock work, without a fixed membership barrier.
                 while len(items) < MAX_SYMBOLS * 4:
                     try:
@@ -76,7 +83,7 @@ class ProviderChannel:
                     except Empty:
                         break
                     if following is None:
-                        self.queue.put(None)
+                        self.closing = True
                         break
                     items.append(following)
                 groups = {}
@@ -108,7 +115,26 @@ class ProviderChannel:
                                 for batch in {job[0] for job,future in group}:
                                     conn.execute("UPDATE collection_sources SET parse_status='failed',error=coalesce(error,?) WHERE batch_id=? AND parse_status='pending'",(type(exc).__name__,batch))
                         for _,future in group:future.set_exception(exc)
+                items = []
+                if self.closing:
+                    return
+        except BaseException as exc:
+            failure = exc
+            logging.getLogger(__name__).error('stock source channel failed: provider=%s type=%s\n%s',
+                self.provider, type(exc).__name__,
+                ''.join(traceback.format_list(traceback.extract_tb(exc.__traceback__))))
         finally:
+            with self.guard:
+                self.failure = failure
+                self.closing = True
+                while True:
+                    try:
+                        item = self.queue.get_nowait()
+                    except Empty:
+                        break
+                    if item is not None:items.append(item)
+                for _, _, future in items:
+                    if not future.done():future.set_exception(failure)
             self.cache.clear()
             self.collector.session.close()
 
@@ -279,7 +305,22 @@ class GroupRequests:
         self.channels={};self.batches=GroupBatches(self)
 
     def submit(self,provider,kind,payload):
-        future=Future();self.channels[provider].queue.put((kind,payload,future))
+        channel=self.channels[provider]
+        future=Future()
+        while True:
+            with channel.guard:
+                if channel.failure is not None:raise channel.failure
+                if channel.closing:raise RuntimeError('来源通道已关闭')
+                try:
+                    channel.queue.put_nowait((kind,payload,future))
+                    break
+                except Full:pass
+            self.check_cancelled()
+            channel.thread.join(timeout=.1)
+        # An accepted request owns real work: wait for its completion even on cancel.
+        while not wait([future],timeout=.2).done:
+            if not channel.thread.is_alive():
+                raise channel.failure or RuntimeError('来源线程意外退出')
         return future.result()
 
     def request(self,batch,provider,dataset,method,url,params=None,**kwargs):
@@ -300,5 +341,10 @@ class GroupRequests:
     def open(self,providers):
         for provider in providers:self.channels[provider]=ProviderChannel(self,provider)
     def close(self):
-        for channel in self.channels.values():channel.queue.put(None)
+        for channel in self.channels.values():
+            while channel.thread.is_alive():
+                try:
+                    channel.queue.put(None,timeout=.1)
+                    break
+                except Full:continue
         for channel in self.channels.values():channel.thread.join()
