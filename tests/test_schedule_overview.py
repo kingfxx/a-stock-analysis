@@ -139,3 +139,45 @@ def test_browser_stock_plan_editor_reuses_group_dataset_and_rule(live):
             assert errors==[] and state['storage']==0
         finally:
             browser.close()
+
+
+def test_browser_weekdays_and_daily_modes_in_both_editors(live):
+    from playwright.sync_api import sync_playwright, expect
+    base, db, state, web = live
+    seed(db)
+    with sync_playwright() as p:
+        browser=p.chromium.launch(channel='msedge',headless=True)
+        try:
+            page=browser.new_page(); errors=[]
+            page.on('pageerror',lambda error: errors.append(str(error)))
+            page.goto(base+'/harness')
+            page.click('#collection-overview-tab')
+            row=page.locator('[data-schedule-id="indices:a"]')
+            row.locator('[data-schedule-edit]').click()
+            form=page.locator('[data-schedule-editor] [data-task-schedule]')
+            form.locator('[name=frequency]').select_option('weekly')
+            form.locator('[name=weekdays][value="1"]').check()
+            form.locator('[name=weekdays][value="2"]').check()
+            with page.expect_response('**/api/maintenance/collections/schedule') as response:
+                form.locator('[type=submit]').click()
+            assert response.value.ok
+            expect(row).to_contain_text('每周一、二、三')
+            page.click('[data-schedule-close-editor]')
+            page.click('#collection-settings-tab')
+            card=page.locator('#maintenance-collection-list [data-task="indices"]')
+            card.locator('[data-task-schedule]').locator('..').locator(':scope > summary').click()
+            form=card.locator('[data-task-schedule]')
+            form.locator('[name=schedule_key]').select_option('indices:a')
+            expect(form.locator('[name=weekdays]:checked')).to_have_count(3)
+            form.locator('[name=frequency]').select_option('daily')
+            form.locator('[name=daily_mode]').select_option('weekdays')
+            with page.expect_response('**/api/maintenance/collections/schedule') as response:
+                form.locator('[type=submit]').click()
+            assert response.value.ok
+            page.click('#collection-overview-tab')
+            expect(row).to_contain_text('工作日（周一至周五）')
+            row.locator('[data-schedule-edit]').click()
+            expect(page.locator('[data-schedule-editor] [name=daily_mode]')).to_have_value('weekdays')
+            assert not errors and state['storage']==0
+        finally:
+            browser.close()

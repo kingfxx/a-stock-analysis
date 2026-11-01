@@ -18,9 +18,9 @@ window.initCollectionOverview=({root,post,reload,makeEditor})=>{
   function frequency(rule){
     const r=rule.rule;
     if(r.frequency==='financial_season')return `财报季<span class="schedule-sub">前 ${r.days_before} / 后 ${r.days_after} 天</span>`;
-    if(r.frequency==='weekly')return '每周'+['一','二','三','四','五','六','日'][r.weekday];
+    if(r.frequency==='weekly')return '每周'+(r.weekdays||[r.weekday??0]).map(i=>['一','二','三','四','五','六','日'][i]).join('、');
     if(r.frequency==='monthly')return r.window?`每月 ${r.window[0]}—${r.window[1]} 日`:`每月 ${r.day} 日`;
-    return '每天';
+    return r.daily_mode==='weekdays'?'工作日（周一至周五）':'日历日每天';
   }
   function entries(){return tasks.flatMap(task=>(task.rules||[]).map(rule=>({task,rule})));}
   function find(identity){return entries().find(({rule})=>rule.schedule_id===identity);}

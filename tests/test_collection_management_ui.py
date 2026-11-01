@@ -692,7 +692,7 @@ def test_financial_season_available_everywhere_and_roundtrips_without_collection
                 expect(form.locator('[name=days_before]')).to_have_value('30')
                 expect(form.locator('[name=days_after]')).to_have_value('7')
                 expect(form.locator('[name=day]')).to_be_hidden()
-                expect(form.locator('[name=weekday]')).to_be_hidden()
+                expect(form.locator('[data-weekdays]')).to_be_hidden()
                 form.locator('[name=days_before]').fill('15')
                 form.locator('[name=days_after]').fill('0')
                 with page.expect_response('**/api/maintenance/collections/schedule') as response:

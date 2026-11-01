@@ -20,6 +20,21 @@ def now(value='2026-10-25T19:00:00'):
     return datetime.fromisoformat(value).replace(tzinfo=ZONE)
 
 
+def test_multi_weekday_and_daily_workday_rules():
+    rule=validate_rule({'frequency':'weekly','weekdays':[2,0,1]})
+    assert rule['weekdays']==[0,1,2]
+    schedule=dict(enabled=True,local_time='19:00',rule=rule)
+    assert due_slot(schedule,now('2026-10-25T20:00:00'))=='2026-10-21'
+    assert next_check(schedule,now('2026-10-25T20:00:00')).startswith('2026-10-26T19:00')
+    schedule['rule']=validate_rule({'frequency':'daily','daily_mode':'weekdays'})
+    assert due_slot(schedule,now('2026-10-25T20:00:00'))=='2026-10-23'
+    assert next_check(schedule,now('2026-10-25T20:00:00')).startswith('2026-10-26T19:00')
+    schedule['rule']=validate_rule({'frequency':'daily'})
+    assert due_slot(schedule,now('2026-10-25T20:00:00'))=='2026-10-25'
+    for invalid in ([],[0,0],[-1],[7],[True]):
+        with pytest.raises(ValueError):validate_rule({'frequency':'weekly','weekdays':invalid})
+
+
 def complete(management, key, params, ref):
     with management.db.connection(write=True) as conn:
         if ref.startswith('sw_update_runs:'):

@@ -95,11 +95,15 @@ def validate_params(key, params, *, scheduled=False):
 
 
 def validate_rule(rule):
-    if not isinstance(rule, dict) or set(rule) - {'frequency', 'weekday', 'day', 'window', 'days_before', 'days_after'}:
+    if not isinstance(rule, dict) or set(rule) - {'frequency', 'weekday', 'weekdays', 'daily_mode', 'day', 'window', 'days_before', 'days_after'}:
         raise ValueError('检查规则无效')
     rule = dict(rule)
     frequency = rule.get('frequency', 'daily')
     rule['frequency'] = frequency
+    if frequency != 'daily' and 'daily_mode' in rule or frequency != 'weekly' and 'weekdays' in rule:
+        raise ValueError('规则字段与频率不匹配')
+    if frequency == 'daily' and rule.get('daily_mode', 'calendar') not in ('calendar', 'weekdays'):
+        raise ValueError('每日模式无效')
     if frequency not in ('daily', 'weekly', 'monthly', 'financial_season'):
         raise ValueError('仅支持日、周、月、财报季规则')
     if frequency != 'weekly' and 'weekday' in rule or frequency != 'monthly' and ('day' in rule or 'window' in rule):
@@ -112,9 +116,15 @@ def validate_rule(rule):
             if type(value) is not int or not 0 <= value <= 90:
                 raise ValueError('财报季提前／延后天数须为0—90')
     if frequency == 'weekly':
-        value = rule.setdefault('weekday', 0)
-        if type(value) is not int or not 0 <= value <= 6:
-            raise ValueError('星期须为0—6（周一—周日）')
+        if 'weekdays' in rule:
+            values = rule['weekdays']
+            if 'weekday' in rule or not isinstance(values, list) or not values or any(type(v) is not int or not 0 <= v <= 6 for v in values) or len(set(values)) != len(values):
+                raise ValueError('请选择不重复的星期')
+            rule['weekdays'] = sorted(values)
+        else:
+            value = rule.setdefault('weekday', 0)
+            if type(value) is not int or not 0 <= value <= 6:
+                raise ValueError('星期须为0—6（周一—周日）')
     if frequency == 'monthly':
         value = rule.setdefault('day', 1)
         if type(value) is not int or not 1 <= value <= 31:
@@ -134,8 +144,11 @@ def due_slot(schedule, now):
     frequency = rule['frequency']
     if frequency == 'financial_season':
         day = latest_financial_season_date(day, rule['days_before'], rule['days_after'])
+    elif frequency == 'daily' and rule.get('daily_mode') == 'weekdays':
+        day -= timedelta(days=max(0, day.weekday() - 4))
     elif frequency == 'weekly':
-        day -= timedelta(days=(day.weekday() - rule['weekday']) % 7)
+        selected = rule.get('weekdays', [rule.get('weekday', 0)])
+        day -= timedelta(days=min((day.weekday() - value) % 7 for value in selected))
     elif frequency == 'monthly':
         if 'window' in rule:
             first, last = rule['window']
