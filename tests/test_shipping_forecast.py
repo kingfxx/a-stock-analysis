@@ -85,7 +85,10 @@ def test_source_revision_and_segment_atomicity(db):
     with pytest.raises(ValueError):publish_rates(db,updated,other,s)
 
 
-def test_trend_filtering_statistics_routes_quality_years_and_profit(db):
+def test_trend_filtering_statistics_routes_quality_years_and_profit(db, monkeypatch):
+    from stock_analysis.domains.stocks.price_service import PriceService
+    prices = [{"date":"2022-12-30","close":10}, {"date":"2024-01-30","close":11}, {"date":"2024-01-31","close":12}, {"date":"2021-01-01","close":8}, {"date":"2021-01-15","close":9}]
+    monkeypatch.setattr(PriceService, "read", lambda *args, **kwargs: prices)
     batch,source=evidence(db)
     monthly=parse_mot((FIX/'month.html').read_text(encoding='utf8'),'2024-01')
     publish_rates(db,monthly,batch,source)
@@ -109,6 +112,7 @@ def test_trend_filtering_statistics_routes_quality_years_and_profit(db):
     official=read_trend(db,index='CCFI',frequency='monthly',route='综合',quality='official')
     preferred=read_trend(db,index='CCFI',frequency='monthly',route='综合',quality='preferred')
     assert [p['value'] for p in official['points']]==[900,1191.91,1511.91]
+    assert [(p['display_date'], p['qfq_close']) for p in official['points']] == [('2022-12-30', 10), ('2024-01-31', 12), ('2024-02-29', None)]
     assert [p['value'] for p in preferred['points']]==[900,1191.91,1511.91,1300]
     assert preferred['points'][-1]['quality']=='transcribed_unverified'
     recent=read_trend(db,index='CCFI',frequency='monthly',route='综合',years='1')
@@ -120,6 +124,9 @@ def test_trend_filtering_statistics_routes_quality_years_and_profit(db):
     assert read_trend(db,index='SCFI',frequency='monthly')['points']==[]
     weekly_trend=read_trend(db,index='CCFI',frequency='weekly',route='综合')
     assert weekly_trend['statistic']=='release' and len(weekly_trend['points'])==5
+    assert next(p for p in weekly_trend['points'] if p['date']=='2021-01-01')['qfq_close']==8
+    assert any(p['date']=='2021-01-15' and p['value']==9 for p in weekly_trend['price_points'])
+    assert not any(p['date']=='2021-01-15' for p in weekly_trend['points'])
     assert {p['year']:p['x'] for p in weekly_trend['points'] if p['period_start'] in ('2021-01-01','2021-01-08','2022-01-01')}=={2020:53,2021:1,2021:52}
     assert '西非' not in weekly_trend['routes'] and '东西非' in weekly_trend['routes']
 

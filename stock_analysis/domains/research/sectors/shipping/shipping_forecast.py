@@ -181,10 +181,30 @@ def read_trend(db, *, index='CCFI', frequency='monthly', route='综合', years='
             profit_rows = [r for r in profit_rows if rate_start <= r['period'] <= rate_end]
         elif profit != 'none':
             profit_rows = []
+    # Read only the current local price generation; never collect while viewing.
+    price_points = []
+    if index == 'CCFI' and points:
+        from stock_analysis.domains.stocks.price_service import PriceService
+        prices = PriceService(db).read('601919', lease=False,
+            start=points[0]['date'][:7] + '-01' if frequency == 'monthly' else
+                  (date.fromisoformat(points[0]['date']) - timedelta(days=6)).isoformat(),
+            end=(date.fromisoformat(points[-1]['date']) + timedelta(days=7)).isoformat())
+        def period_key(day):
+            d = date.fromisoformat(day)
+            return (d.year, d.month) if frequency == 'monthly' else tuple(d.isocalendar()[:2])
+        by_period = {period_key(p['date']): p for p in prices}
+        first_key, last_key = period_key(points[0]['date']), period_key(points[-1]['date'])
+        price_points = [dict(date=p['date'], value=p['close'], period_start=p['date'][:7] + '-01', quality='price')
+                        for key, p in by_period.items() if first_key <= key <= last_key]
+        for point in points:
+            price = by_period.get(period_key(point['date']))
+            point['price_date'] = price['date'] if price else None
+            point['qfq_close'] = price['close'] if price else None
+            point['display_date'] = price['date'] if price else point['date']
     compare_points = [dict(p, compare_x=(int(p['period_start'][5:7]) if frequency == 'monthly' else p['x'])) for p in comparison]
     profit_rows = [dict(r, value=r['quarter'] if profit == 'quarter' else r['ytd'], x=int(r['label'][-1]), year=int(r['label'][:4])) for r in profit_rows if (r['quarter'] if profit == 'quarter' else r['ytd']) is not None]
     return dict(index=index, frequency=frequency, statistic=statistic, route=route, routes=routes, years=available_years, selected_years=year_selection,
-        points=points, comparison=compare_points, profit=profit_rows, quality=quality, profit_mode=profit,
+        points=points, price_points=price_points, comparison=compare_points, profit=profit_rows, quality=quality, profit_mode=profit,
         coverage=dict(count=len(points), first=points[0]['date'] if points else None, last=points[-1]['date'] if points else None,
                       latest_obtained=max((p['obtained_at'] or '' for p in points), default=None),
                       note='范围按最新有效观察滚动截取；首末期不代表连续覆盖。月度为整月均值，周度按真实发布日期，缺期不插值。'))

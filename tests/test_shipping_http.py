@@ -13,21 +13,33 @@ def test_trend_connects_quality_transitions_without_crossing_missing_weeks(live,
     from playwright.sync_api import sync_playwright
     payload=requests.get(base+'/api/shipping-trend?index=CCFI&frequency=weekly&quality=preferred&profit=none',timeout=5).json()
     template=payload['points'][0]
-    payload['points']=[dict(template,date=d,period_start=d,period_end=d,value=v,quality=q) for d,v,q in [
+    payload['points']=[dict(template,date=d,display_date=d,period_start=d,period_end=d,value=v,quality=q) for d,v,q in [
         ('2026-09-24',1918,'calendar_inferred'),('2026-09-30',1923,'calendar_inferred_flagged'),
         ('2026-10-09',1912,'calendar_inferred_flagged'),('2026-10-16',1922.64,'official'),
         ('2026-10-30',1881.82,'official')]]
+    payload['price_points']=[dict(date=d,period_start=d[:7]+'-01',value=v,quality='price') for d,v in [('2026-09-04',10),('2026-10-16',12),('2026-10-23',13),('2026-11-06',14)]]
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         try:
             page=browser.new_page();page.route('**/api/shipping-trend?**',lambda route:route.fulfill(json=payload))
             page.goto(base+'/?code=601919&tab=shipping-forecast&view=trend')
-            page.wait_for_function("document.getElementById('trend-chart').data?.length===3")
-            traces=page.locator('#trend-chart').evaluate('e=>e.data.map(t=>({name:t.name,x:t.x,y:t.y,size:t.marker.size}))')
+            page.wait_for_function("document.getElementById('trend-chart').data?.length===5")
+            traces=page.locator('#trend-chart').evaluate('e=>e.data.map(t=>({name:t.name,x:t.x,y:t.y,size:t.marker?.size}))')
             flagged=next(t for t in traces if 'flagged' in t['name']);official=next(t for t in traces if '官方' in t['name'])
             assert flagged['y'][:3]==[1918,1923,1912] and flagged['size'][0]==0
             assert official['y'][2:4]==[1912,1922.64] and official['size'][2]==0
             assert official['y'][4] is None and official['y'][5]==1881.82
+            price=next(t for t in traces if '601919' in t['name'])
+            assert '2026-10-23' in price['x'] and 13 in price['y']
+            gap=next(t for t in traces if t['name']=='股价缺周连接')
+            assert gap['x']==['2026-10-23','2026-11-06',None] and gap['y']==[13,14,None]
+            legend=page.locator('#trend-chart .legend .traces').filter(has_text='601919 前复权收盘价')
+            legend.click()
+            page.wait_for_function("document.getElementById('trend-chart').data.filter(t=>t.legendgroup==='shipping-price').every(t=>t.visible==='legendonly')")
+            legend.click()
+            page.wait_for_function("document.getElementById('trend-chart').data.filter(t=>t.legendgroup==='shipping-price').every(t=>t.visible===true)")
+            legend.dblclick()
+            page.wait_for_function("document.getElementById('trend-chart').data.filter(t=>t.legendgroup==='shipping-price').every(t=>t.visible===true) && document.getElementById('trend-chart').data.filter(t=>t.legendgroup!=='shipping-price').every(t=>t.visible==='legendonly')")
         finally:browser.close()
 
 
