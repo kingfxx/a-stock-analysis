@@ -88,6 +88,15 @@ def publish(conn,batch,rows,*,definition=DEFINITION):
         identity=(values['security_code'],values['exchange'],values['trade_date'],definition)
         old=conn.execute('SELECT * FROM market_trade_snapshot WHERE security_code=? AND exchange=? AND trade_date=? '
                          'AND definition_version=? AND is_latest=1',identity).fetchone()
+        if old and old['content_hash'] != values['content_hash']:
+            source_row = conn.execute('SELECT request_json FROM collection_sources WHERE id=?', (old['source_id'],)).fetchone()
+            metadata = json.loads(source_row['request_json']) if source_row else {}
+            guard = metadata.get('snapshot_correction')
+            if guard:
+                if values['content_hash'] == guard.get('baseline_content_hash'):
+                    unchanged += 1
+                    continue
+                raise ValueError(f'{identity[0]} 已有人工核正，来源出现不同修订，需人工核对')
         if old and old['content_hash']==values['content_hash']:
             changed=[k for k in DESCRIPTIONS if old[k]!=values[k]]
             if changed:

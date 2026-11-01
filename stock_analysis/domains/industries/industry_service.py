@@ -713,7 +713,7 @@ class IndustryService:
                 'SELECT quarter,target_date FROM sw_cap_quarter_rosters WHERE quarter IN (?,?)', (quarter,prior))}
             for q, date in dates.items():
                 rows = list(conn.execute("SELECT c.security_code AS stock_code,c.total_market_cap AS total_cap,"
-                    "CASE c.definition_version WHEN 'em-valueanalysis-v1' THEN 'eastmoney:market_trade_snapshot' "
+                    "CASE WHEN EXISTS (SELECT 1 FROM collection_sources cs WHERE cs.id=c.source_id AND cs.source_system='manual_review') THEN 'derived:manual_review' WHEN c.definition_version='em-valueanalysis-v1' THEN 'eastmoney:market_trade_snapshot' "
                     "ELSE 'composite:'||c.definition_version END AS source FROM market_trade_snapshot c "
                     f"WHERE c.security_code IN ({','.join('?' for _ in stocks)}) AND c.trade_date=? "
                     "AND c.is_latest=1 AND c.exchange IN ('sh','sz') "

@@ -192,36 +192,43 @@ def test_valuation_source_priority_is_per_field_and_does_not_recalculate(preview
     assert before == preview_db.path.read_bytes()
 
 
-def test_verified_byd_snapshot_correction_is_exact_and_read_only(preview_db):
+def test_preview_reads_audited_snapshot_version_without_special_case(preview_db):
     from stock_analysis.collection.collection import begin_batch, archive_source, finish_batch
     from stock_analysis.domains.market import market_trade_snapshot as snapshots
-    from stock_analysis.domains.industries.company_preview_market_corrections import corrected_market_cap
 
     raw = {field: None for field in snapshots.FIELDS}
     raw.update(SECURITY_CODE='002594', SECUCODE='002594.SZ', TRADE_DATE='2025-06-30',
                TOTAL_SHARES=5_494_665_855, CLOSE_PRICE=331.91,
                TOTAL_MARKET_CAP=1_823_734_543_933.05)
     batch = begin_batch(preview_db, 'preview-byd-test', snapshots.DATASET, 'eastmoney', start='2025-06-30')
-    source = archive_source(preview_db, batch, 'eastmoney', snapshots.DATASET,
-                            {'url': 'https://example.test'}, 1, raw=json.dumps(raw).encode())
+    source = archive_source(preview_db, batch, 'eastmoney', snapshots.DATASET, {'url':'https://example.test'}, 1, raw=json.dumps(raw).encode())
     with preview_db.connection(write=True) as conn:
         snapshots.publish(conn, batch, [(snapshots.normalized(raw, '2025-06-30'), source, '2026-11-01')])
+        old = dict(conn.execute('SELECT * FROM market_trade_snapshot').fetchone())
     finish_batch(preview_db, batch, 'complete')
+    correction = {'baseline_content_hash':old['content_hash'], 'reason':'半年报期末股本核正；',
+                  'original_market_cap':old['total_market_cap'], 'evidence_url':'https://example.test/report'}
+    batch2 = begin_batch(preview_db, 'correction', snapshots.DATASET, 'manual_review', start='2025-06-30')
+    source2 = archive_source(preview_db, batch2, 'manual_review', snapshots.DATASET, {'snapshot_correction':correction}, 1, raw=b'evidence')
+    with preview_db.connection(write=True) as conn:
+        snapshots.publish_metric_patch(conn, batch2, ('002594','sz','2025-06-30'),
+            {'total_shares':3_039_065_855,'total_market_cap':331.91*3_039_065_855}, source2, '2026-11-01', definition=snapshots.DEFINITION)
+    finish_batch(preview_db, batch2, 'complete')
     before = preview_db.path.read_bytes()
     result = read_company_preview(preview_db, '002594', 'ttm')
     point = result['market']['2025-06-30']
     assert point['market_cap'] == pytest.approx(331.91 * 3_039_065_855)
-    assert point['cap_source']['source_id'] == source
-    assert point['cap_correction']['original_value'] == raw['TOTAL_MARKET_CAP']
+    assert point['cap_source']['source_id'] == source2
     assert any('2025-06-30季末市值已核正' in note for note in result['notes'])
     assert next(r for r in result['rows'] if r['period'] == '2025-06-30')['values']['market_cap'] == pytest.approx(point['market_cap'])
     assert before == preview_db.path.read_bytes()
-    with preview_db.connection() as conn:
-        original = dict(conn.execute("SELECT * FROM market_trade_snapshot WHERE security_code='002594'").fetchone())
-    for field, replacement in [('security_code', '002595'), ('trade_date', '2025-03-31'),
-                               ('total_shares', 3_039_065_855), ('close_price', 332),
-                               ('definition_version', 'historical-composite-v1')]:
-        assert corrected_market_cap({**original, field: replacement}) is None
+    with preview_db.connection(write=True) as conn:
+        assert snapshots.publish(conn, batch, [(snapshots.normalized(raw, '2025-06-30'), source, '2026-11-01')])['unchanged'] == 1
+        raw['PE_TTM'] = 50
+        with pytest.raises(ValueError, match='人工核对'):
+            snapshots.publish(conn, batch, [(snapshots.normalized(raw, '2025-06-30'), source, '2026-11-01')])
+        rows = conn.execute('SELECT version,is_latest,total_shares FROM market_trade_snapshot ORDER BY version').fetchall()
+        assert [tuple(r) for r in rows] == [(1,0,5_494_665_855),(2,1,3_039_065_855)]
 
 
 def test_api_is_read_only_without_stock_or_industry_initialization(preview_db, protocol_server, monkeypatch):

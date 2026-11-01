@@ -56,7 +56,8 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (38, "038_compact_index_prices.sql"), (39, "039_sovereign_yields.sql"), (40, "040_collection_management.sql"),
               (41, "041_shipping_research.sql"), (42, "042_collection_rate_limits.sql"),
               (43, "043_stock_collection_management.sql"), (44, "044_collection_control.sql"), (45, "045_stock_group_batches.sql"),
-              (46, "046_shipping_route_view.sql"), (47, "047_source_archive_members.sql"))
+              (46, "046_shipping_route_view.sql"), (47, "047_source_archive_members.sql"),
+              (48, "048_snapshot_correction_source.sql"))
 
 
 class StorageError(RuntimeError):

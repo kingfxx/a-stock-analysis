@@ -214,3 +214,29 @@ def test_failed_task_entrypoint_preserves_already_published_aggregation(db,monke
     assert run['status']=='failed'
     assert saved['aggregation_results']['2025Q4']['import_id']==current['import_id']
     assert current['import_id'] is not None
+
+
+def test_snapshot_correction_publishes_provenance_and_new_aggregation(db):
+    from stock_analysis.domains.market.snapshot_correction import correct_shares
+    from stock_analysis.collection.collection import read_source
+    batch=begin_batch(db,'seed','market.trade_snapshot','eastmoney')
+    source=archive_source(db,batch,'eastmoney','market.trade_snapshot',{'seed':True},1,raw=b'original')
+    raw={key:None for key in FIELDS}
+    raw.update(SECURITY_CODE='000001',SECUCODE='000001.SZ',TRADE_DATE='2025-12-31',TOTAL_SHARES=100,CLOSE_PRICE=10,TOTAL_MARKET_CAP=1000)
+    with db.connection(write=True) as c:
+        publish(c,batch,[(normalized(raw,'2025-12-31'),source,'2026-10-14')])
+        old=dict(c.execute('SELECT * FROM market_trade_snapshot').fetchone())
+    result=correct_shares(db,code='000001',exchange='sz',day='2025-12-31',quarter='2025Q4',
+        expected_id=old['id'],expected_hash=old['content_hash'],shares=80,evidence_url='https://example.test/report',reason='核对报告')
+    with db.connection() as c:
+        rows=c.execute('SELECT version,is_latest,total_shares,total_market_cap,source_id FROM market_trade_snapshot ORDER BY version').fetchall()
+        assert [tuple(r)[:4] for r in rows]==[(1,0,100,1000),(2,1,80,800)]
+        assert rows[1]['source_id']==result['source_id']
+        assert c.execute('SELECT operation_id FROM collection_batches WHERE id=?',(result['batch_id'],)).fetchone()[0]==result['operation_id']
+        assert c.execute("SELECT source FROM market_cap_latest WHERE stock_code='000001'").fetchone()[0]=='derived:manual_review'
+        assert current_aggregation_versions(c)['2025Q4']['import_id']==result['aggregation']['import_id']
+        assert c.execute("SELECT known_cap FROM sw_industry_cap_quarters WHERE import_id=? AND industry_code='110101'",(result['aggregation']['import_id'],)).fetchone()[0]==800
+    evidence=json.loads(read_source(db,result['source_id'])[0])
+    assert evidence['baseline_source_id']==source and evidence['shares']==80
+    with pytest.raises(ValueError,match='原快照已变化'):
+        correct_shares(db,code='000001',exchange='sz',day='2025-12-31',quarter='2025Q4',expected_id=old['id'],expected_hash=old['content_hash'],shares=80,evidence_url='https://example.test/report',reason='核对报告')

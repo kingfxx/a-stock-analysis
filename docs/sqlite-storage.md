@@ -35,6 +35,8 @@ v34 新增个股主营构成 `business_segment_versions` 与 `business_segment_i
 
 v31继续只更新 `market_cap_latest`，新增可读取的同表独立停牌估值系列 `historical-suspended-preclose-v1`：东财有效值优先，其次经验证的停牌参考价系列、普通历史合成、旧同日市值。原空价记录保留；实际价格日集中登记于发布batch的 `result_json.price_dates`，快照交易日仍为季末，真实取得／更新时间规则不变。详见[停牌参考价补齐](data-sources/market-suspended-price.md)。
 
+v48更新 `market_cap_latest` 的来源标识：人工核验修订显示 `derived:manual_review`，版本事实和原始证据仍使用现有表。
+
 v30仅更新 `market_cap_latest`，不新增表：按字段优先读取东财有效值、独立 `historical-composite-v1` 同日合成值、旧同日市值。来源使用公共批次／来源表，时间依据仍为真实 `obtained_at/updated_at`，逻辑View显示「未记录」。详见[历史合成快照](data-sources/market-trade-snapshot-composite.md)。
 
 v29新增业务表 `market_trade_snapshot`：全市场未复权股价、涨跌幅、股本、市值、估值等22个源字段，当前只采季度末，事实按实际交易日识别以兼容以后日频。复用公共 `collection_batches/sources/provider_state` 和现有 `sw_update_runs`，不新增采集控制表。`market_cap_latest` 为新快照优先、旧同日市值回退的逻辑View。新表为行业数据，时间依据为真实 `obtained_at/updated_at`；空表或缺时间显示未记录，交易日不代替更新时间。公共来源表分类为运行与配置。原文归档在公共 `collection_sources/`，SQLite备份不包含来源文件。详见[全市场交易日快照](data-sources/market-trade-snapshot.md)。

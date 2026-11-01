@@ -7,7 +7,6 @@ from stock_analysis.domains.financials.company_preview_metrics import (
     METRICS, NONFINANCIAL, build_series, difference,
 )
 from stock_analysis.domains.financials.company_preview_dividends import annual_dividend_plans
-from stock_analysis.domains.industries.company_preview_market_corrections import corrected_market_cap
 
 
 FINANCIAL_COLUMNS = {
@@ -82,8 +81,8 @@ def read_company_preview(db, code, mode='ttm'):
             }
         market = {}
         # Reuse the industry's approved version priority, separately for each metric.
-        rows = conn.execute('SELECT s.*,b.result_json FROM market_trade_snapshot s '
-                            'JOIN collection_batches b ON b.id=s.batch_id '
+        rows = conn.execute('SELECT s.*,b.result_json,cs.request_json FROM market_trade_snapshot s '
+                            'JOIN collection_batches b ON b.id=s.batch_id JOIN collection_sources cs ON cs.id=s.source_id '
                             'WHERE s.security_code=? AND s.exchange=? AND s.is_latest=1 '
                             'AND s.definition_version IN (?,?,?) ORDER BY s.trade_date, '
                             "CASE s.definition_version WHEN 'em-valueanalysis-v1' THEN 3 WHEN 'historical-suspended-preclose-v1' THEN 2 ELSE 1 END",
@@ -97,9 +96,9 @@ def read_company_preview(db, code, mode='ttm'):
                     point.update({metric: row[metric], metric+'_date': row['trade_date'], metric+'_source': source})
             if row['total_market_cap'] is not None:
                 point.update(market_cap=row['total_market_cap'], cap_date=row['trade_date'], cap_source=source)
-                correction = corrected_market_cap(row)
+                correction = json.loads(row['request_json']).get('snapshot_correction')
                 if correction:
-                    point.update(market_cap=correction['value'], cap_correction=correction)
+                    point['cap_correction'] = correction
                 else:
                     point.pop('cap_correction', None)
             if row['close_price'] is not None:
@@ -125,9 +124,8 @@ def read_company_preview(db, code, mode='ttm'):
         for row in series:
             row['values'] = {k: v for k, v in row['values'].items() if k in allowed}
         corrections = [f"{period}季末市值已核正：{point['cap_correction']['reason']}"
-                       f"按季末股价{point['cap_correction']['price']:.2f}元乘期末股本估算；"
-                       f"原快照市值{point['cap_correction']['original_value'] / 1e8:,.2f}亿元。"
-                       f"半年报：{point['cap_correction']['report_url']}"
+                       f"原快照市值{point['cap_correction']['original_market_cap'] / 1e8:,.2f}亿元；"
+                       f"依据：{point['cap_correction']['evidence_url']}"
                        for period, point in sorted(market.items()) if point.get('cap_correction')]
         return {'code': code, 'exchange': exchange, 'name': member['name'] if member else code,
                 'financial_company': financial, 'classification_known': node is not None,
