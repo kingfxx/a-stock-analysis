@@ -7,6 +7,7 @@ from stock_analysis.domains.financials.company_preview_metrics import (
     METRICS, NONFINANCIAL, build_series, difference,
 )
 from stock_analysis.domains.financials.company_preview_dividends import annual_dividend_plans
+from stock_analysis.domains.industries.company_preview_market_corrections import corrected_market_cap
 
 
 FINANCIAL_COLUMNS = {
@@ -96,6 +97,11 @@ def read_company_preview(db, code, mode='ttm'):
                     point.update({metric: row[metric], metric+'_date': row['trade_date'], metric+'_source': source})
             if row['total_market_cap'] is not None:
                 point.update(market_cap=row['total_market_cap'], cap_date=row['trade_date'], cap_source=source)
+                correction = corrected_market_cap(row)
+                if correction:
+                    point.update(market_cap=correction['value'], cap_correction=correction)
+                else:
+                    point.pop('cap_correction', None)
             if row['close_price'] is not None:
                 price_date = row['trade_date']
                 if row['definition_version'] == 'historical-suspended-preclose-v1':
@@ -118,6 +124,11 @@ def read_company_preview(db, code, mode='ttm'):
         allowed = {item['key'] for item in metrics}
         for row in series:
             row['values'] = {k: v for k, v in row['values'].items() if k in allowed}
+        corrections = [f"{period}季末市值已核正：{point['cap_correction']['reason']}"
+                       f"按季末股价{point['cap_correction']['price']:.2f}元乘期末股本估算；"
+                       f"原快照市值{point['cap_correction']['original_value'] / 1e8:,.2f}亿元。"
+                       f"半年报：{point['cap_correction']['report_url']}"
+                       for period, point in sorted(market.items()) if point.get('cap_correction')]
         return {'code': code, 'exchange': exchange, 'name': member['name'] if member else code,
                 'financial_company': financial, 'classification_known': node is not None,
                 'mode': mode, 'metrics': metrics, 'rows': series, 'sources': origins, 'market': market,
@@ -130,4 +141,4 @@ def read_company_preview(db, code, mode='ttm'):
                           '净利率使用合并净利润（利润总额－所得税），不使用归母利润；累计加权ROE不做TTM转换。',
                           '市值和股价为独立季末观察；股价未复权，受分红送转影响。缺失不补零、不插值。',
                           'PE(TTM)及PB(MRQ)直接使用季末快照原值（倍），有效零／负值保留，缺值不以财务数据重算；与行业列表按报告期财务重算的估值可能不同。',
-                          '年度股息率以去年归属的税前每股已存方案合计除本季末未复权股价；可能包含季末之后才公布的方案，不能用于无前视回测。非已实施分红TTM；特别分红可能缺漏，缺年报／中报方案、送转或未知格式时留空。']}
+                          '年度股息率以去年归属的税前每股已存方案合计除本季末未复权股价；可能包含季末之后才公布的方案，不能用于无前视回测。非已实施分红TTM；特别分红可能缺漏，缺年报／中报方案、送转或未知格式时留空。'] + corrections}
