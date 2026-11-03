@@ -1,8 +1,6 @@
 """User-managed groups and browsing history, independent of source facts."""
 
-from pypinyin import lazy_pinyin, Style
-
-from stock_analysis.infrastructure.storage import utc_now
+from stock_analysis.infrastructure.storage import StorageError, utc_now
 from stock_analysis.domains.stocks.sync_support import backup_before_update
 
 
@@ -13,7 +11,7 @@ class StockLibrary:
     def read(self):
         with self.db.connection() as conn:
             stocks = [dict(row) for row in conn.execute(
-                "SELECT code,name FROM instruments WHERE id NOT IN (SELECT instrument_id FROM stock_unfollowed) ORDER BY code")]
+                "SELECT code,name,search_pinyin,search_initials FROM instruments WHERE id NOT IN (SELECT instrument_id FROM stock_unfollowed) ORDER BY code")]
             groups = [dict(row) for row in conn.execute("SELECT id,name FROM stock_groups ORDER BY position,id")]
             members = conn.execute("SELECT group_id,code FROM stock_group_members JOIN instruments "
                                    "ON instrument_id=instruments.id WHERE instrument_id NOT IN "
@@ -23,9 +21,11 @@ class StockLibrary:
                       "ORDER BY viewed_at DESC,instrument_id DESC LIMIT 20")]
             selected = conn.execute("SELECT selected_group FROM stock_picker_preferences WHERE id=1").fetchone()[0]
         for stock in stocks:
+            if stock['search_pinyin'] is None or stock['search_initials'] is None:
+                raise StorageError('股票检索字段尚未准备，请完成数据库初始化后重试')
             name = stock["name"] or ""
             stock["search"] = " ".join((stock["code"], name,
-                "".join(lazy_pinyin(name)), "".join(lazy_pinyin(name, style=Style.FIRST_LETTER)))).lower()
+                stock.pop('search_pinyin') or '', stock.pop('search_initials') or '')).lower()
         for group in groups:
             group["codes"] = [row["code"] for row in members if row["group_id"] == group["id"]]
         return {"stocks": stocks, "groups": groups, "recent": recent, "selected_group": selected}

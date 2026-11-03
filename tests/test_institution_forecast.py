@@ -39,6 +39,41 @@ def test_no_forecasts_is_missing_not_zero():
     assert all(r['profit'] is None for r in rows)
 
 
+def test_light_parser_inline_entities_commas_scientific_and_optional_sections():
+    body = html([(2026, 38, '1,234.50'), (2027, 2, '1e2'), (2028, 1, '&minus;1')])
+    body = body.replace('<th>均值</th>', '<th><span>均值</span></th>')
+    body = body.replace('<td>38</td>', '<td><b>38</b>&nbsp;</td>')
+    body = body.replace('<thead>', '').replace('</thead>', '').replace('<tbody>', '').replace('</tbody>', '')
+    rows = parse_forecast(body, '600887', [2026, 2027, 2028])
+    assert rows[0]['profit'] == 123450000000 and rows[0]['institutions'] == 38
+    assert rows[1]['profit'] == 10000000000 and rows[2]['profit'] is None
+
+
+@pytest.mark.parametrize('value', ['NaN', 'inf', '--', '', 'N/A'])
+def test_nonfinite_and_empty_values_remain_missing(value):
+    assert parse_forecast(html([(2026, 2, value)]), '600887', [2026])[0]['profit'] is None
+
+
+@pytest.mark.parametrize('count', [-1, '1.5'])
+def test_invalid_institution_counts(count):
+    with pytest.raises(ValueError): parse_forecast(html([(2026, count, '1')]), '600887', [2026])
+
+
+def test_ambiguous_and_truncated_tables_are_rejected():
+    body = html()
+    with pytest.raises(ValueError): parse_forecast(body + body[body.index('<table>'):], '600887', [2026])
+    with pytest.raises(ValueError): parse_forecast(body.replace('<td>200</td>', ''), '600887', [2026])
+
+
+def test_rowspan_is_expanded_without_losing_years():
+    body = html([(2026, 3, '1'), (2027, 3, '2')])
+    body = body.replace('<td>2026</td><td>3</td>', '<td>2026</td><td rowspan="2">3</td>')
+    body = body.replace('<td>2027</td><td>3</td>', '<td>2027</td>')
+    rows = parse_forecast(body, '600887', [2026, 2027])
+    assert [r['institutions'] for r in rows] == [3, 3]
+    assert [r['profit'] for r in rows] == [100000000, 200000000]
+
+
 def setup(tmp_path, body, status=200):
     db=Database(tmp_path/'test.sqlite3');db.initialize()
     response=requests.Response();response.status_code=status;response._content=body.encode('gbk')

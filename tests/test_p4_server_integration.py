@@ -15,6 +15,9 @@ from stock_analysis.infrastructure.storage import Database
 def no_unrelated_mainop_requests(monkeypatch):
     monkeypatch.setattr(data_module.BusinessSegmentService, 'update',
                         lambda *args, **kwargs: {'sync': {}, 'warnings': []})
+    # These legacy-cache tests exercise saved financial facts, not CNInfo requests.
+    monkeypatch.setattr(data_module.AnnouncementService, 'update',
+                        lambda *args, **kwargs: {'sync': {}, 'warnings': []})
 
 
 def test_render_page_reads_imported_financial_fact_without_json(tmp_path, monkeypatch):

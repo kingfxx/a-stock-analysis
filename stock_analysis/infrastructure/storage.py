@@ -57,7 +57,7 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (41, "041_shipping_research.sql"), (42, "042_collection_rate_limits.sql"),
               (43, "043_stock_collection_management.sql"), (44, "044_collection_control.sql"), (45, "045_stock_group_batches.sql"),
               (46, "046_shipping_route_view.sql"), (47, "047_source_archive_members.sql"),
-              (48, "048_snapshot_correction_source.sql"))
+              (48, "048_snapshot_correction_source.sql"), (49, "049_stock_search.sql"))
 
 
 class StorageError(RuntimeError):
@@ -272,10 +272,27 @@ class Database:
                 conn.rollback()
                 raise
             self._validate_schema(conn)
-            return {"path": str(self.path), "sqlite_version": sqlite3.sqlite_version,
-                    "schema_version": migrations[-1][0], "journal_mode": actual_mode}
+            runtime = {"path": str(self.path), "sqlite_version": sqlite3.sqlite_version,
+                       "schema_version": migrations[-1][0], "journal_mode": actual_mode}
         finally:
             conn.close()
+        from stock_analysis.domains.stocks.stock_search import prepare_search
+        prepare_search(self)
+        return runtime
+
+    def pending_search_keys(self, limit):
+        with self.connection() as conn:
+            if 'search_pinyin' not in {r['name'] for r in conn.execute('PRAGMA table_info(instruments)')}:
+                return []  # Old-schema migration fixtures and tools.
+            return [dict(r) for r in conn.execute(
+                'SELECT id,name FROM instruments WHERE search_pinyin IS NULL OR search_initials IS NULL LIMIT ?',
+                (limit,))]
+
+    def publish_search_keys(self, rows):
+        with self.connection(write=True) as conn:
+            conn.executemany('UPDATE instruments SET search_pinyin=?,search_initials=? '
+                'WHERE id=? AND name IS ? AND (search_pinyin IS NULL OR search_initials IS NULL)',
+                ((pinyin, initials, identity, name) for identity, name, pinyin, initials in rows))
 
     @contextmanager
     def connection(self, *, write=False):
@@ -316,6 +333,27 @@ class Database:
         exchange = "sh" if code.startswith("6") else "sz"
         if prefix and prefix != exchange:
             raise ValueError("Exchange and stock code disagree")
+        while True:
+            with self.connection() as conn:
+                row = conn.execute('SELECT * FROM instruments WHERE exchange=? AND code=?', (exchange, code)).fetchone()
+                columns = row.keys() if row else {r['name'] for r in conn.execute('PRAGMA table_info(instruments)')}
+                if 'search_pinyin' not in columns:
+                    break  # Preserve the pre-migration identity path for old-schema tools.
+                desired = name if name is not None else row['name'] if row else None
+                if (row and (name is None or row['name'] == name)
+                        and row['search_pinyin'] is not None and row['search_initials'] is not None):
+                    return row['id']
+            from stock_analysis.domains.stocks.stock_search import generate_keys
+            pinyin, initials = generate_keys([desired or ''])[0]
+            with self.connection(write=True) as conn:
+                current = conn.execute('SELECT name FROM instruments WHERE exchange=? AND code=?', (exchange, code)).fetchone()
+                if name is None and current and current['name'] != desired:
+                    continue  # Retry against the name that actually won the concurrent write.
+                conn.execute('INSERT INTO instruments(exchange,code,name,created_at,search_pinyin,search_initials) '
+                    'VALUES (?,?,?,?,?,?) ON CONFLICT(exchange,code) DO UPDATE SET '
+                    'name=coalesce(excluded.name,instruments.name),search_pinyin=excluded.search_pinyin,'
+                    'search_initials=excluded.search_initials', (exchange, code, desired, utc_now(), pinyin, initials))
+                return conn.execute('SELECT id FROM instruments WHERE exchange=? AND code=?', (exchange, code)).fetchone()[0]
         with self.connection(write=True) as conn:
             conn.execute("INSERT INTO instruments(exchange, code, name, created_at) VALUES (?, ?, ?, ?) "
                          "ON CONFLICT(exchange, code) DO UPDATE SET name=coalesce(excluded.name, instruments.name)",

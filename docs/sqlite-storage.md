@@ -35,6 +35,8 @@ v34 新增个股主营构成 `business_segment_versions` 与 `business_segment_i
 
 v31继续只更新 `market_cap_latest`，新增可读取的同表独立停牌估值系列 `historical-suspended-preclose-v1`：东财有效值优先，其次经验证的停牌参考价系列、普通历史合成、旧同日市值。原空价记录保留；实际价格日集中登记于发布batch的 `result_json.price_dates`，快照交易日仍为季末，真实取得／更新时间规则不变。详见[停牌参考价补齐](data-sources/market-suspended-price.md)。
 
+v49仅为 `instruments` 增加 `search_pinyin`（全拼）和 `search_initials`（首字母）两个可空 TEXT 字段，不新增表或索引。NULL 表示未生成，空字符串表示转换结果为空；初始化在结构事务释放后用短命离线进程批量补缺，完成后才提供正常读取。新建/更名经 `Database.ensure_instrument` 在写锁外转换、同事务保存名称和两字段，同名且完整时复用。辅助进程独立加载 pypinyin，主后台与页面不加载词典，页面 GET 不补齐。原库升级、旧备份暂存恢复和应用重载共用初始化准备；生成失败可再次初始化补齐，升级前备份仍按原规则保存。算法变化由后续迁移使派生值失效并重建，不逐行保存名称快照、版本或时间。直接 SQL 改名的维护工具必须同步将两字段置 NULL 并初始化，或使用集中写入口。维护页仍归个股数据，不以派生字段改变数据更新时间。设计和验收见[计划](plans/20261103_后台内存依赖与拼音检索优化/PLAN.md)。
+
 v48更新 `market_cap_latest` 的来源标识：人工核验修订显示 `derived:manual_review`，版本事实和原始证据仍使用现有表。
 
 v30仅更新 `market_cap_latest`，不新增表：按字段优先读取东财有效值、独立 `historical-composite-v1` 同日合成值、旧同日市值。来源使用公共批次／来源表，时间依据仍为真实 `obtained_at/updated_at`，逻辑View显示「未记录」。详见[历史合成快照](data-sources/market-trade-snapshot-composite.md)。

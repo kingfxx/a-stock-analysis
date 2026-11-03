@@ -1,0 +1,117 @@
+# 后台内存依赖与拼音检索优化
+
+状态：已实施并完成局部回归、原库迁移与宿主机验收。日期：2026-11-03。默认单代理。
+
+## 目标与范围
+
+仅实施用户指定的两项：机构预测解析去掉 pandas；股票拼音检索结果预先生成并保存在 SQLite。降低后台启动及日常浏览的常驻内存，保持现有页面打开速度、检索行为和接口格式。
+
+2026-11-03 用户已授权实施本计划；允许必要代码、迁移、验证及按项目规则重启后台。后续实施沿用本目录的 PLAN、DECISIONS、PROGRESS。
+
+不包含行业财务缓存重构、NumPy/OpenBLAS 调参、Plotly 替换、采集提速或新建定时任务。不得通过清空现有缓存或把重依赖简单延迟到首次页面请求来达成指标。
+
+## 已核对的现状和调用链
+
+- `http/server.py` 加载 `http/routes/stocks.py`，后者顶层导入 `domains/valuation/institution_forecast.py`。该模块顶层导入 pandas，只用 `pd.read_html` 解析同花顺机构净利润预测表。
+- 入口 `/api/institution-forecast` → `fetch_institution_forecast` → 公共 RequestCollector；健康响应校验及最终结果组装均调用 `parse_forecast`。请求与纯解析目前在同一文件。机构预期及 HTML 不持久化，沿用 metadata_only。
+- `application.py → domains/stocks/data_service.py → stock_library.py` 顶层导入 pypinyin。`StockLibrary.read()` 每次生成 `search`，前端 `web/shared/stock-picker.js` 使用既有返回字段在本地检索。
+- 生产环境股票身份和名称写入集中于 `infrastructure/storage.py::Database.ensure_instrument(code, name)`。有名称的调用来自 `data_service._add_sqlite_missing_name`、`FundamentalService.import_legacy`、`DividendService.import_legacy`；其他服务多为只传代码。实施前再次扫描写入 SQL，核对新增调用者。
+- `ensure_instrument` 当前用 `coalesce(excluded.name,instruments.name)` 保留已有名称；名称为 None 与空字符串语义不同，不得在优化中擅自合并。
+- `Database.initialize()` 负责结构迁移和升级前备份；`application._initialize_runtime()` 执行启动恢复和 legacy 导入。维护恢复先在暂存库执行 `candidate.initialize()`，再校验当前 schema，最后走应用重载。派生字段必须覆盖这些路径。
+- 当前迁移到 v48；实施时按实际末版本追加，不修改历史迁移。`instruments` 已登记为维护页的个股数据表。
+- 本任务没有找到需沿用的同目标开发计划，因此建立本目录。只读分析见 `data/verification/reports/backend-memory-review-20261103.md`。
+
+## 方案一：机构预测使用轻量纯解析
+
+新增 `domains/valuation/institution_forecast_parser.py`，用标准库 `html.parser.HTMLParser` 提取标题、目标表 caption、表头和单元格。纯模块只接收 HTML、股票代码、目标年度，返回原 rows 格式，不导入 requests、SQLite、collection、HTTP 或 application，也不读取文件。
+
+`institution_forecast.py` 保留来源请求、GBK 解码、公共预算、拒绝冷却、批次及 metadata_only，改为直接调用新解析器。现有 `parse_forecast` 名称可通过明确 import 保留给已有调用者和测试，不保留第二份实现。路由契约不变。
+
+解析与数值规范：
+
+1. 继续校验标题中的精确股票代码，唯一匹配包含“单位：亿元”和“预测年报净利润”的 caption。
+2. 保留六列顺序：年度、预测机构数、最小值、均值、最大值、行业平均数。支持内联标签、实体、空白和 HTML 常见的 thead/tbody 布局；错误表结构明确拒绝，不能把列错位当有效数据。
+3. 结合离线样本明确 rowspan/colspan 的处理；仅支持能无歧义还原六列的布局，其他结构抛既有类别错误，不静默漏行。先对照旧 pandas 结果，不能为减少代码任意缩减当前合法布局。
+4. 保持年度合法性、重复年度、机构数非负整数校验；缺年、无预测、缺值保留 None；有效零、负利润保留，亿元转元口径不变。
+5. 独立完成数值字符串清理，避免反向导入带业务依赖的模块。核对旧 read_html 的千位分隔符、科学计数法及缺失标记处理；新旧返回值和异常类别作离线对照。
+
+不把 pandas 改成函数内导入。requirements 中没有直接声明 pandas，AKShare 等环境依赖仍可能安装它；本任务保证后台实际功能路径不导入 pandas，不卸载其他工具需要的包。
+
+## 方案二：在 instruments 保存拼音派生字段
+
+复用现表，不新增表。按用户 2026-11-03 的要求，仅增加以下两个字段：
+
+| 字段 | 用途 |
+|---|---|
+| search_pinyin | 与当前 lazy_pinyin 相同的全拼拼接结果 |
+| search_initials | 与当前 FIRST_LETTER 相同的首字母拼接结果 |
+
+两个字段使用可空 TEXT：NULL 表示尚未生成，空字符串表示已经生成但无对应拼音（例如空名称）；任一字段为 NULL 都需补齐。不另存名称快照、逐行版本或生成时间。名称直接复用现有 name；算法/词典版本由代码依赖和迁移记录管理，未来规则变化通过迁移将两字段置 NULL，再批量重建。浏览器仍本地过滤，不新增拼音 SQL 索引。继续按原方式拼出 `code name pinyin initials` 并 lower，接口仍只返回原 code/name/search，不增加接口字段。
+
+### 职责与依赖
+
+| 模块 | 拟调整职责 |
+|---|---|
+| `domains/stocks/stock_search_worker.py`（新增） | 独立短命进程入口；仅标准库和 pypinyin，接收有限大小 JSON，生成名称到两种拼音的结果；不导入业务应用、不联网、不访问数据库 |
+| `domains/stocks/stock_search.py`（新增） | 股票检索派生流程：名称变化及字段完整性判断、批量子进程调用、协议校验、准备补齐；不拥有常驻词典、服务或调度器；避免导入 Database 造成循环 |
+| `infrastructure/storage.py` | 保持身份校验、事务、schema 的唯一所有权；ensure_instrument 集中维护名称与派生字段，initialize 衔接已有迁移/恢复准备 |
+| `domains/stocks/stock_library.py` | 删除 pypinyin 导入；只读持久字段并组装既有 search |
+| `application.py` | 仅在实际需要时衔接启动/恢复准备完成状态，不放转换规则和 SQL |
+
+storage 已显式依赖领域的 `financial_storage`；本次检索派生 helper 同样不得反向获取 application、HTTP 或全局服务。实施前复核抽取方式，字段 SQL 留在存储边界，名称派生和子进程规则留在 stocks 领域，不建立通用注册表或全局注入机制。
+
+### 写入、补齐和恢复
+
+- **存量升级：** 追加迁移字段，沿用升级前备份。结构事务提交并释放连接后，一次批量读取需要生成的名称，使用一个短命进程批量转换，在短写事务中按股票 ID、读取时的名称及字段仍缺失的条件发布；名称快照只保留在本次调用内存中，不新增持久字段。不会持有 SQLite 写锁等待子进程。
+- **准备完成条件：** `Database.initialize()` 返回前完成必需派生准备，使正常启动、维护暂存恢复库、恢复后的重载均可读取完整索引。准备函数只对具备本次字段的 schema 执行，兼容测试中的旧迁移切片；schema 已升级但生成失败时明确报错，可在下次初始化幂等补齐，不把未完成称为成功。
+- **启动 legacy 导入：** 迁移后可能再次写入/更新名称，均经 ensure_instrument 同步生成，因此不能仅在启动最开始补齐一次后忽略后续写入。
+- **新增/改名：** ensure_instrument 先核对代码、现有名称和两字段是否完整；仅名称发生变化或派生缺失时调用辅助进程，在写事务外完成生成；同一事务保存名称及对应检索值。并发更新以实际提交的名称/派生对为单位，不能把旧名称结果发布到新名称上。
+- **重复写入：** 已有同名且两字段均非 NULL 时不启动子进程、不重复改写；只传 code/name=None 时保留已有名称和索引。无名称的新股票按现有行为支持代码检索，完整名称后来写入时补齐。
+- **失败：** 子进程超时/异常/协议无效不发布新名称与不匹配索引，不用旧拼音冒充新名称。错误由原写入调用链按现有异常边界处理；测试覆盖失败后可重试，无常驻子进程遗留。
+- **直接 SQL：** 实施前核对并消除生产代码绕过 ensure_instrument 的名称写入；不让页面 GET 承担修复职责。旧备份、迁移和测试直接 SQL 插入的缺失字段通过初始化补齐路径覆盖。若测试或维护工具直接修改已有 name，必须同时将两字段置 NULL 并运行准备，或改走集中写入口；不声称仅凭两个非 NULL 字段可以识别任意外部 SQL 改名。
+- **读取：** StockLibrary.read 不启动辅助进程、不调用转换、不更新数据库。名称与拼音一致性由集中写入的同事务发布保证，字段完整性由初始化准备保证，不以静默退化到仅代码/中文检索作为成功验收。
+- **退出与隔离：** 用当前 sys.executable 启动明确的 worker 模块、无 shell；Windows 使用 CREATE_NO_WINDOW；JSON 明确 UTF-8，限制输入及返回规模，校验对应关系，设置有限超时并回收。worker 模块必须独立于应用初始化，以免重复导入整个后台。
+
+仅从主进程移除词典才能降低常驻量。主进程不通过延迟 import、清理 sys.modules 或动态卸载词典实现；pypinyin 保留安装供辅助进程使用。
+
+## 实施步骤
+
+1. **建立基线。** 复核当前入口和传递导入；保存进程模块列表、内存、原解析返回与检索字符串对照。原库对照仅在短命离线进程运行，不进入生产页面。隔离数据库和缓存。
+2. **替换预测解析。** 新建纯解析模块、接通来源适配器、删除 pandas 导入，先通过离线语义/来源边界回归。
+3. **生成与存储检索值。** 增加迁移、独立 worker、派生准备；集中接入 ensure_instrument 和 initialize。覆盖升级、legacy、恢复、并发和失败路径，随后切换 StockLibrary.read。
+4. **局部验证与性能对比。** 验证下表；发现新依赖/范围变化先更新本计划。不默认跑全量。
+5. **文档与上线验收。** 更新实际结构和存储说明，保存测量报告；相关测试通过后核对 8765 身份和活动任务，按项目规则安全重启原数据库后台，检查日志、页面并保持运行。已于本次实施授权内完成。
+
+## 验证范围与通过条件
+
+| 范围 | 最小充分检查 |
+|---|---|
+| 预测解析 | `tests/test_institution_forecast.py`；新增纯解析离线用例，覆盖标题/唯一表/列序/HTML实体及内联标签/千位分隔/非法数值/零负值/缺年/重复年/机构数/无预测/结构异常；与旧解析结果对照 |
+| 来源保护 | 保留现有 metadata_only、无预测值持久化、共享预算、拒绝冷却、恢复拒绝及 HTTP no-store/400 的测试；不真实联网取机构预期 |
+| 检索 | `tests/test_stock_library.py`；全拼与首字母逐项对照现有结果，覆盖多音字、ST/*ST、字母数字、标点、空名称、更名、重复调用、取消/恢复关注、分组与最近查看 |
+| 存储边界 | `tests/test_storage.py` 中身份、连接隔离、迁移/备份及本次相关新增用例；`tests/test_fundamental_service.py`、`tests/test_dividend_service.py` 和 `tests/test_p4_server_integration.py` 中的名称/legacy 相关用例，按实际调用者选择，不机械整组扩展 |
+| 生命周期 | `tests/test_database_restore.py`、`tests/test_stock_library.py` 的旧库升级，覆盖恢复旧版本、准备失败重试、空库、重复初始化、并发更名与子进程退出 |
+| 边界 | `tests/test_http_source_boundaries.py` 选独立解析相关项并补预测纯模块检查；新进程导入 server 及正常检索/预测解析后主进程均不含 pandas/pypinyin 模块，numpy 保留正常 |
+| 存储成本/维护 | 对比 instruments 行均/总大小、索引、读写耗时；维护表用途仍登记正确；两个派生字段不增加时间统计列或改写来源更新时间 |
+| 页面 | 宿主机 8765 首页与股票选择器；代码/中文/全拼/首字母搜索、分组、切换股票、行业跳转；机构预测用隔离离线数据验证交互，不自动联网 |
+
+性能验收分别测量，不以更快的某项抵消其他项变慢：
+
+- 同一电脑、相同数据和页面，分开记录：新进程启动/初始化、首次页面、已缓存页面、StockLibrary.read、切换股票及股票所属行业；报告 HTTP/领域耗时和浏览器就绪耗时，不能混用。
+- 首次与热态分组。热态至少 20 次，首次在至少 5 个新进程/页面会话对照；记录中位数和 P95。测量噪声观察线：中位数增加超过 max(原值 5%,10ms) 或 P95 增加超过 max(原值 10%,30ms) 即定位、只复测受影响项；这不是允许业务长期变慢的预算，确认稳定退化即不通过。
+- 启动升级批量补齐、新建/更名转换的写入成本单独报告，不把它隐藏进“页面不变慢”；已准备库的普通启动/页面不得因等待辅助进程产生新延迟。
+- 记录工作集、私有工作集（可获得时）、私有提交，首次和多轮使用后稳定值；辅助进程峰值单列，待其退出后比较主进程。初步期望减少几十 MiB，不把前次不同进程的依赖体积简单相加或承诺固定 80 MiB。
+- 验收关键是搜索结果/预测结果等价、主进程重依赖确已移除、正常浏览内存下降且无可重复的打开速度退化。
+
+资料：离线合成样本及合法留存样本在 `data/verification/samples/`；测量/验收在 `data/verification/reports/`；工具在 `data/verification/tools/`；后台日志在 `data/verification/logs/`。不违反机构预测原有“不持久化真实 HTML/预测值”的约束，不新增真实同花顺内容样本。清理隔离测试库和一次性文件，保留正式备份、报告和当前日志。
+
+## 文档同步与风险控制
+
+- 实施后更新 `stock_analysis/README.md`（纯解析、检索派生入口）、`docs/sqlite-storage.md`（两个追加字段、NULL/空串含义、补齐和恢复语义）、`docs/dividend-forecast.md`（只描述已实现的解析方式）、根 `README.md` 的“我的股票”说明或其详细说明链接。
+- `maintenance/maintenance.py` 更新 instruments 的用途描述；不新增时间字段，不修改 TIME_COLUMNS。无新增表不虚设分类。
+- 原数据库升级沿用既有升级前备份；出现问题保留证据和备份，不自动覆盖/恢复日常库。旧代码不一定能打开新 schema，回退程序与数据库必须匹配。
+- 主要风险是 HTML 解析语义差异、多音字检索变化、遗漏名称写入入口、辅助进程瞬时峰值/启动延迟，以及旧备份恢复后索引未准备。上述均为明确验收项。
+
+## 实施验收
+
+已完成，详见 [验收报告](../../../data/verification/reports/backend-dependency-acceptance-20261103.md)。v49 仅新增两字段；8765 PID 12156 保持运行。独立进程模块工作集约134.75→52.55 MiB，行业读取后约178.96→95.45 MiB；首页和行业热态速度未观察到稳定退化。原库名称/身份及来源/批次/分析记录数校验一致。

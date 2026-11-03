@@ -71,7 +71,7 @@ DESCRIPTIONS={
  'index_read_revisions':('指数数据','Index chart cache revision; incremented only by committed index valuation, index point, catalog, definition, sequence and industry taxonomy changes'),
  'index_valuation_observations':('指数数据','整数序列 ID 引用的指数估值事实、原始来源及真实修订版本'),
  'sovereign_yield_observations':('宏观数据','中美国债收益率与GDP年增率日度原值、来源修订及真实写入时间'),
- 'instruments':('个股数据','股票代码、交易所与名称'),
+ 'instruments':('个股数据','股票代码、交易所、名称及预生成的全拼和首字母检索键'),
  'financial_reports':('个股数据','新浪关键指标和三表原始财报，按公司及报告期逐条无损压缩保存'),
  'stock_announcement_identities':('个股数据','股票对应巨潮组织标识及身份来源、查询和真实更新时间'),
  'stock_announcement_metadata':('个股数据','巨潮公告结构化元数据及真实修订版本；不保存原文/PDF'),

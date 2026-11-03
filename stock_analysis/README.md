@@ -12,6 +12,7 @@
 | `collection/` | 公共运行控制、来源归档、预算、锁、限速、调度及已注册任务适配；publication_counts提供不含IO的发布计数，collection_progress只读汇总公共批次 |
 | `maintenance/` | 统计、备份恢复、空间整理和清理 |
 | `domains/stocks/` | 股票库、行情、公告、分红、筹码；data_service 负责个股加载和数据组装，source_parsers 负责离线解析，sync_support 提供共享同步状态与策略 |
+| `domains/stocks/stock_search.py` / `stock_search_worker.py` | 股票全拼及首字母预生成；初始化批量补缺，名称写入同事务发布，pypinyin 仅在短命离线子进程加载；股票库读取只读持久字段 |
 | `domains/stocks/collection_operations.py` | 个股首次/手动/分组执行编排与轻量运行状态；复用事实服务及公共来源，不复制业务缓存 |
 | `domains/stocks/group_execution.py` | 分组业务依赖及有界工作线程，复用唯一operation和取消生命周期 |
 | `domains/stocks/group_requests.py` | 独立来源通道、最多20股请求合并及全页校验/内存分流，同源仍走公共collector |
@@ -27,6 +28,7 @@
 | `collection/execution_context.py` | 组合采集执行中的父任务元数据与取消回调，作用域退出自动恢复 |
 | `domains/financials/` | 财务周期、报表、指标与主营构成；payloads 组装财务视图数据 |
 | `domains/valuation/` | 估值、DCF、股息预测；纯计算在 calculations，视图数据组装在 payloads |
+| `domains/valuation/institution_forecast_parser.py` | 标准库 HTML 表格纯解析与机构净利润预测校验，无 pandas、网络或存储依赖；请求仍由 institution_forecast 复用公共采集 |
 | `domains/indices/` | 指数定义、采集、查询、行情与编码 |
 | `domains/industries/` | 通用行业分类、成员、财务／市值汇总与比较；company_preview.py 只读组装单公司快览 |
 | `domains/financials/company_preview_metrics.py` | 行业公司快览纯周期、同比及派生计算；不引入网络或存储 |
