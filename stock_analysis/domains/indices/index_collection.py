@@ -923,216 +923,220 @@ def _run_operation_locked(db,operation,*,collector=None):
         return _run_bond_only_operation(db,operation,row)
     injected_collector=collector is not None
     collector=collector or IndexCollector(db,operation,progress=progress)
-    try:collector.task_progress=tracker
-    except (AttributeError,TypeError):pass
-    errors={}
-    bond_result={}
-    bond_task_id=(tracker.register('eastmoney','bond_zh_us_rate','中美国债收益率')
-                  if 'bond_zh_us_rate' in scope.get('datasets',[]) else None)
-    derived_result={'status':'pending','facts':0,'network_requests':0}
-    dependency_result={'status':'pending','network_requests':0}
-    derive_through=None
-    status='complete'
-    def run_bond(http):
-        status='complete';errors={};bond_result={}
-        tracker.transition(bond_task_id,'running','检查初始化、增量水位及近期14日')
-        try:
-            from stock_analysis.domains.market.bond_yields import collect as collect_bond_yields
+    try:
+        try:collector.task_progress=tracker
+        except (AttributeError,TypeError):pass
+        errors={}
+        bond_result={}
+        bond_task_id=(tracker.register('eastmoney','bond_zh_us_rate','中美国债收益率')
+                      if 'bond_zh_us_rate' in scope.get('datasets',[]) else None)
+        derived_result={'status':'pending','facts':0,'network_requests':0}
+        dependency_result={'status':'pending','network_requests':0}
+        derive_through=None
+        status='complete'
+        def run_bond(http):
+            status='complete';errors={};bond_result={}
+            tracker.transition(bond_task_id,'running','检查初始化、增量水位及近期14日')
+            try:
+                from stock_analysis.domains.market.bond_yields import collect as collect_bond_yields
+                def bond_cancelled():
+                    with db.connection() as conn:
+                        item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                    return not item or bool(item[0])
+                bond_result=collect_bond_yields(db,operation,collector=http,cancelled=bond_cancelled,
+                    progress=lambda message:tracker.update_message('eastmoney',message))
+                tracker.transition(bond_task_id,'success',bond_result.get('status','complete'))
+                if bond_result.get('status')=='partial':
+                    status='failed';errors['bond_zh_us_rate']='部分日期存在尚未核实的字段撤回；保留旧事实'
+                elif bond_result.get('status')=='empty':
+                    status='failed'
+                    errors['bond_zh_us_rate']='来源返回空区间；未将空响应当作年度覆盖'
+            except Cancelled as exc:
+                tracker.transition(bond_task_id,'cancelled','已停止，已完成年度分段保留')
+                status='cancelled';errors['bond_zh_us_rate']=str(exc)
+            except Exception as exc:
+                tracker.transition(bond_task_id,'failed',str(exc))
+                status='failed';errors['bond_zh_us_rate']=str(exc)
+            return status,bond_result,errors
+        bond_pool=None;bond_future=None;bond_http=None
+        if bond_task_id is not None and not injected_collector:
+            from stock_analysis.collection.collection import RequestCollector
             def bond_cancelled():
                 with db.connection() as conn:
                     item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
                 return not item or bool(item[0])
-            bond_result=collect_bond_yields(db,operation,collector=http,cancelled=bond_cancelled,
+            bond_http=RequestCollector(db,cancelled=bond_cancelled,
                 progress=lambda message:tracker.update_message('eastmoney',message))
-            tracker.transition(bond_task_id,'success',bond_result.get('status','complete'))
-            if bond_result.get('status')=='partial':
-                status='failed';errors['bond_zh_us_rate']='部分日期存在尚未核实的字段撤回；保留旧事实'
-            elif bond_result.get('status')=='empty':
-                status='failed'
-                errors['bond_zh_us_rate']='来源返回空区间；未将空响应当作年度覆盖'
-        except Cancelled as exc:
-            tracker.transition(bond_task_id,'cancelled','已停止，已完成年度分段保留')
-            status='cancelled';errors['bond_zh_us_rate']=str(exc)
-        except Exception as exc:
-            tracker.transition(bond_task_id,'failed',str(exc))
-            status='failed';errors['bond_zh_us_rate']=str(exc)
-        return status,bond_result,errors
-    bond_pool=None;bond_future=None;bond_http=None
-    if bond_task_id is not None and not injected_collector:
-        from stock_analysis.collection.collection import RequestCollector
-        def bond_cancelled():
-            with db.connection() as conn:
-                item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
-            return not item or bool(item[0])
-        bond_http=RequestCollector(db,cancelled=bond_cancelled,
-            progress=lambda message:tracker.update_message('eastmoney',message))
-        bond_pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='index-bond')
-        bond_future=bond_pool.submit(run_bond,bond_http)
-    try:
-        with nullcontext():
-            collector.load_calendar(cached=row['mode'] in ('incremental','review'))
-            local_now=datetime.now(ZoneInfo('Asia/Shanghai'))
-            today=local_now.date()
-            # After market close, incremental collection may check today's data from every selected provider.
-            eligible=[d for d in collector.trading_days if d<today.isoformat()]
-            if (row['mode']=='incremental' and (scope['end'] is None or scope['end']>=today.isoformat())
-                    and local_now.hour>=15 and today.isoformat() in collector.trading_days):
-                eligible.append(today.isoformat())
-            if not eligible:
-                raise ValueError('交易日历没有已完成交易日')
-            end=min(scope['end'] or max(eligible),max(eligible))
-            start=scope['start'] or rolling_start(today).isoformat()
-            if row['mode'] in ('incremental','review') and not scope['start']:
-                start=sorted(d for d in collector.trading_days if d<=end)[-10]
-            collector.auto_incremental=row['mode']=='incremental' and not scope['start']
-            if row['mode']=='audit' and not scope['start']:
-                # Rotate one older month per manual monthly audit; quarter-wide overview is read-only.
-                candidates=list(segments(start,end))[:-4]
-                with db.connection() as conn:
-                    audit_number=conn.execute("SELECT count(*) FROM collection_operations WHERE mode='audit' AND operation_id<>? AND status='complete'",(operation,)).fetchone()[0]
-                if candidates:
-                    start,end=candidates[audit_number%len(candidates)]
-            if start>end:
-                raise ValueError('滚动窗口没有已完成交易日')
-            derive_through=end
-            try:
-                from stock_analysis.domains.market.market_congestion import prepare_index_dependency
-                def dependency_cancelled():
+            bond_pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='index-bond')
+            bond_future=bond_pool.submit(run_bond,bond_http)
+        try:
+            with nullcontext():
+                collector.load_calendar(cached=row['mode'] in ('incremental','review'))
+                local_now=datetime.now(ZoneInfo('Asia/Shanghai'))
+                today=local_now.date()
+                # After market close, incremental collection may check today's data from every selected provider.
+                eligible=[d for d in collector.trading_days if d<today.isoformat()]
+                if (row['mode']=='incremental' and (scope['end'] is None or scope['end']>=today.isoformat())
+                        and local_now.hour>=15 and today.isoformat() in collector.trading_days):
+                    eligible.append(today.isoformat())
+                if not eligible:
+                    raise ValueError('交易日历没有已完成交易日')
+                end=min(scope['end'] or max(eligible),max(eligible))
+                start=scope['start'] or rolling_start(today).isoformat()
+                if row['mode'] in ('incremental','review') and not scope['start']:
+                    start=sorted(d for d in collector.trading_days if d<=end)[-10]
+                collector.auto_incremental=row['mode']=='incremental' and not scope['start']
+                if row['mode']=='audit' and not scope['start']:
+                    # Rotate one older month per manual monthly audit; quarter-wide overview is read-only.
+                    candidates=list(segments(start,end))[:-4]
                     with db.connection() as conn:
-                        item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
-                    return not item or bool(item[0])
-                dependency_result=prepare_index_dependency(db,operation,end,dependency_cancelled)
-            except Cancelled:
-                raise
-            except Exception as exc:
-                dependency_result={'status':'failed','network_requests':0,'error':str(exc)}
-            collector.http.requests+=dependency_result.get('network_requests',0)
-            progress(f'指数采集范围 {start}—{end}；主题指数未纳入')
-            legu_plan_start=start
-            if row['mode'] in ('incremental','review') and not scope['start']:
-                current=date.fromisoformat(end).replace(day=1)
-                for _ in range(3):current=(current-timedelta(days=1)).replace(day=1)
-                legu_plan_start=current.isoformat()
-            planner=getattr(collector,'plan_operation_work_units',None)
-            if callable(planner):planner(start,end,row['mode'],scope['providers'],legu_plan_start)
-            tracker.set_phase('running')
-            def run_provider(provider,worker):
-                if provider=='csindex':
-                    worker.collect_cs(start,end,row['mode'])
-                elif provider=='legu':
-                    lg_start=start
-                    if row['mode'] in ('incremental','review') and not scope['start']:
-                        current=date.fromisoformat(end).replace(day=1)
-                        for _ in range(3):
-                            current=(current-timedelta(days=1)).replace(day=1)
-                        lg_start=current.isoformat()
-                    worker.collect_legu(lg_start,end,row['mode'])
-                else:
-                    worker.collect_sw(start,end,row['mode'])
-                return worker
-            workers=[]
-            if injected_collector:
-                # Keep custom collectors deterministic for tests and callers that inject a session.
-                jobs=[(provider,collector) for provider in scope['providers']]
-                for provider,worker in jobs:
-                    try:
-                        run_provider(provider,worker)
-                    except Cancelled:
-                        raise
-                    except Exception as exc:
-                        errors[provider]=str(exc)
-                        progress(f'{provider} 停止：{exc}；其他来源独立继续')
-            else:
-                def worker_for(provider):
-                    worker=IndexCollector(db,operation,progress=lambda message,p=provider:progress(message,p))
-                    worker.trading_days=collector.trading_days
-                    worker.auto_incremental=collector.auto_incremental
-                    try:worker.task_progress=tracker
-                    except (AttributeError,TypeError):pass
-                    if hasattr(collector,'planned_cs_candidates'):
-                        worker.planned_cs_candidates=collector.planned_cs_candidates
+                        audit_number=conn.execute("SELECT count(*) FROM collection_operations WHERE mode='audit' AND operation_id<>? AND status='complete'",(operation,)).fetchone()[0]
+                    if candidates:
+                        start,end=candidates[audit_number%len(candidates)]
+                if start>end:
+                    raise ValueError('滚动窗口没有已完成交易日')
+                derive_through=end
+                try:
+                    from stock_analysis.domains.market.market_congestion import prepare_index_dependency
+                    def dependency_cancelled():
+                        with db.connection() as conn:
+                            item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                        return not item or bool(item[0])
+                    dependency_result=prepare_index_dependency(db,operation,end,dependency_cancelled)
+                except Cancelled:
+                    raise
+                except Exception as exc:
+                    dependency_result={'status':'failed','network_requests':0,'error':str(exc)}
+                collector.http.requests+=dependency_result.get('network_requests',0)
+                progress(f'指数采集范围 {start}—{end}；主题指数未纳入')
+                legu_plan_start=start
+                if row['mode'] in ('incremental','review') and not scope['start']:
+                    current=date.fromisoformat(end).replace(day=1)
+                    for _ in range(3):current=(current-timedelta(days=1)).replace(day=1)
+                    legu_plan_start=current.isoformat()
+                planner=getattr(collector,'plan_operation_work_units',None)
+                if callable(planner):planner(start,end,row['mode'],scope['providers'],legu_plan_start)
+                tracker.set_phase('running')
+                def run_provider(provider,worker):
+                    if provider=='csindex':
+                        worker.collect_cs(start,end,row['mode'])
+                    elif provider=='legu':
+                        lg_start=start
+                        if row['mode'] in ('incremental','review') and not scope['start']:
+                            current=date.fromisoformat(end).replace(day=1)
+                            for _ in range(3):
+                                current=(current-timedelta(days=1)).replace(day=1)
+                            lg_start=current.isoformat()
+                        worker.collect_legu(lg_start,end,row['mode'])
+                    else:
+                        worker.collect_sw(start,end,row['mode'])
                     return worker
-                cancelled=False
-                with ThreadPoolExecutor(max_workers=max(1,len(scope['providers'])),thread_name_prefix='index-provider') as pool:
-                    jobs={provider:worker_for(provider) for provider in scope['providers']}
-                    futures={pool.submit(run_provider,provider,worker):(provider,worker) for provider,worker in jobs.items()}
-                    for future in as_completed(futures):
-                        provider,worker=futures[future]
+                workers=[]
+                if injected_collector:
+                    # Keep custom collectors deterministic for tests and callers that inject a session.
+                    jobs=[(provider,collector) for provider in scope['providers']]
+                    for provider,worker in jobs:
                         try:
-                            future.result()
+                            run_provider(provider,worker)
                         except Cancelled:
-                            cancelled=True
+                            raise
                         except Exception as exc:
                             errors[provider]=str(exc)
                             progress(f'{provider} 停止：{exc}；其他来源独立继续')
-                        workers.append(worker)
-                for worker in workers:
-                    collector.http.requests+=worker.http.requests
-                    collector.http.retries+=worker.http.retries
-                    collector.http.halted.update(worker.http.halted)
-                close_worker_sessions(workers)
-                if cancelled:
-                    raise Cancelled('用户取消采集；已发布分段保留')
-            with db.connection() as conn:
-                failed=conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND status='failed' "
-                    "AND dataset NOT IN ('index.price.derived','market.legu.congestion.page')",(operation,)).fetchone()[0]
-            if errors or failed:
-                status='failed'
-            try:
-                from stock_analysis.domains.indices.index_price_derived import recompute
-                def derivation_cancelled():
-                    with db.connection() as conn:
-                        item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
-                    return not item or bool(item[0])
+                else:
+                    def worker_for(provider):
+                        worker=IndexCollector(db,operation,progress=lambda message,p=provider:progress(message,p))
+                        worker.trading_days=collector.trading_days
+                        worker.auto_incremental=collector.auto_incremental
+                        try:worker.task_progress=tracker
+                        except (AttributeError,TypeError):pass
+                        if hasattr(collector,'planned_cs_candidates'):
+                            worker.planned_cs_candidates=collector.planned_cs_candidates
+                        return worker
+                    cancelled=False
+                    with ThreadPoolExecutor(max_workers=max(1,len(scope['providers'])),thread_name_prefix='index-provider') as pool:
+                        jobs={provider:worker_for(provider) for provider in scope['providers']}
+                        futures={pool.submit(run_provider,provider,worker):(provider,worker) for provider,worker in jobs.items()}
+                        for future in as_completed(futures):
+                            provider,worker=futures[future]
+                            try:
+                                future.result()
+                            except Cancelled:
+                                cancelled=True
+                            except Exception as exc:
+                                errors[provider]=str(exc)
+                                progress(f'{provider} 停止：{exc}；其他来源独立继续')
+                            workers.append(worker)
+                    for worker in workers:
+                        collector.http.requests+=worker.http.requests
+                        collector.http.retries+=worker.http.retries
+                        collector.http.halted.update(worker.http.halted)
+                    close_worker_sessions(workers)
+                    if cancelled:
+                        raise Cancelled('用户取消采集；已发布分段保留')
                 with db.connection() as conn:
-                    affected_start=conn.execute("SELECT min(scope_start) FROM collection_batches WHERE operation_id=? "
-                        "AND status='complete' AND dataset IN ('index.cs.history','index.sw.analysis')",(operation,)).fetchone()[0]
-                # Tail catch-up can extend before the default ten-day review window.
-                estimate_start=min(d for d in (start,affected_start,dependency_result.get('first')) if d)
-                derived_result=recompute(db,operation,start=estimate_start,through=derive_through,cancelled=derivation_cancelled)
-            except Cancelled:
-                raise
-            except Exception as exc:
-                # A failed local estimate never rolls back already committed provider fields.
-                derived_result={'status':'failed','facts':0,'network_requests':0,'error':str(exc)}
-    except Cancelled as exc:
-        status='cancelled'
-        errors['operation']=str(exc)
-    except Exception as exc:
-        status='failed'
-        errors['operation']=str(exc)
-    if bond_future is not None or (bond_task_id is not None and status!='cancelled'):
-        try:
-            bond_status,bond_result,bond_errors=(bond_future.result() if bond_future is not None
-                                               else run_bond(collector.http))
-            errors.update(bond_errors)
-            if bond_status=='cancelled' or (status!='cancelled' and bond_status=='failed'):
-                status=bond_status
-        finally:
-            if bond_pool is not None:
-                bond_pool.shutdown(wait=True)
-                collector.http.requests+=bond_http.requests
-                collector.http.retries+=bond_http.retries
-                collector.http.halted.update(bond_http.halted)
-                bond_http.session.close()
-    tracker.finish(status)
-    with db.connection(write=True) as conn:
-        current=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
-        progress_result=json.loads(current[0]) if current and current[0] else {}
-        totals=[dict(r) for r in conn.execute('SELECT status,coverage_status,count(*) AS batches FROM collection_batches WHERE operation_id=? '
-                                            'GROUP BY status,coverage_status',(operation,))]
-        valuation_batches=conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND dataset NOT IN "
-            "('index.calendar','index.price.derived','market.legu.congestion.page')",(operation,)).fetchone()[0]
-        conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
-            (status,utc_now(),encoded(dict(message=_operation_message(status,row['mode'],valuation_batches,derived_result),
-                providers=progress_result.get('providers',{}),work_progress=progress_result.get('work_progress'),
-                batches=totals,errors=errors,bond_yields=bond_result,derived=derived_result,dependency=dependency_result,**collector.http.report())),
-             encoded(errors) if errors else None,operation))
-    report=db.path.parent/'verification'/'reports'/('index-collection-'+operation+'.json')
-    with db.connection() as conn:
-        payload=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(operation,)).fetchone())
-    atomic_write(report,encoded(payload).encode())
-    return payload
+                    failed=conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND status='failed' "
+                        "AND dataset NOT IN ('index.price.derived','market.legu.congestion.page')",(operation,)).fetchone()[0]
+                if errors or failed:
+                    status='failed'
+                try:
+                    from stock_analysis.domains.indices.index_price_derived import recompute
+                    def derivation_cancelled():
+                        with db.connection() as conn:
+                            item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                        return not item or bool(item[0])
+                    with db.connection() as conn:
+                        affected_start=conn.execute("SELECT min(scope_start) FROM collection_batches WHERE operation_id=? "
+                            "AND status='complete' AND dataset IN ('index.cs.history','index.sw.analysis')",(operation,)).fetchone()[0]
+                    # Tail catch-up can extend before the default ten-day review window.
+                    estimate_start=min(d for d in (start,affected_start,dependency_result.get('first')) if d)
+                    derived_result=recompute(db,operation,start=estimate_start,through=derive_through,cancelled=derivation_cancelled)
+                except Cancelled:
+                    raise
+                except Exception as exc:
+                    # A failed local estimate never rolls back already committed provider fields.
+                    derived_result={'status':'failed','facts':0,'network_requests':0,'error':str(exc)}
+        except Cancelled as exc:
+            status='cancelled'
+            errors['operation']=str(exc)
+        except Exception as exc:
+            status='failed'
+            errors['operation']=str(exc)
+        if bond_future is not None or (bond_task_id is not None and status!='cancelled'):
+            try:
+                bond_status,bond_result,bond_errors=(bond_future.result() if bond_future is not None
+                                                   else run_bond(collector.http))
+                errors.update(bond_errors)
+                if bond_status=='cancelled' or (status!='cancelled' and bond_status=='failed'):
+                    status=bond_status
+            finally:
+                if bond_pool is not None:
+                    bond_pool.shutdown(wait=True)
+                    collector.http.requests+=bond_http.requests
+                    collector.http.retries+=bond_http.retries
+                    collector.http.halted.update(bond_http.halted)
+                    bond_http.session.close()
+        tracker.finish(status)
+        with db.connection(write=True) as conn:
+            current=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
+            progress_result=json.loads(current[0]) if current and current[0] else {}
+            totals=[dict(r) for r in conn.execute('SELECT status,coverage_status,count(*) AS batches FROM collection_batches WHERE operation_id=? '
+                                                'GROUP BY status,coverage_status',(operation,))]
+            valuation_batches=conn.execute("SELECT count(*) FROM collection_batches WHERE operation_id=? AND dataset NOT IN "
+                "('index.calendar','index.price.derived','market.legu.congestion.page')",(operation,)).fetchone()[0]
+            conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
+                (status,utc_now(),encoded(dict(message=_operation_message(status,row['mode'],valuation_batches,derived_result),
+                    providers=progress_result.get('providers',{}),work_progress=progress_result.get('work_progress'),
+                    batches=totals,errors=errors,bond_yields=bond_result,derived=derived_result,dependency=dependency_result,**collector.http.report())),
+                 encoded(errors) if errors else None,operation))
+        report=db.path.parent/'verification'/'reports'/('index-collection-'+operation+'.json')
+        with db.connection() as conn:
+            payload=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(operation,)).fetchone())
+        atomic_write(report,encoded(payload).encode())
+        return payload
+    finally:
+        if not injected_collector:
+            close_worker_sessions([collector])
 
 
 def _run_bond_only_operation(db,operation,row):
@@ -1144,34 +1148,37 @@ def _run_bond_only_operation(db,operation,row):
             item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
         return not item or bool(item[0])
     collector=RequestCollector(db,cancelled=cancelled,progress=lambda message:tracker.update_message('eastmoney',message))
-    task=tracker.register('eastmoney','bond_zh_us_rate','中美国债收益率')
-    tracker.transition(task,'running','检查初始化、增量水位及近期14日')
     try:
-        result=collect_bond_yields(db,operation,collector=collector,cancelled=cancelled,
-            progress=lambda message:tracker.update_message('eastmoney',message))
-        if result.get('status') in ('partial','empty'):
-            status='failed';errors['bond_zh_us_rate']='部分或空区间未满足覆盖验证；保留已发布分段'
-        tracker.transition(task,'success',result.get('status','complete'))
-    except Cancelled as exc:
-        result={};status='cancelled';errors['bond_zh_us_rate']=str(exc)
-        tracker.transition(task,'cancelled','已停止，已完成年度分段保留')
-    except Exception as exc:
-        result={};status='failed';errors['bond_zh_us_rate']=str(exc)
-        tracker.transition(task,'failed',str(exc))
-    tracker.finish(status)
-    with db.connection(write=True) as conn:
-        current=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
-        progress_result=json.loads(current[0]) if current and current[0] else {}
-        totals=[dict(r) for r in conn.execute('SELECT status,coverage_status,count(*) AS batches FROM collection_batches WHERE operation_id=? GROUP BY status,coverage_status',(operation,))]
-        conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
-            (status,utc_now(),encoded(dict(message='国债收益率采集'+('完成' if status=='complete' else '未完成'),
-                providers=progress_result.get('providers',{}),work_progress=progress_result.get('work_progress'),
-                batches=totals,errors=errors,bond_yields=result,**collector.report())),
-             encoded(errors) if errors else None,operation))
-    report=db.path.parent/'verification'/'reports'/('index-collection-'+operation+'.json')
-    with db.connection() as conn:payload=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(operation,)).fetchone())
-    atomic_write(report,encoded(payload).encode())
-    return payload
+        task=tracker.register('eastmoney','bond_zh_us_rate','中美国债收益率')
+        tracker.transition(task,'running','检查初始化、增量水位及近期14日')
+        try:
+            result=collect_bond_yields(db,operation,collector=collector,cancelled=cancelled,
+                progress=lambda message:tracker.update_message('eastmoney',message))
+            if result.get('status') in ('partial','empty'):
+                status='failed';errors['bond_zh_us_rate']='部分或空区间未满足覆盖验证；保留已发布分段'
+            tracker.transition(task,'success',result.get('status','complete'))
+        except Cancelled as exc:
+            result={};status='cancelled';errors['bond_zh_us_rate']=str(exc)
+            tracker.transition(task,'cancelled','已停止，已完成年度分段保留')
+        except Exception as exc:
+            result={};status='failed';errors['bond_zh_us_rate']=str(exc)
+            tracker.transition(task,'failed',str(exc))
+        tracker.finish(status)
+        with db.connection(write=True) as conn:
+            current=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
+            progress_result=json.loads(current[0]) if current and current[0] else {}
+            totals=[dict(r) for r in conn.execute('SELECT status,coverage_status,count(*) AS batches FROM collection_batches WHERE operation_id=? GROUP BY status,coverage_status',(operation,))]
+            conn.execute('UPDATE collection_operations SET status=?,finished_at=?,result_json=?,error=? WHERE operation_id=?',
+                (status,utc_now(),encoded(dict(message='国债收益率采集'+('完成' if status=='complete' else '未完成'),
+                    providers=progress_result.get('providers',{}),work_progress=progress_result.get('work_progress'),
+                    batches=totals,errors=errors,bond_yields=result,**collector.report())),
+                 encoded(errors) if errors else None,operation))
+        report=db.path.parent/'verification'/'reports'/('index-collection-'+operation+'.json')
+        with db.connection() as conn:payload=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(operation,)).fetchone())
+        atomic_write(report,encoded(payload).encode())
+        return payload
+    finally:
+        collector.session.close()
 
 
 def cancel_operation(db):

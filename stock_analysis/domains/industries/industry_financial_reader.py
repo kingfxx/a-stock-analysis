@@ -1,9 +1,9 @@
 """Bounded industry reads from the latest Eastmoney financial projection."""
-from collections import OrderedDict
 import json
 import threading
 
 from stock_analysis.domains.financials.statements import previous_quarter
+from stock_analysis.infrastructure.idle_cache import IdleCache
 
 
 def required_periods(period, mode):
@@ -22,11 +22,19 @@ def required_periods(period, mode):
 
 
 class IndustryFinancialReader:
-    def __init__(self, db):
+    def __init__(self, db, *, clock=None):
         self.db = db
         self._lock = threading.Lock()
-        self._facts = OrderedDict()
-        self._series = OrderedDict()
+        self._facts = IdleCache(clock=clock)
+        self._series = IdleCache(clock=clock)
+
+    def expire_idle(self):
+        if not self._lock.acquire(blocking=False):
+            return 0
+        try:
+            return len(self._facts.expire()) + len(self._series.expire())
+        finally:
+            self._lock.release()
 
     @staticmethod
     def _remember(cache, key, value, limit):
@@ -72,6 +80,8 @@ class IndustryFinancialReader:
         periods = required_periods(period, mode)
         key = (token, member_id, periods)
         with self._lock:
+            self._facts.expire()
+            self._series.expire()
             if key in self._facts:
                 self._facts.move_to_end(key)
                 return self._facts[key]
@@ -86,6 +96,8 @@ class IndustryFinancialReader:
     def series(self, token, member_id, nonfinancial, stocks, periods, mode, aggregate):
         key = (token, member_id, tuple(stocks), tuple(periods), mode)
         with self._lock:
+            self._facts.expire()
+            self._series.expire()
             if key in self._series:
                 self._series.move_to_end(key)
                 return self._series[key]

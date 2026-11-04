@@ -6,6 +6,8 @@
 |---|---|
 | `paths.py` | 稳定的项目、数据与前端根路径 |
 | `runtime.py` | HTTP 服务、唯一调度器、退出与恢复重载生命周期 |
+| `infrastructure/idle_cache.py` | 有界缓存的逐条单调时钟访问记录及一小时空闲释放，复用各领域原锁；应用回收回调由唯一 Scheduler 的30秒循环调用，不另建线程 |
+| `infrastructure/memory_reclaim.py` | 无前台请求一小时且无任务时，每小时GC及Windows未使用LFH堆页回收，记录前后真实内存；复用原请求/恢复门禁，不压活跃工作集；runtime拥有实例 |
 | `application.py` | 唯一数据服务、行业/AI/维护实例组装，以及初始化和恢复清理 |
 | `http/` | server 保留协议/鉴权/门禁，routes 按功能分发；rendering 负责侧栏、页面模板与安全插值 |
 | `infrastructure/` | SQLite 连接、事务、版本检查及网络基础；SQL 历史在 `migrations/` |

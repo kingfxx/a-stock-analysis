@@ -109,6 +109,25 @@ def _clear_runtime_services():
         data._DATA_LOCKS.clear()
 
 
+def _expire_idle_caches(server):
+    """Expire existing owners, then reclaim process heaps during verified idle time."""
+    with _SERVICE_LOCK:
+        owners = [*_INDUSTRY_SERVICES.values(), *_MAINTENANCE_SERVICES.values()]
+        index_reader = getattr(server, 'index_reader', None)
+        if index_reader is not None:
+            owners.append(index_reader)
+    removed = sum(owner.expire_idle() for owner in owners)
+    if removed:
+        print(f'空闲缓存回收：{removed} 项（超过一小时未使用）', flush=True)
+    reclaimer = getattr(server, 'memory_reclaimer', None)
+    gate = getattr(server, 'request_gate', None)
+    if reclaimer and gate and reclaimer.due(gate.last_request_at) and not _restore_activity():
+        with gate.lock:
+            if not gate.blocked and gate.active == 1 and reclaimer.due(gate.last_request_at):
+                reclaimer.reclaim()
+    return removed
+
+
 def maintenance_service():
     with _SERVICE_LOCK:
         key = str(settings.DATABASE_PATH)

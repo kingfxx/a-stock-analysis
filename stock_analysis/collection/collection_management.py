@@ -500,9 +500,10 @@ class CollectionManagement:
 
 
 class Scheduler:
-    def __init__(self, management, *, gate=None, archive=None):
+    def __init__(self, management, *, gate=None, archive=None, idle_cleanup=None):
         self.management, self.gate = management, gate
         self.archive = archive
+        self.idle_cleanup = idle_cleanup
         self.stop_event = Event()
         self.thread = Thread(target=self._loop, daemon=True, name='collection-scheduler')
 
@@ -515,10 +516,12 @@ class Scheduler:
     def _loop(self):
         while not self.stop_event.is_set():
             try:
-                admitted = self.gate is None or self.gate.enter()
+                admitted = self.gate is None or self.gate.enter(background=True)
                 if admitted:
                     try:
                         if not self.stop_event.is_set():
+                            if self.idle_cleanup:
+                                self.idle_cleanup()
                             if self.archive:
                                 try:
                                     self.archive.tick()
@@ -527,7 +530,7 @@ class Scheduler:
                             self.management.tick(stopped=self.stop_event.is_set)
                     finally:
                         if self.gate:
-                            self.gate.leave()
+                            self.gate.leave(background=True)
             except (ValueError, OSError, sqlite3.DatabaseError) as exc:
                 print('统一采集检查：' + str(exc), flush=True)
             self.stop_event.wait(30)

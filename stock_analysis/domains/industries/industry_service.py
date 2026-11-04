@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from time import monotonic
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from stock_analysis.domains.industries.industry_storage import latest_financial_
 from stock_analysis.domains.financials.statements import find, previous_quarter
 from stock_analysis.domains.industries.industry_financial_reader import IndustryFinancialReader
 from stock_analysis.domains.financials.financial_storage import decompress_json
+from stock_analysis.infrastructure.idle_cache import IDLE_SECONDS
 
 
 def financial_change_summary(statements):
@@ -168,13 +170,15 @@ def company_valuation(cap, profit, close=None, bps=None):
 
 
 class IndustryService:
-    def __init__(self, db, directory=None):
+    def __init__(self, db, directory=None, *, clock=None):
         self.db = db
         self.directory = Path(directory or db.path.parent/'industry_sources')
         self._lock = threading.Lock()
         self._load_lock = threading.Lock()
         self._cache = None
-        self._financial_reader = IndustryFinancialReader(db)
+        self._clock = clock or monotonic
+        self._cache_used = 0
+        self._financial_reader = IndustryFinancialReader(db, clock=self._clock)
         self._status = {'running':False,'message':'尚未刷新','error':None}
 
     def status(self):
@@ -564,7 +568,29 @@ class IndustryService:
     def _load(self):
         # Serialize cold loads without holding the status/update lock.
         with self._load_lock:
-            return self._load_cached()
+            with self._lock:
+                if self._cache and self._clock() - self._cache_used >= IDLE_SECONDS:
+                    self._cache = None
+            value = self._load_cached()
+            self._cache_used = self._clock()
+            return value
+
+    def expire_idle(self):
+        removed = self._financial_reader.expire_idle()
+        if not self._load_lock.acquire(blocking=False):
+            return removed
+        try:
+            if not self._lock.acquire(blocking=False):
+                return removed
+            try:
+                if self._cache and self._clock() - self._cache_used >= IDLE_SECONDS:
+                    self._cache = None
+                    removed += 1
+            finally:
+                self._lock.release()
+        finally:
+            self._load_lock.release()
+        return removed
 
     def _load_cached(self):
         with self.db.connection() as conn:

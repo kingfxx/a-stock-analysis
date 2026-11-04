@@ -1,5 +1,4 @@
 """Bounded serialized chart cache; independent lightweight collection status."""
-from collections import OrderedDict
 from bisect import bisect_left
 from datetime import date
 import json
@@ -12,6 +11,7 @@ from datetime import datetime, timezone
 from stock_analysis.domains.indices.index_definitions import METRICS
 from stock_analysis.domains.indices.index_repository import index_valuation_views, read_indices
 from stock_analysis.domains.indices.index_prices import read_overlay
+from stock_analysis.infrastructure.idle_cache import IDLE_SECONDS, IdleCache
 
 
 def encode(value):
@@ -19,12 +19,14 @@ def encode(value):
 
 
 class IndexReadService:
-    def __init__(self, db, *, max_entries=16, max_bytes=32*1024*1024):
+    def __init__(self, db, *, max_entries=16, max_bytes=32*1024*1024, clock=None):
         self.db = db
         self.max_entries, self.max_bytes = max_entries, max_bytes
-        self.cache = OrderedDict()
+        self.cache = IdleCache(clock=clock)
+        self._clock = self.cache.clock
         self.cache_bytes = 0
         self.metadata = None
+        self._metadata_used = 0
         self.lock = threading.RLock()
         # Transactional triggers track only index read dependencies, including
         # historical corrections. Ordinary page writes do not evict these caches.
@@ -40,6 +42,7 @@ class IndexReadService:
             self.metadata = None
 
     def _revision(self):
+        self._expire_locked()
         bond_revision = tuple(self.watcher.execute('SELECT max(id),max(updated_at) FROM sovereign_yield_observations').fetchone())
         version = (bond_revision, self.watcher.execute("SELECT revision FROM index_read_revisions WHERE scope='indices'").fetchone()[0], date.today().isoformat())
         if version != self.version:
@@ -48,6 +51,23 @@ class IndexReadService:
             self.cache.clear()
             self.cache_bytes = 0
         return f'{self.epoch}:{version}'
+
+    def _expire_locked(self):
+        expired = self.cache.expire()
+        self.cache_bytes -= sum(len(body) for _, body in expired)
+        removed = len(expired)
+        if self.metadata is not None and self._clock() - self._metadata_used >= IDLE_SECONDS:
+            self.metadata = None
+            removed += 1
+        return removed
+
+    def expire_idle(self):
+        if not self.lock.acquire(blocking=False):
+            return 0
+        try:
+            return self._expire_locked()
+        finally:
+            self.lock.release()
 
     def status(self):
         with self.lock:
@@ -69,6 +89,7 @@ class IndexReadService:
                 catalog = [{k:r[k] for k in fields if k in r} for r in result['catalog']]
                 self.metadata = encode(dict(revision=revision, catalog=catalog,
                                             coverage=result['coverage'], definitions=result['definitions']))
+            self._metadata_used = self._clock()
             return self.metadata
 
     def chart(self, *, code, provider, series, definition='v1', metric):

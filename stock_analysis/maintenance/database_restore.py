@@ -40,16 +40,21 @@ def schema_contract(conn):
 
 class RequestGate:
     """Freeze admissions only when the confirming request is the sole active request."""
-    def __init__(self):
+    def __init__(self, *, clock=None):
         self.lock=Lock();self.active=0;self.blocked=False
+        self.clock=clock or monotonic
+        self.last_request_at=self.clock()
 
-    def enter(self):
+    def enter(self, *, background=False):
         with self.lock:
             if self.blocked:return False
+            if not background:self.last_request_at=self.clock()
             self.active+=1;return True
 
-    def leave(self):
-        with self.lock:self.active-=1
+    def leave(self, *, background=False):
+        with self.lock:
+            self.active-=1
+            if not background:self.last_request_at=self.clock()
 
 
 class RestoreManager:

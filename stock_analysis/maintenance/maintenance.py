@@ -9,6 +9,7 @@ import sqlite3
 import tempfile
 
 from stock_analysis.maintenance.sqlite_sizes import physical_sizes
+from stock_analysis.infrastructure.idle_cache import IDLE_SECONDS
 
 
 def compact_database(db, validate):
@@ -190,15 +191,29 @@ def table_time(conn, name, columns):
 
 
 class MaintenanceService:
-    def __init__(self, db):
+    def __init__(self, db, *, clock=None):
         self.db=db;self._lock=Lock();self._snapshot=None;self._at=0
+        self._clock=clock or monotonic
+        self._used=0
+
+    def expire_idle(self):
+        if not self._lock.acquire(blocking=False):
+            return 0
+        try:
+            if self._snapshot is not None and self._clock()-self._used>=IDLE_SECONDS:
+                self._snapshot=None
+                return 1
+            return 0
+        finally:
+            self._lock.release()
 
     def read(self, refresh=False):
         with self._lock:
-            if self._snapshot and not refresh and monotonic()-self._at<60:
+            self._used=self._clock()
+            if self._snapshot and not refresh and self._clock()-self._at<60:
                 return self._snapshot
             data=self._read()
-            self._snapshot=data;self._at=monotonic()
+            self._snapshot=data;self._at=self._clock()
             return data
 
     def _read(self):

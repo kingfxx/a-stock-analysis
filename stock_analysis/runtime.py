@@ -5,10 +5,11 @@ from stock_analysis.infrastructure.storage import Database, instance_lock
 from stock_analysis.maintenance.database_restore import RestoreManager, RequestGate
 from stock_analysis.collection.collection_management import Scheduler
 from stock_analysis.collection.source_archive_service import SourceArchiveService
+from stock_analysis.infrastructure.memory_reclaim import IdleMemoryReclaimer
 
 
 def run_server(port, open_browser, *, database_path, handler, server_factory,
-               initialize, activity_check, management_factory, clear_state, open_url):
+               initialize, activity_check, management_factory, clear_state, open_url, idle_cleanup=None):
     """Run one local listener and scheduler; drain both before restore/reload."""
     db = Database(database_path)
     manager = RestoreManager(db, activity_check=activity_check)
@@ -18,11 +19,13 @@ def run_server(port, open_browser, *, database_path, handler, server_factory,
             server = server_factory(('127.0.0.1', port), handler)
             server.restore_manager = manager
             server.request_gate = RequestGate()
+            server.memory_reclaimer = IdleMemoryReclaimer()
             scheduler = None
             try:
                 initialize(db, skip_legacy=reloaded)
                 server.source_archive = SourceArchiveService(db, server.request_gate)
-                scheduler = Scheduler(management_factory(db), gate=server.request_gate, archive=server.source_archive)
+                scheduler = Scheduler(management_factory(db), gate=server.request_gate, archive=server.source_archive,
+                                      idle_cleanup=(lambda: idle_cleanup(server)) if idle_cleanup else None)
                 scheduler.start()
                 print(f'季度分析页面：http://127.0.0.1:{port}/', flush=True)
                 if open_browser and not reloaded:
