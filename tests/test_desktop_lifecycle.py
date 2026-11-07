@@ -168,7 +168,11 @@ def test_windows_secondary_activation_and_crash_release(tmp_path):
 
 def test_log_streams_rotation_and_exception_hooks(tmp_path, monkeypatch):
     from stock_analysis.desktop.logging_setup import configure_logs
+    from stock_analysis.desktop import windows_instance
     import threading
+    log_errors = []
+    monkeypatch.setattr(windows_instance, 'show_error',
+                        lambda message: log_errors.append(f'{message}: {sys.exc_info()[1]}'))
     # configure_logs intentionally replaces process streams/hooks; restore after test.
     for module, attr in [(sys,'stdout'), (sys,'stderr'), (sys,'excepthook'), (threading,'excepthook')]:
         monkeypatch.setattr(module, attr, getattr(module, attr))
@@ -184,12 +188,31 @@ def test_log_streams_rotation_and_exception_hooks(tmp_path, monkeypatch):
         except ValueError:
             sys.excepthook(*sys.exc_info())
         sys.stderr.write('thread evidence\n')
+        assert not log_errors, '\n'.join(log_errors)
         assert (tmp_path/'desktop.log.1').exists()
         contents = ''.join(p.read_text(encoding='utf-8') for p in tmp_path.glob('desktop.log*'))
         assert 'error evidence' in contents and 'thread evidence' in contents
         assert len(list(tmp_path.glob('desktop.log*'))) <= 4
     finally:
         logger.removeHandler(handler); handler.close()
+
+
+def test_log_write_failure_reports_once_without_recursive_logging(tmp_path, monkeypatch):
+    from stock_analysis.desktop.logging_setup import DesktopLogHandler
+    from stock_analysis.desktop import windows_instance
+    errors = []
+    monkeypatch.setattr(windows_instance, 'show_error', errors.append)
+    handler = DesktopLogHandler(tmp_path/'failure.log', maxBytes=50, backupCount=1, encoding='utf-8')
+    try:
+        def fail_to_rotate():
+            raise PermissionError('rotation denied')
+        monkeypatch.setattr(handler, 'doRollover', fail_to_rotate)
+        record = logging.LogRecord('test', logging.ERROR, __file__, 1, 'x' * 100, (), None)
+        handler.emit(record)
+        handler.emit(record)
+        assert len(errors) == 1 and '日志写入失败' in errors[0]
+    finally:
+        handler.close()
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='pythonw only exists on Windows')
@@ -207,8 +230,11 @@ def test_pythonw_search_worker_json_pipe_with_chinese_names(tmp_path):
     assert rows == [['ningdeshidai', 'ndsd'], ['zhongguoyinhang', 'zgyh']]
 
 
-@pytest.mark.parametrize('fail', [False, True])
-def test_tray_opens_only_when_running_and_exits_after_backend(tmp_path, monkeypatch, fail):
+@pytest.mark.parametrize('fail,restart,busy_first,compete', [
+    (False,False,False,False), (True,False,False,False),
+    (False,True,False,False), (False,True,True,False),
+    (False,True,False,True), (False,False,False,True)])
+def test_tray_opens_only_when_running_and_exits_after_backend(tmp_path, monkeypatch, fail,restart,busy_first,compete):
     from stock_analysis.desktop import tray
     from stock_analysis.infrastructure import app_settings
     from stock_analysis.http import server
@@ -221,20 +247,36 @@ def test_tray_opens_only_when_running_and_exits_after_backend(tmp_path, monkeypa
     class Instance:
         primary = True
         exit_sent = False
+        busy_sent = False
         def __init__(self, path): pass
         def __enter__(self): return self
         def __exit__(self, *args): pass
         def wait(self):
             time.sleep(.01)
             if (opened or errors) and not self.exit_sent:
+                if busy_first and not self.busy_sent:
+                    self.busy_sent = True
+                    holder['control'].activity_check = lambda: True
+                    holder['icon'].menu[-2].action(holder['icon'], None)
+                    return False
+                if busy_first and not errors:
+                    return False
+                holder['control'].activity_check = lambda: False
                 self.exit_sent = True
-                holder['icon'].menu[-1].action(holder['icon'], None)
+                holder['icon'].menu[-2 if restart else -1].action(holder['icon'], None)
+                if compete:
+                    deadline = time.monotonic() + 2
+                    while holder['control'].snapshot()[0] == 'running' and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    assert holder['control'].snapshot()[0] in ('stopping','stopped')
+                    # A stale second menu callback must not reverse the accepted action.
+                    holder['icon'].menu[-1 if restart else -2].action(holder['icon'], None)
             return False
     class Menu(list):
         SEPARATOR = None
         def __init__(self, *items): super().__init__(items)
     class Item:
-        def __init__(self, title, action, **kwargs): self.action = action
+        def __init__(self, title, action, **kwargs): self.action = action; self.title = title
     class Icon:
         def __init__(self, *args, menu): self.menu = menu; holder['icon'] = self
         def run(self, setup): setup(self)
@@ -245,6 +287,7 @@ def test_tray_opens_only_when_running_and_exits_after_backend(tmp_path, monkeypa
     monkeypatch.setitem(sys.modules, 'pystray', SimpleNamespace(Icon=Icon, Menu=Menu, MenuItem=Item))
     def serve(port, *, control):
         assert not opened
+        holder['control'] = control
         if fail: raise OSError('startup unavailable')
         control, listener = rebind(control)
         until = time.monotonic() + 5
@@ -252,12 +295,17 @@ def test_tray_opens_only_when_running_and_exits_after_backend(tmp_path, monkeypa
             time.sleep(.01)
         assert control.snapshot()[0] == 'stopping'
     monkeypatch.setattr(server, 'serve', serve)
-    tray.run(8768)
+    result = tray.run(8768)
     assert stopped
     if fail:
         assert not opened and any('startup unavailable' in error for error in errors)
     else:
-        assert opened == ['http://127.0.0.1:8768/'] and not errors
+        assert opened == ['http://127.0.0.1:8768/']
+        assert bool(result) is restart
+        if busy_first:
+            assert len(errors) == 1 and '暂时无法重启' in errors[0]
+        else:
+            assert not errors
 
 
 def test_unwritable_log_directory_does_not_replace_streams(tmp_path):

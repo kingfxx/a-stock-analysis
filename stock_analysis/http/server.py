@@ -57,6 +57,14 @@ class Handler(ShippingRoutes, NotesRoutes, MaintenanceRoutes, ResearchRoutes, In
             return
         self._dispatch('POST')
 
+    def log_request(self, code='-', size='-'):
+        try:
+            if int(code) < 400:
+                return
+        except (TypeError, ValueError):
+            pass  # Keep diagnostics if the response status is unknown.
+        super().log_request(code, size)
+
     def log_message(self, format, *args):
         if urlparse(self.path).path == '/auth/callback':
             return

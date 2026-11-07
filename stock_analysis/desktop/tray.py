@@ -2,7 +2,7 @@
 import logging
 import os
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 import webbrowser
 
 from stock_analysis.desktop.windows_instance import DesktopInstance, show_error
@@ -27,6 +27,8 @@ def run(port=8765, *, open_browser=True):
         control = RuntimeControl()
         done = Event()
         requested_open = Event()
+        restart_requested = Event()
+        action_lock = Lock()
         if open_browser:
             requested_open.set()
         logs = AppSettings().ROOT / 'data' / 'verification' / 'logs'
@@ -46,22 +48,34 @@ def run(port=8765, *, open_browser=True):
         def open_page(icon, item):
             requested_open.set()
 
-        def stop(icon, item):
+        def status_label():
+            phase, _ = control.snapshot()
+            return '重启中' if phase == 'stopping' and restart_requested.is_set() else LABELS[phase]
+
+        def stop(icon, item, *, restart=False):
             def request():
-                try:
-                    phase, _ = control.snapshot()
-                    if phase == 'failed':
-                        if control.cleanup_error:
-                            raise ValueError('后台资源清理失败，暂不退出以保留现场，请查看日志。')
-                        done.set()
-                        icon.stop()
-                        return
-                    message = control.request_stop()
-                    if message:
-                        icon.notify(message, '暂时无法退出')
-                except Exception as exc:
-                    logger.exception('退出请求未执行')
-                    icon.notify(str(exc), '暂时无法退出')
+                with action_lock:
+                    operation = '重启' if restart else '退出'
+                    try:
+                        phase, _ = control.snapshot()
+                        if phase in ('stopping', 'stopped'):
+                            return  # First accepted exit/restart wins.
+                        if phase == 'failed' and not restart:
+                            if control.cleanup_error:
+                                raise ValueError('后台资源清理失败，暂不退出以保留现场，请查看日志。')
+                            done.set()
+                            icon.stop()
+                            return
+                        message = control.request_stop()
+                        if message:
+                            icon.notify(message, f'暂时无法{operation}')
+                        else:
+                            if restart:
+                                restart_requested.set()
+                            logger.info('已接受%s请求', operation)
+                    except Exception as exc:
+                        logger.exception('%s请求未执行', operation)
+                        icon.notify(str(exc), f'暂时无法{operation}')
             Thread(target=request, name='desktop-exit-request').start()
 
         def setup(icon):
@@ -74,7 +88,7 @@ def run(port=8765, *, open_browser=True):
                 phase, error = control.snapshot()
                 if phase != last_phase:
                     logger.info('生命周期：%s', phase)
-                    icon.title = f'A 股分析 · {LABELS[phase]} · {port}'
+                    icon.title = f'A 股分析 · {status_label()} · {port}'
                     icon.update_menu()
                     last_phase = phase
                     if phase == 'failed':
@@ -96,9 +110,11 @@ def run(port=8765, *, open_browser=True):
         icon = pystray.Icon('a-stock-analysis', image, 'A 股分析 · 启动中', menu=pystray.Menu(
             pystray.MenuItem('打开页面', open_page, default=True,
                             enabled=lambda item: control.snapshot()[0] == 'running'),
-            pystray.MenuItem(lambda item: f'后台：{LABELS[control.snapshot()[0]]} · {port}', None, enabled=False),
+            pystray.MenuItem(lambda item: f'后台：{status_label()} · {port}', None, enabled=False),
             pystray.MenuItem('打开日志目录', lambda icon, item: os.startfile(logs)),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem('重启后台', lambda icon, item: stop(icon, item, restart=True),
+                            enabled=lambda item: control.snapshot()[0] == 'running'),
             pystray.MenuItem('退出程序', stop,
                             enabled=lambda item: control.snapshot()[0] in ('running', 'failed')),
         ))
@@ -109,3 +125,5 @@ def run(port=8765, *, open_browser=True):
             image.close()
             if worker.ident is not None:
                 worker.join()
+        with action_lock:
+            return restart_requested.is_set() and control.snapshot()[0] == 'stopped'
