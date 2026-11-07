@@ -1,0 +1,3 @@
+# Install alongside requirements.txt; CLI installations do not require these.
+pystray==0.19.5
+Pillow==12.1.1

@@ -6,6 +6,9 @@
 |---|---|
 | `paths.py` | 稳定的项目、数据与前端根路径 |
 | `runtime.py` | HTTP 服务、唯一调度器、退出与恢复重载生命周期 |
+| `runtime_control.py` | 可选桌面生命周期控制：事件循环就绪、恢复换绑、关闭准入后检查活动与安全退出；不导入 UI |
+| `desktop/` | 可选 Windows 托盘、命名互斥量/激活事件及轮转日志；通过 runtime 控制后台，与 HTTP 共用一个进程 |
+| `maintenance/runtime_activity.py` | 退出前只读检查持久化采集/同步/分析状态，配合 application 现有内存工作线程检查及请求门禁 |
 | `infrastructure/idle_cache.py` | 有界缓存的逐条单调时钟访问记录及一小时空闲释放，复用各领域原锁；应用回收回调由唯一 Scheduler 的30秒循环调用，不另建线程 |
 | `infrastructure/memory_reclaim.py` | 无前台请求一小时且无任务时，每小时GC及Windows未使用LFH堆页回收，记录前后真实内存；复用原请求/恢复门禁，不压活跃工作集；runtime拥有实例 |
 | `application.py` | 唯一数据服务、行业/AI/维护实例组装，以及初始化和恢复清理 |

@@ -103,6 +103,11 @@ def _restore_activity():
         index_running=bool(conn.execute("SELECT 1 FROM collection_operations WHERE status='running'").fetchone())
     return index_running or _runtime_worker_activity()
 
+
+def _shutdown_activity():
+    from stock_analysis.maintenance.runtime_activity import has_background_work
+    return _runtime_worker_activity() or has_background_work(Database(settings.DATABASE_PATH))
+
 def _clear_runtime_services():
     with _SERVICE_LOCK:
         data._SERVICES.clear(); _AI_SERVICES.clear(); _INDUSTRY_SERVICES.clear(); _MAINTENANCE_SERVICES.clear()

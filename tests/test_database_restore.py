@@ -128,7 +128,8 @@ def test_failure_after_publish_rolls_back(tmp_path,monkeypatch):
     assert result['phase']=='failed' and result['rolled_back'] and original()['instruments']==1
 
 
-def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch):
+@pytest.mark.parametrize('desktop', [False, True])
+def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch,desktop):
     from stock_analysis.http import server
     db,backup,_=setup_db(tmp_path)
     monkeypatch.setattr(app.settings,'DATABASE_PATH',db.path)
@@ -144,7 +145,9 @@ def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch
     monkeypatch.setattr(server,'ThreadingHTTPServer',TrackingServer)
     with socket.socket() as selector:
         selector.bind(('127.0.0.1',0));port=selector.getsockname()[1]
-    thread=Thread(target=server.serve,args=(port,),daemon=True);thread.start()
+    from stock_analysis.runtime_control import RuntimeControl
+    control = RuntimeControl() if desktop else None
+    thread=Thread(target=server.serve,args=(port,),kwargs={'control':control},daemon=True);thread.start()
     base=f'http://127.0.0.1:{port}'
     def request(path,body=None,token=None):
         headers={'Origin':base,'Content-Type':'application/json'}
@@ -171,7 +174,15 @@ def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch
         assert request('/api/maintenance/storage')['summary']['schema_version']==MIGRATIONS[-1][0]
         assert db.check()['instruments']==0
     finally:
-        instances[-1].shutdown();thread.join(timeout=10)
+        if control:
+            for _ in range(100):
+                if control.snapshot()[0] == 'running':break
+                time.sleep(.02)
+            assert control.server is instances[-1]
+            assert not control.request_stop()
+        else:
+            instances[-1].shutdown()
+        thread.join(timeout=10)
     assert not thread.is_alive()
 
 

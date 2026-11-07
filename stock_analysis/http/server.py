@@ -94,7 +94,7 @@ class Handler(ShippingRoutes, NotesRoutes, MaintenanceRoutes, ResearchRoutes, In
     def _do_POST(self):
         dispatch.post(self)
 
-def serve(port: int=8765, open_browser: bool=False):
+def serve(port: int=8765, open_browser: bool=False, *, control=None):
     return run_server(
         port, open_browser, database_path=app.settings.DATABASE_PATH,
         handler=Handler, server_factory=ThreadingHTTPServer,
@@ -102,4 +102,5 @@ def serve(port: int=8765, open_browser: bool=False):
         management_factory=app.collection_management,
         clear_state=app._clear_runtime_services, open_url=webbrowser.open,
         idle_cleanup=app._expire_idle_caches,
+        control=control, shutdown_activity=app._shutdown_activity,
     )

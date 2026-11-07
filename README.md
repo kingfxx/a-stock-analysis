@@ -43,6 +43,19 @@ python app.py --port 8765 --open-browser
 
 Windows 可双击 [start_dashboard.bat](start_dashboard.bat)。脚本依次使用 `PYTHON_EXE`、项目 `.venv`、PATH 中的 Python 或 `py -3`，检查环境后启动；可传入启动参数，关闭窗口即停止服务。
 
+Windows 也支持无黑窗托盘启动。先在项目目录安装桌面依赖并创建快捷方式：
+
+```powershell
+python -m pip install -r requirements.txt -r requirements-desktop.txt
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/create_desktop_shortcut.ps1
+```
+
+双击桌面的 **A-Stock Analysis**，后台就绪后自动在默认浏览器打开页面。关闭浏览器后后台继续运行；右键托盘图标可打开页面、查看运行状态、打开日志目录或退出。再次双击快捷方式只唤起原实例。退出时若仍有页面请求、采集、分析或维护任务，会提示稍候或先在页面停止任务。
+
+快捷方式直接使用同环境的 `pythonw.exe`，托盘与后台共用一个 Python 进程。首次从旧命令行后台切换，先确认任务完成并按 `Ctrl+C` 安全停止原后台。日志位于 `data/verification/logs/desktop.log`，最多保留当前日志和三个轮转文件，每个约 2 MiB；启动失败会显示错误提示。依赖缺失需手动安装，不自动联网修复。
+
+脚本可通过 `-PythonExe '完整的 python.exe 路径'` 指定环境，或用 `-ShortcutDirectory '已有目录'` 指定快捷方式位置。它只创建快捷方式，不启动程序、不设置开机自启。托盘入口为 [desktop_app.pyw](desktop_app.pyw)，命令行入口继续保留。
+
 Plotly 由本地 Python 包提供，不依赖 CDN；首次取数和后续更新需要访问外部数据源。完整依赖见 [requirements.txt](requirements.txt)。
 
 ## 数据与连接
