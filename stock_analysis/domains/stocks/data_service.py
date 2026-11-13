@@ -409,6 +409,34 @@ class StockDataService:
     def _read_cache(self, path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
+    def has_stock_data(self, db, code):
+        """Check locally published stock facts before opening the full dashboard."""
+        with db.connection() as conn:
+            instrument = conn.execute('SELECT id FROM instruments WHERE code=?', (code,)).fetchone()
+            if instrument:
+                identity = instrument['id']
+                for table in ('financial_reports', 'raw_daily_prices', 'dividend_events',
+                              'valuation_observations', 'legacy_valuation_snapshots',
+                              'shareholder_observations', 'financing_daily', 'stock_announcement_metadata'):
+                    if conn.execute(f'SELECT 1 FROM {table} WHERE instrument_id=? LIMIT 1', (identity,)).fetchone():
+                        return True
+                if conn.execute('SELECT 1 FROM business_segment_versions WHERE instrument_id=? '
+                                'AND is_current=1 AND row_count>0 LIMIT 1', (identity,)).fetchone():
+                    return True
+                if conn.execute('SELECT 1 FROM sync_state s JOIN adjusted_daily_prices p '
+                                'ON p.version_id=s.active_price_version_id WHERE s.instrument_id=? '
+                                "AND s.dataset='prices_adjusted' AND s.source='tencent' LIMIT 1", (identity,)).fetchone():
+                    return True
+
+        for section in ('shareholders', 'financing'):
+            try:
+                cache = self._read_cache(self.settings.CHIP_CACHE / section / f'{code}.json')
+                if chip_payload(cache, section)['stored_count']:
+                    return True
+            except (ValueError, KeyError, TypeError, AttributeError, OSError):
+                continue
+        return False
+
     def _needs_financial(self, data: dict) -> bool:
         return (not data or not (data.get("name") or "").strip()
                 or data.get("financial_fields_basis") != contracts.FINANCIAL_FIELDS_BASIS

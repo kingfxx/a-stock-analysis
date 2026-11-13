@@ -8,7 +8,9 @@ import pytest
 
 from stock_analysis.domains.financials.company_preview_metrics import build_series, flow_value
 from stock_analysis.domains.industries.company_preview import read_company_preview
-from stock_analysis.infrastructure.storage import Database
+from stock_analysis.infrastructure.app_settings import AppSettings
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, utc_now
+from stock_analysis.domains.stocks.data_service import StockDataService
 from stock_analysis.domains.industries.industry_service import IndustryService
 from industry_financial_fixture import publish_financials
 from test_industries import fixture_bundle
@@ -247,3 +249,47 @@ def test_api_is_read_only_without_stock_or_industry_initialization(preview_db, p
     for params in ({'code': 'bad'}, {'code': '300750', 'mode': 'bad'}):
         assert session.get(base + '/api/industry-company-preview', params=params).status_code == 400
     assert before == preview_db.path.read_bytes()
+
+
+def test_stock_lookup_uses_published_stock_data(preview_db, protocol_server, monkeypatch, tmp_path):
+    from stock_analysis import application
+
+    _, session, base = protocol_server
+    settings = AppSettings(DATABASE_PATH=preview_db.path, CHIP_CACHE=tmp_path/'chips')
+    monkeypatch.setattr(application, 'settings', settings)
+    monkeypatch.setattr(application, 'data', StockDataService(settings))
+    identity = preview_db.ensure_instrument('300750')
+    run = preview_db.start_sync(SyncKey(identity, 'shareholders', 'test'),
+                               parser_version='test', methodology_version='test')
+    preview_db.complete_sync(run, SyncResult(0, no_data=True), lambda conn: None)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail('Stock lookup must only read published local data')
+
+    monkeypatch.setattr(Database, 'initialize', forbidden)
+    monkeypatch.setattr(application.data, 'page_payload', forbidden)
+    monkeypatch.setattr(application, 'stock_collections', forbidden)
+
+    def lookup(code):
+        return session.get(base + '/api/stock-collection', params={'code': code, 'lookup': '1'})
+
+    before = preview_db.path.read_bytes()
+    assert lookup('300750').json() == {'code': '300750', 'has_stock_data': False}
+    assert lookup('000001').json() == {'code': '000001', 'has_stock_data': False}
+    assert lookup('').status_code == lookup('999999').status_code == 400
+    assert preview_db.path.read_bytes() == before
+
+    legacy = settings.CHIP_CACHE/'financing'/'000001.json'
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(json.dumps({'records': [{'DATE': '2025-06-30', 'RZYE': 0}]}), encoding='utf-8')
+    assert lookup('000001').json()['has_stock_data'] is True
+
+    run = preview_db.start_sync(SyncKey(identity, 'shareholders', 'test'),
+                               parser_version='test', methodology_version='test')
+    day = '2025-06-30'
+    preview_db.complete_sync(run, SyncResult(1, day, day, day), lambda conn: conn.execute(
+        "INSERT INTO shareholder_observations VALUES (?,'test','1','2025-06-30',NULL,'total',123,'{}','hash',?,?)",
+        (identity, utc_now(), run)))
+    before = preview_db.path.read_bytes()
+    assert lookup('300750').json() == {'code': '300750', 'has_stock_data': True}
+    assert preview_db.path.read_bytes() == before

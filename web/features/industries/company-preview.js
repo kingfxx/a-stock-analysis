@@ -31,7 +31,8 @@
     dialog.addEventListener('pointerdown',event=>{outsideDown=outside(event);});
     dialog.addEventListener('click',event=>{if(outsideDown&&outside(event))dialog.close();outsideDown=false;});
     el('full').addEventListener('click',()=>{
-      if(window.confirm(`确认打开「${companies[index].name}」的完整个股展示？首次打开可能初始化并获取完整数据。`))window.location.assign(el('full').dataset.url);
+      const company=companies[index];
+      if(window.confirm(`确认打开「${company.name||company.code}」的完整个股展示？首次打开可能初始化并获取完整数据。`))window.location.assign(el('full').dataset.url);
     });
     dialog.addEventListener('close',()=>{
       lastSlots=[0,1,2].map(i=>({key:el('metric-'+i).value,type:el('metric-'+i).parentElement.querySelector('[data-series-mode][aria-pressed="true"]')?.dataset.seriesMode}));
@@ -109,8 +110,9 @@
   async function load(){
     if(index<0||index>=companies.length)return;
     const company=companies[index],token=++request;controller?.abort();controller=new AbortController();data=null;
-    el('title').textContent=company.name+' '+company.code;
+    el('title').textContent=company.name?`${company.name} ${company.code}`:company.code;
     el('full').dataset.url='/?code='+encodeURIComponent(company.code)+'&tab=trend';
+    el('prev').hidden=el('next').hidden=companies.length===1;
     el('prev').disabled=index===0;el('next').disabled=index===companies.length-1;
     el('status').textContent='正在读取本地数据…';el('controls').querySelectorAll('select,[data-series-mode]').forEach(n=>n.disabled=true);
     Plotly.purge(el('chart'));el('history-head').replaceChildren();el('history-body').replaceChildren();el('dates').replaceChildren();el('dividends').replaceChildren();el('history-note').textContent='';el('coverage').textContent='';el('methods').replaceChildren();el('notes').replaceChildren();
@@ -119,6 +121,10 @@
       const result=await response.json();if(token!==request||!dialog.open)return;
       if(!response.ok)throw new Error(result.error||'读取失败');
       data=result;
+      if(!company.name&&data.name&&data.name!==company.code){
+        company.name=data.name;
+        el('title').textContent=`${company.name} ${company.code}`;
+      }
       [0,1,2].forEach(i=>{
         const select=el('metric-'+i),key=select.options.length?select.value:lastSlots?.[i]?.key??['profit','','market_cap'][i];
         select.innerHTML='<option value="">不展示</option>'+data.metrics.map(m=>`<option value="${esc(m.key)}">${esc(m.label)}</option>`).join('');
@@ -126,7 +132,8 @@
       });
       el('controls').querySelectorAll('select,[data-series-mode]').forEach(n=>n.disabled=false);
       const financial=data.financial_periods,market=data.market_periods;
-      el('status').textContent=`财务 ${financial.length?financial[0]+' — '+financial.at(-1):'暂无'} · 季末行情 ${market.length?market[0]+' — '+market.at(-1):'暂无'} · ${index+1}/${companies.length} 家`+(data.financial_company?' · 已隐藏金融企业不适用指标':'');
+      const position=companies.length>1?` · ${index+1}/${companies.length} 家`:'';
+      el('status').textContent=`财务 ${financial.length?financial[0]+' — '+financial.at(-1):'暂无'} · 季末行情 ${market.length?market[0]+' — '+market.at(-1):'暂无'}`+position+(data.financial_company?' · 已隐藏金融企业不适用指标':'');
       el('notes').innerHTML=data.notes.map(note=>`<p>${esc(note)}</p>`).join('');draw();
     }catch(error){if(token===request&&error.name!=='AbortError')el('status').textContent='读取失败：'+error.message;}
   }

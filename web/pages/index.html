@@ -204,13 +204,14 @@
     </div>
     <div class="lookup">
 
-      <form class="search" action="/" method="get">
+      <form id="stock-lookup" class="search" action="/" method="get">
         <label for="code">股票代码</label>
-        <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码">
+        <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码" required>
         <button type="submit">查看</button>
         <a id="refresh" class="refresh" href="#" title="刷新当前股票；批量采集统一在后台维护的采集管理">手动刷新</a>
         <button id="full-audit" class="refresh" type="button">全量刷新</button>
       </form>
+      <div id="stock-lookup-status" role="status" hidden></div>
     </div>
   </header>
   <div class="context">
@@ -396,7 +397,7 @@
   document.getElementById('trend-controls-mount').innerHTML = TrendView.controls();
   document.getElementById('trend-display-mount').innerHTML = TrendView.display();
 </script>
-<script src="/company-preview.js?v=20261031"></script>
+<script src="/company-preview.js?v=20261113"></script>
 <script src="/industry.js?v=20261031-company-preview"></script>
 <link rel="stylesheet" href="/maintenance.css?v=20261031-source-archive-2">
 <script src="/stock-cleanup.js?v=20261007-no-cleanup-backup"></script>
@@ -427,6 +428,53 @@
     return data;
   }
   const state = JSON.parse(document.getElementById('payload').textContent);
+  const lookupForm = document.getElementById('stock-lookup');
+  const lookupCode = document.getElementById('code');
+  const lookupButton = lookupForm.querySelector('button[type="submit"]');
+  const lookupStatus = document.getElementById('stock-lookup-status');
+  let lookupRequest;
+
+  function showLookupStatus(message) {
+    lookupStatus.textContent = message;
+    lookupStatus.hidden = !message;
+  }
+
+  lookupCode.addEventListener('input', () => {
+    lookupRequest?.abort();
+    lookupRequest = null;
+    lookupButton.disabled = false;
+    showLookupStatus('');
+  });
+  lookupForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (lookupRequest) return;
+    const code = lookupCode.value;
+    const request = new AbortController();
+    lookupRequest = request;
+    lookupButton.disabled = true;
+    showLookupStatus('正在查询本地数据…');
+    try {
+      const response = await fetch('/api/stock-collection?' + new URLSearchParams({code, lookup:'1'}),
+        {cache:'no-store', signal:request.signal});
+      const result = await response.json();
+      if (lookupRequest !== request || lookupCode.value !== code) return;
+      if (!response.ok) throw new Error(result.error || '读取状态失败');
+      if (result.code !== code || typeof result.has_stock_data !== 'boolean') throw new Error('查询结果无效');
+      if (result.has_stock_data) {
+        window.location.assign('/?' + new URLSearchParams({code:result.code}));
+      } else {
+        window.openIndustryCompanyPreview(result.code, [{code:result.code}], 'ttm', lookupButton);
+      }
+      showLookupStatus('');
+    } catch (error) {
+      if (lookupRequest === request) showLookupStatus('查询失败：' + error.message);
+    } finally {
+      if (lookupRequest === request) {
+        lookupRequest = null;
+        lookupButton.disabled = false;
+      }
+    }
+  });
   window.setResearchContext = ({periodLabel='最新报告期',period=null,updatedLabel='财报缓存更新',updatedAt=null}={}) => {
     document.getElementById('latest-period-label').textContent = periodLabel;
     document.getElementById('latest-period').textContent = period || '—';

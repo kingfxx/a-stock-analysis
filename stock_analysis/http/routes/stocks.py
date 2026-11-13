@@ -26,8 +26,14 @@ class StocksRoutes:
         if parsed.path != '/api/stock-collection':
             return False
         try:
-            code = normalize_code(parse_qs(parsed.query).get('code', ['601919'])[0])
-            self._ai_reply(app.stock_collections().page_status(code))
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            if query.get('lookup') == ['1']:
+                code = normalize_code(query.get('code', [''])[0])
+                has_data = app.data.has_stock_data(Database(app.settings.DATABASE_PATH), code)
+                self._ai_reply({'code': code, 'has_stock_data': has_data})
+            else:
+                code = normalize_code(parse_qs(parsed.query).get('code', ['601919'])[0])
+                self._ai_reply(app.stock_collections().page_status(code))
         except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
             self._ai_reply({'error': str(exc)}, 400)
         return True
