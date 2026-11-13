@@ -148,6 +148,7 @@
     .chip-chart { height:390px; }
     .chip-summary { padding:18px 27px 12px; color:var(--ink); font-size:14px; line-height:1.7; }
     .chip-table-wrap { max-width:100%; overflow-x:auto; margin:0 27px 14px; border:1px solid #304049; border-radius:6px; }
+    .chip-table-toolbar { display:flex; margin:0 27px 10px; }
     .chip-data-table { width:max-content; min-width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
     .chip-data-table th,.chip-data-table td { min-width:126px; padding:10px 13px; text-align:right; white-space:nowrap; border-right:1px solid #304049; border-bottom:1px solid #304049; }
     .chip-data-table th:first-child,.chip-data-table td:first-child { position:sticky; left:0; min-width:160px; text-align:left; }
@@ -161,7 +162,7 @@
     .chip-data-table .chip-positive { color:#f09a75; }
     .chip-data-table .chip-negative { color:#72c9b3; }
     .chip-panel .note { padding-bottom:14px; }
-    @media(max-width:800px) { .chip-chart{height:340px} .chip-summary{padding:16px 15px 10px} .chip-table-wrap{margin:0 15px 14px} .chip-controls{width:100%} }
+    @media(max-width:800px) { .chip-chart{height:340px} .chip-summary{padding:16px 15px 10px} .chip-table-wrap{margin:0 15px 14px} .chip-table-toolbar{margin-inline:15px} .chip-controls{width:100%} }
     @media(max-width:520px) { .chip-controls{grid-template-columns:1fr} }
     .error,.warning { border-radius:8px; margin-bottom:15px; padding:12px 16px; font-size:14px; }
     .error { background:#442729; color:#ffe2df; }
@@ -359,6 +360,19 @@
       <div id="financing-summary" class="chip-summary">等待融资数据…</div>
       <p id="financing-status" class="note" role="status" aria-live="polite"></p>
       <div id="financing-chart" class="chip-chart" role="img" aria-label="融资与股价双轴趋势图"></div>
+      <div class="chip-table-toolbar">
+        <div class="period" id="financing-table-range" role="group" aria-label="融资明细时间范围">
+          <button type="button" class="active" aria-pressed="true" data-days="30">30 天</button>
+          <button type="button" aria-pressed="false" data-days="60">60 天</button>
+          <button type="button" aria-pressed="false" data-days="90">90 天</button>
+        </div>
+      </div>
+      <div id="financing-table-wrap" class="chip-table-wrap" role="region" aria-label="融资日度明细" tabindex="0">
+        <table class="chip-data-table" aria-label="融资日度明细">
+          <thead><tr id="financing-table-dates"><th scope="col">指标 / 日期</th></tr></thead>
+          <tbody id="financing-table-body"></tbody>
+        </table>
+      </div>
       <p class="note">融资余额是尚未偿还的融资金额，融资融券余额包含融券余额；净买入可为负。日度历史保留原始单位元，图表显示亿元。价格与同一交易日对齐，默认前复权，可切换不复权。</p>
       <p id="financing-note" class="note"></p>
     </section>
@@ -744,9 +758,12 @@
   const holderSeriesSelect = document.getElementById('shareholders-series');
   let holderSeriesExplicit = Boolean(savedSelections.shareholdersSeries);
   holderSeriesSelect.addEventListener('change', () => { holderSeriesExplicit = true; saveSelections(); renderChips('shareholders'); });
-  function financingView(data, years) {
+  function financingWindowEnd(data) {
     const now = new Date();
-    const end = data.window_end || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    return data.window_end || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  }
+  function financingView(data, years) {
+    const end = financingWindowEnd(data);
     const cutoff = new Date(end + 'T00:00:00Z');
     const month = cutoff.getUTCMonth();
     cutoff.setUTCFullYear(cutoff.getUTCFullYear() - Number(years));
@@ -904,6 +921,78 @@
   financingMetricSelect.addEventListener('change', () => { saveSelections(); renderChips('financing'); });
   financingRangeSelect.addEventListener('change', () => { saveSelections(); renderChips('financing'); });
   // Background data loading.
+  // Financing details also render when the chart library is unavailable.
+  const financingTableRange = document.getElementById('financing-table-range');
+  let financingTableDays = 30;
+
+  function renderFinancingTable() {
+    const data = state.financing || {};
+    const end = financingWindowEnd(data);
+    const cutoff = new Date(end + 'T00:00:00Z');
+    cutoff.setUTCDate(cutoff.getUTCDate() - (financingTableDays - 1));
+    const start = cutoff.toISOString().slice(0, 10);
+    const rows = (data.rows || []).filter(row => row.date >= start && row.date <= end)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const dates = document.getElementById('financing-table-dates');
+    const body = document.getElementById('financing-table-body');
+    dates.replaceChildren(dates.firstElementChild);
+    body.replaceChildren();
+    if (!rows.length) {
+      const cell = body.insertRow().insertCell();
+      cell.className = 'chip-table-empty';
+      cell.textContent = '当前范围暂无融资记录';
+      return;
+    }
+    for (const row of rows) {
+      const dateHead = document.createElement('th');
+      dateHead.scope = 'col';
+      dateHead.textContent = row.date;
+      dates.append(dateHead);
+    }
+    for (const metric of ['margin_balance', 'net_buy']) {
+      const metricRow = body.insertRow();
+      const label = metricRow.insertCell();
+      label.className = 'chip-table-label';
+      label.textContent = `${financingNames[metric]}（亿元）`;
+      for (const row of rows) {
+        const cell = metricRow.insertCell();
+        const value = row[metric];
+        cell.textContent = Number.isFinite(value) ? (value / 1e8).toFixed(2) : '—';
+        if (metric === 'net_buy' && Number.isFinite(value)) {
+          if (value > 0) cell.classList.add('chip-positive');
+          if (value < 0) cell.classList.add('chip-negative');
+        }
+      }
+    }
+    const priceRow = body.insertRow();
+    const priceLabel = priceRow.insertCell();
+    priceLabel.className = 'chip-table-label';
+    priceLabel.textContent = '前复权股价（元/股）';
+    for (const row of rows) {
+      const cell = priceRow.insertCell();
+      const price = row.qfq_close;
+      cell.textContent = Number.isFinite(price) ? price.toFixed(2) : '—';
+      const change = document.createElement('span');
+      const percent = row.qfq_change_pct;
+      const rounded = Number.isFinite(percent) ? Number(percent.toFixed(2)) : null;
+      change.textContent = rounded == null ? '—' : `${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}%`;
+      if (rounded > 0) change.className = 'chip-positive';
+      if (rounded < 0) change.className = 'chip-negative';
+      cell.append(' ', change);
+    }
+  }
+
+  financingTableRange.addEventListener('click', event => {
+    const button = event.target.closest('button[data-days]');
+    if (!button) return;
+    financingTableDays = Number(button.dataset.days);
+    for (const option of financingTableRange.querySelectorAll('button')) {
+      option.classList.toggle('active', option === button);
+      option.setAttribute('aria-pressed', String(option === button));
+    }
+    renderFinancingTable();
+    document.getElementById('financing-table-wrap').scrollLeft = 0;
+  });
   let dashboardUpdating = false;
   const sectionNames = {financial:'财务', dividends:'分红', valuation:'估值',shareholders:'股东人数',financing:'融资'};
   function sectionStatus(section, message = '') {
@@ -966,6 +1055,7 @@
     for (const section of ['shareholders','financing']) {
       state[section] = {...data[section], warnings:[...new Set([...(state[section]?.warnings || []), ...(data[section]?.warnings || [])])]};
     }
+    renderFinancingTable();
     if (typeof Plotly !== 'undefined') { trendAdapter.render(); renderValuation(); renderChips('shareholders'); renderChips('financing'); }
   }
   async function loadDashboard(force = false, full = false) {
@@ -1032,6 +1122,7 @@
   });
   if (typeof Plotly !== 'undefined') { trendAdapter.render(); renderValuation(); }
   if (typeof Plotly !== 'undefined') { renderChips('shareholders'); renderChips('financing'); }
+  renderFinancingTable();
   let notesDeferredDashboard = !document.getElementById('notes-panel').hidden;
   if (!notesDeferredDashboard || state.collection?.needs_initial || state.collection?.operation?.status === 'running') loadDashboard(false);
   window.addEventListener('research-tab-changed', event => {

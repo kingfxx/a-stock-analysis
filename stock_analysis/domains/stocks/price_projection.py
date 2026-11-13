@@ -31,6 +31,7 @@ def valuation_prices(data, qfq):
 def chip_prices(data, section, raw, qfq, version):
     raw_by_day, qfq_by_day = ({r["date"]: r for r in prices} for prices in (raw, qfq))
     raw_days, qfq_days = sorted(raw_by_day), sorted(qfq_by_day)
+    previous_qfq_days = dict(zip(qfq_days[1:], qfq_days)) if section == "financing" else {}
     def match(rows):
         for row in rows:
             day = row["date"]
@@ -45,6 +46,11 @@ def chip_prices(data, section, raw, qfq, version):
                 row[adjustment + "_close"] = price["close"] if price else row.get("raw_close") if adjustment == "raw" and section == "financing" else None
                 row[adjustment + "_price_date"] = price["date"] if price else day if adjustment == "raw" and row.get("raw_close") is not None else None
             row["close"], row["price_date"] = row["qfq_close"], row["qfq_price_date"]
+            if section == "financing":
+                previous = qfq_by_day.get(previous_qfq_days.get(day))
+                close = row["qfq_close"]
+                row["qfq_change_pct"] = ((close / previous["close"] - 1) * 100
+                                         if close is not None and previous and previous["close"] > 0 else None)
         return rows
     result = {**data, "rows": match(data.get("rows", [])), "price_version": version, "price_adjustment": "qfq"}
     for series in result.get("series", []):
