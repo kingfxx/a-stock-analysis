@@ -146,7 +146,7 @@ def test_cleanup_still_closes_listener_and_reader_after_scheduler_error(tmp_path
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows kernel objects')
 def test_windows_secondary_activation_and_crash_release(tmp_path):
-    from stock_analysis.desktop.windows_instance import DesktopInstance
+    from stock_analysis.desktop.windows_instance import DesktopInstance, signal_restart
     identity = tmp_path/'desktop.sqlite3'
     code = ('from stock_analysis.desktop.windows_instance import DesktopInstance; import sys; '
             'i=DesktopInstance(sys.argv[1]); print(i.primary); i.activate(); i.close()')
@@ -157,6 +157,14 @@ def test_windows_secondary_activation_and_crash_release(tmp_path):
         assert result.stdout.strip() == 'False'
         assert primary.wait(1000)
         assert not primary.wait(10)
+        subprocess.run([sys.executable, '-c',
+                        'from stock_analysis.desktop.windows_instance import signal_restart; import sys; '
+                        'signal_restart(sys.argv[1])', str(identity)], check=True, timeout=10)
+        assert primary.restart_pending()
+        assert not primary.restart_pending()
+        assert not primary.wait(10)
+    with pytest.raises(RuntimeError, match='找不到支持命令行重启'):
+        signal_restart(identity)
     crash = ('from stock_analysis.desktop.windows_instance import DesktopInstance; import sys,os; '
              'i=DesktopInstance(sys.argv[1]); print(i.primary,flush=True); os._exit(0)')
     result = subprocess.run([sys.executable, '-c', crash, str(identity)],
@@ -230,11 +238,12 @@ def test_pythonw_search_worker_json_pipe_with_chinese_names(tmp_path):
     assert rows == [['ningdeshidai', 'ndsd'], ['zhongguoyinhang', 'zgyh']]
 
 
-@pytest.mark.parametrize('fail,restart,busy_first,compete', [
-    (False,False,False,False), (True,False,False,False),
-    (False,True,False,False), (False,True,True,False),
-    (False,True,False,True), (False,False,False,True)])
-def test_tray_opens_only_when_running_and_exits_after_backend(tmp_path, monkeypatch, fail,restart,busy_first,compete):
+@pytest.mark.parametrize('fail,restart,busy_first,compete,command', [
+    (False,False,False,False,False), (True,False,False,False,False),
+    (False,True,False,False,False), (False,True,True,False,False),
+    (False,True,False,True,False), (False,False,False,True,False),
+    (False,True,True,False,True)])
+def test_tray_opens_only_when_running_and_exits_after_backend(tmp_path, monkeypatch, fail,restart,busy_first,compete,command):
     from stock_analysis.desktop import tray
     from stock_analysis.infrastructure import app_settings
     from stock_analysis.http import server
@@ -248,6 +257,10 @@ def test_tray_opens_only_when_running_and_exits_after_backend(tmp_path, monkeypa
         primary = True
         exit_sent = False
         busy_sent = False
+        restart_signal = False
+        def restart_pending(self):
+            pending, self.restart_signal = self.restart_signal, False
+            return pending
         def __init__(self, path): pass
         def __enter__(self): return self
         def __exit__(self, *args): pass
@@ -257,12 +270,18 @@ def test_tray_opens_only_when_running_and_exits_after_backend(tmp_path, monkeypa
                 if busy_first and not self.busy_sent:
                     self.busy_sent = True
                     holder['control'].activity_check = lambda: True
-                    holder['icon'].menu[-2].action(holder['icon'], None)
+                    if command:
+                        self.restart_signal = True
+                    else:
+                        holder['icon'].menu[-2].action(holder['icon'], None)
                     return False
                 if busy_first and not errors:
                     return False
                 holder['control'].activity_check = lambda: False
                 self.exit_sent = True
+                if command:
+                    self.restart_signal = True
+                    return False
                 holder['icon'].menu[-2 if restart else -1].action(holder['icon'], None)
                 if compete:
                     deadline = time.monotonic() + 2

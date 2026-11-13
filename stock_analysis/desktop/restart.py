@@ -46,3 +46,14 @@ def launch_replacement(entry_path, port):
         cwd=str(entry.parent), close_fds=True,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
+
+
+if __name__ == '__main__':
+    from stock_analysis.desktop.windows_instance import signal_restart
+    from stock_analysis.infrastructure.app_settings import AppSettings
+
+    try:
+        signal_restart(AppSettings().DATABASE_PATH)
+    except (OSError, RuntimeError) as exc:
+        sys.exit(str(exc))
+    print('已发送重启请求。请查看 desktop.log 确认处理结果。')

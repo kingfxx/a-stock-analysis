@@ -68,6 +68,7 @@ def run(port=8765, *, open_browser=True):
                             return
                         message = control.request_stop()
                         if message:
+                            logger.info('%s请求未执行：%s', operation, message)
                             icon.notify(message, f'暂时无法{operation}')
                         else:
                             if restart:
@@ -85,6 +86,8 @@ def run(port=8765, *, open_browser=True):
             while not done.is_set():
                 if instance.wait():
                     requested_open.set()
+                if instance.restart_pending():
+                    stop(icon, None, restart=True)
                 phase, error = control.snapshot()
                 if phase != last_phase:
                     logger.info('生命周期：%s', phase)
