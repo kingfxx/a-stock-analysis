@@ -437,6 +437,34 @@ def test_daily_backup_retention_only_removes_owned_daily_files(db, tmp_path):
         "analysis-daily-2026-09-03.sqlite3", "analysis-daily-2026-09-04.sqlite3"]
 
 
+def test_automatic_backup_keeps_three_across_cloud_and_archive(db, monkeypatch):
+    class Clock(storage.datetime):
+        day = 5
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, cls.day, tzinfo=tz)
+
+    monkeypatch.setattr(storage, "datetime", Clock)
+    for day in range(1, 5):
+        db.daily_backup(day=date(2026, 9, day))
+    archive = db.path.parent / "backups"
+    cloud = archive / "stock_cloud_bkp"
+    special = db.backup(archive / "pre-migration-keep.sqlite3")
+
+    Database(db.path).automatic_backup()
+    assert sorted(path.name for path in archive.glob("analysis-daily-*.sqlite3")) == [
+        "analysis-daily-2026-09-02.sqlite3", "analysis-daily-2026-09-03.sqlite3"]
+    assert [path.name for path in cloud.glob("*.sqlite3")] == ["analysis-daily-2026-09-04.sqlite3"]
+
+    Clock.day = 11
+    db.automatic_backup()
+    assert sorted(path.name for path in archive.glob("analysis-daily-*.sqlite3")) == [
+        "analysis-daily-2026-09-03.sqlite3", "analysis-daily-2026-09-04.sqlite3"]
+    assert [path.name for path in cloud.glob("*.sqlite3")] == ["analysis-daily-2026-09-11.sqlite3"]
+    assert special.exists()
+
+
 def test_instance_lock_prevents_other_process_and_releases_after_exception(db):
     command = [sys.executable, "-c",
                "from stock_analysis.infrastructure.storage import instance_lock; import sys; "

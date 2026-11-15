@@ -25,6 +25,7 @@ from stock_analysis.domains.financials.financial_storage import compress_json, f
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "stock_analysis.sqlite3"
 APPLICATION_ID = 0x4153544B  # ASTK; refuse an unrelated SQLite file.
+AUTOMATIC_BACKUP_KEEP = 3
 _WRITE_LOCKS_GUARD = Lock()
 _WRITE_LOCKS: dict[str, RLock] = {}
 MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_facts.sql"),
@@ -756,22 +757,33 @@ class Database:
                 source.close()
             temporary.unlink(missing_ok=True)
 
-    def automatic_backup(self) -> None:
-        """Create a regular snapshot when none was published in the last seven UTC dates."""
-        today = datetime.now(timezone.utc).date()
-        earliest_recent = today - timedelta(days=6)
+    def _automatic_snapshots(self) -> list[tuple[date, Path]]:
         archive = self.path.parent / "backups"
+        cloud = archive / "stock_cloud_bkp"
         prefix = f"{self.path.stem}-daily-"
-        for folder in (archive / "stock_cloud_bkp", archive):
+        snapshots = []
+        for folder in (cloud, archive):
             for candidate in folder.glob(f"{prefix}*.sqlite3"):
                 token = candidate.stem[len(prefix):].split("-cloud-", 1)[0]
                 try:
                     snapshot_day = date.fromisoformat(token)
                 except ValueError:
                     continue
-                if token == snapshot_day.isoformat() and earliest_recent <= snapshot_day <= today and candidate.is_file():
-                    return
-        self.daily_backup(day=today)
+                if token == snapshot_day.isoformat() and candidate.is_file():
+                    snapshots.append((snapshot_day, candidate))
+        return sorted(snapshots, key=lambda item: (
+            item[0], item[1].parent == cloud, item[1].stat().st_mtime), reverse=True)
+
+    def automatic_backup(self) -> None:
+        """Apply regular snapshot retention and the seven-day UTC interval."""
+        today = datetime.now(timezone.utc).date()
+        earliest_recent = today - timedelta(days=6)
+        snapshots = self._automatic_snapshots()
+        if any(earliest_recent <= snapshot_day <= today for snapshot_day, _ in snapshots):
+            for _, candidate in snapshots[AUTOMATIC_BACKUP_KEEP:]:
+                candidate.unlink()
+            return
+        self.daily_backup(day=today, keep=AUTOMATIC_BACKUP_KEEP)
 
     def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None, verify_existing=True) -> Path:
         if type(keep) is not int or keep < 1:
@@ -806,16 +818,7 @@ class Database:
                     # this date; do not replace or hash a potentially huge file.
                     archived = archive_directory / f"{candidate.stem}-cloud-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}{candidate.suffix}"
                 os.replace(candidate, archived)
-            owned = []
-            for folder in (archive_directory, directory):
-                for candidate in folder.glob(f"{self.path.stem}-daily-*.sqlite3"):
-                    token = candidate.name[len(self.path.stem) + len("-daily-"):-len(".sqlite3")]
-                    try:
-                        candidate_day = _day(token.split("-cloud-", 1)[0])
-                    except ValueError:
-                        continue
-                    owned.append((candidate_day, candidate))
-            for _, candidate in sorted(owned, key=lambda item: (item[0], item[1].stat().st_mtime), reverse=True)[keep:]:
+            for _, candidate in self._automatic_snapshots()[keep:]:
                 candidate.unlink()
             return path
         # Only the exact daily names owned by this database; pre-migration files stay.
