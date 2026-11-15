@@ -69,7 +69,7 @@ def business_service():
         return _AI_SERVICES[key]
 
 def _initialize_runtime(db, skip_legacy=False):
-    runtime=db.initialize();StockCleanupService(db).recover();db.check();db.daily_backup()
+    runtime=db.initialize();StockCleanupService(db).recover();db.check();db.automatic_backup()
     recover_operations(db)
     recovered=db.recover_interrupted_runs()
     industry_recovered=IndustryService(db).recover_interrupted_runs()

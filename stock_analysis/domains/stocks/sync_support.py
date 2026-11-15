@@ -88,7 +88,7 @@ def mark_failed(db, run, exc, *, collection_batch_id=None):
 
 
 def backup_before_update(db):
-    """Keep the first daily snapshot; serialize concurrent first updates."""
+    """Serialize automatic snapshot checks before concurrent updates."""
     with data_lock(db, "backup", "daily"):
-        db.daily_backup(verify_existing=False)
+        db.automatic_backup()
 

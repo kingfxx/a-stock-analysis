@@ -756,6 +756,23 @@ class Database:
                 source.close()
             temporary.unlink(missing_ok=True)
 
+    def automatic_backup(self) -> None:
+        """Create a regular snapshot when none was published in the last seven UTC dates."""
+        today = datetime.now(timezone.utc).date()
+        earliest_recent = today - timedelta(days=6)
+        archive = self.path.parent / "backups"
+        prefix = f"{self.path.stem}-daily-"
+        for folder in (archive / "stock_cloud_bkp", archive):
+            for candidate in folder.glob(f"{prefix}*.sqlite3"):
+                token = candidate.stem[len(prefix):].split("-cloud-", 1)[0]
+                try:
+                    snapshot_day = date.fromisoformat(token)
+                except ValueError:
+                    continue
+                if token == snapshot_day.isoformat() and earliest_recent <= snapshot_day <= today and candidate.is_file():
+                    return
+        self.daily_backup(day=today)
+
     def daily_backup(self, directory: Path | str | None = None, *, keep=7, day: date | None = None, verify_existing=True) -> Path:
         if type(keep) is not int or keep < 1:
             raise ValueError("keep must be positive")

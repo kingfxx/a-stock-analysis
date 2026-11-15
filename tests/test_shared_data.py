@@ -316,7 +316,8 @@ def test_daily_backup_preserves_state_before_first_update(db, tmp_path, monkeypa
     assert db.check()["instruments"] == 2
 
 
-def test_daily_backup_rolls_over_without_restart(db, tmp_path, monkeypatch):
+@pytest.mark.parametrize('archive_only', [False, True])
+def test_automatic_backup_rolls_over_after_seven_days(db, tmp_path, monkeypatch, archive_only):
     from datetime import datetime, timezone
     from stock_analysis.infrastructure import storage
     class Clock(datetime):
@@ -327,13 +328,22 @@ def test_daily_backup_rolls_over_without_restart(db, tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "datetime", Clock)
     service = ChipService(db, tmp_path, fetcher=lambda *a, **kw: [margin("2026-09-29")])
     service.update("600887", "financing")
-    Clock.day = 2
+    archive = tmp_path / "backups"
+    cloud = archive / "stock_cloud_bkp"
+    first = cloud / "shared-daily-2026-10-01.sqlite3"
+    if archive_only:
+        first = first.rename(archive / first.name)
+    Clock.day = 7
+    Database(db.path).automatic_backup()
+    service.update("600519", "financing")
+    assert list(archive.rglob("shared-daily-*.sqlite3")) == [first]
+    Clock.day = 8
     service.update("300750", "financing")
     previous = Database(tmp_path / "backups/shared-daily-2026-10-01.sqlite3")
-    current = Database(tmp_path / "backups/stock_cloud_bkp/shared-daily-2026-10-02.sqlite3")
+    current = Database(cloud / "shared-daily-2026-10-08.sqlite3")
     assert previous.check()["instruments"] == 0
-    assert current.check()["instruments"] == 1
-    assert db.check()["instruments"] == 2
+    assert current.check()["instruments"] == 2
+    assert db.check()["instruments"] == 3
 
 
 def test_concurrent_daily_backup_is_created_once(db, monkeypatch):
