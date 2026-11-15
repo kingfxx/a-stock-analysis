@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict');
-const {periodKey,chartSeries,leguCloseOverlay,dailyStatistics}=require('../web/features/market/congestion.js');
+const {periodKey,chartSeries,leguCloseOverlay,dailyStatistics,dailyDetails}=require('../web/features/market/congestion.js');
 const channels={api_history:{rows:[
   {observation_date:'2026-07-27',value:.50},{observation_date:'2026-07-30',value:.51},
   {observation_date:'2026-07-31',value:null},{observation_date:'2026-08-03',value:null},
@@ -56,3 +56,17 @@ assert.equal(dailyStatistics(dailyStatsChannels,'2027-01-01').count,0);
 const singleton=dailyStatistics({api_history:{rows:[{observation_date:'2026-01-01',value:0}]}});
 assert.equal(singleton.count,1);assert.equal(singleton.current,0);assert.equal(singleton.stddev,0);assert.equal(singleton.low,0);
 console.log('Congestion daily statistics: passed');
+
+const dailyAmountChannels={api_history:{rows:[
+  {observation_date:'2026-10-08',value:.4,total_amount_yi:100},
+  {observation_date:'2026-10-09',value:0,total_amount_yi:110},
+  {observation_date:'2026-10-12',value:null,total_amount_yi:null},
+  {observation_date:'2026-10-13',value:.5,total_amount_yi:0},
+]},html_recent_table:{rows:[{observation_date:'2026-10-09',value:null,total_amount_yi:120}]}};
+const details=dailyDetails(dailyAmountChannels,[{observation_date:'2026-10-09',close:3800}], 'monthly','2026-11-07',30);
+assert.deepEqual(details.map(row=>row.date),['2026-10-13','2026-10-12','2026-10-09']);
+assert.deepEqual(details.map(row=>row.change),[null,null,20]);
+assert.equal(details[0].amount,0);
+assert.equal(details[0].close,undefined);
+assert.deepEqual(details[2],{date:'2026-10-09',congestion:0,amount:120,change:20,close:3800});
+assert.equal(dailyDetails(dailyAmountChannels,[],'daily','2026-11-07',60).at(-1).date,'2026-10-08');

@@ -69,13 +69,34 @@
     }
     return dates.map(day=>totals.get(periodKey(day,frequency))??null);
   }
-  if(typeof module!=='undefined'&&module.exports)module.exports={periodKey,chartSeries,leguCloseOverlay,dailyStatistics,totalAmountSeries};
+  function dailyDetails(channels, pointRows, pointFrequency, end, days) {
+    const cutoff = new Date(end + 'T00:00:00Z');
+    cutoff.setUTCDate(cutoff.getUTCDate() - (days - 1));
+    const start = cutoff.toISOString().slice(0, 10);
+    const market = chartSeries(channels, pointFrequency === 'daily' ? pointRows : [], 'day');
+    const amounts = totalAmountSeries(channels, market.dates, 'day');
+    const rows = new Map();
+    market.dates.forEach((date, i) => {
+      if (date < start || date > end) return;
+      const amount = amounts[i];
+      const previous = amounts[i - 1];
+      rows.set(date, {date, congestion: market.congestion[i], amount,
+        change: amount != null && previous != null ? amount - previous : null});
+    });
+    for (const {observation_date: date, close} of pointRows) {
+      if (date < start || date > end) continue;
+      rows.set(date, {...rows.get(date), date, close});
+    }
+    return [...rows.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }
+  if(typeof module!=='undefined'&&module.exports)module.exports={periodKey,chartSeries,leguCloseOverlay,dailyStatistics,totalAmountSeries,dailyDetails};
   if(typeof window!=='undefined')window.CongestionStats={periodKey,dailyStatistics};
   if(typeof document==='undefined')return;
   const el=id=>document.getElementById('congestion-'+id);
   const leguCloseKey='legu:congestion-close';
   let data=null,controller=null,requestNumber=0,pollTimer=null,amountOverlay=false,crosshairTimer=null;
-  const fmt=value=>value===null||value===undefined?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:2,minimumFractionDigits:2});
+  let detailDays = 30, detailIndex = null;
+  const fmt=(value, digits=2)=>value===null||value===undefined?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:digits,minimumFractionDigits:digits});
   const time=value=>window.DashboardTime.format(value);
   const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   async function api(url,body,signal) {
@@ -89,6 +110,51 @@
     const [year,month,day]=today().split('-').map(Number),target=year-Number(el('range').value);
     const last=new Date(Date.UTC(target,month,0)).getUTCDate();
     return `${target}-${String(month).padStart(2,'0')}-${String(Math.min(day,last)).padStart(2,'0')}`;
+  }
+  function selectedOverlay() {
+    return el('index').value === leguCloseKey ? leguCloseOverlay(data.channels) : data.overlay;
+  }
+  function renderDetails() {
+    const dates = el('detail-dates');
+    const body = el('detail-body');
+    dates.replaceChildren(dates.firstElementChild);
+    body.replaceChildren();
+    const overlay = detailIndex === el('index').value ? selectedOverlay() : null;
+    const rows = overlay ? dailyDetails(data.channels, overlay.rows || [], overlay.frequency, today(), detailDays) : [];
+    if (!rows.length) {
+      body.insertRow().insertCell().textContent = overlay ? '当前范围暂无日度明细' : '等待所选指数数据…';
+      return;
+    }
+    for (const row of rows) {
+      const heading = document.createElement('th');
+      heading.scope = 'col';
+      heading.textContent = row.date;
+      dates.append(heading);
+    }
+    const pointName = el('index').selectedOptions[0]?.textContent || '指数';
+    const metrics = [
+      [`${pointName}（点）`, row => fmt(row.close)],
+      ['大盘拥挤度', row => row.congestion == null ? '—' : fmt(row.congestion * 100) + '%'],
+      ['全 A 成交额（亿元）', row => fmt(row.amount, 0), true],
+    ];
+    for (const [name, format, showChange] of metrics) {
+      const tr = body.insertRow();
+      const heading = document.createElement('th');
+      heading.scope = 'row';
+      heading.textContent = name;
+      tr.append(heading);
+      for (const row of rows) {
+        const cell = tr.insertCell();
+        cell.textContent = format(row);
+        if (!showChange) continue;
+        const change = document.createElement('span');
+        const delta = row.change == null ? null : Number(row.change.toFixed(0)) + 0;
+        change.textContent = (delta > 0 ? '+' : '') + fmt(delta, 0);
+        if (delta > 0) change.className = 'amount-up';
+        if (delta < 0) change.className = 'amount-down';
+        cell.append(' ', change);
+      }
+    }
   }
   function draw() {
     if(!data)return;
@@ -105,9 +171,15 @@
     el('comparison').textContent='按所选区间的有效日频拥挤度判断自身历史位置，不代表后续指数涨跌。'+(std&&stats.count?` 均值 ${percent(stats.mean)}，总体标准差 ${percent(stats.stddev)}。`:'');
     ['high','median','low'].forEach((id,i)=>{el(id).textContent=percent(levels[i]);el(id+'-label').textContent=std?['上限（均值 +1σ）','均值','下限（均值 −1σ）'][i]:['高拥挤（80% 分位）','中值（50% 分位）','低拥挤（20% 分位）'][i];});
     el('current').textContent=percent(stats.current);
-    el('date').textContent=stats.currentDate||'暂无有效观察';
+    if (stats.currentDate) {
+      const [currentAmount] = totalAmountSeries(data.channels, [stats.currentDate], 'day');
+      const amountText = currentAmount == null ? '—' : currentAmount.toFixed(0);
+      el('date').textContent = `${stats.currentDate}  ${amountText} 亿`;
+    } else {
+      el('date').textContent = '暂无有效观察';
+    }
     const visible=row=>row.observation_date>=lower&&row.observation_date<=upper;
-    const overlay=el('index').value===leguCloseKey?leguCloseOverlay(data.channels):data.overlay;
+    const overlay=selectedOverlay();
     const pointRows=(overlay.rows||[]).filter(visible);
     const channels=Object.fromEntries(Object.entries(data.channels).map(([key,series])=>[key,{rows:series.rows.filter(visible)}]));
     const frequency=el('frequency').value==='auto'?(el('range').value==='5'?'day':'week'):el('frequency').value;
@@ -127,6 +199,8 @@
     if(hasAmountSeries)traces.push({x:dates,y:amountValues,type:'bar',name:'全A成交额',xaxis:'x2',yaxis:'y3',
       marker:{color:'#c792ea'},opacity:.62,hovertemplate:'市场成交总额：%{y:.2f} 亿元<extra></extra>'});
     el('amount').setAttribute('aria-pressed',String(amountOverlay));
+    el('detail').hidden = !hasAmountSeries;
+    if (hasAmountSeries) renderDetails();
     el('amount-note').hidden=!amountOverlay;
     el('amount-note').textContent=amountOverlay?(hasAmountSeries?'全A成交额按亿元显示；日频显示当日值，周／月频显示区间内有效日成交额合计，缺值不补。':'当前区间暂无有效全A成交额。'):'';
     el('chart').setAttribute('aria-label',hasAmountSeries?'大盘拥挤度、指数点位与全A成交额走势':'大盘拥挤度与所选宽基指数双轴趋势图');
@@ -198,9 +272,7 @@
     indices.splice(indices.findIndex(row=>row.index_code==='cn:000001')+1,0,{index_code:leguCloseKey,name:'上证指数-legu'});
     el('index').replaceChildren(...indices.map(row=>{const option=document.createElement('option');option.value=row.index_code;option.textContent=row.name;return option;}));
     el('index').value=indices.some(row=>row.index_code===selected)?selected:'cn:000001';
-    const latest=data.latest;
-    el('current').textContent=latest?fmt(latest.value*100)+'%':'—';
-    el('date').textContent=latest?latest.observation_date:'尚未获取数据';
+    detailIndex = el('index').value;
     const supplemented=data.supplemented_dates||[];
     el('coverage').textContent=`API 有值至 ${data.channels.api_history.last_value_date||'—'}；网页有值至 ${data.channels.html_recent_table.last_value_date||'—'}。共 ${data.valid_dates} 个有值日期，${data.missing_dates.length} 个已知缺值日期；全历史覆盖率未核实。`+(supplemented.length?`其中 ${supplemented.length} 日使用 BigQuant 自算补值，原始 Legu 缺值保留；对应 close 取本地中证上证日频点数，口径可能与 Legu 有差异。`:'');
     el('gaps').textContent=data.missing_dates.length?`待补日期（${data.missing_dates.length}）：${data.missing_dates.join('、')}`:'已返回日期中暂无缺值；未返回的历史日期覆盖情况未知。';
@@ -230,10 +302,24 @@
       }
     }
   }
-  el('range').onchange=draw;el('index').onchange=load;
+  el('range').onchange=draw;
+  el('index').onchange=()=>{
+    if (!el('detail').hidden) renderDetails();
+    load();
+  };
   el('frequency').onchange=draw;
   el('benchmark').onchange=draw;
   el('amount').onclick=()=>{amountOverlay=!amountOverlay;draw();};
+  el('detail-range').onclick=event=>{
+    const button = event.target.closest('button[data-days]');
+    if (!button) return;
+    detailDays = Number(button.dataset.days);
+    for (const option of el('detail-range').querySelectorAll('button')) {
+      option.setAttribute('aria-pressed', String(option === button));
+    }
+    renderDetails();
+    el('detail-scroll').scrollLeft = 0;
+  };
   document.addEventListener('visibilitychange',()=>{clearTimeout(pollTimer);pollTimer=null;if(!document.hidden)pollProgress();});
   document.addEventListener('index-collection-change',event=>{if(event.detail?.source!=='congestion')pollProgress();});
   load();

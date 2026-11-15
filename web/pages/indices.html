@@ -41,6 +41,16 @@ __RESEARCH_SIDEBAR__
 <div class="congestion-summary"><div class="valuation-current"><div id="congestion-position" class="valuation-position">待判断</div><strong id="congestion-current">—</strong><small id="congestion-basis">暂无有效分位</small><span id="congestion-date">尚未获取数据</span></div><div class="valuation-summary"><p id="congestion-history-summary"></p><p id="congestion-comparison" class="muted"></p></div></div>
 <div class="valuation-levels"><span><i style="background:#ed8180"></i><small id="congestion-high-label">高拥挤（80% 分位）</small><b id="congestion-high">—</b></span><span><i style="background:#f4b560"></i><small id="congestion-median-label">中值（50% 分位）</small><b id="congestion-median">—</b></span><span><i style="background:#6ac9aa"></i><small id="congestion-low-label">低拥挤（20% 分位）</small><b id="congestion-low">—</b></span></div>
 <div id="congestion-chart" role="img" aria-label="大盘拥挤度与所选宽基指数双轴趋势图"></div>
+<div id="congestion-detail" class="congestion-detail" hidden>
+  <div id="congestion-detail-range" role="group" aria-label="成交额明细时间范围">
+    <button type="button" data-days="30" aria-pressed="true">30 天</button>
+    <button type="button" data-days="60" aria-pressed="false">60 天</button>
+    <button type="button" data-days="90" aria-pressed="false">90 天</button>
+  </div>
+  <div id="congestion-detail-scroll" class="congestion-detail-scroll" role="region" aria-label="大盘拥挤度日度明细" tabindex="0">
+    <table aria-label="大盘拥挤度日度明细"><thead><tr id="congestion-detail-dates"><th scope="col">指标 / 日期</th></tr></thead><tbody id="congestion-detail-body"></tbody></table>
+  </div>
+</div>
 <section id="industry-crowding" class="industry-crowding" aria-label="申万行业拥挤度热力图">
 <div class="industry-crowding-head"><div><h3>行业拥挤度</h3><p class="muted">拥挤度 = 行业成交额 ÷ 市场总成交额；比例越高，表示该行业成交在市场中的集中度越高。颜色按换手率历史分位表示交易活跃度在该行业自身历史中的位置。</p></div>
 <div class="controls"><label>行业层级<select id="industry-crowding-level"><option value="1">申万一级</option><option value="2">申万二级</option></select></label><label>日期范围<select id="industry-crowding-range"><option value="30" selected>最近 30 天</option><option value="60">最近 60 天</option><option value="90">最近 90 天</option></select></label></div></div>
