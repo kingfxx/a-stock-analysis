@@ -256,7 +256,6 @@ def ensure_daily_memberships(service, progress=lambda message:None, *, today=Non
                 source=conn.execute('SELECT source_system,dataset FROM collection_sources WHERE id=?',(source_id,)).fetchone()
             if not source:
                 raise ValueError('待保留的上市日期公共来源不存在')
-            read_source(service.db,source_id)
             batch_key=f"{source['source_system']}:{source['dataset']}"
             target_batch=bundle.get('collection_batches',{}).get(batch_key)
             if target_batch is None:

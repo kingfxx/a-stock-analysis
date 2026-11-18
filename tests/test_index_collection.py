@@ -439,17 +439,35 @@ def test_review_keeps_explicit_overlap_and_does_not_skip_latest(db):
     assert len(session.calls)==1
 
 
-def test_calendar_cache_reuses_verified_file_without_network(db):
+@pytest.mark.parametrize('missing', [None, 'file', 'zip'])
+def test_calendar_cache_reuses_verified_file_or_refetches(db,missing):
     batch=begin_batch(db,'old','index.calendar','sina')
     sid=archive_source(db,batch,'sina','index.calendar',{'url':'https://example.test/calendar'},1,
         raw=b'calendar fixture',response=response(),obtained_at='2026-10-11T01:00:00+00:00')
     parsed_source(db,sid,fields=['trading_date']);finish_batch(db,batch,'complete')
-    client,session,_=http(db,[])
+    with db.connection(write=True) as conn:
+        old=conn.execute('SELECT * FROM collection_sources WHERE id=?',(sid,)).fetchone()
+        if missing=='zip':
+            conn.execute('INSERT INTO collection_source_archive_members VALUES (?,?,?,?,?,?,?,?)',
+                (old['file_path'],'collection_sources/sina/index.calendar/2026-10-missing.zip','calendar.raw.gz',
+                 old['stored_sha256'],old['stored_bytes'],old['stored_sha256'],1,old['obtained_at']))
+    if missing:
+        (db.path.parent/old['file_path']).unlink()
+    client,session,_=http(db,[response(body=b'new calendar')] if missing else [])
     collector=ic.IndexCollector(db,'test',request_collector=client)
     dates={(date(2020,1,1)+ic.timedelta(days=d)).isoformat() for d in range(5000)}
     collector.decode_calendar=lambda text:dates
     collector.load_calendar(cached=True)
-    assert collector.trading_days==dates and not session.calls
+    assert collector.trading_days==dates
+    assert len(session.calls)==int(bool(missing))
+    if missing:
+        from stock_analysis.collection.collection import read_source
+        with pytest.raises(FileNotFoundError):
+            read_source(db,sid)
+        with db.connection() as conn:
+            fresh=conn.execute('SELECT id,reused_source_id FROM collection_sources ORDER BY id DESC LIMIT 1').fetchone()
+        assert fresh['id']!=sid and fresh['reused_source_id'] is None
+        assert read_source(db,fresh['id'])[0]==b'new calendar'
 
 
 def test_sw_only_latest_level_skips_while_other_level_remains_pending(db):

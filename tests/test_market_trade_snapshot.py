@@ -126,7 +126,8 @@ def test_shared_metadata_versions_and_historical_range(db):
     assert len(m.quarters('2015Q1','2026Q3'))==47
 
 
-def test_failed_day_replays_archived_page_and_maintenance_reports_real_time(db):
+@pytest.mark.parametrize('missing_archive', [False, True])
+def test_failed_day_replays_archived_page_and_maintenance_reports_real_time(db,missing_archive):
     from datetime import datetime,timezone
     before=MaintenanceService(db).read()
     empty=next(t for t in before['tables'] if t['name']=='market_trade_snapshot')
@@ -140,12 +141,19 @@ def test_failed_day_replays_archived_page_and_maintenance_reports_real_time(db):
         m.collect_day(db,'broken','2025-12-31',quarter='2025Q4',http=client)
     with db.connection() as c:
         assert c.execute('SELECT count(*) FROM market_trade_snapshot').fetchone()[0]==0
-    session=Session([dict(success=True,code=0,result=dict(count=501,pages=2,data=[row('002000')]))])
+        cached=c.execute("SELECT file_path FROM collection_sources WHERE parse_status='complete'").fetchone()[0]
+    if missing_archive:
+        (db.path.parent/cached).unlink()
+    replies=[dict(success=True,code=0,result=dict(count=501,pages=2,data=[row('002000')]))]
+    if missing_archive:
+        replies.insert(0,dict(success=True,code=0,result=dict(count=501,pages=2,data=rows)))
+    session=Session(replies)
     client=RequestCollector(db,session=session,clock=clock.time,sleep=clock.sleep,uniform=lambda a,b:a)
     result=m.collect_day(db,'resumed','2025-12-31',quarter='2025Q4',http=client)
-    assert len(session.calls)==1 and session.calls[0]['params']['pageNumber']==2 and result['inserted']==501
+    assert [call['params']['pageNumber'] for call in session.calls]==([1,2] if missing_archive else [2])
+    assert result['inserted']==501
     with db.connection() as c:
-        assert c.execute('SELECT count(*) FROM collection_sources WHERE reused_source_id IS NOT NULL').fetchone()[0]==1
+        assert c.execute('SELECT count(*) FROM collection_sources WHERE reused_source_id IS NOT NULL').fetchone()[0]==int(not missing_archive)
     assert m.audit(db,[result])[0]['source_rows']==501
     filled=next(t for t in MaintenanceService(db).read()['tables'] if t['name']=='market_trade_snapshot')
     assert filled['rows']==501 and filled['total_bytes']>0 and 'obtained_at' in filled['time_basis']

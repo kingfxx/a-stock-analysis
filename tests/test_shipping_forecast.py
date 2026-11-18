@@ -380,7 +380,8 @@ def test_formal_quarter_prepare_reuses_local_pdf_and_no_network(db,monkeypatch):
     with pytest.raises(ValueError):service.prepare_period('601919','2026-09-30')
 
 
-def test_monthly_recovery_logs_reused_segments_and_keeps_failed_history(db,monkeypatch):
+@pytest.mark.parametrize('missing_files',[False, True])
+def test_monthly_recovery_logs_reused_segments_and_keeps_failed_history(db,monkeypatch,missing_files):
     from stock_analysis.collection.collection import finish_batch, RequestCollector
     from stock_analysis.domains.research.sectors.shipping.shipping_sources import MOT
     month='2026-08';scope=dict(mode='backfill',start=month+'-01',end=month+'-31')
@@ -393,11 +394,24 @@ def test_monthly_recovery_logs_reused_segments_and_keeps_failed_history(db,monke
         batch=begin_batch(db,old,'shipping.mot_'+kind,'mot',scope=dict(scope,url=url),domain='research_shipping')
         source=archive_source(db,batch,'mot','shipping.mot_'+kind,dict(url=url),1,raw=html.encode(),obtained_at=stamp)
         parsed_source(db,source,fields=['verified'])
-        finish_batch(db,batch,'complete','partial' if kind=='rates' else 'unknown' if kind=='directory' else 'complete')
+        finish_batch(db,batch,'complete','partial' if kind=='rates' else 'unknown' if kind=='directory' else 'complete',
+                     result=dict(month=month,published=0) if kind!='directory' else None)
         originals.append(batch)
+    if missing_files:
+        with db.connection() as c:
+            paths=[r[0] for r in c.execute('SELECT file_path FROM collection_sources')]
+        for path in paths:
+            (db.path.parent/path).unlink()
     with db.connection(write=True) as c:
         c.execute("UPDATE collection_operations SET status='failed',finished_at=?,error='首次解析失败' WHERE operation_id=?",(stamp,old))
-    monkeypatch.setattr(RequestCollector,'get',lambda *a,**k:pytest.fail('已校验分段恢复不得联网'))
+    calls=[]
+    def fetch(self,batch,provider,dataset,url,**kwargs):
+        from types import SimpleNamespace
+        assert missing_files and dataset=='shipping.mot_directory' and url==MOT
+        calls.append(dataset)
+        source=archive_source(db,batch,provider,dataset,dict(url=url),1,raw=directory.encode(),obtained_at=stamp)
+        return SimpleNamespace(text=directory),source
+    monkeypatch.setattr(RequestCollector,'get',fetch)
     for _ in range(2):
         with db.connection(write=True) as c:ref=shipping_collection.reserve(c,'shipping_monthly',scope)
         result=shipping_collection.run(db,ref)
@@ -412,19 +426,58 @@ def test_monthly_recovery_logs_reused_segments_and_keeps_failed_history(db,monke
             assert c.execute('SELECT count(*) FROM research_shipping_rate_points').fetchone()[0]==0
         task=next(t for t in CollectionManagement(db,None).read()['tasks'] if t['task_key']=='shipping_monthly')
         assert task['history'][0]['status']=='complete' and task['last_success'] and task['coverage']=='partial'
+    assert len(calls)==int(missing_files)
 
 
-def test_reused_month_rejects_corrupt_archive_and_records_failure(db):
-    from stock_analysis.collection.collection import finish_batch
+def test_monthly_retry_fetches_missing_unpublished_detail(db,monkeypatch):
+    from types import SimpleNamespace
+    from stock_analysis.collection.collection import finish_batch, RequestCollector
+    from stock_analysis.domains.research.sectors.shipping.shipping_sources import MOT
+
+    month='2024-01'
+    url=MOT+'month.html'
+    scope=dict(mode='incremental',start=month+'-01',end=month+'-31')
+    dataset='shipping.mot_rates'
+    old=begin_batch(db,'old',dataset,'mot',scope=dict(url=url))
+    source=archive_source(db,old,'mot',dataset,dict(url=url),1,raw=b'unusable old detail')
+    parsed_source(db,source,error='previous parse failed')
+    finish_batch(db,old,'failed')
+    with db.connection() as conn:
+        path=conn.execute('SELECT file_path FROM collection_sources WHERE id=?',(source,)).fetchone()[0]
+    (db.path.parent/path).unlink()
+
+    pages={MOT:'<a href="month.html">2024年1月中国出口集装箱运价指数</a>',
+           url:(FIX/'month.html').read_text(encoding='utf8')}
+    calls=[]
+    def fetch(self,batch,provider,dataset,url,**kwargs):
+        calls.append(url)
+        body=pages[url]
+        fresh=archive_source(db,batch,provider,dataset,dict(url=url),1,raw=body.encode())
+        return SimpleNamespace(text=body),fresh
+    monkeypatch.setattr(RequestCollector,'get',fetch)
+    with db.connection(write=True) as conn:
+        ref=shipping_collection.reserve(conn,'shipping_monthly',scope)
+    result=shipping_collection.run(db,ref)
+    assert calls==[MOT,url] and result['status']=='complete', result
+    assert result['results'][-1]['published']>0
+
+
+def test_reused_month_keeps_review_reference_without_reopening_evidence(db):
+    from stock_analysis.collection.collection import finish_batch, read_source
     b=begin_batch(db,'old','shipping.mot_rates','mot',scope=dict(url='https://www.mot.gov.cn/test.html'),domain='research_shipping')
     source=archive_source(db,b,'mot','shipping.mot_rates',dict(url='https://www.mot.gov.cn/test.html'),1,raw=b'original')
-    parsed_source(db,source,fields=['verified']);finish_batch(db,b,'complete','partial')
+    review=archive_source(db,b,'mot','shipping.image_review',dict(transport='explicit_verified_transcription'),1,raw=b'review')
+    parsed_source(db,source,fields=['verified']);parsed_source(db,review,fields=['verified_rows'])
+    finish_batch(db,b,'complete','partial',result=dict(month='2026-09',published=3,review_source_id=review))
     with db.connection() as c:
         previous=dict(c.execute('SELECT * FROM collection_batches WHERE id=?',(b,)).fetchone())
         path=db.path.parent/c.execute('SELECT file_path FROM collection_sources WHERE id=?',(source,)).fetchone()[0]
     path.write_bytes(b'corrupt')
+    result=shipping_collection.reuse_month_segment(db,'new',dict(mode='incremental'),'2026-09','rates','https://www.mot.gov.cn/test.html',previous)
+    assert result['skipped']
     with pytest.raises(ValueError,match='哈希'):
-        shipping_collection.reuse_month_segment(db,'new',dict(mode='backfill'),'2026-09','rates','https://www.mot.gov.cn/test.html',previous)
+        read_source(db,source)
     with db.connection() as c:
         new=c.execute("SELECT * FROM collection_batches WHERE coalesce(operation_id,legacy_operation_ref)='new'").fetchone()
-        assert new['status']=='failed' and new['coverage_status']=='unknown' and new['scope_end']=='2026-09-30'
+        assert new['status']=='complete' and new['coverage_status']=='partial' and new['scope_end']=='2026-09-30'
+        assert json.loads(new['result_json'])['review_source_id']==review

@@ -267,7 +267,8 @@ def test_public_classification_entry_initializes_an_empty_database(tmp_path,monk
             ('market_financial_income','market_financial_balance','market_financial_cashflow','market_financial_performance'))
 
 
-def test_listing_source_lineage_survives_three_changed_roster_versions(service,monkeypatch):
+@pytest.mark.parametrize('missing_archive',[False, True])
+def test_listing_source_lineage_survives_three_changed_roster_versions(service,monkeypatch,missing_archive):
     calls=[]
     def fetch(directory,asof,progress,*,db,operation_id,collector,classification=True):
         bundle=listing_bundle()
@@ -277,6 +278,12 @@ def test_listing_source_lineage_survives_three_changed_roster_versions(service,m
         return public_bundle(db,operation_id,bundle)
     monkeypatch.setattr(members,'fetch_directory',fetch)
     first=members.ensure_daily_memberships(service,today='2026-10-04')
+    if missing_archive:
+        with service.db.connection() as conn:
+            paths=[r[0] for r in conn.execute("SELECT file_path FROM collection_sources WHERE dataset LIKE 'market.listings.%'")]
+        assert paths
+        for path in paths:
+            (service.db.path.parent/path).unlink()
     second=members.ensure_daily_memberships(service,today='2026-10-05')
     third=members.ensure_daily_memberships(service,today='2026-10-06')
     assert [first['status'],second['status'],third['status']]==['complete']*3,(first,second,third)

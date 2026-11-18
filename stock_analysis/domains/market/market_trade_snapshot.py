@@ -179,7 +179,12 @@ def collect_day(db,operation,day,*,quarter=None,http=None,recheck=False,progress
                     "AND json_extract(s.request_json,'$.params.pageNumber')=? AND substr(s.obtained_at,1,10)=? "
                     "ORDER BY s.id DESC LIMIT 1",(DATASET,key,page,utc_now()[:10])).fetchone() if not recheck else None
             if cached:
-                raw,previous=read_source(db,cached['id'])
+                try:
+                    raw,previous=read_source(db,cached['id'])
+                except FileNotFoundError:
+                    progress(f"{day} · 第 {page} 页历史归档缺失（来源 #{cached['id']}），重新请求")
+                    cached=None
+            if cached:
                 source=archive_source(db,batch,'eastmoney',DATASET,json.loads(previous['request_json']),1,
                     raw=raw,obtained_at=previous['obtained_at'],request_status='reused',reused_source_id=previous['id'])
             else:

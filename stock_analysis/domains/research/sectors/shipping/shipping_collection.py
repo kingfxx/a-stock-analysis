@@ -36,23 +36,17 @@ def reuse_month_segment(db,ref,scope,month,kind,url,previous):
         scope=dict(scope,url=url,month=month,reused_batch_id=previous['id']),domain='research_shipping',
         parser_version='shipping-v1',frequency='monthly')
     try:
-        with db.connection() as conn:
-            sources=[dict(r) for r in conn.execute('SELECT * FROM collection_sources WHERE batch_id=?',(previous['id'],))]
-        primary=None
-        for source in sources:
-            if source['file_path']:
-                read_source(db,source['id'])  # Verify both hashes, including image evidence.
-            if source['dataset']==dataset and source['parse_status']=='complete' and source['file_path'] and source['request_status'] in ('success','reused'):
-                primary=source
         prior_result=json.loads(previous['result_json'] or '{}')
         review_id=prior_result.get('review_source_id')
-        if review_id:
-            raw,_=read_source(db,review_id)
-            review=json.loads(raw)
-            read_source(db,int(review['image_source_id']))
-            read_source(db,int(review['html_source_id']))
+        with db.connection() as conn:
+            primary=conn.execute("SELECT id FROM collection_sources WHERE batch_id=? AND dataset=? AND source_system='mot' "
+                "AND parse_status='complete' AND file_path IS NOT NULL AND request_status IN ('success','reused') "
+                "AND json_extract(request_json,'$.url')=? ORDER BY id DESC LIMIT 1",(previous['id'],dataset,url)).fetchone()
+            if review_id and not conn.execute("SELECT 1 FROM collection_sources WHERE id=? AND dataset='shipping.image_review' "
+                    "AND source_system='mot' AND request_status='success' AND parse_status='complete'",(review_id,)).fetchone():
+                raise ValueError('已完成分段缺少人工核验来源记录')
         if not primary:
-            raise ValueError('已完成分段缺少可核验的原始来源，请使用修订核对')
+            raise ValueError('已完成分段缺少原始来源记录，请使用修订核对')
         reusable_source(db,batch,primary['id'])
         result=dict(month=month,kind=kind,reused_batch_id=previous['id'],published=0,
                     note='复用已校验分段及原取得时间；未重新联网，覆盖判定不扩大')
@@ -95,8 +89,13 @@ def run(db,ref):
             with db.connection() as conn:
                 saved=conn.execute("SELECT s.id,s.parse_status FROM collection_sources s JOIN collection_batches b ON b.id=s.batch_id WHERE b.dataset=? AND json_extract(s.request_json,'$.url')=? AND s.file_path IS NOT NULL AND s.request_status IN ('success','reused') AND s.parse_status IN ('complete','failed') ORDER BY s.id DESC LIMIT 1",(dataset,url)).fetchone()
             if saved:
-                raw,_=read_source(db,saved[0]);source=reusable_source(db,batch,saved[0],reparse=saved['parse_status']=='failed')
-                return raw.decode('utf8'),source
+                try:
+                    raw,_=read_source(db,saved[0])
+                    source=reusable_source(db,batch,saved[0],reparse=saved['parse_status']=='failed')
+                except FileNotFoundError:
+                    collector.progress(f'航运来源 #{saved[0]} 的历史归档缺失，重新获取 {dataset}')
+                else:
+                    return raw.decode('utf8'),source
         response,source=collector.get(batch,provider,dataset,url,expect='html')
         response.encoding='utf8'
         return response.text,source
@@ -166,7 +165,11 @@ def run(db,ref):
                 dataset='shipping.mot_'+kind
                 with db.connection() as conn:
                     done=conn.execute("SELECT * FROM collection_batches WHERE dataset=? AND status='complete' AND json_extract(scope_json,'$.url')=? ORDER BY id DESC LIMIT 1",(dataset,url)).fetchone()
-                if done and scope['mode']!='review':
+                prior=json.loads(done['result_json'] or '{}') if done and scope['mode']!='review' else {}
+                published=prior.get('published')
+                if (prior.get('month')==month
+                        and type(published) is int and published>=0
+                        and done['coverage_status'] in ('complete','partial','empty')):
                     try:
                         results.append(reuse_month_segment(db,ref,scope,month,kind,url,dict(done)))
                     except Exception as exc:

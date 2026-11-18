@@ -442,12 +442,16 @@ class IndexCollector:
                 row=conn.execute("SELECT id FROM collection_sources WHERE dataset='index.calendar' "
                     "AND parse_status='complete' ORDER BY id DESC LIMIT 1").fetchone()
             if row:
-                raw,_=read_source(self.db,row[0])
-                dates=self.decode_calendar(raw.decode('utf-8'))
-                today=datetime.now(ZoneInfo('Asia/Shanghai')).date()
-                if len(dates)>=1000 and max(dates)>=today.isoformat():
-                    self.trading_days=dates
-                    return
+                try:
+                    raw,_=read_source(self.db,row[0])
+                except FileNotFoundError:
+                    self.progress(f'交易日历来源 #{row[0]} 的历史归档缺失，重新获取新浪交易日历')
+                else:
+                    dates=self.decode_calendar(raw.decode('utf-8'))
+                    today=datetime.now(ZoneInfo('Asia/Shanghai')).date()
+                    if len(dates)>=1000 and max(dates)>=today.isoformat():
+                        self.trading_days=dates
+                        return
         batch=begin_batch(self.db,self.operation_id,'index.calendar','sina')
         try:
             response,source=self.http.get(batch,'sina','index.calendar',CALENDAR,expect='text')
