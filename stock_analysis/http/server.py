@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from stock_analysis import application as app
 from stock_analysis.http.routes import dispatch
 from stock_analysis.http.routes.shipping import ShippingRoutes
+from stock_analysis.http.routes.aluminum import AluminumRoutes
 from stock_analysis.http.routes.notes import NotesRoutes
 from stock_analysis.http.routes.maintenance import MaintenanceRoutes
 from stock_analysis.http.routes.research import ResearchRoutes
@@ -19,7 +20,7 @@ from stock_analysis.http.routes.stocks import StocksRoutes
 from stock_analysis.http.routes.pages import PagesRoutes
 
 
-class Handler(ShippingRoutes, NotesRoutes, MaintenanceRoutes, ResearchRoutes, IndicesRoutes, IndustriesRoutes, StocksRoutes, PagesRoutes, BaseHTTPRequestHandler):
+class Handler(ShippingRoutes, AluminumRoutes, NotesRoutes, MaintenanceRoutes, ResearchRoutes, IndicesRoutes, IndustriesRoutes, StocksRoutes, PagesRoutes, BaseHTTPRequestHandler):
 
     def _maintenance_auth(self):
         self._ai_host()

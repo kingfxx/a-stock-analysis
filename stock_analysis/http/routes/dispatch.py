@@ -15,6 +15,8 @@ def get(self):
         return
     if self._get_shipping_forecast(parsed):
         return
+    if self._get_aluminum_forecast(parsed):
+        return
     if self._get_notes(parsed):
         return
     if self._get_vendor_notes(parsed):
@@ -88,6 +90,8 @@ def post(self):
     if self._post_source_archive(path):
         return
     if self._post_shipping_forecast_save(path):
+        return
+    if self._post_aluminum_forecast(path):
         return
     if self._post_notes(path):
         return

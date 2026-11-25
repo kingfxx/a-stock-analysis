@@ -1,0 +1,20 @@
+{
+  "version": "aluminum-annual-exposure-2025-v1",
+  "year": 2025,
+  "profit": 12673918000,
+  "pretax_profit": 25839529000,
+  "primary_aluminum_sold": 8070000,
+  "primary_aluminum_produced": 8080000,
+  "metallurgical_alumina_produced": 17350000,
+  "metallurgical_alumina_sold": 6420000,
+  "al_price": 20750,
+  "ao_price": 3221,
+  "al_spread": 0.04,
+  "ao_spread": 0.211,
+  "alumina_per_tonne": 2,
+  "domestic_tax_factor": 1.13,
+  "report_url": "https://static.cninfo.com.cn/finalpage/2026-03-28/1225048106.PDF",
+  "report_hash": "a78b2eb3ab0f162e8edda70968e2d62f640e51825289300952178236f4e984c6",
+  "report_pages": [10, 13, 15, 16],
+  "consumption_url": "https://international-aluminium.org/landing/aluminium-carbon-footprint-faqs/"
+}

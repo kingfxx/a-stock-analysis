@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>中国铝业周期盈利分析</title>
+  <link rel="stylesheet" href="/aluminum-forecast.css">
+  <script src="/datetime.js" defer></script>
+  <script src="/plotly.min.js" defer></script>
+  <script src="/dividend-forecast.js" defer></script>
+  <script src="/aluminum-forecast.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="page-head">
+      <div>
+        <a href="/?code=601600">← 企业经营趋势</a>
+        <h1>中国铝业周期盈利分析</h1>
+      </div>
+      <span class="ticker">601600 · SH</span>
+    </header>
+    <section class="panel quote-panel" aria-labelledby="quote-heading">
+      <div class="section-head">
+        <h2 id="quote-heading">铝产业市场行情</h2>
+        <button type="button" id="refresh-quotes">刷新市场行情</button>
+      </div>
+      <div id="quotes" class="quote-grid"></div>
+      <p class="muted">沪铝和氧化铝使用上期所交割月合约日结算价，按持仓量选取。华东 A00 铝锭现货仅作参考。</p>
+      <div class="monthly-market">
+        <h3>沪铝主连近 12 个月</h3>
+        <div id="monthly-chart" class="chart"></div>
+        <p id="monthly-note" class="muted"></p>
+      </div>
+    </section>
+    <p id="status" role="status" aria-live="polite">正在读取本地数据…</p>
+    <div id="workspace" hidden>
+      <section class="panel" aria-labelledby="base-heading">
+        <div class="section-head">
+          <h2 id="base-heading">预测基准</h2>
+          <button type="button" id="new-draft">新建方案</button>
+        </div>
+        <fieldset id="base" class="base-grid"></fieldset>
+        <p id="evidence" class="muted"></p>
+        <details>
+          <summary>历史敏感度测算依据</summary>
+          <div id="sensitivity"></div>
+        </details>
+        <details>
+          <summary>本地历史分红</summary>
+          <div id="dividends" class="table-scroll"></div>
+        </details>
+      </section>
+      <section class="panel" aria-labelledby="scenario-heading">
+        <div class="section-head">
+          <h2 id="scenario-heading">三情景假设</h2>
+          <div class="actions">
+            <button type="button" id="copy-base">复制中性参数到两侧</button>
+          </div>
+        </div>
+        <fieldset class="actions quote-adopt" id="quote-adopt">
+          <select id="adopt-scenario" aria-label="采用报价的情景">
+            <option value="base">中性</option><option value="bear">保守</option><option value="bull">乐观</option><option value="">全部情景（同价）</option>
+          </select>
+          <select id="adopt-year" aria-label="采用报价的年度">
+            <option value="">全部年度</option><option value="0">第 1 年</option><option value="1">第 2 年</option><option value="2">第 3 年</option>
+          </select>
+          <select id="adopt-product" aria-label="采用报价的品种">
+            <option value="">两个品种</option><option value="al">沪铝</option><option value="ao">氧化铝</option>
+          </select>
+          <button type="button" id="adopt-quotes">采用报价为预测均价</button>
+        </fieldset>
+        <p class="muted" id="scenario-method">敏感度以归母利润计，每 100 元／吨变动影响多少亿元。</p>
+        <div id="scenarios" class="scenarios"></div>
+      </section>
+      <section class="panel results-panel" aria-labelledby="results-heading">
+        <h2 id="results-heading">三年利润与股息</h2>
+        <p id="actual-progress" class="muted" hidden></p>
+        <div class="chart-grid">
+          <div id="profit-chart" class="chart"></div>
+          <div id="yield-chart" class="chart"></div>
+        </div>
+        <div id="results"></div>
+      </section>
+      <section class="panel" aria-labelledby="versions-heading">
+        <h2 id="versions-heading">分析方案</h2>
+        <p id="version-detail" class="muted"></p>
+        <fieldset id="version-inputs" class="save-fields">
+          <label>方案名称<input id="name" maxlength="100" placeholder="例：基准情景"></label>
+          <label>备注<textarea id="note" rows="2" maxlength="2000"></textarea></label>
+        </fieldset>
+        <div class="actions">
+          <button type="button" class="primary" id="save">保存新版本</button>
+          <button type="button" id="fork" hidden>复制为草稿</button>
+          <button type="button" id="reprice" hidden>用最新行情重新测算</button>
+        </div>
+        <p id="version-status" class="muted" role="status"></p>
+        <div id="versions" class="versions"></div>
+        <div class="actions">
+          <button type="button" id="load-version" disabled>载入所选版本</button>
+          <button type="button" id="delete-version" disabled>删除所选版本</button>
+          <button type="button" id="more-versions" hidden>加载更多</button>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

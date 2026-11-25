@@ -65,6 +65,8 @@ window.initEnterpriseTrend = function({state, savedSelections, saveSelections}) 
   }
   function render() {
     document.getElementById('shipping-forecast-entry').hidden = state.code !== '601919';
+    const aluminumEntry = document.getElementById('aluminum-forecast-entry');
+    if (aluminumEntry) aluminumEntry.hidden = state.code !== '601600';
     metrics.roic.name = selectedPeriod === 'year' ? 'ROIC（年度，简化估算）' : 'ROIC（TTM，简化估算）';
     const cutoff = new Date();
     cutoff.setHours(0, 0, 0, 0);

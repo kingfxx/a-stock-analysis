@@ -1,0 +1,13 @@
+{
+  "version": "aluminum-coverage-20261125-v1",
+  "available": false,
+  "reason": "目前已登记财报缺少可配对的同口径电解铝对外销售收入与销量。原铝分部收入含分部间销售，营销对外收入涉及其他产品和外购货源，不能直接除以自产原铝外销量。",
+  "report_periods": ["2019-12-31", "2025-12-31", "2026-06-30"],
+  "sample_count": 0,
+  "tests": [],
+  "evidence": [
+    {"period": "2019-12-31", "document_id": 5, "report_version": "v1", "pdf_pages": [23, 220, 275, 276], "content_hash": "14808d318aef01a74d8c7d2521794732af3e68fcd0d063b53d4e600a97b4ea37"},
+    {"period": "2025-12-31", "document_id": 7, "report_version": "v1", "pdf_pages": [13, 21, 23, 267, 268, 269], "content_hash": "a78b2eb3ab0f162e8edda70968e2d62f640e51825289300952178236f4e984c6"},
+    {"period": "2026-06-30", "document_id": 6, "report_version": "v1", "pdf_pages": [12, 18, 20, 188, 189, 190], "content_hash": "e98b4a10e4a1494198cf2cfb4d8adb1560e3ef311addd47aea7314b7037984c6"}
+  ]
+}

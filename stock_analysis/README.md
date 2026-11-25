@@ -45,6 +45,8 @@
 
 行业专题放在 `domains/research/sectors/<行业>/`，航运已归入 `shipping/`。领域专属采集、计算和存储在主题内组织，跨主题的预算、归档和请求锁复用公共采集层。
 
+`domains/research/sectors/aluminum/` 负责 601600 周期盈利预测的纯利润计算、上期所结算行情适配、历史传导验证和不可改写方案快照；页面与 API 走独立入口。参见 [铝业周期盈利分析](../docs/aluminum-forecast.md)。
+
 纯计算函数不主动取数或写库。已有 `valuation.py` 与 `update_service.py` 保留原函数导出供现有调用者使用；新增调用优先直接引用 `calculations.py` 或 `sync_support.py`。
 
 `sources.py` 保留请求、分页和跨响应复权验证；纯解析实现位于 `source_parsers.py`，原解析导出仍兼容。数据服务显式接收 `infrastructure/app_settings.py` 的路径配置，领域模块不依赖 HTTP。

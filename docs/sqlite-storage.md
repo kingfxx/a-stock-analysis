@@ -556,6 +556,8 @@ v46新增只读视图 `research_shipping_report_metrics_readable`，关联股票
 
 `research_shipping_forecast_versions`：601919专用目标季度、名称、模型和输入hash、紧凑输入引用/参数/结果快照；禁止UPDATE，保存新版本而非覆盖历史。四表均为「行业研究」，维护时间来自真实created_at；空表/空时间不以报告期或观察日补齐，显示未记录。业务表无完整源库副本，PDF/解析复用正式存储，原文归档与来源预算复用公共表。细节见[航运预测](shipping-forecast.md)。
 
+v50 新增 `research_aluminum_forecast_versions`，一行表示 601600 的一个不可改写方案版本。主键用于目录倒序及游标查询，允许选定版本删除。列存方案名、预测起始年、模型和快照格式版本、输入哈希、UTC `created_at` 及可空来源版本 ID。JSON 存采用的财务、行情和敏感度依据、三情景三年参数与结果、备注；行情证据按来源编号和合约归并，正文仍在公共归档。维护分类「行业研究」，时间依据为真实 `created_at`，空表时间显示「未记录」。SQLite 备份可独立恢复方案值和结果，核对原始证据还需公共来源文件和正式财报。 [铝业周期盈利分析](aluminum-forecast.md)
+
 
 ## 可调采集限速（v42）
 

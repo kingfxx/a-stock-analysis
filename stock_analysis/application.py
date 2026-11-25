@@ -30,7 +30,17 @@ _INDUSTRY_SERVICES = {}
 
 _MAINTENANCE_SERVICES = {}
 
+_ALUMINUM_SERVICES = {}
+
 LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
+
+def aluminum_forecast():
+    from stock_analysis.domains.research.sectors.aluminum.forecast import AluminumForecast
+    with _SERVICE_LOCK:
+        key = str(Path(settings.DATABASE_PATH).resolve())
+        if key not in _ALUMINUM_SERVICES:
+            _ALUMINUM_SERVICES[key] = AluminumForecast(Database(settings.DATABASE_PATH), LOCAL_SESSION_TOKEN)
+        return _ALUMINUM_SERVICES[key]
 
 def stock_collections():
     from stock_analysis.domains.stocks.collection_operations import StockCollections
@@ -71,6 +81,8 @@ def business_service():
 def _initialize_runtime(db, skip_legacy=False):
     runtime=db.initialize();StockCleanupService(db).recover();db.check();db.automatic_backup()
     recover_operations(db)
+    from stock_analysis.domains.research.sectors.aluminum.quotes import recover_quote_batches
+    recover_quote_batches(db)
     recovered=db.recover_interrupted_runs()
     industry_recovered=IndustryService(db).recover_interrupted_runs()
     ai_recovered=ai_service().repository.recover()
@@ -112,12 +124,13 @@ def _clear_runtime_services():
     with _SERVICE_LOCK:
         data._SERVICES.clear(); _AI_SERVICES.clear(); _INDUSTRY_SERVICES.clear(); _MAINTENANCE_SERVICES.clear()
         data._DATA_LOCKS.clear()
+        _ALUMINUM_SERVICES.clear()
 
 
 def _expire_idle_caches(server):
     """Expire existing owners, then reclaim process heaps during verified idle time."""
     with _SERVICE_LOCK:
-        owners = [*_INDUSTRY_SERVICES.values(), *_MAINTENANCE_SERVICES.values()]
+        owners = [*_INDUSTRY_SERVICES.values(), *_MAINTENANCE_SERVICES.values(), *_ALUMINUM_SERVICES.values()]
         index_reader = getattr(server, 'index_reader', None)
         if index_reader is not None:
             owners.append(index_reader)

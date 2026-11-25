@@ -70,7 +70,9 @@ class PagesRoutes:
         if parsed.path == "/":
             query = parse_qs(parsed.query)
             code = query.get("code", ["601919"])[0]
-            if query.get('tab')==['shipping-forecast'] and code=='601919':
+            if query.get('tab') == ['aluminum-forecast'] and code == '601600':
+                body = asset_path('aluminum-forecast.html').read_bytes()
+            elif query.get('tab')==['shipping-forecast'] and code=='601919':
                 body=(asset_path('shipping-forecast.html')).read_bytes()
             else:
                 body = rendering.render_page(code, query.get("refresh") == ["1"]).encode("utf-8")
