@@ -4,6 +4,7 @@ from threading import Event, Thread
 
 import pytest
 
+from stock_analysis.collection.collection import begin_batch, finish_batch
 from stock_analysis.collection.collection_management import CollectionManagement, ZONE, due_slot, next_check, validate_params, validate_rule, TASKS
 from stock_analysis.domains.industries.industry_service import IndustryService
 from stock_analysis.infrastructure.storage import Database
@@ -159,6 +160,29 @@ def test_cooldown_utc_and_recovery_bounded(management):
     management.recover();management.tick(now=now('2026-10-25T23:00:00'))
     with management.db.connection() as conn:
         assert conn.execute('SELECT status,attempts FROM collection_schedule_slots').fetchone()[:]==('failed',2)
+
+
+def test_recovery_closes_only_interrupted_manual_aluminum_batches(management):
+    db = management.db
+    batches = [begin_batch(db, None, dataset, provider, domain='research_aluminum')
+               for dataset, provider in [('aluminum.shfe_settlement', 'shfe'),
+                                         ('aluminum.ccmn_spot', 'ccmn'),
+                                         ('aluminum.sina_al0_monthly', 'sina')]]
+    completed = begin_batch(db, None, 'aluminum.shfe_settlement', 'shfe', domain='research_aluminum')
+    finish_batch(db, completed, 'complete', 'complete')
+    unrelated = begin_batch(db, None, 'other', 'sina', domain='other')
+
+    management.recover()
+
+    with db.connection() as conn:
+        rows = {row['id']: row for row in conn.execute(
+            'SELECT id,status,finished_at,error FROM collection_batches')}
+    for batch in batches:
+        assert rows[batch]['status'] == 'failed'
+        assert rows[batch]['finished_at']
+        assert rows[batch]['error'] == '后台重启，已归档来源保留'
+    assert rows[completed]['status'] == 'complete'
+    assert rows[unrelated]['status'] == 'running'
 
 
 def test_new_schedule_incremental_only_and_publication_window_target(management):

@@ -81,8 +81,6 @@ def business_service():
 def _initialize_runtime(db, skip_legacy=False):
     runtime=db.initialize();StockCleanupService(db).recover();db.check();db.automatic_backup()
     recover_operations(db)
-    from stock_analysis.domains.research.sectors.aluminum.quotes import recover_quote_batches
-    recover_quote_batches(db)
     recovered=db.recover_interrupted_runs()
     industry_recovered=IndustryService(db).recover_interrupted_runs()
     ai_recovered=ai_service().repository.recover()

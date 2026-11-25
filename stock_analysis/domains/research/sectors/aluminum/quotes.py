@@ -5,7 +5,6 @@ from threading import Lock
 from time import monotonic
 
 from stock_analysis.collection.collection import RequestCollector, begin_batch, finish_batch, parsed_source, read_source
-from stock_analysis.infrastructure.storage import utc_now
 
 from .quote_parser import PRODUCTS, settled_quotes
 
@@ -23,13 +22,6 @@ EXPIRE_SECONDS = 60 * 60
 def candidates(now):
     latest = now.date() - timedelta(days=int(now.time() < time(15, 45)))
     return [day for offset in range(8) if (day := latest - timedelta(days=offset)).weekday() < 5][:5]
-
-
-def recover_quote_batches(db):
-    with db.connection(write=True) as conn:
-        conn.execute("UPDATE collection_batches SET status='failed', finished_at=?, "
-                     "error='后台重启，已归档来源保留' WHERE domain=? AND status='running'",
-                     (utc_now(), DOMAIN))
 
 
 class AluminumQuotes:

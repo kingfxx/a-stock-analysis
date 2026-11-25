@@ -391,8 +391,15 @@ class CollectionManagement:
         if self.stocks:
             self.stocks.recover()
         with self.db.connection(write=True) as conn:
+            recovered_at = utc_now()
+            # These manual refresh batches have no parent operation to recover them.
+            conn.execute(
+                "UPDATE collection_batches SET status='failed', finished_at=?, "
+                "error='后台重启，已归档来源保留' WHERE domain='research_aluminum' AND status='running'",
+                (recovered_at,),
+            )
             conn.execute("UPDATE collection_schedule_slots SET status=CASE WHEN attempts<2 THEN 'pending' ELSE 'failed' END,"
-                         "updated_at=?,error='后台中断；已提交分段保留，最多自动恢复一次' WHERE status='running'", (utc_now(),))
+                         "updated_at=?,error='后台中断；已提交分段保留，最多自动恢复一次' WHERE status='running'", (recovered_at,))
 
     @staticmethod
     def target_complete(conn, key, params):
