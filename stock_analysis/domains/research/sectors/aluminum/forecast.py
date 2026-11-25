@@ -9,8 +9,8 @@ from stock_analysis.domains.valuation.dividend_forecast import calculate_scenari
 from stock_analysis.infrastructure.storage import utc_now
 
 from .market_references import MarketReferences
-from .model import (LEGACY_MODEL_VERSION, MODEL_VERSION, QUOTE_BASES, REMAINING_QUARTERS, SCENARIOS, SCHEMA_VERSION,
-                    automatic_draft, calculate_profit, validate)
+from .model import (LEGACY_MODEL_VERSION, MODEL_VERSION, PREVIOUS_MODEL_VERSION, QUOTE_BASES, REMAINING_QUARTERS,
+                    SCENARIOS, SCHEMA_VERSION, automatic_draft, calculate_profit, remaining_prices, validate)
 from .quotes import AluminumQuotes, PRODUCTS
 from .sensitivity import attributable_sensitivity
 
@@ -115,7 +115,7 @@ class AluminumForecast:
         evidence = dict(annual=annual, market=market, sensitivity=self._reference, automatic=self._automatic,
                         as_of=facts['as_of_date'], current_year=progress)
         state = self.quotes.latest()
-        defaults = automatic_draft(annual, self._automatic, state['quotes'], market, year)
+        defaults = automatic_draft(annual, self._automatic, state['quotes'], market, year, progress)
         return dict(self.directory(), code=CODE, evidence=evidence, proof=self._sign('facts', evidence),
                     defaults=defaults, quotes=dict(self._quote_state(state), references=self.references.latest()),
                     warnings=facts['warnings'],
@@ -128,7 +128,7 @@ class AluminumForecast:
             raise LookupError('版本不存在')
         version = dict(row)
         version['snapshot'] = snapshot = json.loads(version.pop('snapshot_json'))
-        compatible = (version['model_version'] in (MODEL_VERSION, LEGACY_MODEL_VERSION)
+        compatible = (version['model_version'] in (MODEL_VERSION, PREVIOUS_MODEL_VERSION, LEGACY_MODEL_VERSION)
                       and version['schema_version'] == SCHEMA_VERSION)
         if compatible:
             context = snapshot['context']
@@ -199,11 +199,16 @@ class AluminumForecast:
         if base['price_basis'] not in QUOTE_BASES and any(row for rows in adopted.values() for row in rows):
             raise ValueError('采用期货报价须选择与上期所一致的价格口径')
         progress = evidence.get('current_year')
+        if (progress and start <= progress['year'] <= start + 2
+                and REMAINING_QUARTERS[progress['actual']['period'][5:]]):
+            comparison = progress['prior'].get(str(base['year']))
+            if not comparison:
+                raise ValueError('所选基准年缺少同报告期归母净利润，无法计算当年剩余季度')
+            prices = remaining_prices(base, comparison)
+            if any(prices.get(key) is None for key in ('al_price', 'ao_price')):
+                raise ValueError('请补齐基准年剩余期间的沪铝和氧化铝均价')
         results = calculate(base, start, scenarios, progress)
         if any(row['profit'] is None for result in results.values() for row in result['rows']):
-            if (progress and start <= progress['year'] <= start + 2
-                    and REMAINING_QUARTERS[progress['actual']['period'][5:]] and str(base['year']) not in progress['prior']):
-                raise ValueError('所选基准年缺少同报告期归母净利润，无法计算当年剩余季度')
             raise ValueError('请补齐三个情景共九年的利润参数')
         anchor = next((row for row in evidence['annual'] if row['year'] == base['year']), None)
         context = dict(code=CODE, start=start, base=base, financial=anchor, market=evidence['market'],

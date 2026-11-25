@@ -12,7 +12,7 @@ from stock_analysis import application as app
 from stock_analysis.domains.research.sectors.aluminum.forecast import AluminumForecast, calculate
 from stock_analysis.domains.research.sectors.aluminum.market_reference_parser import parse_monthly, parse_spot
 from stock_analysis.domains.research.sectors.aluminum.market_references import MarketReferences, MONTHLY_PARAMS
-from stock_analysis.domains.research.sectors.aluminum.model import SCENARIOS
+from stock_analysis.domains.research.sectors.aluminum.model import SCENARIOS, automatic_draft
 from stock_analysis.domains.research.sectors.aluminum.quote_parser import settled_quotes
 from stock_analysis.domains.research.sectors.aluminum.quotes import AluminumQuotes, BEIJING, candidates
 from stock_analysis.domains.research.sectors.aluminum.sensitivity import actual_price, validate_transmission
@@ -155,6 +155,7 @@ def test_current_year_realized_profit_and_remainder_match_browser(db):
     service = AluminumForecast(db, 'session')
     case = complete(service)
     case['base']['year'] = 2025
+    case['base']['remaining_prices'] = dict(period='2025-09-30', al_price=20400, ao_price=3100)
     start = 2026
     current = dict(year=start, actual=dict(period='2026-09-30', profit=17.9e9),
                    prior={'2025': dict(period='2025-09-30', profit=10e9)})
@@ -163,16 +164,21 @@ def test_current_year_realized_profit_and_remainder_match_browser(db):
     row = results['base']['rows'][0]
     assert row['progress']['actual_profit'] == 17.9e9
     assert row['parts']['base'] == 2e9
-    assert row['parts']['al'] == .5e9
-    assert row['parts']['ao'] == -.125e9
+    assert row['parts']['al'] == .3e9
+    assert row['parts']['ao'] == -.1e9
     # Operating adjustments apply to the period still being forecast.
     assert row['parts']['volume'] == .3e9
-    assert row['progress']['forecast_profit'] == 2.575e9
-    assert row['profit'] == 20.475e9
+    assert row['progress']['forecast_profit'] == 2.4e9
+    assert row['profit'] == 20.3e9
     assert results['base']['rows'][1] == calculate(*args)['base']['rows'][1] | {
         'growth_rate': results['base']['rows'][1]['growth_rate']}
     missing = calculate(*args, dict(current, prior={}))['base']['rows'][0]
     assert missing['profit'] is None and missing['progress']['actual_profit'] == 17.9e9
+    for missing_base in (dict(case['base'], remaining_prices=None),
+                         dict(case['base'], remaining_prices=dict(period='2025-06-30', al_price=20400, ao_price=3100))):
+        unmatched = calculate(missing_base, start, case['scenarios'], current)['base']['rows'][0]
+        assert unmatched['parts']['al'] is None and unmatched['parts']['ao'] is None
+        assert unmatched['progress']['forecast_profit'] is None
     full = calculate(*args, dict(current, actual=dict(period='2026-12-31', profit=21e9)))['base']['rows'][0]
     assert full['profit'] == 21e9 and full['progress']['remaining_quarters'] == 0
     case['start'] = start
@@ -192,6 +198,20 @@ process.stdout.write(JSON.stringify(calculate(base, start, scenarios, calculate_
     browser = subprocess.run(['node', '-e', js], input=json.dumps([*args, current]), encoding='utf-8',
                              capture_output=True, check=True)
     assert json.loads(browser.stdout) == results
+
+
+def test_remaining_price_defaults_require_matching_period_and_current_quote(db):
+    facts = AluminumForecast(db, 'session').read()['evidence']['automatic']
+    quotes = {'al': {'price': 21020}}
+    market = {'price': 8, 'shares': 16e9}
+    progress = dict(actual=dict(period='2026-09-30'), prior={'2025': dict(period='2025-09-30')})
+    draft = automatic_draft([], facts, quotes, market, 2026, progress)
+    assert draft['base']['remaining_prices'] == dict(period='2025-09-30', al_price=21539, ao_price=2860)
+    assert draft['scenarios']['base'][0]['al_price'] == 21020
+    assert draft['scenarios']['base'][0]['ao_price'] is None
+    assert draft['scenarios']['base'][1]['ao_price'] == facts['ao_price']
+    progress = dict(actual=dict(period='2026-06-30'), prior={'2025': dict(period='2025-06-30')})
+    assert 'remaining_prices' not in automatic_draft([], facts, quotes, market, 2026, progress)['base']
 
 
 def test_existing_schema_upgrades_with_pre_migration_backup(tmp_path, monkeypatch):

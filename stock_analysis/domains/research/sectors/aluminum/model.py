@@ -3,7 +3,8 @@ from math import isfinite
 
 
 LEGACY_MODEL_VERSION = 'aluminum-price-sensitivity-v1'
-MODEL_VERSION = 'aluminum-price-sensitivity-v2'
+PREVIOUS_MODEL_VERSION = 'aluminum-price-sensitivity-v2'
+MODEL_VERSION = 'aluminum-price-sensitivity-v3'
 SCHEMA_VERSION = 1
 SCENARIOS = ('bear', 'base', 'bull')
 AUTO_BASIS = '年报市场均价与期货代理'
@@ -31,7 +32,7 @@ def year(value):
 
 
 def validate(base, start, scenarios):
-    if not isinstance(base, dict) or set(base) != set(BASE_FIELDS):
+    if not isinstance(base, dict) or set(base) - {'remaining_prices'} != set(BASE_FIELDS):
         raise ValueError('基准参数无效')
     if year(start) <= year(base['year']):
         raise ValueError('预测起始年须在基准年之后')
@@ -42,6 +43,14 @@ def validate(base, start, scenarios):
     number(base['profit'], '基准归母净利润')
     for key in ('al_price', 'ao_price', 'share_price'):
         number(base[key], key, positive=True)
+    remaining = base.get('remaining_prices')
+    if remaining is not None:
+        if (not isinstance(remaining, dict) or set(remaining) != {'period', 'al_price', 'ao_price'}
+                or remaining['period'] not in tuple(f"{base['year']}-{suffix}" for suffix, count
+                                                    in REMAINING_QUARTERS.items() if count)):
+            raise ValueError('剩余季度价格基准期间无效')
+        for key in ('al_price', 'ao_price'):
+            number(remaining[key], key, positive=True)
     if not isinstance(scenarios, dict) or set(scenarios) != set(SCENARIOS):
         raise ValueError('须提供完整三情景')
     for rows in scenarios.values():
@@ -69,6 +78,11 @@ def price_effect(future, baseline, sensitivity):
     return (future - baseline) / 100 * sensitivity if None not in (future, baseline, sensitivity) else None
 
 
+def remaining_prices(base, comparison):
+    prices = base.get('remaining_prices') or {}
+    return prices if comparison and prices.get('period') == comparison['period'] else {}
+
+
 def calculate_profit(base, row, current=None):
     parts = {
         'base': base['profit'],
@@ -88,9 +102,11 @@ def calculate_profit(base, row, current=None):
         else:
             parts['base'] = (base['profit'] - comparison['profit']
                              if base['profit'] is not None and comparison else None)
+            prices = remaining_prices(base, comparison)
             for key in ('al', 'ao'):
-                if parts[key] is not None:
-                    parts[key] *= quarters / 4
+                price = key + '_price'
+                effect = price_effect(row[price], prices.get(price), row[key + '_sensitivity'])
+                parts[key] = effect * (quarters / 4) if effect is not None else None
         progress = dict(actual_period=actual['period'], actual_profit=actual['profit'],
                         remaining_quarters=quarters,
                         forecast_profit=sum(parts.values()) if None not in parts.values() else None)
@@ -101,7 +117,7 @@ def calculate_profit(base, row, current=None):
     return result
 
 
-def automatic_draft(annual, facts, quotes, market, current_year):
+def automatic_draft(annual, facts, quotes, market, current_year, progress=None):
     basis_year = facts['year']
     anchor = next((row for row in annual if row['year'] == basis_year), None)
     profit = anchor['profit'] if anchor else facts['profit']
@@ -112,6 +128,17 @@ def automatic_draft(annual, facts, quotes, market, current_year):
     conversion = facts['profit'] / facts['pretax_profit'] / facts['domestic_tax_factor']
     coefficients = {'al': 100 * facts['primary_aluminum_sold'] * conversion, 'ao': 100 * net_ao * conversion}
     centre = {key: quotes[key]['price'] if key in quotes else base[key + '_price'] for key in coefficients}
+    start = max(current_year, basis_year + 1)
+    partial = (start == current_year and progress
+               and REMAINING_QUARTERS[progress['actual']['period'][5:]])
+    if partial:
+        comparison = progress['prior'].get(str(basis_year))
+        if comparison:
+            period = comparison['period']
+            reference = facts.get('remaining_price_references', {}).get(period)
+            if reference:
+                base['remaining_prices'] = dict(period=period, al_price=reference['al_price'],
+                                                ao_price=reference['ao_price'])
     scenarios = {}
     for key, side in zip(SCENARIOS, (-1, 0, 1)):
         prices = {product + '_price': round(centre[product] * (1 + side *
@@ -122,4 +149,7 @@ def automatic_draft(annual, facts, quotes, market, current_year):
                  volume=0, cost=0, other=0, payout=payout, shares=market['shares'], reference=None)
             for payout in (.30, .35, .40)
         ]
-    return dict(start=max(current_year, basis_year + 1), base=base, scenarios=scenarios)
+        if partial:
+            for product in coefficients.keys() - quotes.keys():
+                scenarios[key][0][product + '_price'] = None
+    return dict(start=start, base=base, scenarios=scenarios)

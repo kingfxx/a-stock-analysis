@@ -36,8 +36,13 @@
           for (const part of Object.keys(parts)) parts[part] = 0;
         } else {
           parts.base = finite(base.profit) && comparison ? base.profit - comparison.profit : null;
+          const prices = comparison && base.remaining_prices?.period === comparison.period
+            ? base.remaining_prices : {};
+          const assumption = scenarios[key][index];
           for (const commodity of ['al', 'ao']) {
-            if (finite(parts[commodity])) parts[commodity] *= remaining / 4;
+            const field = commodity + '_price';
+            const impact = effect(assumption[field], prices[field], assumption[commodity + '_sensitivity']);
+            parts[commodity] = finite(impact) ? impact * (remaining / 4) : null;
           }
         }
         progress = {actual_period: actual.period, actual_profit: actual.profit, remaining_quarters: remaining,
@@ -113,6 +118,7 @@
     $('reprice').hidden = !historical?.compatible;
     $('more-versions').hidden = !nextBefore;
     $('base').disabled = Boolean(historical) || busy;
+    $('remaining-price-base').disabled = Boolean(historical) || busy;
     $('quote-adopt').disabled = Boolean(historical) || busy;
     $('version-inputs').disabled = Boolean(historical) || busy;
     for (const element of $('scenarios').querySelectorAll('fieldset')) element.disabled = Boolean(historical) || busy;
@@ -214,7 +220,7 @@
       ? `<p>配对样本 ${esc(reference.sample_count)} 期 · 销售价格传导系数 ${format(reference.slope)} · 锚定模型误差 ${format(reference.mae)} 元/吨 · 基线误差 ${format(reference.baseline_mae)} 元/吨</p>`
       : `<p class="muted">实际售价回归：${esc(reference?.reason || '没有已存测算依据。')}</p>`);
     $('scenario-method').textContent = automatic
-      ? `默认以本地期货报价作中性参考；缺报价的品种用年报均价。两侧按沪铝 ±${format(automatic.al_spread * 100)}%、氧化铝 ±${format(automatic.ao_spread * 100)}% 测算。敏感度来自年报敞口估算，表示价格每变化 100 元／吨的归母影响（亿元），可手动调整。`
+      ? `默认以本地期货报价作中性参考。剩余季度缺报价时留空，完整预测年度缺报价时用年报均价。两侧按沪铝 ±${format(automatic.al_spread * 100)}%、氧化铝 ±${format(automatic.ao_spread * 100)}% 测算。敏感度来自年报敞口估算，表示价格每变化 100 元／吨的归母影响（亿元），可手动调整。`
       : '敏感度表示价格每变化 100 元／吨的归母影响（亿元）。';
     $('dividends').parentElement.hidden = Boolean(historical);
     $('dividends').innerHTML = table(['财务年度', '每股已实施股息估算（元）', '历史分红率', '覆盖状态'],
@@ -228,8 +234,8 @@
     $('base').innerHTML = [
       ['year', '基准财务年', 1, 'min="1900" max="2197" list="report-years"'],
       ['profit', '基准归母净利润（亿元）', units, ''],
-      ['al_price', '基准沪铝均价（元/吨）', 1, 'min="0"'],
-      ['ao_price', '基准氧化铝均价（元/吨）', 1, 'min="0"'],
+      ['al_price', '基准全年沪铝均价（元/吨）', 1, 'min="0"'],
+      ['ao_price', '基准全年氧化铝均价（元/吨）', 1, 'min="0"'],
       ['share_price', '参考未复权股价（元）', 1, 'min="0"'],
       ['start', '预测起始年', 1, 'min="1900" max="2197"'],
     ].map(([key, label, scale, bounds]) => `<label>${label}${input(label,
@@ -238,6 +244,51 @@
       + `<datalist id="report-years">${reports}</datalist><label>价格口径<select id="price-basis">
       ${priceBases.map(value => `<option${base.price_basis === value ? ' selected' : ''}>${value}</option>`).join('')}
       </select></label><label>基准与手填依据<input id="basis-note" maxlength="1000" value="${esc(base.basis_note)}"></label>`;
+  }
+
+  function remainingPricePeriod() {
+    const progress = current?.evidence?.current_year;
+    if (!draft || !progress || !Number.isInteger(draft.start) || progress.year < draft.start
+        || progress.year > draft.start + 2 || !remainingQuarters[progress.actual.period.slice(5)]) return null;
+    return progress.prior[draft.base.year]?.period || null;
+  }
+
+  function remainingPriceReference(period) {
+    return draft.base.price_basis === priceBases[3]
+      ? current.evidence.automatic?.remaining_price_references?.[period] : null;
+  }
+
+  function renderRemainingPrices() {
+    const container = $('remaining-price-base');
+    const source = $('remaining-price-source');
+    const period = remainingPricePeriod();
+    const legacy = historical && !Object.hasOwn(draft?.base || {}, 'remaining_prices');
+    container.hidden = source.hidden = !period || Boolean(legacy);
+    if (container.hidden) { container.replaceChildren(); return; }
+    const reference = remainingPriceReference(period);
+    if (!historical && draft.base.remaining_prices?.period !== period && reference) {
+      draft.base.remaining_prices = {period, al_price: reference.al_price, ao_price: reference.ao_price};
+    }
+    const prices = draft.base.remaining_prices?.period === period ? draft.base.remaining_prices : {};
+    const quarter = 5 - remainingQuarters[period.slice(5)];
+    const range = quarter === 4 ? `${period.slice(0, 4)} 年 Q4` : `${period.slice(0, 4)} 年 Q${quarter}–Q4`;
+    container.innerHTML = `<legend>${range}基准均价</legend>`
+      + Object.entries(products).map(([key, product]) => {
+        const field = key + '_price';
+        const label = `${product}均价（元/吨）`;
+        return `<label>${label}${input(label, dataValue(prices[field], 1), `min="0" data-remaining-price="${field}"`)}</label>`;
+      }).join('');
+    source.replaceChildren();
+    if (reference) {
+      const link = document.createElement('a');
+      link.href = reference.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = `${reference.source}，第 ${reference.page} 页`;
+      source.append(`默认参考：${reference.basis}。`, link, '。预测价格可用期货报价作代理，也可手填预计均价。');
+    } else {
+      source.textContent = '请填写与基准利润同期间、与预测价格口径可比的均价。缺价时剩余季度预测留空。';
+    }
   }
 
   function referenceControls(key, index, row) {
@@ -285,6 +336,128 @@
   }
 
   const resultsExpanded = new Map([['base', true]]);
+  const simulationFields = [
+    {key: 'al_price', label: '电解铝均价（元/吨）', scale: 1, low: 18000, high: 27000, step: 10, price: true},
+    {key: 'al_sensitivity', label: '电解铝敏感度（亿元 / 每 1,000 元/吨）', scale: units / 10, low: -60, high: 60, step: .1},
+    {key: 'ao_price', label: '氧化铝均价（元/吨）', scale: 1, low: 1500, high: 4500, step: 10, price: true},
+    {key: 'ao_sensitivity', label: '氧化铝净敏感度（亿元 / 每 1,000 元/吨）', scale: units / 10, low: -20, high: 20, step: .1},
+  ];
+  const simulation = {year: null, scenario: 'base', changes: {}, results: {}};
+  const simulationInputs = $('simulation-inputs');
+  const simulationFieldMarkup = ({key, label, price}) => `<div class="simulation-field">
+    <label for="simulation-${key}">${label}</label>
+    ${input(label, '', `id="simulation-${key}" data-simulation="${key}" placeholder="待填" ${price ? 'min="1"' : ''}`)}
+    <input type="range" step="any" aria-label="${label}滑杆" data-simulation="${key}">
+    <span class="simulation-scale" aria-hidden="true"><span></span><span></span></span>
+  </div>`;
+  simulationInputs.innerHTML = [0, 2].map(start =>
+    '<div>' + simulationFields.slice(start, start + 2).map(simulationFieldMarkup).join('') + '</div>').join('');
+
+  function simulationContext() {
+    const index = simulation.year - draft.start;
+    return {index, row: draft.scenarios[simulation.scenario][index],
+      original: simulation.results[simulation.scenario]?.rows[index]};
+  }
+
+  function syncSimulationSlider(field, slider, displayed) {
+    const bounds = slider.nextElementSibling.children;
+    const low = finite(displayed) ? Math.min(field.low, Math.floor(displayed)) : field.low;
+    const high = finite(displayed) ? Math.max(field.high, Math.ceil(displayed)) : field.high;
+    slider.min = low;
+    slider.max = high;
+    slider.value = displayed ?? (low + high) / 2;
+    bounds[0].textContent = format(low);
+    bounds[1].textContent = format(high);
+  }
+
+  function syncSimulationInputs() {
+    const {row, original} = simulationContext();
+    for (const field of simulationFields) {
+      const value = Object.hasOwn(simulation.changes, field.key) ? simulation.changes[field.key] : row[field.key];
+      const displayed = finite(value) ? value / field.scale : null;
+      const box = $('simulation-' + field.key);
+      const slider = box.nextElementSibling;
+      box.value = displayed === null ? '' : Number(displayed.toFixed(4));
+      syncSimulationSlider(field, slider, displayed);
+      box.disabled = slider.disabled = original?.progress?.remaining_quarters === 0;
+    }
+  }
+
+  const trialAmount = (value, signed = false) =>
+    finite(value) ? `${signed && value > 0 ? '+' : ''}${amount(value)} 亿元` : '—';
+
+  function renderSimulationResult() {
+    const {index, original} = simulationContext();
+    const rows = draft.scenarios[simulation.scenario].map((row, i) => i === index ? {...row, ...simulation.changes} : row);
+    const result = calculate(draft.base, draft.start, {...draft.scenarios, [simulation.scenario]: rows},
+      window.DividendForecast.calculate_scenario, current.evidence.current_year)[simulation.scenario].rows[index];
+    const progress = result.progress;
+    const partial = Boolean(progress?.remaining_quarters);
+    const actual = progress?.remaining_quarters === 0;
+    $('simulation-total-label').textContent = `${simulation.year} 年${actual ? '已披露' : '估算'}归母净利润`;
+    $('simulation-profit').textContent = trialAmount(result.profit);
+    $('simulation-change').textContent = finite(result.profit) && finite(original?.profit)
+      ? `较${labels[simulation.scenario]}情景 ${trialAmount(result.profit - original.profit, true)}` : '';
+    $('simulation-al').textContent = trialAmount(result.parts.al, true);
+    $('simulation-ao').textContent = trialAmount(result.parts.ao, true);
+    $('simulation-remaining-row').hidden = !partial;
+    $('simulation-remaining-label').textContent = progress?.remaining_quarters === 1 ? '第四季度归母净利润' : '剩余季度归母净利润';
+    $('simulation-remaining').textContent = trialAmount(progress?.forecast_profit);
+    const prices = partial && draft.base.remaining_prices?.period === remainingPricePeriod()
+      ? draft.base.remaining_prices : partial ? {} : draft.base;
+    const basis = partial ? `${draft.base.year} 年同期` : `${draft.base.year} 年全年`;
+    $('simulation-basis').textContent = actual ? '该年度财报已披露，显示实际利润。'
+      : `比较基准为${basis}。电解铝 ${format(prices.al_price)}、氧化铝 ${format(prices.ao_price)} 元/吨。`
+        + (partial ? `全年含已披露归母净利润 ${trialAmount(progress.actual_profit)}，滑杆仅改变剩余季度。` : '')
+        + (finite(result.profit) ? '' : '请补齐预测价格和基准参数。');
+  }
+
+  function renderSimulation(results) {
+    const panel = $('profit-simulator');
+    panel.hidden = Boolean(historical) || !Number.isInteger(draft?.start);
+    if (panel.hidden) return;
+    simulation.results = results;
+    const years = Array.from({length: 3}, (_, index) => draft.start + index);
+    if (!years.includes(simulation.year)) {
+      const currentYear = Number(current.evidence.as_of?.slice(0, 4));
+      simulation.year = years.find(year => year > currentYear) ?? years[0];
+      simulation.changes = {};
+    }
+    const yearPicker = $('simulation-year');
+    yearPicker.replaceChildren(...years.map(year => new Option(String(year), String(year), false, year === simulation.year)));
+    $('simulation-scenario').value = simulation.scenario;
+    syncSimulationInputs();
+    renderSimulationResult();
+  }
+
+  $('simulation-year').addEventListener('change', event => {
+    simulation.year = Number(event.target.value);
+    $('simulation-reset').click();
+  });
+  $('simulation-scenario').addEventListener('change', event => {
+    simulation.scenario = event.target.value;
+    $('simulation-reset').click();
+  });
+  $('simulation-reset').addEventListener('click', () => {
+    simulation.changes = {};
+    syncSimulationInputs();
+    renderSimulationResult();
+  });
+  simulationInputs.addEventListener('input', event => {
+    const field = simulationFields.find(item => item.key === event.target.dataset.simulation);
+    if (!field) return;
+    let value = number(event.target);
+    const box = $('simulation-' + field.key);
+    const slider = box.nextElementSibling;
+    if (event.target === slider && finite(value)) {
+      value = Number((Math.round(value / field.step) * field.step).toFixed(1));
+      box.value = slider.value = value;
+    } else {
+      syncSimulationSlider(field, slider, finite(value) && (!field.price || value > 0) ? value : null);
+    }
+    simulation.changes[field.key] = finite(value) && (!field.price || value > 0) ? value * field.scale : null;
+    renderSimulationResult();
+  });
 
   function renderResults() {
     const panel = $('results');
@@ -294,6 +467,7 @@
     const results = historical ? historical.snapshot.results
       : Number.isInteger(draft?.start) ? calculate(draft.base, draft.start, draft.scenarios,
         window.DividendForecast.calculate_scenario, current.evidence.current_year) : {};
+    renderSimulation(results);
     const view = results && keys.some(key => Array.isArray(results[key]?.rows));
     const progress = results?.base?.rows?.find(row => row.progress)?.progress;
     $('actual-progress').hidden = !progress;
@@ -301,6 +475,8 @@
       $('actual-progress').textContent = `截至 ${progress.actual_period} 已披露累计归母净利润 ${amount(progress.actual_profit)} 亿元。`
         + (progress.remaining_quarters
           ? `其余 ${progress.remaining_quarters} 个季度按各情景测算。表内当年价格和经营调整只用于剩余季度。`
+            + (!historical && progress.forecast_profit === null
+              ? ' 请核对同期财务并补齐基准与预测均价。' : '')
           : '全年归母净利润已披露。');
     }
     chart('profit-chart', results || {}, 'profit', '归母净利润（亿元）', '亿元', 1 / units);
@@ -335,6 +511,7 @@
   function render() {
     renderQuotes();
     renderBase();
+    renderRemainingPrices();
     renderEvidence();
     renderScenarios();
     renderResults();
@@ -356,6 +533,7 @@
     historical = null;
     parentId = null;
     dirty = false;
+    Object.assign(simulation, {year: null, scenario: 'base', changes: {}});
     $('name').value = '';
     $('note').value = '';
     $('version-detail').textContent = '保存会生成一个独立版本。';
@@ -386,6 +564,7 @@
     historical = null;
     parentId = id;
     dirty = true;
+    Object.assign(simulation, {year: null, scenario: 'base', changes: {}});
     $('version-detail').textContent = `从 #${id} 复制的草稿，保存会生成新版本。`;
     render();
   }
@@ -397,6 +576,7 @@
       if (field === 'start') draft.start = val;
       else draft.base[field] = val === null ? null : val * Number(event.target.dataset.scale);
       if (field === 'year') {
+        delete draft.base.remaining_prices;
         const report = current.evidence.annual.find(row => row.year === val);
         if (report) {
           draft.base.profit = report.profit;
@@ -409,6 +589,7 @@
           cell.textContent = Number.isInteger(val) ? val + Number(cell.dataset.year) : '—';
       }
     } else if (event.target.id === 'price-basis') {
+      if (draft.base.price_basis !== event.target.value) delete draft.base.remaining_prices;
       draft.base.price_basis = event.target.value;
       if (!acceptsQuote(draft.base.price_basis)) {
         adopted = newAdopted();
@@ -416,9 +597,21 @@
         renderScenarios();
       }
     } else if (event.target.id === 'basis-note') draft.base.basis_note = event.target.value;
+    if (field === 'year' || field === 'start' || event.target.id === 'price-basis') renderRemainingPrices();
     dirty = true;
     renderResults();
     updateControls();
+  });
+
+  $('remaining-price-base').addEventListener('input', event => {
+    const field = event.target.dataset.remainingPrice;
+    const period = remainingPricePeriod();
+    if (!field || !period) return;
+    if (draft.base.remaining_prices?.period !== period)
+      draft.base.remaining_prices = {period, al_price: null, ao_price: null};
+    draft.base.remaining_prices[field] = number(event.target);
+    dirty = true;
+    renderResults();
   });
 
   $('scenarios').addEventListener('input', event => {

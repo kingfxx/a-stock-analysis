@@ -40,6 +40,8 @@
           <button type="button" id="new-draft">新建方案</button>
         </div>
         <fieldset id="base" class="base-grid"></fieldset>
+        <fieldset id="remaining-price-base" class="base-grid" hidden></fieldset>
+        <p id="remaining-price-source" class="muted" hidden></p>
         <p id="evidence" class="muted"></p>
         <details>
           <summary>历史敏感度测算依据</summary>
@@ -71,6 +73,33 @@
         </fieldset>
         <p class="muted" id="scenario-method">敏感度以归母利润计，每 100 元／吨变动影响多少亿元。</p>
         <div id="scenarios" class="scenarios"></div>
+      </section>
+      <section class="panel simulator" id="profit-simulator" aria-labelledby="simulation-heading" hidden>
+        <div class="section-head">
+          <h2 id="simulation-heading">铝价与利润互动计算器</h2>
+          <button type="button" id="simulation-reset">恢复所选情景参数</button>
+        </div>
+        <div class="simulation-selectors">
+          <label>预测年度<select id="simulation-year"></select></label>
+          <label>参考情景<select id="simulation-scenario">
+            <option value="bear">保守</option><option value="base" selected>中性</option><option value="bull">乐观</option>
+          </select></label>
+        </div>
+        <div id="simulation-inputs" class="simulation-inputs"></div>
+        <div class="simulation-results">
+          <div class="simulation-total">
+            <span id="simulation-total-label">估算归母净利润</span>
+            <strong id="simulation-profit" aria-live="polite"></strong>
+            <span id="simulation-change" class="muted"></span>
+          </div>
+          <dl class="simulation-breakdown">
+            <div><dt>电解铝价格影响</dt><dd id="simulation-al"></dd></div>
+            <div><dt>氧化铝价格影响</dt><dd id="simulation-ao"></dd></div>
+            <div id="simulation-remaining-row" hidden><dt id="simulation-remaining-label">剩余季度净利润</dt><dd id="simulation-remaining"></dd></div>
+          </dl>
+        </div>
+        <p id="simulation-basis" class="muted"></p>
+        <p class="muted">价格变动按归母净利润口径折算。产销量、成本和其他调整取所选情景。试算不会写入方案。</p>
       </section>
       <section class="panel results-panel" aria-labelledby="results-heading">
         <h2 id="results-heading">三年利润与股息</h2>
