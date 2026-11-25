@@ -17,18 +17,24 @@ CHECKLIST_DISPLAY_VERSION = hashlib.sha256(asset_path('ai-checklist.js').read_by
 def render_research_sidebar(page: str, template: str) -> str:
     """Render the shared stock picker and research navigation for each page."""
     views = (('trend', '企业经营趋势', 'trend-panel'), ('business', '主营构成', 'business-panel'), ('statements', '财务分析', 'statements-panel'), ('notes', '投资笔记', 'notes-panel'), ('industry', '行业内对比', 'industry-panel'), ('maintenance', '后台维护', 'maintenance-panel'))
-    if page == 'indices':
+    if page in ('indices', 'portfolio'):
         items = [f'<a class="nav-link" data-view="{key}" href="/?tab={key}">{label}</a>' for key, label, _ in views]
-        items.insert(5, '<a class="nav-link" href="/indices" aria-current="page">指数分析</a>')
+        indices_current = ' aria-current="page"' if page == 'indices' else ''
+        portfolio_current = ' aria-current="page"' if page == 'portfolio' else ''
+        items[5:5] = [f'<a class="nav-link" href="/indices"{indices_current}>指数分析</a>',
+                      f'<a class="nav-link" href="/portfolio"{portfolio_current}>持仓分析</a>']
         nav_role = ''
         filters = ''
         entity = ('当前指数', 'current-index-name', 'current-index-code', '指数分析', '当前指数、股票选择和研究视图')
+        if page == 'portfolio':
+            entity = ('账户', 'current-portfolio-name', 'current-portfolio-account', '持仓分析', '账户与研究视图')
     else:
         items = []
         for index, (key, label, panel) in enumerate(views):
             tabindex = '' if index == 0 else ' tabindex="-1"'
             items.append(f'<button id="{key}-tab" type="button" role="tab" aria-selected="{str(index == 0).lower()}" aria-controls="{panel}"{tabindex}>{label}</button>')
         items.insert(5, '<a id="indices-link" class="nav-link" href="/indices">指数分析</a>')
+        items.insert(6, '<a class="nav-link" href="/portfolio">持仓分析</a>')
         nav_role = 'role="tablist"'
         filters = '<details id="industry-filter-details" class="industry-filter-details" hidden><summary>行业筛选</summary><div class="industry-filter-body"></div></details>\n  <details id="statement-filter-details" class="industry-filter-details statement-filter-details" open hidden><summary>财务筛选</summary><div class="statement-filter-body"></div></details>\n  <details id="business-filter-details" class="industry-filter-details business-filter-details" hidden><summary>主营筛选</summary><div class="business-filter-body"></div></details>'
         entity = ('当前标的', 'current-stock-name', 'current-stock-code', '—', '当前标的、股票选择和研究视图')
@@ -37,6 +43,10 @@ def render_research_sidebar(page: str, template: str) -> str:
 
 def research_sidebar(page: str) -> str:
     return render_research_sidebar(page, RESEARCH_SIDEBAR_TEMPLATE)
+
+def render_portfolio() -> str:
+    return asset_path('portfolio.html').read_text(encoding='utf-8').replace(
+        '__RESEARCH_SIDEBAR__', research_sidebar('portfolio'))
 
 def render_page(code: str, refresh: bool) -> str:
     code, payload, error = app.data.page_payload(code, refresh)

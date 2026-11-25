@@ -43,6 +43,10 @@ def compact_database(db, validate):
         conn.close()
 
 DESCRIPTIONS={
+ 'portfolio_accounts':('持仓分析','券商账户及建立时间'),
+ 'portfolio_snapshots':('持仓分析','券商同日资金与持仓快照、原件哈希及修订关系'),
+ 'portfolio_snapshot_positions':('持仓分析','各版持仓快照的证券数量、成本、市值和盈亏'),
+ 'portfolio_ledger_entries':('持仓分析','券商历史成交、银证转账和其他业务事件、导入来源及重复关联'),
  'collection_operations':('运行与配置','公共采集整次启动、范围、状态和简短结果；保留行业数字运行身份'),
  'research_shipping_rate_points':('行业研究','CCFI/SCFI周月综合及航线事实、统计区间、来源质量与真实修订'),
  'research_shipping_report_metrics':('行业研究','海控正式财报累计收入和箱量、范围、单位及解析页引用'),
@@ -133,6 +137,7 @@ DESCRIPTIONS={
 TIME_COLUMNS=('updated_at','obtained_at','archived_at','checked_at','completed_at','finished_at','started_at','validated_at',
               'captured_at','imported_at','applied_at','viewed_at','created_at','unfollowed_at')
 PARENT_TIMES={
+ 'portfolio_snapshot_positions':('portfolio_snapshots','snapshot_id','id','imported_at'),
  'business_segment_items':('business_segment_versions','version_id','id','obtained_at'),
  'stock_unfollowed_groups':('stock_unfollowed','instrument_id','instrument_id','unfollowed_at'),
  'adjusted_daily_prices':('adjusted_price_versions','version_id','id','created_at'),

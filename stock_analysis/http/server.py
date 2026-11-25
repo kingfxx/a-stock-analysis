@@ -18,9 +18,10 @@ from stock_analysis.http.routes.indices import IndicesRoutes
 from stock_analysis.http.routes.industries import IndustriesRoutes
 from stock_analysis.http.routes.stocks import StocksRoutes
 from stock_analysis.http.routes.pages import PagesRoutes
+from stock_analysis.http.routes.portfolio import PortfolioRoutes
 
 
-class Handler(ShippingRoutes, AluminumRoutes, NotesRoutes, MaintenanceRoutes, ResearchRoutes, IndicesRoutes, IndustriesRoutes, StocksRoutes, PagesRoutes, BaseHTTPRequestHandler):
+class Handler(ShippingRoutes, AluminumRoutes, NotesRoutes, MaintenanceRoutes, ResearchRoutes, IndicesRoutes, IndustriesRoutes, StocksRoutes, PagesRoutes, PortfolioRoutes, BaseHTTPRequestHandler):
 
     def _maintenance_auth(self):
         self._ai_host()

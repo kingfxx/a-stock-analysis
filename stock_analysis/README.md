@@ -41,6 +41,7 @@
 | `domains/financials/company_preview_dividends.py` | 快览上年分红方案纯解析、保守年度合并及季末股息率估算，不取数、不写库 |
 | `domains/market/` | 全市场财务、交易快照、拥挤度、国债及市场数据工具；market_financial_missing.py负责按公司／接口缺行的手动补缺，不修改既有行 |
 | `domains/notes/` | 投资笔记与数据快照 |
+| `domains/portfolio/` | 招商快照及历史成交导入、来源留存、快照对账与只读估值展示 |
 | `domains/research/` | 研究报告、Checklist、经营判断、模型适配及行业专题 |
 
 行业专题放在 `domains/research/sectors/<行业>/`，航运已归入 `shipping/`。领域专属采集、计算和存储在主题内组织，跨主题的预算、归档和请求锁复用公共采集层。

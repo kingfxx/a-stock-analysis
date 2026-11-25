@@ -19,6 +19,8 @@ def get(self):
         return
     if self._get_notes(parsed):
         return
+    if self._get_portfolio(parsed):
+        return
     if self._get_vendor_notes(parsed):
         return
     if self._get_business_segments(parsed):
@@ -94,6 +96,8 @@ def post(self):
     if self._post_aluminum_forecast(path):
         return
     if self._post_notes(path):
+        return
+    if self._post_portfolio(path):
         return
     if self._post_maintenance_compact(path):
         return

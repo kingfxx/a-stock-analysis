@@ -6,6 +6,7 @@
 | `shared/` | 公共侧栏、选股、日期处理和布局 |
 | `features/` | 按财务、估值、指数、行业、市场、笔记、研究和维护功能组织的 JS／CSS |
 | `features/research/sectors/shipping/` | 航运研究前端 |
+| `features/portfolio/` | 持仓分析页面、券商文件预览和历史成交 |
 | `vendor/` | 第三方资源及原许可证说明 |
 | `samples/` | 现有示例资源 |
 

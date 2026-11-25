@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sqlite3
 import secrets
+from functools import partial
 from pathlib import Path
 from stock_analysis.infrastructure.storage import Database, StorageError
 from stock_analysis.domains.industries.industry_service import IndustryService
@@ -33,6 +34,14 @@ _MAINTENANCE_SERVICES = {}
 _ALUMINUM_SERVICES = {}
 
 LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
+
+def portfolio_service():
+    from stock_analysis.domains.portfolio.reference import read_stock_reference
+    from stock_analysis.domains.portfolio.service import Portfolio
+
+    db = Database(settings.DATABASE_PATH)
+    reference = partial(read_stock_reference, cache=settings.CACHE, valuation_cache=settings.VALUATION_CACHE)
+    return Portfolio(db, db.path.parent / 'portfolio_sources', reference)
 
 def aluminum_forecast():
     from stock_analysis.domains.research.sectors.aluminum.forecast import AluminumForecast

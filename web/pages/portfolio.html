@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>持仓分析</title>
+  <link rel="stylesheet" href="/research-layout.css">
+  <link rel="stylesheet" href="/portfolio.css">
+  <script src="/portfolio-performance.js" defer></script>
+  <script src="/portfolio.js" defer></script>
+</head>
+<body>
+<main class="shell">
+  __RESEARCH_SIDEBAR__
+  <div class="workspace-content">
+    <header class="workspace-head">
+      <div><h1>持仓分析</h1><p id="coverage" class="muted">招商证券</p></div>
+      <button type="button" id="open-import" class="primary">导入券商文件</button>
+    </header>
+    <div class="portfolio-nav" role="tablist" aria-label="持仓页面">
+      <button id="holdings-tab" type="button" role="tab" aria-selected="true" aria-controls="holdings">持仓快照</button>
+      <button id="performance-tab" type="button" role="tab" aria-selected="false" aria-controls="performance" tabindex="-1">盈亏分析</button>
+      <button id="history-tab" type="button" role="tab" aria-selected="false" aria-controls="history" tabindex="-1">历史成交</button>
+      <button id="transfers-tab" type="button" role="tab" aria-selected="false" aria-controls="transfers" tabindex="-1">银证转账</button>
+    </div>
+    <p id="notice" role="status" aria-live="polite" hidden></p>
+    <section id="holdings" class="panel" role="tabpanel" aria-labelledby="holdings-tab">
+      <div class="panel-head">
+        <div><h2 id="holdings-title">持仓快照</h2><p id="snapshot-context" class="muted"></p></div>
+        <div class="fields">
+          <label id="account-control" hidden>账户<select id="account-select"></select></label>
+          <label id="snapshot-control" hidden>快照日期<select id="snapshot-select"></select></label>
+        </div>
+      </div>
+      <p id="holdings-empty" class="empty">导入招商证券持仓表后查看仓位与估值。</p>
+      <div id="holdings-data" hidden>
+        <dl class="balance-strip">
+          <div><dt>人民币总资产</dt><dd id="asset-value"></dd><small id="asset-source" class="subline"></small></div>
+          <div><dt>确认现金</dt><dd id="cash-value"></dd><small id="cash-weight" class="subline" title="现金占纳入总资产比例" hidden></small></div>
+          <div><dt>纳入证券市值</dt><dd id="market-value"></dd><small id="market-weight" class="subline" title="证券市值占纳入总资产比例" hidden></small></div>
+          <div><dt>持仓盈亏</dt><dd id="holding-pnl"></dd></div>
+          <div><dt>今日盈亏</dt><dd id="daily-pnl"></dd><small id="daily-pnl-rate" class="subline"></small></div>
+        </dl>
+        <div class="table-scroll" tabindex="0" aria-label="持仓明细，可横向滚动">
+          <table>
+            <thead><tr>
+              <th scope="col">证券</th>
+              <th scope="col" class="market-column" aria-sort="descending"><button type="button" data-sort="market_value">总市值 <span aria-hidden="true">↓</span></button></th>
+              <th scope="col"><button type="button" data-sort="quantity">数量 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-sort="price">现价／成本 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-sort="holding_pnl">持仓盈亏 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-sort="daily_pnl">今日盈亏 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-sort="weight">仓位 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col">本地估值</th>
+            </tr></thead>
+            <tbody id="positions-body"></tbody>
+          </table>
+        </div>
+        <details class="reconciliation"><summary>券商资金与市值核对</summary><div id="funds-details"></div></details>
+        <details id="excluded" class="reconciliation" hidden><summary id="excluded-title"></summary><ul id="excluded-list"></ul></details>
+      </div>
+    </section>
+    <section id="transfers" class="panel" role="tabpanel" aria-labelledby="transfers-tab" hidden>
+      <div class="panel-head"><div><h2>银证转账</h2><p id="transfers-count" class="muted"></p></div></div>
+      <form id="transfers-filter" class="fields">
+        <label>开始日期<input name="start" type="date"></label>
+        <label>结束日期<input name="end" type="date"></label>
+        <button type="submit">查询</button>
+      </form>
+      <div class="table-scroll" tabindex="0" aria-label="银证转账明细，可横向滚动">
+        <table>
+          <thead><tr><th scope="col">转账日期</th><th scope="col">方向与状态</th><th scope="col">原表金额</th><th scope="col">资金变动（元）</th></tr></thead>
+          <tbody id="transfers-body"></tbody>
+        </table>
+      </div>
+      <p id="transfers-empty" class="empty" hidden>这个日期范围内没有已导入的银证转账。</p>
+      <div id="transfers-pages" class="fields pager" hidden>
+        <button id="transfers-prev" type="button">上一页</button>
+        <button id="transfers-next" type="button">下一页</button>
+      </div>
+    </section>
+    <section id="performance" class="panel performance-panel" role="tabpanel" aria-labelledby="performance-tab" hidden>
+      <div class="panel-head"><div><h2>2026 年盈亏分析</h2><p id="performance-scope" class="muted">招商证券 · A 股</p></div></div>
+      <p id="performance-status" class="muted" role="status">正在读取本地成交与行情。</p>
+      <div id="performance-data" hidden>
+        <div class="fields performance-controls">
+          <label>时间范围<select id="performance-range">
+            <option value="month">本月</option><option value="year" selected>今年</option>
+            <option value="all">开户至今</option><option value="custom">自定义</option>
+          </select></label>
+          <div id="performance-dates" class="fields" hidden>
+            <label>开始日期<input id="performance-start" type="date"></label>
+            <label>结束日期<input id="performance-end" type="date"></label>
+          </div>
+          <label>收益率口径<select id="performance-return-mode">
+            <option value="simple">单利</option><option value="compound">复利</option>
+          </select></label>
+        </div>
+        <p id="performance-period" class="muted" role="status"></p>
+        <dl class="balance-strip performance-summary">
+          <div><dt id="performance-total-label">累计盈亏估算</dt><dd id="performance-total"></dd></div>
+          <div><dt id="performance-return-label">收益率估算 · 单利</dt><dd id="performance-return"></dd></div>
+          <div><dt>盈利／亏损天数</dt><dd id="performance-positive"></dd></div>
+          <div><dt>日线覆盖</dt><dd id="performance-covered"></dd></div>
+        </dl>
+        <p id="performance-basis" class="muted"></p>
+        <label class="performance-chart-control">曲线指标<select id="performance-chart-metric">
+          <option value="amount">累计盈亏</option><option value="rate">累计收益率</option>
+        </select></label>
+        <div id="performance-chart" class="performance-chart" role="region" aria-label="2026 年 A 股累计盈亏曲线"></div>
+        <div class="panel-head calendar-head">
+          <div><h2>资产轨迹</h2><p class="muted">招商 A 股收盘市值 · 不含 ETF、港股及现金</p></div>
+        </div>
+        <p id="asset-flow-summary" class="muted"></p>
+        <div id="performance-assets" class="performance-chart" role="region" aria-label="A 股收盘市值与银证转账"></div>
+        <div class="panel-head calendar-head">
+          <div><h2>盈亏日历</h2><p id="calendar-total" class="muted"></p></div>
+          <div class="fields">
+            <label>视图<select id="calendar-view"><option value="month">月</option><option value="year">年</option></select></label>
+            <label>显示<select id="calendar-metric"><option value="amount">金额</option><option value="rate">收益率</option></select></label>
+            <div id="calendar-month-controls" class="fields">
+              <button id="calendar-prev" type="button" aria-label="上个月">‹</button>
+              <label>月份<select id="calendar-month"></select></label>
+              <button id="calendar-next" type="button" aria-label="下个月">›</button>
+            </div>
+          </div>
+        </div>
+        <table id="calendar-month-grid" class="pnl-calendar" aria-label="月度盈亏日历">
+          <thead><tr><th scope="col">日</th><th scope="col">一</th><th scope="col">二</th><th scope="col">三</th><th scope="col">四</th><th scope="col">五</th><th scope="col">六</th></tr></thead>
+          <tbody id="calendar-body"></tbody>
+        </table>
+        <div id="calendar-year-grid" class="calendar-year-grid" role="group" aria-label="年度盈亏日历" hidden></div>
+        <p id="calendar-day-detail" class="calendar-detail muted" aria-live="polite"></p>
+      </div>
+    </section>
+    <section id="history" class="panel" role="tabpanel" aria-labelledby="history-tab" hidden>
+      <div class="panel-head"><div><h2 id="history-title">历史成交</h2><p id="history-count" class="muted"></p></div></div>
+      <form id="history-filter" class="fields">
+        <label>开始日期<input name="start" type="date"></label>
+        <label>结束日期<input name="end" type="date"></label>
+        <button type="submit">查询</button>
+      </form>
+      <div class="table-scroll" tabindex="0" aria-label="历史成交明细，可横向滚动">
+        <table>
+          <thead><tr><th scope="col">成交日期</th><th scope="col">业务</th><th scope="col">证券</th><th scope="col">数量</th><th scope="col">成交价</th><th scope="col">原表金额</th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+      <p id="history-empty" class="empty" hidden>这个日期范围内没有已导入的成交。</p>
+      <div id="history-pages" class="fields pager" hidden>
+        <button id="history-prev" type="button">上一页</button>
+        <button id="history-next" type="button">下一页</button>
+      </div>
+    </section>
+  </div>
+</main>
+<dialog id="import-dialog" aria-labelledby="import-title">
+  <form method="dialog" class="dialog-head"><h2 id="import-title">导入招商证券文件</h2><button type="submit" aria-label="关闭导入">关闭</button></form>
+  <p class="muted">选择招商证券导出的持仓、历史成交或银证转账 XLS 文件。</p>
+  <label>券商文件<input id="import-file" type="file" accept=".xls,application/vnd.ms-excel"></label>
+  <div id="snapshot-fields" class="fields" hidden>
+    <label>快照日期<input id="import-date" type="date"></label>
+    <label>快照时点<select id="import-session"><option value="">请选择</option><option value="close">收盘</option><option value="intraday">盘中</option></select></label>
+    <label>已确认现金（可留空）<input id="import-cash" type="text" inputmode="decimal"></label>
+  </div>
+  <p id="import-message" role="status" aria-live="polite"></p>
+  <div id="preview-content"></div>
+  <label id="revision-field" class="check" hidden><input id="revision-check" type="checkbox">保存为同日快照的修订版本</label>
+  <label id="overlap-field" hidden>疑似重复记录<select id="overlap-choice"><option value="">请选择</option><option value="mark">标记重复候选，保留原件供核对</option><option value="keep">按独立成交全部保留</option></select></label>
+  <div class="fields dialog-actions">
+    <button id="preview-import" type="button">预览文件</button>
+    <button id="confirm-import" class="primary" type="button" disabled>确认导入</button>
+  </div>
+</dialog>
+</body>
+</html>
