@@ -140,7 +140,7 @@
 - `tests/test_shipping_forecast.py tests/test_shipping_http.py`隔离验收22项通过；包括临时SQLite/HTTP、Edge 1440px/390px、双Tab、筛选、空态恢复、年份多选、参数保留和无横向溢出。`node --check web/shipping-forecast.js`通过。项目内pytest临时目录已清理。
 - 正式覆盖只读复核：CCFI官方综合月度153点（2014-01至2026-09），CCFI与SCFI官方周度各2点（2026-10-16、23），SCFI月度0点。显示空态，不从周度推导月度或编造历史。
 - 8765重启前确认原PID10844的命令行为`python.exe -u app.py --port 8765`且正式库无运行中采集，重启后PID23756。正式趋势页和SCFI月度趋势API均HTTP200；保留日志`data/verification/logs/shipping-trend-tabs-final-8765.out.log`与`data/verification/logs/shipping-trend-tabs-final-8765.err.log`。真实窄屏页面及多年份图已复核。
-- 使用说明和本验收结果见[航运预测说明](../../shipping-forecast.md)与[TREND_TABS_ACCEPTANCE.md](TREND_TABS_ACCEPTANCE.md)。后续本任务反馈仍更新本计划目录。
+- 使用说明和本验收结果见[航运预测说明](../../../shipping-forecast.md)与[TREND_TABS_ACCEPTANCE.md](TREND_TABS_ACCEPTANCE.md)。后续本任务反馈仍更新本计划目录。
 
 
 ## 2026-10-25 页面反馈实现与验收

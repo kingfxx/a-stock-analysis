@@ -8,7 +8,7 @@
 
 项目根路径统一从 `stock_analysis.paths.PROJECT_ROOT` 获取。数据仍保存在原 `data/`；SQL 迁移位于 `infrastructure/migrations/`，研究提示词在 `domains/research/assessment/prompts/`，资源随真实调用领域归档。目录迁移保持 SQL、提示词和资源字节不变。生成缓存不迁移。
 
-分阶段方案、逐文件映射、验证与后续职责拆分见 [目录整理计划](plans/20261025_代码目录结构整理/PLAN.md)。以下原有数据流程说明的业务语义保持，文件位置以迁移清单及实际源码为准。
+分阶段方案、逐文件映射、验证与后续职责拆分见 [目录整理计划](plans/done/20261025_代码目录结构整理/PLAN.md)。以下原有数据流程说明的业务语义保持，文件位置以迁移清单及实际源码为准。
 
 ## 行业公司快览（2026-10-31）
 
@@ -105,4 +105,4 @@ P4 后，正常加载以 data/stock_analysis.sqlite3 为唯一业务事实库。
 
 ## 全市场财务补缺（2026-10-31）
 
-采集管理注册manual missing模式，通过已有行业更新调用链传入missing_only；具体缺口范围、定向请求、归档复用及只插缺行发布归domains/market/market_financial_missing.py。复用公共collector／来源预算及现有生命周期，无新增表、缓存、锁或调度器。原全量采集／发布保持既有保护，补缺范围和原文另由parser_version及scope区分；UI只增加模式及范围说明，HTTP协议／门禁不变。详见[补缺计划](plans/20261031_全市场财务补缺/PLAN.md)。
+采集管理注册manual missing模式，通过已有行业更新调用链传入missing_only；具体缺口范围、定向请求、归档复用及只插缺行发布归domains/market/market_financial_missing.py。复用公共collector／来源预算及现有生命周期，无新增表、缓存、锁或调度器。原全量采集／发布保持既有保护，补缺范围和原文另由parser_version及scope区分；UI只增加模式及范围说明，HTTP协议／门禁不变。详见[补缺计划](plans/done/20261031_全市场财务补缺/PLAN.md)。

@@ -109,4 +109,4 @@ python -m pytest tests -q
 
 ## 代码组织
 
-Python 主包为 `stock_analysis`：`domains/` 按业务主题组织，`http/` 处理后端 HTTP，`collection/` 提供公共采集，`infrastructure/` 提供数据库与网络基础，`maintenance/` 负责维护。前端资源位于仓库根 `web/`。启动命令保持 `python app.py --port 8765 --open-browser`。具体迁移阶段和映射见[目录整理计划](docs/plans/20261025_代码目录结构整理/PLAN.md)。
+Python 主包为 `stock_analysis`：`domains/` 按业务主题组织，`http/` 处理后端 HTTP，`collection/` 提供公共采集，`infrastructure/` 提供数据库与网络基础，`maintenance/` 负责维护。前端资源位于仓库根 `web/`。启动命令保持 `python app.py --port 8765 --open-browser`。具体迁移阶段和映射见[目录整理计划](docs/plans/done/20261025_代码目录结构整理/PLAN.md)。

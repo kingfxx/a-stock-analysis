@@ -129,7 +129,7 @@
 
 ## 参考证据
 
-- [多股接口实测报告](../../../data/verification/reports/stock_multi_symbol_20261027.md)
-- [腾讯raw/qfq合并请求实测](../../../data/verification/reports/tencent_combined_adjustment_20261027.json)
-- [股东来源比较](../../../data/verification/reports/shareholder_source_comparison_20261027.json)
+- [多股接口实测报告](../../../../data/verification/reports/stock_multi_symbol_20261027.md)
+- [腾讯raw/qfq合并请求实测](../../../../data/verification/reports/tencent_combined_adjustment_20261027.json)
+- [股东来源比较](../../../../data/verification/reports/shareholder_source_comparison_20261027.json)
 - [此前只读研究](../20261027_个股接口多股能力验证/GROUP_REFRESH_RESEARCH.md)仅作证据；本次后续状态只在本目录维护。

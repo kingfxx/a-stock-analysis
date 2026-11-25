@@ -4,9 +4,9 @@
 
 53条旧指数类结果JSON从10.83MB减至约0.25MB，独有诊断/旧任务消息保留。76张未变表逐行哈希一致，旧控制表及规则附表退役；各模块公共多日程、失败恢复、分页证据及维护门禁已验证。全量回归末轮1691通过、两项浏览器波动原样复跑通过；最新专项123/75/15项分别通过，不合并重复计数。细节及限制见PROGRESS最新条目。
 
-- [迁移/哈希报告](../../../data/verification/reports/collection_control_migration_20261027.json)
-- [存储/性能报告](../../../data/verification/reports/collection_control_storage_20261027.json)
-- [原库只读部署报告](../../../data/verification/reports/collection_control_deployment_20261027.json)
+- [迁移/哈希报告](../../../../data/verification/reports/collection_control_migration_20261027.json)
+- [存储/性能报告](../../../../data/verification/reports/collection_control_storage_20261027.json)
+- [原库只读部署报告](../../../../data/verification/reports/collection_control_deployment_20261027.json)
 
 没有移动来源/PDF，没有为验收启用日程、保存用户配置或发来源请求，没有自动VACUUM。正式迁移备份及当前后台日志保留。
 
@@ -47,9 +47,9 @@
 
 ## 可复核资料
 
-- [代表性存储与查询计划](../../../data/verification/reports/collection_management_20261025.json)
-- [原库部署前配置/活动任务快照](../../../data/verification/reports/collection_management_deploy_before.json)
-- [原8765只读页面验收](../../../data/verification/reports/collection_management_live_20261025.json)
+- [代表性存储与查询计划](../../../../data/verification/reports/collection_management_20261025.json)
+- [原库部署前配置/活动任务快照](../../../../data/verification/reports/collection_management_deploy_before.json)
+- [原8765只读页面验收](../../../../data/verification/reports/collection_management_live_20261025.json)
 - 常用复测工具data/verification/tools/collection_management_benchmark.py与collection_management_live_check.py。
 - 当前后台日志data/verification/logs/collection_management_8765.stdout.log、stderr.log。
 
@@ -94,7 +94,7 @@
 
 190项相关测试经组合与独立入口分别通过；组合189 passed，跨进程槽位项因stdin包装器路径不可加载，直接pytest重验通过。2项已知基线图表失败排除。最后校验24 passed，JS语法、Python编译和diff检查通过。覆盖当前参数／两个模板／手调／未保存刷新保留／保存后重载、后端白名单／同源与维护门禁、原策略无改动、任务来源映射／CLI与个股隔离、共享窗口跨collector／429冷却、运行中禁止保存、精度和新表维护统计。原暗色样式的隔离截图人工核对通过。
 
-真实请求0；原8765未重启，日常库本轮未写入或迁移。用户明确正在采集，不重启，部署及原库验收待后续安排。当前九配置含索引8192字节，JSON平均110字节，1000次逐笔保存约8760ms，列表3.5—4.1ms。[复测数据](../../../data/verification/reports/collection_rate_limits_20261025.json)，工具data/verification/tools/collection_rate_limits_benchmark.py；本次测试库与截图已清理。一次并发财务计数波动在单项及最终组合均通过；8768连接环境问题通过独立空闲测试端口复验解决，未改原后台端口。
+真实请求0；原8765未重启，日常库本轮未写入或迁移。用户明确正在采集，不重启，部署及原库验收待后续安排。当前九配置含索引8192字节，JSON平均110字节，1000次逐笔保存约8760ms，列表3.5—4.1ms。[复测数据](../../../../data/verification/reports/collection_rate_limits_20261025.json)，工具data/verification/tools/collection_rate_limits_benchmark.py；本次测试库与截图已清理。一次并发财务计数波动在单项及最终组合均通过；8768连接环境问题通过独立空闲测试端口复验解决，未改原后台端口。
 
 ## 用户重启后原8765验收（2026-10-25）
 
@@ -111,14 +111,14 @@
 - 存储：v43仅两张控制表；分组规则复用公共表，batch引用原sync run并记录父运行。事实缓存、价格版本与metadata_only不变，无新增响应正文/文件/哈希/BLOB。维护用途及真实更新时间已登记。
 - 测试：完整1666 passed，末轮补充42 passed；详情见PROGRESS。首次/失败/旧库升级/跨组复用/停止/恢复/拒绝冷却/读取价格版本绑定与浏览器入口均采用隔离库或模拟响应验证。
 - 部署：原库自动备份后升级v43，8765 PID43148运行；原日程/限速哈希及source/batch水位不变，新增个股operation/日程均为0。真实页面脚本错误0、storage读取0、窄屏无溢出；未为验收发真实采集请求。
-- 报告：[部署只读验收](../../../data/verification/reports/stock_collection_deployment_20261027.json)、[控制元数据占用](../../../data/verification/reports/stock_collection_storage_20261027.json)。日志：stock-management-release-20261027.log、stock-management-postreview-20261027.log；工具：verify_stock_collection_deployment.py、stock_collection_management_benchmark.py、restart_stock_collection_server.ps1。
+- 报告：[部署只读验收](../../../../data/verification/reports/stock_collection_deployment_20261027.json)、[控制元数据占用](../../../../data/verification/reports/stock_collection_storage_20261027.json)。日志：stock-management-release-20261027.log、stock-management-postreview-20261027.log；工具：verify_stock_collection_deployment.py、stock_collection_management_benchmark.py、restart_stock_collection_server.ps1。
 
 ## 2026-10-27 多主题反馈验收
 
-相关89项及57项通过；同组多主题新增/编辑/删除、旧规则不覆盖、删除保留槽位、失效编辑拒绝及控件布局在隔离库与浏览器验证。原8765重启后PID42524；旧持仓19:00规则和配置哈希不变。实页1920/1440单行、手动字段偏差0px、分组框180×36px、390px无溢出、脚本错误0。来源/批次及stock operation前后不变，无真实采集。详见[反馈验收报告](../../../data/verification/reports/stock_collection_feedback_20261027.json)。
+相关89项及57项通过；同组多主题新增/编辑/删除、旧规则不覆盖、删除保留槽位、失效编辑拒绝及控件布局在隔离库与浏览器验证。原8765重启后PID42524；旧持仓19:00规则和配置哈希不变。实页1920/1440单行、手动字段偏差0px、分组框180×36px、390px无溢出、脚本错误0。来源/批次及stock operation前后不变，无真实采集。详见[反馈验收报告](../../../../data/verification/reports/stock_collection_feedback_20261027.json)。
 
 ## 2026-10-27 个股发布计数验收
 
 事实发布与计数同事务提交，重复、真实变化、零/负值、回滚、复权版本复制、主营、公告/派生及融资/股东已隔离验证。完整1678 passed，两项旧文案/Windows路径问题解决后相关23 passed；其他相关172/43/10及最终SQL 3项通过，具体日志和重叠范围见PROGRESS。
 
-原8765已重启为PID24976，schema仍43。源写入汇总/旧记录简化显示实页通过；旧批次与配置哈希不变，source5763/batch3460水位、operation及日程数量不变，无实际采集或历史补写。旧记录未保存的实际写入数不猜测。报告：[原库验收](../../../data/verification/reports/stock_write_counts_20261027.json)。后台日志stock-counts-server-20261027.out.log/err.log，回归日志stock-counts-release-20261027.log及stock-counts-final-20261027.log。
+原8765已重启为PID24976，schema仍43。源写入汇总/旧记录简化显示实页通过；旧批次与配置哈希不变，source5763/batch3460水位、operation及日程数量不变，无实际采集或历史补写。旧记录未保存的实际写入数不猜测。报告：[原库验收](../../../../data/verification/reports/stock_write_counts_20261027.json)。后台日志stock-counts-server-20261027.out.log/err.log，回归日志stock-counts-release-20261027.log及stock-counts-final-20261027.log。

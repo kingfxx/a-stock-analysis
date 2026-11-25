@@ -36,6 +36,6 @@
 - 补充官方合计：2023全年27196万TEU、2024Q1 6754万TEU、2024全年29160万TEU。2024起官方表有主要港口发布说明，另做2024后水平、2025后同比敏感性；未断言沿海合计发生同等范围变化。
 - [2023全年官方表](https://xxgk.mot.gov.cn/jigou/zhghs/202404/P020240704596425175639.pdf)、[2024Q1官方表](https://xxgk.mot.gov.cn/jigou/zhghs/202404/P020240528368732806335.pdf)、[2024全年官方表](https://xxgk.mot.gov.cn/jigou/zhghs/202503/P020250326508512684765.pdf)。
 
-完整报告：[Markdown](../../../data/verification/reports/shipping-volume-correlation/report.md) / [HTML](../../../data/verification/reports/shipping-volume-correlation/report.html)；数值：[results.json](../../../data/verification/reports/shipping-volume-correlation/results.json)。来源快照位于 `data/verification/samples/shipping-volume-correlation/`，逐季来源、修订、页面、公式和披露时点见报告。data资料不随Git迁移，换机器需携带样本与原归档。
+完整报告：[Markdown](../../../../data/verification/reports/shipping-volume-correlation/report.md) / [HTML](../../../../data/verification/reports/shipping-volume-correlation/report.html)；数值：[results.json](../../../../data/verification/reports/shipping-volume-correlation/results.json)。来源快照位于 `data/verification/samples/shipping-volume-correlation/`，逐季来源、修订、页面、公式和披露时点见报告。data资料不随Git迁移，换机器需携带样本与原归档。
 
 复算工具：`data/verification/tools/shipping_volume_correlation.py`（原库只读）；加`--snapshot`重放冻结资料。渲染：`data/verification/tools/render_shipping_volume_research.py`。标准科学绘图；报告已检查1440px/390px下图表加载、7张表及页面无溢出。

@@ -31,7 +31,7 @@
 
 当前状态：开发、文档和验收完成，后台保持运行，供用户验收。用户已要求 commit & push，源码随本次提交交付；未进行多 Agent 协作。
 
-验收记录：[investment-notes-20261023.md](../../../data/verification/reports/investment-notes-20261023.md)。当前后台日志：`data/verification/logs/investment-notes-8765.stdout.log` 与 `.stderr.log`。
+验收记录：[investment-notes-20261023.md](../../../../data/verification/reports/investment-notes-20261023.md)。当前后台日志：`data/verification/logs/investment-notes-8765.stdout.log` 与 `.stderr.log`。
 
 后续反馈与缺陷修复继续更新本计划目录。
 
@@ -178,5 +178,5 @@
 
 设计参考：
 
-- [轻量样例：开始观察](../../../data/verification/samples/investment-notes/daily/2026-10-23_东鹏_开始观察.md)
-- [轻量样例：继续观察](../../../data/verification/samples/investment-notes/daily/2026-10-30_东鹏_继续观察.md)
+- [轻量样例：开始观察](../../../../data/verification/samples/investment-notes/daily/2026-10-23_东鹏_开始观察.md)
+- [轻量样例：继续观察](../../../../data/verification/samples/investment-notes/daily/2026-10-30_东鹏_继续观察.md)

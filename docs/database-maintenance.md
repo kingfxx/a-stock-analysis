@@ -152,7 +152,7 @@ index_price_observations每序列/日期仅一行，version为更新计数；fie
 collection_schedule_rules、collection_schedule_slots分类「运行与配置」，分别登记规则参数和定时槽位的领域operation引用；时间按updated_at及started_at/finished_at识别，不用slot_key日期。空表／缺时间不推算。collection_schedules用途扩展为统一任务开关与时间，原拥挤度记录原样保留。sw_update_runs新增内部安全停机标记，不改变时间口径。隔离库维护统计与代表性大小／读写测量见[验收数据](../data/verification/reports/collection_management_20261025.json)。
 ## 航运研究表登记（v41）
 
-四张 `research_shipping_*` 业务表登记为「行业研究」，用途、记录数（包含修订）、表及索引大小自动发现，更新时间使用真实 `created_at`。空表或缺值显示未记录，不用指数日/报告期代替。隔离库与日常库验收数据见[航运验收](plans/20261024_ccfi海控利润预测/ACCEPTANCE.md)，详细存储见[SQLite说明](sqlite-storage.md)。
+四张 `research_shipping_*` 业务表登记为「行业研究」，用途、记录数（包含修订）、表及索引大小自动发现，更新时间使用真实 `created_at`。空表或缺值显示未记录，不用指数日/报告期代替。隔离库与日常库验收数据见[航运验收](plans/done/20261024_ccfi海控利润预测/ACCEPTANCE.md)，详细存储见[SQLite说明](sqlite-storage.md)。
 
 
 ## 限速配置（v42）

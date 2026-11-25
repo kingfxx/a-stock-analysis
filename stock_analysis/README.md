@@ -53,6 +53,6 @@
 
 SQL、提示词、JS 解码器、字段定义、证书和 OCR 脚本为业务资产，位置跟随所属模块；不能仅按 Python 文件迁移。项目数据、来源响应、PDF、笔记和凭据仍在原配置位置。生成缓存不提交。
 
-迁移阶段、完整文件映射和已知测试基线见 [计划](../docs/plans/20261025_代码目录结构整理/PLAN.md) 与 [验收](../docs/plans/20261025_代码目录结构整理/ACCEPTANCE.md)。
+迁移阶段、完整文件映射和已知测试基线见 [计划](../docs/plans/done/20261025_代码目录结构整理/PLAN.md) 与 [验收](../docs/plans/done/20261025_代码目录结构整理/ACCEPTANCE.md)。
 
-HTTP 与来源职责进一步拆分见 [本轮映射](../docs/plans/20261026_HTTP与来源职责拆分/MIGRATION_MAP.md) 与 [验收](../docs/plans/20261026_HTTP与来源职责拆分/ACCEPTANCE.md)。
+HTTP 与来源职责进一步拆分见 [本轮映射](../docs/plans/done/20261026_HTTP与来源职责拆分/MIGRATION_MAP.md) 与 [验收](../docs/plans/done/20261026_HTTP与来源职责拆分/ACCEPTANCE.md)。

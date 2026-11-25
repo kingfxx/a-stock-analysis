@@ -1,8 +1,8 @@
 # SQLite 存储、数据更新与备份
 
-v47 在源码中新增 `collection_source_archive_members`，以原文件相对路径为唯一键记录归档包、成员、哈希、大小及实际归档时间；维护统计分类为运行与配置，时间依据为 `archived_at`。归档使用已有计划与槽位表；原来源记录和双哈希不变。使用及备份边界见[公共响应归档](source-response-archive.md)，部署和验收状态见[计划进度](plans/20261030_公共响应按月归档/PROGRESS.md)。SQLite 备份仍不包含来源文件。
+v47 在源码中新增 `collection_source_archive_members`，以原文件相对路径为唯一键记录归档包、成员、哈希、大小及实际归档时间；维护统计分类为运行与配置，时间依据为 `archived_at`。归档使用已有计划与槽位表；原来源记录和双哈希不变。使用及备份边界见[公共响应归档](source-response-archive.md)，部署和验收状态见[计划进度](plans/done/20261030_公共响应按月归档/PROGRESS.md)。SQLite 备份仍不包含来源文件。
 
-当前结构版本为v44，部署与验收状态见[当前计划进度](plans/20261025_统一采集管理/PROGRESS.md)。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
+当前结构版本为v44，部署与验收状态见[当前计划进度](plans/done/20261025_统一采集管理/PROGRESS.md)。v36新增`market_indicator_observations`（单表市场拥挤度及收盘点位、两类亿元金额、来源通道和修订）和`collection_schedules`（每日检查配置），不建立指标序列表。观察表更新时间依据真实obtained_at/updated_at，配置依据updated_at，空表不以交易日代替。首次来源归档，后续拥挤度HTML更新经用户授权仅保存公共请求元数据及事实，不落响应/逐次报告文件。详见[大盘拥挤度](index-data-collection.md#大盘拥挤度采集与查询)。
 
 v37仅扩展既有`index_price_observations`，新增volume、amount、change_points、change_pct、turnover_rate、amount_ratio、constituent_count、mean_price、float_market_cap和mean_float_market_cap十个可空字段，另增field_lineage_json字段级来源/估算JSON，不新增业务表。中证/申万原series及行情行就地升级v2，保留ID及OHLC，不保留v1行情副本；Legu/Sina继续v1。每个series_id/observation_date物理唯一，历史修订就地更新，version只作计数；不建立独立derived行情。估算字段标记及父依赖同行存储，官方值优先；仅补算保留原source/batch/obtained_at，computed_at在估算JSON中，updated_at是真实写入时间；缺依赖保持NULL或撤回。单位、字段映射、缺值和派生估算规则见[指数行情字段映射](index-data-collection.md#field-mapping)。v38后逻辑来源/时间语义保持，物理来源/时间格式见下节。
 
@@ -592,7 +592,7 @@ collection_schedules的schedule_id为规则主键，task_key为可重复模块�
 
 隔离原库验证：53条原指数类result_json从10,833,973减至249,704字节（保留独有旧任务消息）；3460个batch ID与来源/事实不变，批次JSON仅增加35,971字节以承接独有诊断及旧工作元数据。运行列表三次约51—57ms。全未变表逐行SHA256相同、来源预算/冷却和6条原日程配置保持。详见[迁移报告](../data/verification/reports/collection_control_migration_20261027.json)。JSON逻辑字节不等于物理释放文件大小，未自动VACUUM。
 
-代表性隔离测量：10次运行×20股票×16个真实来源分段，共3200个batch；批次表含索引2,818,048字节，约881字节/行；10次占位及模拟终结约242ms，公共列表约55ms。该值包含真实batch及排队索引，不能只与旧1600条item的开销比较。无新增source/业务sync/响应文件。报告与复测工具见[存储测量](../data/verification/reports/collection_control_storage_20261027.json)、[测量工具](../data/verification/tools/collection_control_benchmark.py)；具体迁移边界见[字段对照](plans/20261025_统一采集管理/CONTROL_SCHEMA.md)。
+代表性隔离测量：10次运行×20股票×16个真实来源分段，共3200个batch；批次表含索引2,818,048字节，约881字节/行；10次占位及模拟终结约242ms，公共列表约55ms。该值包含真实batch及排队索引，不能只与旧1600条item的开销比较。无新增source/业务sync/响应文件。报告与复测工具见[存储测量](../data/verification/reports/collection_control_storage_20261027.json)、[测量工具](../data/verification/tools/collection_control_benchmark.py)；具体迁移边界见[字段对照](plans/done/20261025_统一采集管理/CONTROL_SCHEMA.md)。
 
 
 ## v45 个股共享分段身份约束

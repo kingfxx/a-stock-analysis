@@ -80,7 +80,7 @@ b = Σ[(xᵢ−x̄)(yᵢ−ȳ)] / Σ[(xᵢ−x̄)²]
 - `POST /api/shipping-forecast/save`：target/name/kind/input_hash/scenarios，三情景由服务端复算；Origin和本地会话校验。
 - `POST /api/shipping-forecast/prepare-report`：period，显式准备单份正式财报；同样校验Origin和本地会话。
 
-SQLite备份不包括Excel归档、图片、PDF、解析文件；资料迁移同时携带公共collection_sources与company_reports，按哈希校验。实施范围及实际验收见[原计划](plans/20261024_ccfi海控利润预测/PLAN.md)、[主任务验收记录](plans/20261024_ccfi海控利润预测/ACCEPTANCE.md)和[趋势 Tab 与页面反馈验收](plans/20261024_ccfi海控利润预测/TREND_TABS_ACCEPTANCE.md)。
+SQLite备份不包括Excel归档、图片、PDF、解析文件；资料迁移同时携带公共collection_sources与company_reports，按哈希校验。实施范围及实际验收见[原计划](plans/done/20261024_ccfi海控利润预测/PLAN.md)、[主任务验收记录](plans/done/20261024_ccfi海控利润预测/ACCEPTANCE.md)和[趋势 Tab 与页面反馈验收](plans/done/20261024_ccfi海控利润预测/TREND_TABS_ACCEPTANCE.md)。
 
 普通增量/回填复用已校验详情时，当前运行也登记对应分段、原batch/source引用和保留的来源取得时间，重新验证归档哈希，覆盖判定不升级。原失败运行保持历史状态；后续同范围恢复成功会产生新的成功运行，管理页最近执行成功随之更新，页面读取本身不启动恢复。
 
@@ -117,4 +117,4 @@ shipping-analysis-v2校验报告标题及真实披露日后，从统计段就近
 
 三情景利润卡同时显示预测单季度归母净利润的同比和环比：同比基期为上年同季度、环比基期为紧邻上一季度（Q1对应上年Q4），从当前本地计算上下文 `history[].profit` 精确按季度读取，不拿最近可用期替代。历史值沿用 `financial_reports` 新浪gjzb.PARENETP优先、lrb回退和累计转单季口径；对比率为（预测利润－基期实际单季利润）÷基期绝对值×100%，显示最多两位小数，分两行显示“同比／环比：百分比 比较期 金额”，不显示基期日期或季度；百分比不加正负号，正增长用红色、负增长用绿色、零增长用中性色，辅助标签保留增长／下降含义。基期为负时在悬浮说明标注绝对值计算；为零或缺失则明确无法计算，不输出无穷或拿零补缺。修改情景参数、目标或载入版本后与试算结果同步更新，不改变保存版本的数据结构。
 
-沿海行业吞吐量与海控承运箱量的2023Q1—2026Q2研究已完成：水平强相关，但同比及增量预测关系不足，未接入默认模型。详细口径、事后误差及历史可得性限制见[箱量相关性研究](plans/20261024_ccfi海控利润预测/VOLUME_CORRELATION.md)。
+沿海行业吞吐量与海控承运箱量的2023Q1—2026Q2研究已完成：水平强相关，但同比及增量预测关系不足，未接入默认模型。详细口径、事后误差及历史可得性限制见[箱量相关性研究](plans/done/20261024_ccfi海控利润预测/VOLUME_CORRELATION.md)。
