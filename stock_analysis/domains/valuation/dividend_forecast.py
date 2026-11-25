@@ -13,7 +13,7 @@ from stock_analysis.domains.financials.financial_storage import decompress_json
 from stock_analysis.domains.financials.fundamental_service import SOURCE
 from stock_analysis.domains.stocks.price_service import SOURCE as PRICE_SOURCE
 from stock_analysis.domains.stocks.source_parsers import normalize_code
-from stock_analysis.domains.financials.statements import metric
+from stock_analysis.domains.financials.statements import metric, reported_metric
 
 
 VERSION = 'dividend_forecast_v3'
@@ -215,7 +215,7 @@ def derive_scenario(years, neutral_parameters, price, factors):
     return result
 
 
-def read_dividend_forecast(db, code):
+def read_dividend_forecast(db, code, *, include_annual_equity=False):
     code = normalize_code(code)
     now = datetime.now(timezone(timedelta(hours=8)))
     as_of, year = now.date().isoformat(), now.year
@@ -323,10 +323,20 @@ def read_dividend_forecast(db, code):
         warnings.append(dict(code='undisclosed_reports', message=f'{ignored}条财报缺少已到达的真实披露日，未用于自动计算。'))
     warnings.append(dict(code='dividend_evidence_gap', message='分红金额为估算；实际派息日、特别分红性质及年度覆盖尚未核实。历史分红率不构成公司承诺。'))
     history = build_history(reports, events, year, exclude_special=False)
+    annual_equity = {}
+    if include_annual_equity:
+        for period in raw:
+            if not period.endswith('-12-31'):
+                continue
+            detail = reported_metric(raw, period, 'fzb', 'PARESHARRIGH', '归母股东权益')
+            if detail['value'] is not None:
+                detail['provenance'] = evidence[(period, detail['source'])]
+                annual_equity[period[:4]] = detail
     return dict(code=code, name=name, as_of_date=as_of, years=[year, year+1, year+2], calculated_at=now.isoformat(), methodology_version=VERSION,
                 units=dict(amount='CNY元', shares='股', dps='元/股', rate='小数'), reports=reports, events=events, market=market,
                 history=history, payout_bases={str(n): payout_basis(history, year, n) for n in (1, 3, 5)},
                 sustainability=sustainability, warnings=warnings,
                 profit_bases={s: profit_basis(reports, year, scenario=s) for s in SCENARIOS},
                 scenario_factors=scenario_factors(reports, year),
-                policy=dict(available=False, reason='本地暂无可靠结构化分红政策，允许手填并记录依据'))
+                policy=dict(available=False, reason='本地暂无可靠结构化分红政策，允许手填并记录依据'),
+                **({'annual_equity': annual_equity} if include_annual_equity else {}))

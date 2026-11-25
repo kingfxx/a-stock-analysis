@@ -9,6 +9,7 @@
   const format = value => finite(value) ? value.toLocaleString('zh-CN', {maximumFractionDigits: 3}) : '—';
   const amount = value => format(finite(value) ? value / units : null);
   const percent = value => finite(value) ? format(100 * value) + '%' : '—';
+  const multiple = value => finite(value) ? value.toFixed(2) : '—';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char =>
     ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[char]);
   const number = input => input.value === '' || !Number.isFinite(input.valueAsNumber) ? null : input.valueAsNumber;
@@ -17,7 +18,7 @@
   const sum = values => values.every(finite) ? values.reduce((total, value) => total + value, 0) : null;
   const remainingQuarters = {'03-31': 3, '06-30': 2, '09-30': 1, '12-31': 0};
 
-  function calculate(base, start, scenarios, dividendModel, current) {
+  function calculate(base, start, scenarios, dividendModel, current, annualEquity) {
     return Object.fromEntries(keys.map(key => {
       const changes = scenarios[key].map(row => ({
         base: base.profit,
@@ -56,6 +57,16 @@
       }, base.share_price);
       result.rows.forEach((row, index) => { row.parts = changes[index]; });
       if (progress) result.rows[index].progress = progress;
+      if (annualEquity != null) {
+        let equity = annualEquity[start - 1]?.value ?? null;
+        for (const row of result.rows) {
+          equity = [equity, row.profit, row.cash].every(finite) ? equity + row.profit - row.cash : null;
+          const marketCap = base.share_price > 0 && row.shares > 0 ? base.share_price * row.shares : null;
+          row.parent_equity = equity;
+          row.pe = marketCap !== null && row.profit > 0 ? marketCap / row.profit : null;
+          row.pb = marketCap !== null && equity > 0 ? marketCap / equity : null;
+        }
+      }
       result.cumulative_cash = sum(result.rows.map(row => row.cash));
       return [key, result];
     }));
@@ -160,9 +171,12 @@
       const rollover = quote?.previous_contract
         ? `<p class="muted">上次参考合约 ${esc(quote.previous_contract)} · ${esc(quote.previous_trade_date)}</p>` : '';
       const error = quoteState.errors[key];
+      const source = key === 'al'
+        ? '<a href="https://hq.smm.cn/data/futures/shfe-al0000" target="_blank" rel="noopener">上海有色行情</a> · 数据来自上期所'
+        : `<a href="${esc(quote?.url)}" target="_blank" rel="noopener">上期所来源</a>`;
       return `<article class="quote-card"><h3>${label}</h3><p class="quote-price">${quote ? format(quote.price) + ' 元/吨' : '—'}</p>
         <p class="muted">${quote ? `${esc(quote.trade_date)} · ${esc(quote.contract)}${age}` : '暂无报价，可刷新或手填。'}</p>
-        ${quote ? `<p class="muted"><a href="${esc(quote.url)}" target="_blank" rel="noopener">上期所来源</a> · 获取于 ${esc(time)}</p>` : ''}
+        ${quote ? `<p class="muted">${source} · 获取于 ${esc(time)}</p>` : ''}
         ${rollover}${error ? `<p class="warning">${esc(error)}</p>` : ''}</article>`;
     }).join('');
     const references = quoteState.references || initial?.quotes.references || {};
@@ -171,7 +185,7 @@
       <h3>电解铝现货 · 华东 A00 铝锭</h3>
       <p class="quote-price">${spot ? format(spot.price) + ' 元/吨' : '—'}</p>
       <p class="muted">${spot ? `${esc(spot.trade_date)} · ${format(spot.low)}–${format(spot.high)} 元/吨${spot.archived ? ' · 最近本地归档' : ''}` : '暂无现货报价，可刷新市场行情。'}</p>
-      ${spot ? `<p class="muted"><a href="${esc(spot.url)}" target="_blank" rel="noopener">长江有色</a> · 华东中间价</p>` : ''}
+      ${spot ? '<p class="muted"><a href="https://list1.mysteel.com/market/p-975-----020204-0--------1.html" target="_blank" rel="noopener">我的钢铁网行情</a> · 数据为长江有色华东中间价</p>' : ''}
       ${references.errors?.spot ? `<p class="warning">${esc(references.errors.spot)}</p>` : ''}</article>`);
     renderMonthly(references.monthly, references.errors?.monthly);
   }
@@ -466,7 +480,7 @@
     }
     const results = historical ? historical.snapshot.results
       : Number.isInteger(draft?.start) ? calculate(draft.base, draft.start, draft.scenarios,
-        window.DividendForecast.calculate_scenario, current.evidence.current_year) : {};
+        window.DividendForecast.calculate_scenario, current.evidence.current_year, current.evidence.annual_equity) : {};
     renderSimulation(results);
     const view = results && keys.some(key => Array.isArray(results[key]?.rows));
     const progress = results?.base?.rows?.find(row => row.progress)?.progress;
@@ -481,6 +495,18 @@
     }
     chart('profit-chart', results || {}, 'profit', '归母净利润（亿元）', '亿元', 1 / units);
     chart('yield-chart', results || {}, 'yield_rate', '税前股息率', '%', 100);
+    const valuationNote = $('valuation-note');
+    valuationNote.hidden = !view;
+    if (view) {
+      const first = results.base?.rows?.[0];
+      const startingEquity = current?.evidence.annual_equity?.[first?.year - 1];
+      valuationNote.textContent = first && Object.hasOwn(first, 'pe')
+        ? 'PE 和 PB 按参考股价乘当年预计总股本计算市值。PE 除以当年归母净利润，PB 除以预计期末归母净资产。'
+          + (startingEquity
+            ? `净资产从 ${startingEquity.period} 已披露的 ${amount(startingEquity.value)} 亿元起，逐年加归母利润、减预测现金分红。`
+            : '缺少预测首年前一年的年末归母净资产，PB 留空。')
+        : '该版本保存时未记录 PE 和 PB。';
+    }
     if (!view) {
       panel.innerHTML = historical ? `<details><summary>原保存结果</summary><pre>${esc(JSON.stringify(results, null, 2))}</pre></details>` : '';
       return;
@@ -490,10 +516,10 @@
       return `<details data-result-scenario="${key}"${resultsExpanded.get(key) ? ' open' : ''}><summary>${labels[key]} · 三年累计分红 ${amount(result.cumulative_cash)} 亿元 · 每股 ${format(result.cumulative_dps)} 元</summary>
         ${table(['年度', ...(progress ? ['已披露归母', '当年剩余预测'] : []),
           '预测基准归母', '沪铝影响', '氧化铝影响', '产销量', '成本', '其他', '归母净利润', '现金分红',
-          '税前股息（元/股）', '税前股息率'], result.rows.map(row => [row.year,
+          '税前股息（元/股）', '税前股息率', '预测 PE（倍）', '预测 PB（倍）'], result.rows.map(row => [row.year,
           ...(progress ? [amount(row.progress?.actual_profit), amount(row.progress?.forecast_profit)] : []),
           ...['base', 'al', 'ao', 'volume', 'cost', 'other'].map(part => amount(row.parts?.[part])),
-          amount(row.profit), amount(row.cash), format(row.dps), percent(row.yield_rate)]))}
+          amount(row.profit), amount(row.cash), format(row.dps), percent(row.yield_rate), multiple(row.pe), multiple(row.pb)]))}
         <p class="muted">利润、调整和现金分红均为亿元。${result.rows.map(row =>
           finite(row.profit) && row.profit <= 0 ? `${row.year} 年归母利润非正，按比例无法确定分红。 `
             : finite(row.profit) && !finite(row.yield_rate) ? `${row.year} 年分红或股息率参数未齐。 ` : '').join('')}</p></details>`;

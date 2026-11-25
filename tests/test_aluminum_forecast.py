@@ -45,7 +45,8 @@ def complete(service):
 def test_price_effects_and_dividends_match_browser(db):
     case = complete(AluminumForecast(db, 'session'))
     args = [case[key] for key in ('base', 'start', 'scenarios')]
-    result = calculate(*args)
+    annual_equity = {str(case['start'] - 1): {'value': 75e9}}
+    result = calculate(*args, annual_equity=annual_equity)
     row = result['base']['rows'][0]
     assert row['parts']['al'] == 2e9
     assert row['parts']['ao'] == -5e8
@@ -53,28 +54,37 @@ def test_price_effects_and_dividends_match_browser(db):
     assert row['cash'] == 4.11e9
     assert row['dps'] == pytest.approx(4.11 / 16)
     assert row['yield_rate'] == pytest.approx(4.11 / 16 / 8)
+    assert row['parent_equity'] == pytest.approx(84.59e9)
+    assert row['pe'] == pytest.approx(128 / 13.7)
+    assert row['pb'] == pytest.approx(128 / 84.59)
+    assert result['base']['rows'][1]['parent_equity'] == pytest.approx(84.59e9 + 13.9e9 * .65)
+    no_equity = calculate(*args, annual_equity={})['base']['rows'][0]
+    assert no_equity['pb'] is None and no_equity['pe'] == row['pe']
     assert result['base']['rows'][1]['profit'] == 13.9e9
     assert result['base']['cumulative_cash'] == pytest.approx(sum(r['cash'] for r in result['base']['rows']))
     case['scenarios']['bear'][0]['cost'] = -30e9
     case['scenarios']['bear'][1]['al_price'] = None
     case['scenarios']['bull'][0]['payout'] = 0
     case['scenarios']['bull'][1]['shares'] = None
-    reduced = calculate(*args)
+    reduced = calculate(*args, annual_equity=annual_equity)
     assert reduced['bear']['rows'][0]['profit'] < 0
     assert reduced['bear']['rows'][0]['cash'] is None
+    assert reduced['bear']['rows'][0]['pe'] is None
     assert reduced['bear']['rows'][1]['profit'] is None
     assert reduced['bear']['cumulative_cash'] is None
     assert reduced['bull']['rows'][0]['cash'] == 0
     assert reduced['bull']['rows'][1]['cash'] > 0
     assert reduced['bull']['rows'][1]['dps'] is None
+    assert reduced['bull']['rows'][1]['pe'] is None and reduced['bull']['rows'][1]['pb'] is None
+    assert reduced['bull']['rows'][1]['parent_equity'] is not None
     js = r"""
 const fs = require('node:fs');
 const {calculate} = require('./web/features/research/sectors/aluminum/aluminum-forecast.js');
 const {calculate_scenario} = require('./web/features/valuation/dividend-forecast.js');
-const args = JSON.parse(fs.readFileSync(0, 'utf8'));
-process.stdout.write(JSON.stringify(calculate(...args, calculate_scenario)));
+const [base, start, scenarios, equity] = JSON.parse(fs.readFileSync(0, 'utf8'));
+process.stdout.write(JSON.stringify(calculate(base, start, scenarios, calculate_scenario, null, equity)));
 """
-    browser = subprocess.run(['node', '-e', js], input=json.dumps(args), encoding='utf-8',
+    browser = subprocess.run(['node', '-e', js], input=json.dumps([*args, annual_equity]), encoding='utf-8',
                              capture_output=True, check=True)
     assert json.loads(browser.stdout) == reduced
 
@@ -160,7 +170,8 @@ def test_current_year_realized_profit_and_remainder_match_browser(db):
     current = dict(year=start, actual=dict(period='2026-09-30', profit=17.9e9),
                    prior={'2025': dict(period='2025-09-30', profit=10e9)})
     args = [case['base'], start, case['scenarios']]
-    results = calculate(*args, current)
+    annual_equity = {'2025': {'period': '2025-12-31', 'value': 75e9}}
+    results = calculate(*args, current, annual_equity)
     row = results['base']['rows'][0]
     assert row['progress']['actual_profit'] == 17.9e9
     assert row['parts']['base'] == 2e9
@@ -170,8 +181,9 @@ def test_current_year_realized_profit_and_remainder_match_browser(db):
     assert row['parts']['volume'] == .3e9
     assert row['progress']['forecast_profit'] == 2.4e9
     assert row['profit'] == 20.3e9
-    assert results['base']['rows'][1] == calculate(*args)['base']['rows'][1] | {
-        'growth_rate': results['base']['rows'][1]['growth_rate']}
+    future = {key: value for key, value in results['base']['rows'][1].items()
+              if key not in {'parent_equity', 'pe', 'pb'}}
+    assert future == calculate(*args)['base']['rows'][1] | {'growth_rate': future['growth_rate']}
     missing = calculate(*args, dict(current, prior={}))['base']['rows'][0]
     assert missing['profit'] is None and missing['progress']['actual_profit'] == 17.9e9
     for missing_base in (dict(case['base'], remaining_prices=None),
@@ -183,19 +195,21 @@ def test_current_year_realized_profit_and_remainder_match_browser(db):
     assert full['profit'] == 21e9 and full['progress']['remaining_quarters'] == 0
     case['start'] = start
     case['evidence']['current_year'] = current
+    case['evidence']['annual_equity'] = annual_equity
     case['proof'] = service._sign('facts', case['evidence'])
     saved = service.save(case)
     loaded = service.read_version(saved['id'])
     assert loaded['evidence']['current_year'] == current
+    assert loaded['evidence']['annual_equity'] == annual_equity
     assert loaded['snapshot']['results'] == results
     js = r"""
 const fs = require('node:fs');
 const {calculate} = require('./web/features/research/sectors/aluminum/aluminum-forecast.js');
 const {calculate_scenario} = require('./web/features/valuation/dividend-forecast.js');
-const [base, start, scenarios, current] = JSON.parse(fs.readFileSync(0, 'utf8'));
-process.stdout.write(JSON.stringify(calculate(base, start, scenarios, calculate_scenario, current)));
+const [base, start, scenarios, current, equity] = JSON.parse(fs.readFileSync(0, 'utf8'));
+process.stdout.write(JSON.stringify(calculate(base, start, scenarios, calculate_scenario, current, equity)));
 """
-    browser = subprocess.run(['node', '-e', js], input=json.dumps([*args, current]), encoding='utf-8',
+    browser = subprocess.run(['node', '-e', js], input=json.dumps([*args, current, annual_equity]), encoding='utf-8',
                              capture_output=True, check=True)
     assert json.loads(browser.stdout) == results
 

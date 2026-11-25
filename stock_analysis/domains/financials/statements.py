@@ -187,7 +187,12 @@ def metric(reports, period, key, mode, *, balance_first=False):
                 'method':'上季末余额' if key == 'cash_start' else '本期累计 − 上季累计',
                 'baseline_period':prior_period, 'baseline_field':previous['field'],
                 'baseline_source':previous['source'], 'inputs':[current,previous], 'reason':None}
+    return reported_metric(reports, period, source, code, LABELS[key], balance_first=balance_first)
+
+
+def reported_metric(reports, period, source, code, label, *, balance_first=False):
     # Only accept exact, applicable gjzb fields; never substitute similarly named totals.
+    entry = reports.get(period, {})
     for kind in ((source, 'gjzb') if balance_first else ('gjzb', source)):
         raw = entry.get(kind)
         if not raw:
@@ -196,9 +201,9 @@ def metric(reports, period, key, mode, *, balance_first=False):
         if item:
             value = extract(raw, item, kind, period, 'ytd', reports)
             if value['value'] is not None:
-                value['label'] = LABELS[key]
+                value['label'] = label
                 return value
-    return missing(LABELS[key], period)
+    return missing(label, period)
 
 
 def roe_metric(reports, period, mode):

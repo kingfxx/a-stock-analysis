@@ -49,10 +49,11 @@ def _current_year_facts(reports, year, annual):
     return dict(year=year, actual=actual, prior=prior)
 
 
-def calculate(base, start, scenarios, current=None):
+def calculate(base, start, scenarios, current=None, annual_equity=None):
     years = list(range(start, start + 3))
     results = {}
     for key, inputs in scenarios.items():
+        equity = (annual_equity or {}).get(str(start - 1), {}).get('value')
         profits = [calculate_profit(base, row, current if current and year == current['year'] else None)
                    for year, row in zip(years, inputs)]
         dividend = calculate_scenario(years, dict(mode='linked', base_profit=base['profit'], rows=[
@@ -63,6 +64,14 @@ def calculate(base, start, scenarios, current=None):
             row['parts'] = profit['parts']
             if 'progress' in profit:
                 row['progress'] = profit['progress']
+            if annual_equity is not None:
+                # Roll full-year retained profit from the previous December close.
+                equity = equity + row['profit'] - row['cash'] if None not in (equity, row['profit'], row['cash']) else None
+                price, shares = base['share_price'], row['shares']
+                market_cap = price * shares if price and price > 0 and shares and shares > 0 else None
+                row['parent_equity'] = equity
+                row['pe'] = market_cap / row['profit'] if market_cap is not None and row['profit'] and row['profit'] > 0 else None
+                row['pb'] = market_cap / equity if market_cap is not None and equity and equity > 0 else None
         cash = [row['cash'] for row in dividend['rows']]
         dividend['cumulative_cash'] = sum(cash) if None not in cash else None
         results[key] = dividend
@@ -106,14 +115,14 @@ class AluminumForecast:
         return dict(versions=[dict(row) for row in rows[:100]], next_before=rows[99]['id'] if len(rows) > 100 else None)
 
     def read(self):
-        facts = read_dividend_forecast(self.db, CODE)
+        facts = read_dividend_forecast(self.db, CODE, include_annual_equity=True)
         annual = [dict(year=int(row['period'][:4]), profit=row['profit'], detail=row['sources']['profit'])
                   for row in facts['reports'] if row['period'].endswith('-12-31') and row['profit'] is not None]
         market = facts['market']
         year = facts['years'][0]
         progress = _current_year_facts(facts['reports'], year, annual)
         evidence = dict(annual=annual, market=market, sensitivity=self._reference, automatic=self._automatic,
-                        as_of=facts['as_of_date'], current_year=progress)
+                        as_of=facts['as_of_date'], current_year=progress, annual_equity=facts['annual_equity'])
         state = self.quotes.latest()
         defaults = automatic_draft(annual, self._automatic, state['quotes'], market, year, progress)
         return dict(self.directory(), code=CODE, evidence=evidence, proof=self._sign('facts', evidence),
@@ -138,6 +147,8 @@ class AluminumForecast:
                 evidence['automatic'] = context['automatic']
             if 'current_year' in context:
                 evidence['current_year'] = context['current_year']
+            if 'annual_equity' in context:
+                evidence['annual_equity'] = context['annual_equity']
             registry = {key: dict(value=quote, proof=self._sign('quote', quote))
                         for key, quote in context['quote_registry'].items()}
             version.update(evidence=evidence, proof=self._sign('facts', evidence), quote_registry=registry)
@@ -207,7 +218,8 @@ class AluminumForecast:
             prices = remaining_prices(base, comparison)
             if any(prices.get(key) is None for key in ('al_price', 'ao_price')):
                 raise ValueError('请补齐基准年剩余期间的沪铝和氧化铝均价')
-        results = calculate(base, start, scenarios, progress)
+        equity = evidence.get('annual_equity')
+        results = calculate(base, start, scenarios, progress, equity)
         if any(row['profit'] is None for result in results.values() for row in result['rows']):
             raise ValueError('请补齐三个情景共九年的利润参数')
         anchor = next((row for row in evidence['annual'] if row['year'] == base['year']), None)
@@ -218,6 +230,8 @@ class AluminumForecast:
                        share_price_origin='本地收盘价' if evidence['market']['price'] == base['share_price'] else '手填')
         if 'automatic' in evidence:
             context['automatic'] = evidence['automatic']
+        if equity is not None:
+            context['annual_equity'] = {key: value for key, value in equity.items() if key == str(start - 1)}
         if progress and start <= progress['year'] <= start + 2:
             context['current_year'] = dict(progress, prior={
                 key: value for key, value in progress['prior'].items() if key == str(base['year'])})
