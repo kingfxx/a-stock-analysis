@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from stock_analysis.domains.portfolio.activity_read import read_activity
 from stock_analysis.domains.portfolio.calculations import (
-    combine_positions, daily_change, fill_snapshot_daily_pnl, reconcile, snapshot_totals, sum_known,
+    INCLUDED, combine_positions, daily_change, fill_snapshot_daily_pnl, reconcile, snapshot_totals, sum_known,
 )
 from stock_analysis.domains.portfolio.cmb_transfers import parse_transfers
 from stock_analysis.domains.portfolio.cmb_xls import BIFF_SIGNATURE, decimal_text, parse_export
@@ -16,7 +16,10 @@ from stock_analysis.domains.portfolio.ledger_storage import archive, find_overla
 from stock_analysis.domains.portfolio.manual_entries import manual_options, save_manual_entry
 from stock_analysis.domains.portfolio.performance_read import read_performance_reports
 from stock_analysis.domains.portfolio.reference import previous_market_day
-from stock_analysis.domains.portfolio.revaluation import read_revaluation, revaluation_directory, saved_revaluation, save_revaluation
+from stock_analysis.domains.portfolio.revaluation import (
+    display_revaluation, load_saved_revaluation, previous_revaluation_closes, read_revaluation, revaluation_directory,
+    saved_revaluation, save_revaluation,
+)
 from stock_analysis.infrastructure.storage import utc_now
 
 
@@ -165,7 +168,7 @@ class Portfolio:
                          [(snapshot_id, *(row[col] for col in POSITION_COLUMNS)) for row in data['positions']])
         return {'kind': 'snapshot', 'snapshot_id': snapshot_id, 'saved_count': len(data['positions'])}
 
-    def snapshot(self, snapshot_id=None, *, account_id=None, day=None):
+    def snapshot(self, snapshot_id=None, *, account_id=None, day=None, basis_ids=None):
         if day is not None:
             day = check_day(day)
             if snapshot_id is not None or account_id is not None:
@@ -179,7 +182,7 @@ class Portfolio:
             """)]
             accounts = {row['account_id']: row['broker'] for row in directory}
             if snapshot_id is None and account_id is None and len(accounts) > 1:
-                return self._combined_snapshot(db, directory, accounts, day)
+                return self._combined_snapshot(db, directory, accounts, day, basis_ids)
             selected = next((row for row in directory if (snapshot_id is None or row['id'] == snapshot_id)
                              and (account_id is None or row['account_id'] == account_id)), None)
             payload = {'directory': directory, 'accounts': accounts, 'snapshot': None, 'scope': 'account'}
@@ -210,12 +213,13 @@ class Portfolio:
             'SELECT * FROM portfolio_snapshot_positions WHERE snapshot_id=? ORDER BY source_row', (identity,))]
         return snapshot, positions
 
-    def _combined_snapshot(self, db, directory, accounts, day):
+    def _combined_snapshot(self, db, directory, accounts, day, basis_ids=None):
         days = list(dict.fromkeys(row['snapshot_date'] for row in directory if row['session'] == 'close'))
         selected_day = day or (days[0] if days else None)
         selected = {}
         for row in directory:
-            if row['snapshot_date'] == selected_day and row['session'] == 'close':
+            if (row['snapshot_date'] == selected_day and row['session'] == 'close'
+                    and (basis_ids is None or row['id'] in basis_ids)):
                 selected.setdefault(row['account_id'], row)
         if day and not selected:
             raise LookupError('找不到这一天的收盘快照')
@@ -256,6 +260,16 @@ class Portfolio:
 
     def saved_revaluation(self, estimate_id):
         return saved_revaluation(self.db, estimate_id)
+
+    def revaluation_snapshot(self, estimate_id):
+        account_id, basis_ids, saved = load_saved_revaluation(self.db, estimate_id)
+        payload = (self.snapshot(basis_ids[0]) if account_id is not None
+                   else self.snapshot(day=saved['snapshot_date'], basis_ids=basis_ids))
+        positions = [row for row in payload['positions'] if row['asset_type'] in INCLUDED and row['quantity'] > 0]
+        with self.db.shared_reader() as db:
+            references = [self._reference(db, position, saved['quote_date']) for position in positions]
+            previous = previous_revaluation_closes(db, positions, saved)
+        return display_revaluation(payload, saved, references, previous)
 
     def history(self, start=None, end=None, offset=0, *, transfers=False, **options):
         return read_activity(self.db, local_day(), start, end, offset, transfers, options)

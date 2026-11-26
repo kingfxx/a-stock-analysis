@@ -475,9 +475,11 @@ class CollectionManagement:
                 if old and old['status'] != 'pending':
                     continue
                 # Do not start during any relevant source cooldown. No slot is consumed.
-                providers = ['eastmoney'] if key == etf_collection.TASK_KEY else TASKS[key]['providers']
+                is_etf = key == etf_collection.TASK_KEY
+                providers = [etf_collection.SCHEDULED_PROVIDERS[item] for item in params['datasets']] if is_etf else TASKS[key]['providers']
                 states = conn.execute('SELECT cooldown_until FROM collection_provider_state WHERE source_system IN (' + ','.join('?' for _ in providers) + ')', providers).fetchall()
-                cooling=any(r[0] and datetime.fromisoformat(r[0]) > now for r in states)
+                blocked = sum(bool(r[0] and datetime.fromisoformat(r[0]) > now) for r in states)
+                cooling = blocked == len(providers) if is_etf else bool(blocked)
                 skip_reason=None
                 if key=='market_congestion':
                     if not market_congestion.initialized(conn):

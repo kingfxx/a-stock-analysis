@@ -6,7 +6,9 @@ from hashlib import sha256
 import json
 
 from stock_analysis.domains.etfs.storage import read_unadjusted_closes
-from stock_analysis.domains.portfolio.calculations import INCLUDED, revalue_positions, sum_known
+from stock_analysis.domains.portfolio.calculations import (
+    INCLUDED, position_cost, revalue_positions, snapshot_totals, sum_known,
+)
 from stock_analysis.domains.portfolio.history_prices import read_closes
 from stock_analysis.domains.portfolio.reference import local_market_days
 from stock_analysis.infrastructure.storage import utc_now
@@ -19,12 +21,65 @@ def revaluation_directory(conn, account_id):
     """, (account_id,))]
 
 
-def saved_revaluation(db, estimate_id):
+def load_saved_revaluation(db, estimate_id):
     with db.connection() as conn:
-        row = conn.execute('SELECT result_json FROM portfolio_revaluation_snapshots WHERE id=?', (estimate_id,)).fetchone()
+        row = conn.execute("""
+            SELECT account_id, snapshot_ids, result_json FROM portfolio_revaluation_snapshots WHERE id=?
+        """, (estimate_id,)).fetchone()
     if row is None:
         raise LookupError('找不到本地估算快照')
-    return {**json.loads(row['result_json']), 'saved_id': estimate_id}
+    return row['account_id'], json.loads(row['snapshot_ids']), {**json.loads(row['result_json']), 'saved_id': estimate_id}
+
+
+def saved_revaluation(db, estimate_id):
+    return load_saved_revaluation(db, estimate_id)[2]
+
+
+def _display_position(source, close, market_value, holding_pnl, daily_pnl, reference):
+    costs = [position_cost(part) for part in source.get('accounts', [source])]
+    cost = sum(costs) if None not in costs else None
+    value, quantity = Decimal(market_value), source['quantity']
+    opening = value - Decimal(daily_pnl) if daily_pnl is not None else None
+    return {**source, 'price': close, 'market_value': market_value, 'holding_pnl': holding_pnl,
+            'daily_pnl': daily_pnl, 'reference': reference,
+            'holding_pnl_rate': format(Decimal(holding_pnl) * 100 / abs(cost), '.2f')
+            if holding_pnl is not None and cost else None,
+            'cost_price': source['cost_price'] if source['cost_price'] is not None else
+            (format(cost / quantity, '.6f') if cost is not None and quantity else None),
+            'daily_pnl_rate': format(Decimal(daily_pnl) * 100 / opening, '.2f') if opening and opening > 0 else None,
+            'daily_pnl_basis': 'local_close_estimate' if daily_pnl is not None else None}
+
+
+def display_revaluation(payload, saved, references, previous_closes):
+    day = saved['quote_date']
+    source_rows = [row for row in payload['positions'] if row['asset_type'] in INCLUDED and row['quantity'] > 0]
+    positions = [row for row in payload['positions'] if row['asset_type'] not in INCLUDED]
+    for source, estimate, reference in zip(source_rows, saved['positions'], references, strict=True):
+        close = estimate['close']
+        daily = estimate['daily_pnl']
+        previous = previous_closes.get((source['exchange'], source['code'], source['asset_type']))
+        if daily is None and previous is not None:
+            daily = format((Decimal(close) - previous) * source['quantity'], '.2f')
+        ref = {**(reference or {}), 'close': close, 'close_date': day,
+               'valuation': (reference or {}).get('valuation', {})}
+        row = _display_position(source, close, estimate['market_value'], estimate['holding_pnl'], daily, ref)
+        if source.get('accounts'):
+            parts = []
+            for part in source['accounts']:
+                value = Decimal(close) * part['quantity']
+                cost = position_cost(part)
+                parts.append(_display_position(part, close, format(value, '.2f'),
+                                               format(value - cost, '.2f') if cost is not None else None,
+                                               format(Decimal(daily) * part['quantity'] / source['quantity'], '.2f')
+                                               if daily is not None else None, ref))
+            row['accounts'] = parts
+        positions.append(row)
+    source_snapshot = payload['snapshot']
+    snapshot = {**source_snapshot, 'snapshot_date': day, 'session': 'close',
+                'broker_daily_pnl': None, 'broker_daily_pnl_rate': None, 'broker_assets': None}
+    return {**payload, 'snapshot': snapshot, 'positions': positions, 'totals': snapshot_totals(snapshot, positions),
+            'estimate_id': saved['saved_id'], 'basis_date': saved['snapshot_date'],
+            'funds': payload.get('funds', [{'snapshot': source_snapshot, 'reconciliation': payload.get('reconciliation')}])}
 
 
 def save_revaluation(db, payload, result):
@@ -47,6 +102,31 @@ def save_revaluation(db, payload, result):
     return {**result, 'saved_id': identity}
 
 
+def _read_prices(reader, positions, start, end):
+    stock_closes = read_closes(reader, {(row['exchange'], row['code']) for row in positions
+                                        if row['asset_type'] == 'stock'}, start, end)
+    prices = {(exchange, code, 'stock'): {day: value for day, (value, _) in series.items()}
+              for (exchange, code), series in stock_closes.items()}
+    for exchange, code in {(row['exchange'], row['code']) for row in positions
+                           if row['asset_type'] == 'etf' and row['exchange'] in ('sh', 'sz')}:
+        closes = read_unadjusted_closes(reader.conn, exchange, code, start, end)
+        values = {day: Decimal(str(raw)) for day, raw in closes.items() if raw is not None}
+        prices[exchange, code, 'etf'] = {day: value for day, value in values.items() if value.is_finite() and value > 0}
+    market_days = set(local_market_days(reader, start, end))
+    market_days.update(day for series in prices.values() for day in series)
+    return prices, market_days
+
+
+def previous_revaluation_closes(reader, positions, saved):
+    if all(row['daily_pnl'] is not None for row in saved['positions']):
+        return {}
+    end = saved['quote_date']
+    start = date.fromordinal(max(1, date.fromisoformat(end).toordinal() - 15)).isoformat()
+    prices, days = _read_prices(reader, positions, start, end)
+    previous = max((day for day in days if day < end), default=None)
+    return {key: series.get(previous) for key, series in prices.items()}
+
+
 def read_revaluation(db, payload, now):
     snapshot = payload['snapshot']
     if not snapshot:
@@ -58,19 +138,9 @@ def read_revaluation(db, payload, now):
     positions = [row for row in payload['positions'] if row['asset_type'] in INCLUDED and row['quantity'] > 0]
     start = date.fromordinal(max(1, date.fromisoformat(baseline).toordinal() - 15)).isoformat()
     with db.shared_reader() as reader:
-        stock_closes = read_closes(reader, {(row['exchange'], row['code']) for row in positions
-                                            if row['asset_type'] == 'stock'}, start, end)
-        prices = {(exchange, code, 'stock'): {day: value for day, (value, _) in series.items()}
-                  for (exchange, code), series in stock_closes.items()}
-        for exchange, code in {(row['exchange'], row['code']) for row in positions
-                               if row['asset_type'] == 'etf' and row['exchange'] in ('sh', 'sz')}:
-            closes = read_unadjusted_closes(reader.conn, exchange, code, start, end)
-            values = {day: Decimal(str(raw)) for day, raw in closes.items() if raw is not None}
-            prices[exchange, code, 'etf'] = {day: value for day, value in values.items() if value.is_finite() and value > 0}
-        trading_days = local_market_days(reader, start, end)
-    quote_days = {day for series in prices.values() for day in series}
-    quote_date = max((day for day in quote_days.union(trading_days) if day >= baseline), default=None)
-    previous_day = trading_days[-2] if len(trading_days) >= 2 and trading_days[-1] == quote_date else None
+        prices, trading_days = _read_prices(reader, positions, start, end)
+    quote_date = max((day for day in trading_days if day >= baseline), default=None)
+    previous_day = max((day for day in trading_days if quote_date and day < quote_date), default=None)
     rows = revalue_positions(positions, prices, quote_date, previous_day)
     missing_accounts = payload.get('missing_accounts', [])
     totals = {}

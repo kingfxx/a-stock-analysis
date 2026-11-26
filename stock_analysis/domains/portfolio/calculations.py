@@ -12,21 +12,22 @@ def sum_known(rows, key):
     return None if any(value is None for value in values) else sum(map(Decimal, values), Decimal(0))
 
 
-def revalue_positions(positions, prices, day, previous_day):
-    def cost(part):
-        if part['cost_amount'] is not None:
-            return Decimal(part['cost_amount'])
-        if part['market_value'] is not None and part['holding_pnl'] is not None:
-            return Decimal(part['market_value']) - Decimal(part['holding_pnl'])
-        return None
+def position_cost(part):
+    if part['cost_amount'] is not None:
+        return Decimal(part['cost_amount'])
+    if part['market_value'] is not None and part['holding_pnl'] is not None:
+        return Decimal(part['market_value']) - Decimal(part['holding_pnl'])
+    return None
 
+
+def revalue_positions(positions, prices, day, previous_day):
     rows = []
     for position in positions:
         code, name, exchange, asset_type, quantity = (
             position[key] for key in ('code', 'name', 'exchange', 'asset_type', 'quantity'))
         series = prices.get((exchange, code, asset_type), {})
         close, previous = series.get(day), series.get(previous_day)
-        costs = [cost(part) for part in position.get('accounts', [position])]
+        costs = [position_cost(part) for part in position.get('accounts', [position])]
         value = close * quantity if close is not None else None
         pnl = value - sum(costs) if value is not None and None not in costs else None
         daily = (close - previous) * quantity if close is not None and previous is not None else None

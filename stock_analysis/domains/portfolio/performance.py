@@ -27,6 +27,26 @@ def _cash(event):
     return -amount if kind == 'dividend_tax' else amount
 
 
+def position_change(event):
+    quantity = abs(event['quantity'] or 0)
+    return -quantity if event['event_type'] == 'sell' else quantity
+
+
+def advance_positions(positions, events, anchor_day):
+    held = positions.copy()
+    later_events = (event for event in events if event['event_date'] > anchor_day)
+    for event in sorted(later_events, key=lambda row: row['event_date']):
+        kind = event['event_type']
+        if kind not in SUPPORTED_TYPES or (kind in POSITION_TYPES and not event['quantity']):
+            return None
+        if kind in POSITION_TYPES:
+            key = event['security']
+            held[key] = held.get(key, 0) + position_change(event)
+            if held[key] < 0:
+                return None
+    return held
+
+
 def _market_value(held, prices, day, components, sign):
     value = Decimal(0)
     missing = {}
@@ -103,7 +123,7 @@ def reconstruct(days, closing, events, prices, dividends=()):
                 quantity = event['quantity']
                 if not quantity:
                     return {'records': [], 'blocked_dates': [day]}
-                before[key] = before.get(key, 0) + (abs(quantity) if kind == 'sell' else -abs(quantity))
+                before[key] = before.get(key, 0) - position_change(event)
             value = _cash(event)
             if value is None:
                 issues.add(f'{key[1]} 缺少资金金额')
@@ -244,6 +264,8 @@ def merge_performance(reports):
     gaps.update(report['start'] for report in reports
                 if report['start'] > start and (report.get('opening_assets') is None or Decimal(report['opening_assets']) != 0))
     return {**base, **combined, 'stocks': stocks, 'start': start, 'as_of': end, 'year': int(end[:4]),
+            'local_close_from': min((report['local_close_from'] for report in reports if report.get('local_close_from')),
+                                    default=None),
             'opening_assets': opening_assets, 'return_gaps': sorted(gaps),
             'opening_date': min(report.get('opening_date', start) for report in initial_reports),
             'opening_assumed_zero': any(report.get('opening_assumed_zero') for report in initial_reports),

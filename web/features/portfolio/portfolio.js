@@ -74,7 +74,6 @@
       cell.append(line);
     }
     if (estimated) {
-      cell.append(node('small', '按收盘价估算', 'subline'));
       cell.title = '相邻交易日未复权收盘价差 × 持仓数量';
     }
     return cell;
@@ -172,12 +171,20 @@
   async function loadSnapshot(options = {}) {
     const current = ++snapshotRequest;
     const query = `?${new URLSearchParams(options)}`;
-    const data = await request('/api/portfolio/snapshots' + query);
+    let data = await request('/api/portfolio/snapshots' + query);
     if (current !== snapshotRequest) return;
+    const latest = data.revaluations?.[0];
+    if (latest && !options.snapshot && !options.day && !options.estimate &&
+        (latest.quote_date > data.snapshot.snapshot_date ||
+         (latest.quote_date === data.snapshot.snapshot_date && data.snapshot.session !== 'close'))) {
+      data = await request(`/api/portfolio/snapshots?estimate=${latest.id}`);
+      if (current !== snapshotRequest) return;
+    }
     token = data.session_token;
     snapshotScope = data.scope;
     const snapshot = data.snapshot;
-    snapshotSelection = snapshot ? (data.scope === 'combined' ? { day: snapshot.snapshot_date } : { snapshot: snapshot.id }) : null;
+    snapshotSelection = snapshot ? (data.scope === 'combined'
+      ? { day: data.basis_date ?? snapshot.snapshot_date } : { snapshot: String(snapshot.id) }) : null;
     $('open-revaluation').hidden = !snapshot;
     const combined = data.scope === 'combined';
     const accounts = Object.entries(data.accounts);
@@ -195,20 +202,21 @@
     $('current-portfolio-name').textContent = snapshot.broker;
     $('current-portfolio-account').textContent = snapshot.snapshot_date;
     const missing = data.missing_accounts?.length ? ` · ${data.missing_accounts.join('、')}缺同日快照` : '';
-    $('snapshot-context').textContent = `${snapshot.snapshot_date} · ${sessionLabel(snapshot.session)} · A 股及境内 ETF${missing}`;
-    $('snapshot-select').replaceChildren(...(combined
-      ? data.days.map((day) => new Option(`${day} 收盘`, day, false, day === snapshot.snapshot_date))
-      : data.directory.filter((entry) => entry.account_id === snapshot.account_id).map((entry) => new Option(
-        `${entry.snapshot_date} ${sessionLabel(entry.session)}${entry.supersedes_id ? ` · 修订 #${entry.id}` : ''}`,
-        entry.id, false, entry.id === snapshot.id
-      ))));
-    if (data.revaluations?.length) {
-      const estimates = node('optgroup');
-      estimates.label = '本地估算快照';
-      estimates.append(...data.revaluations.map(({id, quote_date}) =>
-        new Option(`${quote_date} 本地估算 #${id}`, `estimate:${id}`)));
-      $('snapshot-select').append(estimates);
+    const basis = data.estimate_id ? ` · 本地估算，仓位与现金沿用 ${data.basis_date} 快照` : '';
+    $('snapshot-context').textContent = `${snapshot.snapshot_date} · ${sessionLabel(snapshot.session)} · A 股及境内 ETF${missing}${basis}`;
+    const versions = combined
+      ? data.days.map((day) => ({ day, value: day, label: `${day} 收盘` }))
+      : data.directory.filter((entry) => entry.account_id === snapshot.account_id).map((entry) => ({
+        day: entry.snapshot_date, value: String(entry.id),
+        label: `${entry.snapshot_date} ${sessionLabel(entry.session)}${entry.supersedes_id ? ` · 修订 #${entry.id}` : ''}`
+      }));
+    for (const { id, quote_date } of data.revaluations ?? []) {
+      versions.push({ day: quote_date, value: `estimate:${id}`, label: `${quote_date} 收盘 · 本地估算 #${id}` });
     }
+    const selected = data.estimate_id ? `estimate:${data.estimate_id}` : (snapshotSelection.day ?? snapshotSelection.snapshot);
+    versions.sort((a, b) => b.day.localeCompare(a.day));
+    $('snapshot-select').replaceChildren(...versions.map(({ label, value }) =>
+      new Option(label, value, false, value === selected)));
     $('market-value').textContent = money(data.totals.market_value);
     $('cash-value').textContent = data.totals.cash == null ? '待核对' : money(data.totals.cash);
     $('asset-value').textContent = money(data.totals.assets ?? snapshot.broker_assets);
@@ -222,7 +230,6 @@
     const dailyRate = $('daily-pnl-rate');
     setRate(dailyRate, data.totals.daily_pnl_rate);
     if (data.totals.daily_rate_basis === 'estimated_opening_assets') {
-      dailyRate.append(node('span', ' · 估算', 'muted'));
       dailyRate.title = '今日盈亏 ÷（收盘总资产 − 今日盈亏），未调整当日出入金';
     } else {
       dailyRate.removeAttribute('title');
@@ -236,7 +243,8 @@
     $('excluded-title').textContent = `排除明细（${excluded.length} 条）`;
     $('excluded-list').replaceChildren(...excluded.map((row) => node('li',
       `${row.code} ${row.name} · ${labels[row.asset_type]}`)));
-    const funds = combined ? data.funds : [{ snapshot, reconciliation: data.reconciliation }];
+    $('funds-title').textContent = data.estimate_id ? '原券商快照资金与市值核对' : '券商资金与市值核对';
+    const funds = data.funds ?? [{ snapshot, reconciliation: data.reconciliation }];
     $('funds-details').replaceChildren(...funds.map((entry) => {
       const panel = node('section');
       const fields = node('dl');
@@ -247,45 +255,31 @@
     }));
   }
 
-  async function openRevaluation(estimateId) {
+  async function saveRevaluation() {
     if (!snapshotSelection) return;
     const button = $('open-revaluation');
-    const status = $('revaluation-status');
-    const content = $('revaluation-data');
-    $('revaluation-dialog').showModal();
-    content.hidden = true;
-    status.textContent = estimateId ? '正在打开已保存的估算快照。' : '正在读取本地收盘行情并检查保存条件。';
+    const current = snapshotRequest;
     button.disabled = true;
+    notice('正在按当天本地收盘行情计算持仓。');
     try {
-      const selection = snapshotSelection;
-      const url = '/api/portfolio/revaluation';
-      const result = estimateId ? await request(`${url}?${new URLSearchParams({ estimate: estimateId })}`)
-        : await request(url, Object.fromEntries(new URLSearchParams(selection)));
-      const missing = result.positions.filter((position) => position.close == null).map((position) => position.code);
-      const quote = result.quote_date
-        ? `行情 ${result.quote_date} 收盘${result.quote_date < result.today ? ' · 暂无今日收盘数据' : ''}`
-        : '暂无快照当日或之后的本地收盘数据';
-      status.textContent = [result.broker, `仓位快照 ${result.snapshot_date}`, quote,
-        result.saved_id ? '已保存本地估算快照' : '仅预览，当日收盘行情齐全后可保存',
-        missing.length ? `缺少收盘价：${missing.join('、')}` : '',
-        result.missing_accounts.length ? `缺少账户快照：${result.missing_accounts.join('、')}` : '',
-        !result.positions.length ? '暂无可重估的持仓' : ''].filter(Boolean).join(' · ');
-      $('revaluation-body').replaceChildren(...result.positions.map((position) => {
-        const row = node('tr');
-        row.append(node('td', `${position.code} ${position.name}`), node('td', display(position.quantity)),
-          node('td', display(position.close)), node('td', money(position.market_value)),
-          pnlPair(position.holding_pnl, null), pnlPair(position.daily_pnl, null));
-        return row;
-      }));
-      $('revaluation-market').textContent = money(result.totals.market_value);
-      setPnl($('revaluation-pnl'), result.totals.holding_pnl);
-      setPnl($('revaluation-daily'), result.totals.daily_pnl);
-      content.hidden = !result.positions.length;
-      if (!estimateId && result.saved_id && selection === snapshotSelection) {
-        await loadSnapshot(selection).catch((error) => notice(error.message));
+      const result = await request('/api/portfolio/revaluation', snapshotSelection);
+      if (result.saved_id) document.dispatchEvent(new Event('portfolio:performance-changed'));
+      if (current !== snapshotRequest) return;
+      if (result.saved_id) {
+        await loadSnapshot({ estimate: result.saved_id });
+        if (snapshotRequest === current + 1) notice(`已保存 ${result.quote_date} 收盘快照。`);
+      } else if (result.missing_accounts.length) {
+        notice(`缺少同日券商快照：${result.missing_accounts.join('、')}。未生成收盘版本。`);
+      } else if (!result.positions.length) {
+        notice('当前快照没有可重估的持仓。');
+      } else if (result.quote_date !== result.today) {
+        notice('当天收盘行情尚未入库，未生成收盘版本。');
+      } else {
+        const missing = result.positions.filter((position) => position.close == null).map((position) => position.code);
+        notice(`缺少当天收盘价：${missing.join('、')}。未生成收盘版本。`);
       }
     } catch (error) {
-      status.textContent = error.message;
+      notice(error.message);
     } finally {
       button.disabled = false;
     }
@@ -496,6 +490,7 @@
     $('import-file').value = '';
     $('import-file').dispatchEvent(new Event('change'));
     $('import-dialog').close();
+    if (!result.already_imported) document.dispatchEvent(new Event('portfolio:performance-changed'));
     notice(result.already_imported ? '这份记录已导入。' :
       `已保存 ${result.saved_count} 条${{ snapshot: '持仓', history: '历史成交', transfers: '银证转账' }[result.kind]}。 ` +
       (result.duplicate_count ? `其中 ${result.duplicate_count} 条已标记重复。` : ''));
@@ -525,7 +520,7 @@
   }
 
   $('open-import').addEventListener('click', () => $('import-dialog').showModal());
-  $('open-revaluation').addEventListener('click', () => openRevaluation());
+  $('open-revaluation').addEventListener('click', saveRevaluation);
   $('import-file').addEventListener('change', () => {
     importPreview = null;
     $('preview-content').replaceChildren();
@@ -540,6 +535,7 @@
   $('confirm-import').addEventListener('click', () => runImport(confirmFile));
   $('account-select').addEventListener('change', (event) => {
     const account = event.target.value;
+    notice('');
     loadSnapshot(account ? { account } : {}).catch((error) => notice(error.message));
   });
   for (const button of document.querySelectorAll('[data-sort]')) {
@@ -551,13 +547,11 @@
   }
   $('snapshot-select').addEventListener('change', (event) => {
     const selected = event.target.value;
-    if (selected.startsWith('estimate:')) {
-      event.target.value = snapshotSelection.day ?? snapshotSelection.snapshot;
-      openRevaluation(selected.slice('estimate:'.length));
-      return;
-    }
+    notice('');
     const key = snapshotScope === 'combined' ? 'day' : 'snapshot';
-    loadSnapshot({ [key]: selected }).catch((error) => notice(error.message));
+    const options = selected.startsWith('estimate:') ? { estimate: selected.slice('estimate:'.length) }
+      : { [key]: selected };
+    loadSnapshot(options).catch((error) => notice(error.message));
   });
   for (const [kind, state] of Object.entries(activity)) {
     const form = $(`${kind}-filter`);

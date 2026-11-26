@@ -15,14 +15,13 @@ import pytest
 import requests
 
 from stock_analysis import application
-from stock_analysis.domains.portfolio import cmb_xls
+from stock_analysis.domains.portfolio import cmb_xls, performance_read, revaluation
 from stock_analysis.domains.portfolio.activity_read import activity_dates
 from stock_analysis.domains.portfolio.calculations import daily_change, fill_snapshot_daily_pnl
 from stock_analysis.domains.portfolio.cash_history import attach_cash, reconstruct_cash
 from stock_analysis.domains.portfolio.cmb_transfers import HEADERS
 from stock_analysis.domains.portfolio.performance import attach_monthly_security_pnl, merge_performance, reconstruct
 from stock_analysis.domains.portfolio.performance_events import reconcile_etf_dividends
-from stock_analysis.domains.portfolio import revaluation
 from stock_analysis.domains.portfolio.service import ImportConflict, Portfolio
 from stock_analysis.http.server import Handler, ThreadingHTTPServer
 from stock_analysis.infrastructure import storage
@@ -275,7 +274,10 @@ def test_revaluation_uses_same_day_raw_prices_and_keeps_snapshot(isolated, monke
     assert 'saved_id' not in revaluation.save_revaluation(isolated.db, before, after_close)
     assert isolated.snapshot(snapshot_id) == before
     etf[following] = 2.6
+    # The index calendar may publish later than the stock and ETF closes.
+    monkeypatch.setattr(revaluation, 'local_market_days', lambda *_: [prior, DAY])
     estimate = revaluation.read_revaluation(isolated.db, before, datetime.fromisoformat(following + 'T16:30:00'))
+    assert estimate['totals']['daily_pnl'] == '120.00'
     started = perf_counter()
     with ThreadPoolExecutor(max_workers=2) as pool:
         saved, retried = pool.map(lambda _: revaluation.save_revaluation(isolated.db, before, estimate), range(2))
@@ -288,6 +290,13 @@ def test_revaluation_uses_same_day_raw_prices_and_keeps_snapshot(isolated, monke
     data = isolated.snapshot(snapshot_id)
     assert data['snapshot'] == before['snapshot'] and data['positions'] == before['positions']
     assert data['revaluations'] == [dict(id=estimate_id, quote_date=following)]
+    display = isolated.revaluation_snapshot(estimate_id)
+    assert (display['snapshot']['snapshot_date'], display['basis_date']) == (following, DAY)
+    assert display['estimate_id'] == estimate_id
+    assert display['totals']['market_value'] == '1620.00'
+    assert display['totals']['daily_pnl'] == '120.00'
+    assert display['positions'][0]['price'] == '11' and display['positions'][0]['cost_price'] == '8'
+    assert display['positions'][1]['reference']['close_date'] == following
     stats = next(row for row in MaintenanceService(isolated.db).read()['tables']
                  if row['name'] == 'portfolio_revaluation_snapshots')
     assert stats['category'] == '持仓分析' and stats['rows'] == 1
@@ -296,6 +305,57 @@ def test_revaluation_uses_same_day_raw_prices_and_keeps_snapshot(isolated, monke
     backup = isolated.db.backup(tmp_path / 'revaluation-backup.sqlite3')
     restored = Database(restore_backup(backup, tmp_path / 'revaluation-restored.sqlite3'))
     assert revaluation.saved_revaluation(restored, estimate_id) == saved
+
+    legacy = dict(estimate, positions=[dict(row, daily_pnl=None) for row in estimate['positions']],
+                  totals=dict(estimate['totals'], daily_pnl=None))
+    legacy_id = revaluation.save_revaluation(isolated.db, before, legacy)['saved_id']
+    filled = isolated.revaluation_snapshot(legacy_id)
+    assert {row['code']: row['daily_pnl'] for row in filled['positions'] if row['daily_pnl'] is not None} == {
+        '000001': '100.00', '159915': '20.00',
+    }
+    assert filled['totals']['daily_pnl'] == '120.00'
+    assert isolated.saved_revaluation(legacy_id)['totals']['daily_pnl'] is None
+    etf.pop(DAY)
+    assert isolated.revaluation_snapshot(legacy_id)['totals']['daily_pnl'] is None
+
+
+def test_performance_extends_saved_close_using_post_snapshot_ledger(isolated, monkeypatch):
+    import_snapshot(isolated, cash='900')
+    prior, following = '2025-11-21', '2025-11-25'
+    stock = {prior: Decimal('9'), DAY: Decimal('10'), following: Decimal('11')}
+    etf = {prior: Decimal('2.3'), DAY: Decimal('2.5'), following: Decimal('2.6')}
+
+    def stock_closes(reader, keys, start, end, **kwargs):
+        return {('sz', '000001'): {day: (price, None) for day, price in stock.items() if day <= end}}
+
+    def etf_closes(conn, exchange, code, start, end, **kwargs):
+        return {day: price for day, price in etf.items() if day <= end}
+
+    for module in (performance_read, revaluation):
+        monkeypatch.setattr(module, 'local_market_days', lambda *_: [prior, DAY])
+        monkeypatch.setattr(module, 'read_closes', stock_closes)
+        monkeypatch.setattr(module, 'read_unadjusted_closes', etf_closes)
+
+    for day in (DAY, following):
+        isolated.save_manual('transfers', dict(broker='招商', business='银行转证券', event_date=day,
+                                              gross_amount='200', request_id=str(uuid4())))
+    isolated.save_manual('history', dict(broker='招商', business='买入', event_date=following,
+                                        code='000001', quantity='10', price='10.5', gross_amount='105',
+                                        fees='1', request_id=str(uuid4())))
+
+    official = isolated.performance()
+    assert official['as_of'] == DAY
+    payload = isolated.snapshot()
+    estimate = revaluation.read_revaluation(isolated.db, payload, datetime.fromisoformat(following + 'T16:30:00'))
+    assert revaluation.save_revaluation(isolated.db, payload, estimate)['saved_id']
+    updated = isolated.performance()
+    assert updated['as_of'] == updated['combined']['as_of'] == following
+    assert updated['local_close_from'] == updated['combined']['local_close_from'] == following
+    assert updated['records'][:-1] == official['records']
+    last = updated['records'][-1]
+    assert (last['pnl'], last['market_value'], last['cash_balance'], last['total_assets']) == (
+        '124.00', '1730.00', '994.00', '2724.00')
+    assert updated['stocks']['records'][-1]['pnl'] == '104.00'
 
 
 def test_revaluation_schema_upgrades_from_54(tmp_path, monkeypatch):
@@ -502,6 +562,19 @@ def test_huatai_transcription_and_same_day_account_rollup(isolated):
     assert store.snapshot()['missing_accounts'] == ['华泰证券']
     assert store.snapshot(day=DAY)['missing_accounts'] == []
 
+    prices = {('sz', '000001', 'stock'): {DAY: Decimal('10'), next_day: Decimal('11')},
+              ('sz', '159915', 'etf'): {DAY: Decimal('2.5'), next_day: Decimal('2.6')}}
+    rows = revaluation.revalue_positions(
+        [row for row in combined['positions'] if row['asset_type'] in {'stock', 'etf'}], prices, next_day, DAY)
+    result = dict(quote_date=next_day, today=next_day, snapshot_date=DAY, positions=rows,
+                  totals={'market_value': '2170.00'})
+    estimate_id = revaluation.save_revaluation(store.db, combined, result)['saved_id']
+    display = store.revaluation_snapshot(estimate_id)
+    row = next(row for row in display['positions'] if row['code'] == '000001')
+    assert display['scope'] == 'combined' and display['totals']['market_value'] == '2170.00'
+    assert row['market_value'] == '1650.00'
+    assert sorted(part['market_value'] for part in row['accounts']) == ['1100.00', '550.00']
+
 
 def test_bank_transfers_ignore_balance_checks_and_separate_cash_from_trade_history(isolated):
     rows = [
@@ -615,6 +688,25 @@ def test_portfolio_http_gate_and_import(isolated, monkeypatch):
             preview_only = session.post(revalue, json=selection, headers=headers, timeout=5)
             assert preview_only.ok and 'saved_id' not in preview_only.json()
             assert session.get(revalue, params={'estimate': 1}, timeout=5).status_code == 404
+            snapshots = base + '/api/portfolio/snapshots'
+            assert session.get(snapshots, params={'estimate': 1}, timeout=5).status_code == 404
+            assert session.get(snapshots, params={'estimate': 1, 'snapshot': snapshot_id}, timeout=5).status_code == 400
+            def raw_closes(reader, keys, start, end):
+                return {('sz', '000001'): {DAY: (Decimal('10'), None), '2025-11-25': (Decimal('11'), None)}}
+
+            class AfterClose(datetime):
+                @classmethod
+                def now(cls, tz):
+                    return cls(2025, 11, 25, 16, tzinfo=tz)
+
+            monkeypatch.setattr('stock_analysis.domains.portfolio.service.datetime', AfterClose)
+            monkeypatch.setattr(revaluation, 'read_closes', raw_closes)
+            monkeypatch.setattr(revaluation, 'read_unadjusted_closes', lambda *_: {DAY: '2.5', '2025-11-25': '2.6'})
+            published = session.post(revalue, json=selection, headers=headers, timeout=5)
+            assert published.ok
+            selected = session.get(snapshots, params={'estimate': published.json()['saved_id']}, timeout=5)
+            assert selected.ok and selected.json()['snapshot']['snapshot_date'] == '2025-11-25'
+            assert selected.json()['totals']['market_value'] == '1620.00'
             http.request_gate = SimpleNamespace(enter=lambda: False)
             assert session.get(base + '/api/portfolio/history', timeout=5).status_code == 503
         finally:

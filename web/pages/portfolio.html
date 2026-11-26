@@ -32,7 +32,7 @@
         <div class="fields">
           <label id="account-control" hidden>账户<select id="account-select"></select></label>
           <label id="snapshot-control" hidden>快照日期<select id="snapshot-select"></select></label>
-          <button id="open-revaluation" type="button" aria-haspopup="dialog" hidden>重估并保存</button>
+          <button id="open-revaluation" type="button" hidden>重估并保存</button>
         </div>
       </div>
       <p id="holdings-empty" class="empty">导入招商证券持仓表后查看仓位与估值。</p>
@@ -59,7 +59,7 @@
             <tbody id="positions-body"></tbody>
           </table>
         </div>
-        <details class="reconciliation"><summary>券商资金与市值核对</summary><div id="funds-details"></div></details>
+        <details class="reconciliation"><summary id="funds-title">券商资金与市值核对</summary><div id="funds-details"></div></details>
         <details id="excluded" class="reconciliation" hidden><summary id="excluded-title"></summary><ul id="excluded-list"></ul></details>
       </div>
     </section>
@@ -171,7 +171,7 @@
           <p id="asset-card-date"></p>
           <p id="asset-cash-summary"></p>
           <p id="asset-flow-summary"></p>
-          <p>历史现金以券商确认的收盘余额为锚点，按已识别人民币流水倒推。缺实际交收的成交按已知成交额和费用估算。港股流水、未确认的交收修正和未入账的公告分红未计入。</p>
+          <p>现金以券商确认的收盘余额为锚点，按已识别人民币流水计算前后各日余额。缺实际交收的成交按已知成交额和费用估算。港股流水、未确认的交收修正和未入账的公告分红未计入。</p>
         </details>
         <div class="panel-head calendar-head">
           <div><h2>盈亏日历</h2><p id="calendar-total" class="muted">盈亏 <strong id="calendar-total-pnl"></strong> / 收益率 <strong id="calendar-total-rate"></strong></p></div>
@@ -305,22 +305,6 @@
     <ul id="manual-candidates" class="muted" hidden></ul>
     <div class="fields dialog-actions"><button id="manual-save" class="primary" type="submit">保存</button></div>
   </form>
-</dialog>
-<dialog id="revaluation-dialog" aria-labelledby="revaluation-title">
-  <form method="dialog" class="dialog-head">
-    <h2 id="revaluation-title">持仓重估</h2><button type="submit">关闭</button>
-  </form>
-  <p id="revaluation-status" class="muted" role="status"></p>
-  <div id="revaluation-data" hidden>
-    <p class="muted">按快照仓位和成本估算。快照后的实际买卖和现金变动需以较新券商快照为准。</p>
-    <div class="table-scroll" tabindex="0" aria-label="持仓重估明细，可横向滚动">
-      <table>
-        <thead><tr><th scope="col">证券</th><th scope="col">数量</th><th scope="col">未复权收盘</th><th scope="col">估算市值</th><th scope="col">估算持仓盈亏</th><th scope="col">当日价格变动盈亏</th></tr></thead>
-        <tbody id="revaluation-body"></tbody>
-        <tfoot><tr><th scope="row" colspan="3">合计（元）</th><td id="revaluation-market"></td><td id="revaluation-pnl"></td><td id="revaluation-daily"></td></tr></tfoot>
-      </table>
-    </div>
-  </div>
 </dialog>
 <dialog id="calendar-month-picker" aria-labelledby="calendar-month-picker-title">
   <form method="dialog" class="dialog-head">

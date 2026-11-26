@@ -39,10 +39,8 @@ class PortfolioRoutes:
                 self._send_body(200, render_portfolio().encode(), 'text/html; charset=utf-8')
                 return True
             query = parse_qs(parsed.query, keep_blank_values=True)
-            allowed = {'snapshot', 'account', 'day'} if path in SNAPSHOT_READS else (
+            allowed = {'snapshot', 'account', 'day', 'estimate'} if path in SNAPSHOT_READS else (
                 set() if path.endswith('/performance') else {'start', 'end', 'offset', *ACTIVITY_FIELDS})
-            if path.endswith('/revaluation'):
-                allowed.add('estimate')
             if path == MANUAL_OPTIONS:
                 allowed = {'q', 'account'}
             if query.keys() - allowed or any(len(values) != 1 for values in query.values()):
@@ -54,7 +52,11 @@ class PortfolioRoutes:
             elif 'estimate' in args:
                 if len(args) != 1:
                     raise ValueError('请选择一份估算快照')
-                result = service.saved_revaluation(int(args['estimate']))
+                if path.endswith('/snapshots'):
+                    result = service.revaluation_snapshot(int(args['estimate']))
+                    result['session_token'] = app.LOCAL_SESSION_TOKEN
+                else:
+                    result = service.saved_revaluation(int(args['estimate']))
             elif path in SNAPSHOT_READS:
                 read = service.snapshot if path.endswith('/snapshots') else service.revaluation
                 result = read(int(args['snapshot']) if 'snapshot' in args else None,

@@ -6,7 +6,9 @@ from decimal import Decimal
 
 from stock_analysis.domains.etfs.storage import read_cash_dividends, read_unadjusted_closes
 from stock_analysis.domains.portfolio.cash_history import TRANSFERS, attach_cash, reconstruct_cash
-from stock_analysis.domains.portfolio.performance import attach_monthly_security_pnl, merge_performance, reconstruct
+from stock_analysis.domains.portfolio.performance import (
+    advance_positions, attach_monthly_security_pnl, merge_performance, reconstruct,
+)
 from stock_analysis.domains.portfolio.performance_events import normalize_events, reconcile_etf_dividends
 from stock_analysis.domains.portfolio.reference import local_market_days
 from stock_analysis.domains.portfolio.history_prices import read_closes
@@ -28,7 +30,16 @@ def _read_account_coverage(conn):
     """)]
 
 
-def _read_performance(reader, broker, security_names):
+def _saved_close_days(conn, account, anchor_day):
+    return [row[0] for row in conn.execute("""
+        SELECT DISTINCT r.quote_date FROM portfolio_revaluation_snapshots r
+        JOIN json_each(r.snapshot_ids) AS basis
+        JOIN portfolio_snapshots s ON s.id=basis.value
+        WHERE s.account_id=? AND r.quote_date>? ORDER BY r.quote_date
+    """, (account, anchor_day))]
+
+
+def _read_performance(reader, broker, security_names, *, use_local_closes=True):
     base = {'broker': broker, 'records': []}
     broker_label = broker.removesuffix('证券')
     conn = reader.conn
@@ -40,21 +51,23 @@ def _read_performance(reader, broker, security_names):
     """, (broker,)).fetchone()
     if snapshot is None:
         return {**base, 'error': f'缺少{broker_label}收盘持仓快照'}
-    end = snapshot['snapshot_date']
+    anchor_day = snapshot['snapshot_date']
     account = snapshot['account_id']
+    local_days = _saved_close_days(conn, account, anchor_day) if use_local_closes else []
+    end = local_days[-1] if local_days else anchor_day
     start = conn.execute("""
         SELECT min(event_date) FROM portfolio_ledger_entries
         WHERE account_id=? AND event_date<=? AND duplicate_of_id IS NULL
         AND (event_type IN ('bank_transfer_in','bank_transfer_out')
              OR (asset_type IN ('stock','etf') AND event_type IN ('buy','sell','dividend','dividend_tax','stock_credit')))
-    """, (account, end)).fetchone()[0]
+    """, (account, anchor_day)).fetchone()[0]
     if start is None:
         return {**base, 'as_of': end, 'error': f'缺少{broker_label}历史成交或银证转账'}
     calendar_start = (date.fromisoformat(start) - timedelta(days=30)).isoformat()
     calendar = local_market_days(reader, calendar_start, end)
     prior = [day for day in calendar if day < start]
-    if not prior or calendar[-1] != end:
-        return {**base, 'as_of': end, 'error': '期初或快照日缺少本地交易日历'}
+    if not prior or anchor_day not in calendar:
+        return {**base, 'as_of': anchor_day, 'error': '期初或快照日缺少本地交易日历'}
     opening = prior[-1]
     dates = calendar[calendar.index(opening):]
     closing = Counter()
@@ -100,6 +113,14 @@ def _read_performance(reader, broker, security_names):
         dividends.extend(dict(row, security=security, cash_per_unit=Decimal(row['cash_per_unit']))
                          for row in read_cash_dividends(conn, exchange, code, opening, end))
     events = reconcile_etf_dividends(normalize_events(events, prices, opening), dividends)
+    local_close_from = None
+    if local_days:
+        priced_days = {day for series in prices.values() for day in series if anchor_day < day <= end}
+        dates = sorted(set(dates).union(local_days, priced_days))
+        local_close_from = dates[dates.index(anchor_day) + 1]
+        closing = advance_positions(closing, events, anchor_day)
+        if closing is None:
+            return _read_performance(reader, broker, security_names, use_local_closes=False)
     for event in events:
         exchange, code = event['security']
         if event['name']:
@@ -122,7 +143,9 @@ def _read_performance(reader, broker, security_names):
     stock_events = [event for event in events if event['security'] not in etfs]
     stock_result = reconstruct(dates, {key: quantity for key, quantity in closing.items() if key not in etfs},
                                stock_events, prices)
-    balances = reconstruct_cash(dates, snapshot['confirmed_cash'], ledger)
+    if local_days and any(day > anchor_day for scope in (result, stock_result) for day in scope['blocked_dates']):
+        return _read_performance(reader, broker, security_names, use_local_closes=False)
+    balances = reconstruct_cash(dates, snapshot['confirmed_cash'], ledger, anchor_day=anchor_day)
     for scope in (result, stock_result):
         attach_cash(scope['records'], balances)
         scope['fee_gap_count'] = sum(row['fee_gap_count'] for row in scope['records'])
@@ -139,6 +162,7 @@ def _read_performance(reader, broker, security_names):
         if opening_amount >= 0:
             opening_assets = format(opening_amount, '.2f')
     return {**base, **result, 'year': int(end[:4]), 'start': start, 'as_of': end,
+            'local_close_from': local_close_from,
             'opening_assets': opening_assets, 'opening_assumed_zero': assumed_zero,
             'opening_date': start if assumed_zero else opening,
             'return_gaps': sorted(missing_transfers),

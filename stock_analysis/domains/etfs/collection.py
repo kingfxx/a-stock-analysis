@@ -17,6 +17,7 @@ from . import parsers, sources, storage
 
 TASK_KEY = 'etfs'
 DATASETS = {'prices':'历史行情','dividends':'历史分红'}
+SCHEDULED_PROVIDERS = {'prices':'tencent','dividends':'eastmoney'}
 PARSER_VERSION = 'etf-v1'
 ZONE = ZoneInfo('Asia/Shanghai')
 LISTINGS = dict(sh510300='2012-05-28',sh512100='2016-11-04',sh512880='2016-08-08',
@@ -98,12 +99,21 @@ def cached_market_days(db, conn):
     return local
 
 
-def has_result(conn, identity, dataset, kind=None):
+def has_result(conn, identity, dataset, kind=None, provider=None):
     return conn.execute("""
         SELECT 1 FROM collection_batches WHERE domain='etf' AND dataset=? AND code=?
         AND json_extract(scope_json,'$.exchange')=? AND status='complete'
-        AND (? IS NULL OR json_extract(scope_json,'$.kind')=?) LIMIT 1
-    """, (dataset,identity[2:],identity[:2],kind,kind)).fetchone() is not None
+        AND (? IS NULL OR json_extract(scope_json,'$.kind')=?)
+        AND (? IS NULL OR source_system=?) LIMIT 1
+    """, (dataset,identity[2:],identity[:2],kind,kind,provider,provider)).fetchone() is not None
+
+
+def incremental_span(conn, identity, provider):
+    return tuple(conn.execute("""
+        SELECT min(p.trade_date),max(p.trade_date) FROM etf_daily_prices p JOIN collection_batches b ON b.id=p.batch_id
+        WHERE p.exchange=? AND p.code=? AND p.source=?
+        AND json_extract(b.scope_json,'$.kind') IN ('handoff','increment')
+    """,(identity[:2],identity[2:],provider)).fetchone())
 
 
 def add_plan(conn, identity, params, target, days, scheduled):
@@ -121,42 +131,45 @@ def add_plan(conn, identity, params, target, days, scheduled):
         "SELECT 1 FROM portfolio_snapshot_positions WHERE exchange=? AND code=? AND asset_type='etf' LIMIT 1",
         (identity[:2],identity[2:])).fetchone() or has_result(conn,identity,'etf.identity')
     sina_first, sina_end = storage.span(conn,identity,'sina')
-    east_tail = conn.execute("""
-        SELECT max(p.trade_date) FROM etf_daily_prices p JOIN collection_batches b ON b.id=p.batch_id
-        WHERE p.exchange=? AND p.code=? AND p.source='eastmoney'
-        AND json_extract(b.scope_json,'$.kind') IN ('handoff','increment')
-    """,(identity[:2],identity[2:])).fetchone()[0]
     if not official and not scheduled:
         yield work('identity','eastmoney')
     review = params['mode']=='full'
     if 'prices' in params['datasets']:
+        east_start,east_end = incremental_span(conn,identity,'eastmoney')
+        tx_start,tx_end = incremental_span(conn,identity,'tencent')
         if not sina_end and scheduled:
-            yield work('initialize_prices','eastmoney',end=target)
+            yield work('initialize_prices','tencent',end=target)
         elif not sina_end or review:
             initial_end = sina_end or target
             yield work('initial','sina',LISTINGS.get(identity) or sina_first,initial_end)
             if identity=='sz159938':
                 yield work('gap_east','eastmoney',*KNOWN_GAP)
                 yield work('gap_tencent','tencent',*KNOWN_GAP)
-        if review and east_tail:
-            start = shift_day(sina_end,1)
-            for a,b in windows(start,east_tail):
-                yield work('review','eastmoney',a,b)
+        if review:
+            for provider, start, end in (('eastmoney',east_start,east_end),('tencent',tx_start,tx_end)):
+                if start:
+                    for a,b in windows(start,end):
+                        yield work('review',provider,a,b)
         if sina_end:
-            latest = east_tail or sina_end
-            if not east_tail and not has_result(conn,identity,'etf.prices','handoff'):
+            latest = max(filter(None,(sina_end,east_end,tx_end)))
+            if not tx_end and not has_result(conn,identity,'etf.prices','handoff','tencent'):
                 anchors = conn.execute("""
-                    SELECT DISTINCT trade_date FROM etf_daily_prices
-                    WHERE exchange=? AND code=? AND source='sina'
+                    SELECT trade_date,CASE WHEN max(source='sina') THEN 'sina' ELSE 'eastmoney' END source
+                    FROM etf_daily_prices
+                    WHERE exchange=? AND code=? AND
+                      (source='sina' OR (source='eastmoney' AND trade_date>? AND trade_date<=?))
+                    GROUP BY trade_date
                     ORDER BY trade_date DESC LIMIT 10
-                """,(identity[:2],identity[2:])).fetchall()
-                dates = sorted(row[0] for row in anchors)
+                """,(identity[:2],identity[2:],sina_end,east_end)).fetchall()
+                anchor_sources = dict(anchors)
+                dates = sorted(anchor_sources)
                 end = min(target,shift_day(latest,365))
-                yield work('handoff','eastmoney',dates[0],end,anchors=dates,publish_after=latest)
+                yield work('handoff','tencent',dates[0],end,anchors=dates,
+                           anchor_sources=anchor_sources,publish_after=latest)
                 latest = max(latest,end)
             if latest < target and (not days or target>max(days) or any(latest<day<=target for day in days)):
                 for a,b in windows(shift_day(latest,1),target):
-                    yield work('increment','eastmoney',a,b)
+                    yield work('increment','tencent',a,b)
     if 'dividends' in params['datasets']:
         if scheduled and not has_result(conn,identity,'etf.dividends'):
             yield work('initialize_dividends','eastmoney')
@@ -248,14 +261,17 @@ def prepare_prices(conn, batch, scope, records, days):
     if missing:
         raise ValueError(f'日行情缺少 {len(missing)} 个已知交易日，首个缺日 {min(missing)}')
     if kind=='handoff':
-        previous = storage.prices(conn,symbol,'sina',scope['anchors'][0],scope['anchors'][-1])
+        anchor_sources = scope.get('anchor_sources',{})
+        previous = {provider:storage.prices(conn,symbol,provider,scope['anchors'][0],scope['anchors'][-1])
+                    for provider in set(anchor_sources.values()) | {'sina'}}
+        fields = ('volume',) if batch['source_system']=='tencent' else ('volume','amount')
         for value in scope['anchors']:
-            old,new = previous.get(value),prices.get(value)
+            old,new = previous[anchor_sources.get(value,'sina')].get(value),prices.get(value)
             if not old or not new or any(round(old[field],4)!=round(new[field],4) for field in parsers.PRICE_FIELDS[:4]):
                 raise ValueError(f'{value} 行情交接价格不一致')
-            if any(old[field] is None or new[field] is None for field in ('volume','amount')):
-                raise ValueError(f'{value} 成交量单位或成交额未确认')
-            if abs(old['volume']-new['volume'])>100 or abs(old['amount']-new['amount'])>max(1,old['amount']*.001):
+            if any(old[field] is None or new[field] is None for field in fields):
+                raise ValueError(f'{value} 交接的成交量或成交额口径待确认')
+            if abs(old['volume']-new['volume'])>100 or ('amount' in fields and abs(old['amount']-new['amount'])>max(1,old['amount']*.001)):
                 raise ValueError(f'{value} 成交量或成交额口径不一致')
         prices = {value:row for value,row in prices.items() if value>scope['publish_after']}
     coverage = 'complete' if kind.startswith('gap_') or (start and first_known<=start<=end<=last_known) else 'unknown'

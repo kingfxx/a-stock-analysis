@@ -12,7 +12,7 @@ CNY_SECURITIES = {'stock', 'etf'}
 SUBSCRIPTION_PAYMENTS = {'新股申购确认缴款', '配股/配债'}
 
 
-def reconstruct_cash(days, confirmed_cash, entries):
+def reconstruct_cash(days, confirmed_cash, entries, *, anchor_day=None):
     balances = {day: None for day in days}
     if confirmed_cash is None:
         return balances
@@ -40,12 +40,19 @@ def reconstruct_cash(days, confirmed_cash, entries):
                 gaps.add(index)
             else:
                 flow[index] += amount
+    anchor = days.index(anchor_day) if anchor_day is not None else len(days) - 1
     cash = Decimal(confirmed_cash)
-    for index in range(len(days) - 1, -1, -1):
+    for index in range(anchor, -1, -1):
         balances[days[index]] = format(cash, '.2f')
         if index in gaps:
             break
         cash -= flow[index]
+    cash = Decimal(confirmed_cash)
+    for index in range(anchor + 1, len(days)):
+        if index in gaps:
+            break
+        cash += flow[index]
+        balances[days[index]] = format(cash, '.2f')
     return balances
 
 

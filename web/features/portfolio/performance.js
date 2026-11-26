@@ -21,6 +21,7 @@
   let selectedMonth;
   let pickerYearIndex;
   let loading = false;
+  let loadRevision = 0;
   let plotlyPromise;
   let chartRequest = 0;
 
@@ -390,7 +391,8 @@
       }
     }
     const rows = data.records.filter((record) => record.date >= start && record.date <= end);
-    $('performance-period').textContent = `${start} 至 ${end}`;
+    const localClose = data.local_close_from && end >= data.local_close_from ? ' · 含本地收盘估算' : '';
+    $('performance-period').textContent = `${start} 至 ${end}${localClose}`;
     const summary = summarize(rows);
     const closing = rows.at(-1);
     const last = closing?.date;
@@ -440,6 +442,7 @@
     $('performance-assets-scope').textContent = `${data.broker} · ${scopeLabel}收盘市值＋账户人民币现金估算`;
     $('performance-basis').textContent = (report === payload.combined ? '合并账户汇总各券商的总资产及银证净流量。' : '') +
       '累计证券盈亏为逐日盈亏金额之和。' +
+      (data.local_close_from ? '券商快照之后，按已录流水推算持仓与现金，并按已保存的本地收盘日复算。' : '') +
       (data.fee_gap_count ? `${data.fee_gap_count} 笔买卖缺费用或净交收金额，估算未计这部分费用。` : '') +
       (stocksOnly ? '股票股息和补税按券商流水。' : '股票股息和补税按券商流水。ETF 分红计入除息日，优先使用实际到账金额。');
     $('performance-opening-note').textContent = report.opening_assumed_zero
@@ -505,6 +508,7 @@
       return;
     }
     loading = true;
+    const revision = loadRevision;
     const status = $('performance-status');
     status.hidden = false;
     status.textContent = '正在读取本地成交与行情。';
@@ -512,6 +516,7 @@
       const response = await fetch('/api/portfolio/performance');
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || '无法读取盈亏数据');
+      if (revision !== loadRevision) return;
       payload = result;
       $('performance-account').replaceChildren(new Option(result.combined.broker, 'combined', true, true),
         ...result.accounts.map(({broker}) => new Option(broker, broker)));
@@ -519,10 +524,13 @@
       $('performance-range').value = 'all';
       await selectAccount();
     } catch (error) {
-      status.textContent = error.message;
-      status.hidden = false;
+      if (revision === loadRevision) {
+        status.textContent = error.message;
+        status.hidden = false;
+      }
     } finally {
       loading = false;
+      if (revision !== loadRevision && !$('performance').hidden) loadPerformance();
     }
   }
 
@@ -579,11 +587,15 @@
     });
   }
   document.addEventListener('portfolio:performance', loadPerformance);
-  document.addEventListener('portfolio:ledger-changed', () => {
+  function invalidatePerformance() {
+    loadRevision++;
     payload = report = data = null;
     chartRequest++;
     $('performance-data').hidden = true;
     $('performance-account-control').hidden = true;
     $('performance-account-coverage').hidden = true;
-  });
+    if (!$('performance').hidden) loadPerformance();
+  }
+  document.addEventListener('portfolio:ledger-changed', invalidatePerformance);
+  document.addEventListener('portfolio:performance-changed', invalidatePerformance);
 })();

@@ -4,9 +4,9 @@ from datetime import datetime
 
 import pytest
 
-from stock_analysis.collection.collection import archive_source
+from stock_analysis.collection.collection import archive_source, begin_batch, finish_batch
 from stock_analysis.collection.collection_management import CollectionManagement, validate_params
-from stock_analysis.domains.etfs import collection as etfs, parsers
+from stock_analysis.domains.etfs import collection as etfs, parsers, storage
 from stock_analysis.infrastructure.storage import Database
 from test_collection_management_ui import live
 
@@ -36,30 +36,71 @@ def fixture_fetch(response):
 
 
 def test_initial_handoff_resume_and_nullable_fields(db):
-    def raw(stamp, provider='sina', *, change=0, closing=2):
-        values = [2,2.5,1.5,closing,10000,20000]
-        if provider=='eastmoney':
-            values += [0,change,0,0]
+    def raw(stamp, provider='sina', *, closing=2):
+        values = [2,2.5,1.5,closing,100] if provider=='tencent' else [2,2.5,1.5,closing,10000,20000]
         return parsers.price(stamp,values,provider)
 
     initial = [raw('2012-05-28'),raw('2026-11-24'),raw('2026-11-25')]
     ref = reserve(db,['510300','510300.SH'],['prices'])
     etfs.run(db,ref,get_data=fixture_fetch(lambda *_: initial))
     ref = reserve(db,['510300'],['prices'],end='2026-11-26')
-    expected = [raw(d['trade_date'],'eastmoney') for d in initial]
-    bad = [*expected[:2],raw('2026-11-25','eastmoney',closing=2.1),raw('2026-11-26','eastmoney')]
+    expected = [raw(d['trade_date'],'tencent') for d in initial]
+    bad = [*expected[:2],raw('2026-11-25','tencent',closing=2.1),raw('2026-11-26','tencent')]
     etfs.run(db,ref,get_data=fixture_fetch(lambda *_: bad))
     with db.connection() as conn:
         assert conn.execute("SELECT status FROM collection_operations WHERE operation_id=?",(ref,)).fetchone()[0]=='failed'
-        assert conn.execute("SELECT count(*) FROM etf_daily_prices WHERE source='eastmoney'").fetchone()[0]==0
+        assert conn.execute("SELECT count(*) FROM etf_daily_prices WHERE source='tencent'").fetchone()[0]==0
     resume = reserve(db,mode='resume',ref=ref)
-    etfs.run(db,resume,get_data=fixture_fetch(lambda *_: [*expected,raw('2026-11-26','eastmoney',change=-.2)]))
+    etfs.run(db,resume,get_data=fixture_fetch(lambda *_: [*expected,raw('2026-11-26','tencent')]))
     with db.connection() as conn:
-        rows = conn.execute("SELECT source,amplitude_pct,change_pct,turnover_rate_pct FROM etf_daily_prices ORDER BY trade_date").fetchall()
-        assert [tuple(row) for row in rows]==[('sina',None,None,None)]*3+[('eastmoney',0,-.2,0)]
+        rows = conn.execute("SELECT source,amount,amplitude_pct,change_pct,change_amount,turnover_rate_pct FROM etf_daily_prices ORDER BY trade_date").fetchall()
+        assert [tuple(row) for row in rows]==[('sina',20000,None,None,None,None)]*3+[('tencent',None,None,None,None,None)]
         assert conn.execute('PRAGMA foreign_key_check').fetchall()==[]
     with pytest.raises(ValueError,match='没有可续跑'):
         reserve(db,mode='resume')
+
+
+def test_tencent_handoff_preserves_eastmoney_tail(db):
+    first, previous, current = '2012-05-28','2026-11-24','2026-11-25'
+    raw = [2,2.5,1.5,2,10000,20000]
+    initial = reserve(db,['510300'],['prices'],end=previous)
+    etfs.run(db,initial,get_data=fixture_fetch(lambda *_:[parsers.price(first,raw,'sina'),parsers.price(previous,raw,'sina')]))
+    scope = dict(exchange='sh',code='510300',kind='increment')
+    batch_id = begin_batch(db,None,'etf.prices','eastmoney',current,current,scope=scope,domain='etf')
+    source_id = archive_source(db,batch_id,'eastmoney','etf.prices',{'url':'fixture'},1,raw=b'old tail')
+    with db.connection(write=True) as conn:
+        batch = conn.execute('SELECT * FROM collection_batches WHERE id=?',(batch_id,)).fetchone()
+        storage.save_prices(conn,batch,scope,{current:parsers.price(current,raw+[1,-1,-.02,0],'eastmoney')},source_id)
+    finish_batch(db,batch_id,'complete','complete')
+    handoff = reserve(db,['510300'],['prices'],end='2026-11-26',scheduled=True)
+    def fetch(batch,scope):
+        assert batch['source_system']=='tencent' and scope['publish_after']==current
+        assert scope['anchor_sources'][current]=='eastmoney'
+        return [parsers.price(day,[2,2.5,1.5,2,100],'tencent') for day in (*scope['anchors'],'2026-11-26')]
+    etfs.run(db,handoff,get_data=fixture_fetch(fetch))
+    next_ref = reserve(db,['510300'],['prices'],end='2026-11-27',scheduled=True)
+    with db.connection() as conn:
+        assert tuple(conn.execute('SELECT source_system,scope_start,scope_end FROM collection_batches WHERE operation_id=?',(next_ref,)).fetchone())==(
+            'tencent','2026-11-27','2026-11-27')
+        assert [tuple(row) for row in conn.execute("SELECT trade_date,source,amount FROM etf_daily_prices WHERE trade_date>=? ORDER BY trade_date",(current,))]==[
+            (current,'eastmoney',20000),('2026-11-26','tencent',None)]
+
+
+def test_etf_price_schedule_uses_tencent_cooldown(db, monkeypatch):
+    management = CollectionManagement(db,None)
+    management.configure('etfs',dict(enabled=True,local_time='18:00',rule={'frequency':'daily'},
+        params={'mode':'incremental','codes':['510300'],'datasets':['prices']}))
+    monkeypatch.setattr(management,'execute',lambda key,params,ref: etfs.run(
+        db,ref,get_data=lambda *_:pytest.fail('uninitialized schedule cannot send requests')))
+    with db.connection(write=True) as conn:
+        conn.execute("INSERT INTO collection_provider_state VALUES('eastmoney','2099-02-01T00:00:00+00:00','test',1,'{}','2099-01-01')")
+    management.tick(now=datetime(2099,1,2,19,tzinfo=etfs.ZONE))
+    with db.connection(write=True) as conn:
+        assert conn.execute("SELECT count(*) FROM collection_operations WHERE task_key='etfs'").fetchone()[0]==1
+        conn.execute("INSERT INTO collection_provider_state VALUES('tencent','2099-02-01T00:00:00+00:00','test',1,'{}','2099-01-01')")
+    management.tick(now=datetime(2099,1,3,19,tzinfo=etfs.ZONE))
+    with db.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM collection_operations WHERE task_key='etfs'").fetchone()[0]==1
 
 
 def test_dividend_empty_conflict_and_official_evidence(db):
