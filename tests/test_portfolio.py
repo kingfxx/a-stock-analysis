@@ -15,12 +15,15 @@ import pytest
 import requests
 
 from stock_analysis import application
-from stock_analysis.domains.portfolio import cmb_xls, performance_read, revaluation
+from stock_analysis.domains.portfolio import cmb_xls, hk_performance, performance_read, revaluation
 from stock_analysis.domains.portfolio.activity_read import activity_dates
 from stock_analysis.domains.portfolio.calculations import daily_change, fill_snapshot_daily_pnl
 from stock_analysis.domains.portfolio.cash_history import attach_cash, reconstruct_cash
 from stock_analysis.domains.portfolio.cmb_transfers import HEADERS
-from stock_analysis.domains.portfolio.performance import attach_monthly_security_pnl, merge_performance, reconstruct
+from stock_analysis.domains.portfolio.performance import (
+    attach_monthly_security_pnl, combine_market_performance, merge_performance, reconstruct,
+    sum_domestic_performance,
+)
 from stock_analysis.domains.portfolio.performance_events import reconcile_etf_dividends
 from stock_analysis.domains.portfolio.service import ImportConflict, Portfolio
 from stock_analysis.http.server import Handler, ThreadingHTTPServer
@@ -103,6 +106,102 @@ def test_daily_quote_fallback_requires_correct_dates_and_broker_reconciliation()
     broker = {**row, 'daily_pnl': '18', 'daily_pnl_basis': None}
     fill_snapshot_daily_pnl(snapshot, [broker], previous)
     assert broker['daily_pnl'] == '18'
+
+
+def test_confirmed_hk_snapshot_and_fixed_rate_history(isolated, monkeypatch):
+    snapshot_id = import_snapshot(isolated)['snapshot_id']
+    with isolated.db.connection(write=True) as conn:
+        conn.execute("""
+            UPDATE portfolio_snapshot_positions SET code='01919',quantity=1000,
+                price='16.73',exchange_rate='0.8498',market_value='14217.15',
+                cost_amount='12000',holding_pnl='2217.15'
+            WHERE snapshot_id=? AND exchange='hk'
+        """, (snapshot_id,))
+        account = conn.execute('SELECT account_id FROM portfolio_snapshots WHERE id=?', (snapshot_id,)).fetchone()[0]
+        conn.executemany("""
+            INSERT INTO portfolio_ledger_entries(
+                account_id,event_date,event_type,source_label,exchange,code,name,asset_type,
+                quantity,gross_amount,source_sha256,source_name,source_row,fingerprint,imported_at
+            ) VALUES (?,?,?,?,'hk','01919','港股样例','hong_kong',?,?,'fixture','fixture',?,'fixture',?)
+        """, [(account, '2025-11-21', 'buy', '港股订单买申报', 1000, '12119.52', 1, DAY),
+              (account, '2025-11-22', 'dividend', '股息入账', 0, '352', 2, DAY)])
+    dates = ['2025-11-20', '2025-11-21', DAY, '2025-11-25']
+    raw = dict(zip(dates, map(Decimal, ('14.90', '14.92', '16.73', '16.93'))))
+    def closes(reader, keys, start, end):
+        return {(market, code): {stamp: (quote, ()) for stamp, quote in raw.items() if start <= stamp <= end}
+                for market, code in keys}
+    monkeypatch.setattr(hk_performance, 'read_closes', closes)
+    monkeypatch.setattr(revaluation, 'read_closes', closes)
+    monkeypatch.setattr(revaluation, 'read_unadjusted_closes', lambda *_: raw)
+    monkeypatch.setattr(revaluation, 'local_market_days', lambda *_: dates)
+    payload = isolated.snapshot(snapshot_id)
+    hk = next(row for row in payload['positions'] if row['exchange'] == 'hk')
+    assert hk['included'] and hk['weight'] and payload['totals']['market_value'] == '15717.15'
+
+    report = isolated.performance()
+    scope = report['hong_kong']
+    assert report['combined']['hong_kong'] == scope
+    assert scope['fee_gap_count'] == 1 and scope['fx_basis_date'] == DAY and scope['fixed_fx'] == '0.8498'
+    assert [row['date'] for row in scope['records']] == ['2025-11-21', '2025-11-22', DAY]
+    assert scope['records'][1]['pnl'] == scope['records'][1]['dividend_net'] == '352.00'
+    assert scope['records'][-1]['cumulative'] == '2449.63'
+    assert scope['monthly_security_pnl'] == {'2025-11': {'hk:01919': 244963}}
+
+    value = revaluation.read_revaluation(isolated.db, payload, datetime.fromisoformat(dates[-1] + 'T16:30:00'))
+    market = next(row for row in value['positions'] if row['asset_type'] == 'hong_kong')
+    assert (market['close'], market['market_value'], market['daily_pnl']) == ('16.93', '14387.11', '169.96')
+    saved = revaluation.save_revaluation(isolated.db, payload, value)
+    current = isolated.revaluation_snapshot(saved['saved_id'])
+    assert current['positions'][-1]['daily_pnl_basis'] == 'fixed_fx_estimate'
+    assert isolated.performance()['hong_kong']['records'][-1]['pnl'] == '169.96'
+
+    legacy = {**value, 'positions': [row for row in value['positions'] if row['asset_type'] != 'hong_kong'],
+              'totals': {'market_value': '2539.50'}}
+    old = isolated.revaluation_snapshot(revaluation.save_revaluation(isolated.db, payload, legacy)['saved_id'])
+    hk = next(row for row in old['positions'] if row['exchange'] == 'hk')
+    assert not hk['included'] and hk['exclusion_reason']
+
+
+def test_domestic_combination_sums_independently_rounded_pnl():
+    dates = ['2025-11-20', '2025-11-21']
+    stock, etf = ('sh', '601919'), ('sz', '159915')
+    prices = {key: dict(zip(dates, map(Decimal, ('1.000', '1.006')))) for key in (stock, etf)}
+    stocks = reconstruct(dates, {stock: 1}, [], prices)
+    etfs = reconstruct(dates, {etf: 1}, [], prices)
+    combined = sum_domestic_performance(stocks, etfs)['records'][0]
+    assert stocks['records'][0]['pnl'] == etfs['records'][0]['pnl'] == '0.01'
+    assert combined['pnl'] == combined['cumulative'] == '0.02'
+    assert combined['security_pnl'] == {stock: 1, etf: 1}
+
+
+def test_combined_markets_align_local_dates_and_keep_valuation_gaps():
+    def daily(day, pnl, value, security, dividend='0.00'):
+        return {'date': f'2025-11-{day}', 'pnl': pnl, 'market_value': value,
+                'dividend_net': dividend, 'estimated_dividend': '0.00', 'trades': 0,
+                'fee_gap_count': 0, 'issues': ['缺少当日估值'] if pnl is None else [],
+                'estimated_closes': [],
+                'security_pnl': {security: int(Decimal(pnl) * 100)} if pnl is not None else {}}
+    a = ('sh', '601919')
+    h = ('hk', '01919')
+    domestic = {'start': '2025-11-20', 'as_of': '2025-11-26', 'blocked_dates': [],
+                'records': [daily('20', '100.00', '1000.00', a),
+                            daily('24', '-10.00', '990.00', a), daily('25', '25.00', '1015.00', a),
+                            daily('26', '12.00', '1027.00', a)]}
+    hk = {'start': '2025-11-21', 'as_of': '2025-11-25', 'blocked_dates': [],
+          'fixed_fx': '0.8498', 'fx_basis_date': '2025-11-25',
+          'records': [daily('21', '50.00', '500.00', h, '20.00'),
+                      daily('25', None, None, h)]}
+    mixed = combine_market_performance(domestic, hk)
+    assert (mixed['start'], mixed['as_of'], mixed['fixed_fx']) == ('2025-11-20', '2025-11-25', '0.8498')
+    first, hk_day, domestic_day, gap = mixed['records']
+    assert first['market_value'] == '1000.00'
+    assert (hk_day['pnl'], hk_day['dividend_net'], hk_day['market_value']) == ('50.00', '20.00', '1500.00')
+    assert hk_day['carried_markets'] == [{'market': 'A 股及 ETF', 'valuation_date': '2025-11-20'}]
+    assert (domestic_day['pnl'], domestic_day['market_value'], domestic_day['cumulative']) == (
+        '-10.00', '1490.00', '140.00')
+    assert gap['pnl'] is None and gap['market_value'] is None and gap['issues']
+    attach_monthly_security_pnl(mixed)
+    assert mixed['monthly_security_pnl'] == {'2025-11': {'sh:601919': 9000, 'hk:01919': 5000}}
 
 
 def test_performance_reconstructs_trades_dividends_and_gaps():
@@ -356,13 +455,18 @@ def test_performance_extends_saved_close_using_post_snapshot_ledger(isolated, mo
     assert (last['pnl'], last['market_value'], last['cash_balance'], last['total_assets']) == (
         '124.00', '1730.00', '994.00', '2724.00')
     assert updated['stocks']['records'][-1]['pnl'] == '104.00'
+    assert updated['etfs']['records'][-1]['pnl'] == '20.00'
+    assert updated['etfs']['records'][-1]['market_value'] == '520.00'
+    assert updated['combined']['etfs']['records'][-1]['pnl'] == '20.00'
+    assert set(updated['etfs']['monthly_security_pnl']['2025-11']) == {'sz:159915'}
 
 
 def test_revaluation_schema_upgrades_from_54(tmp_path, monkeypatch):
     db = Database(tmp_path / 'upgrade.sqlite3')
-    with monkeypatch.context() as patch:
-        patch.setattr(storage, 'MIGRATIONS', storage.MIGRATIONS[:-1])
-        assert db.initialize()['schema_version'] == 54
+    migrations = storage.MIGRATIONS
+    monkeypatch.setattr(storage, 'MIGRATIONS', tuple(row for row in migrations if row[0] <= 54))
+    assert db.initialize()['schema_version'] == 54
+    monkeypatch.setattr(storage, 'MIGRATIONS', tuple(row for row in migrations if row[0] <= 55))
     assert db.initialize()['schema_version'] == 55
     with db.connection() as conn:
         assert revaluation.revaluation_directory(conn, None) == []

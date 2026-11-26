@@ -5,7 +5,9 @@ import json
 from datetime import date
 
 from stock_analysis.domains.financials.fundamental_service import SOURCE
-from stock_analysis.domains.stocks.source_parsers import _number, normalize_code
+from stock_analysis.domains.stocks.source_parsers import _number
+from stock_analysis.domains.stocks.identity import stock_identity
+from stock_analysis.domains.financials.hk_statement_parser import SOURCE as HK_SOURCE
 from stock_analysis.domains.financials.financial_storage import decompress_json
 
 
@@ -79,6 +81,8 @@ def previous_report_period(period):
 
 
 def comparison_pct(current, previous):
+    if current and previous and current.get('currency') != previous.get('currency'):
+        return None
     current_value = current.get('value') if current else None
     previous_value = previous.get('value') if previous else None
     if current_value is None or previous_value is None or previous_value <= 0:
@@ -87,8 +91,13 @@ def comparison_pct(current, previous):
 
 
 def compatible(a, b):
-    return bool(a and b and a.get('rCurrency') == b.get('rCurrency') == 'CNY'
-                and a.get('rType') == b.get('rType') and a.get('rType') == '合并期末')
+    return bool(a and b and a.get('rCurrency') == b.get('rCurrency') and confirmed_basis(a) and confirmed_basis(b)
+                and a.get('period_start') == b.get('period_start'))
+
+
+def confirmed_basis(raw):
+    return raw.get('rType') == '合并期末' and (
+        raw.get('rCurrency') == 'CNY' or raw.get('statement_source') == HK_SOURCE and bool(raw.get('rCurrency')))
 
 
 def items(raw):
@@ -125,7 +134,9 @@ def extract(raw, item, kind, period, mode, reports):
               'source': kind, 'item_source': item.get('item_source'), 'value': value,
               'unit': unit(item), 'method': '直接取数', 'period': period,
               'currency': raw.get('rCurrency'), 'scope': raw.get('rType'), 'reason': None}
-    if raw.get('rCurrency') != 'CNY' or raw.get('rType') != '合并期末':
+    if item.get('source_field'):
+        output.update(source_field=item['source_field'], statement_source=raw.get('statement_source'))
+    if not confirmed_basis(raw):
         output.update(value=None, reason='币种或合并范围未经确认')
     elif mode == 'quarter' and kind != 'fzb' and int(period[5:7]) != 3:
         if output['unit'] != '元':
@@ -477,7 +488,8 @@ def waterfall(values, financial, period):
 
 
 def read_statements(db, code, *, period=None, mode='ytd', comparison='yoy'):
-    code = normalize_code(code)
+    exchange, code = stock_identity(code)
+    source = HK_SOURCE if exchange == 'hk' else SOURCE
     if mode not in {'ytd','quarter'} or comparison not in {'yoy','previous','year_end'}:
         raise ValueError('财务分析展示口径无效')
     if period:
@@ -485,10 +497,10 @@ def read_statements(db, code, *, period=None, mode='ytd', comparison='yoy'):
         if period[5:] not in {'03-31','06-30','09-30','12-31'}:
             raise ValueError('请选择季度报告期')
     with db.connection() as conn:
-        instrument = conn.execute('SELECT id,name FROM instruments WHERE code=?',(code,)).fetchone()
+        instrument = conn.execute('SELECT id,name FROM instruments WHERE exchange=? AND code=?',(exchange,code)).fetchone()
         rows = conn.execute('SELECT report_type,period,raw_json,obtained_at FROM financial_reports '
                             'WHERE instrument_id=? AND source=? AND report_type IN (?,?,?,?) ORDER BY period',
-                            (instrument['id'], SOURCE,'gjzb','fzb','lrb','llb')).fetchall() if instrument else []
+                            (instrument['id'], source,'gjzb','fzb','lrb','llb')).fetchall() if instrument else []
         override_rows = conn.execute("SELECT period,value_json,source_path FROM report_overrides "
                                      "WHERE instrument_id=? AND field_name='adjusted_profit_ytd'",
                                      (instrument['id'],)).fetchall() if instrument else []
@@ -510,6 +522,9 @@ def read_statements(db, code, *, period=None, mode='ytd', comparison='yoy'):
               'updated_at':max((x['obtained_at'] for x in rows),default=None),'sections':{},'observations':[]}
     if not period:
         return result
+    if exchange == 'hk':
+        currencies = sorted({raw['rCurrency'] for raw in reports[period].values() if raw.get('rCurrency')})
+        result['report_currency'] = ' / '.join(currencies) or None
     year = int(period[:4])
     baseline = f'{year-1}{period[4:]}' if comparison == 'yoy' else f'{year-1}-12-31' if comparison == 'year_end' else (
         previous_quarter(period) or f'{year-1}-12-31')

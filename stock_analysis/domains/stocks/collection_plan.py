@@ -2,7 +2,25 @@
 from stock_analysis.collection.execution_context import current_execution
 
 
-def segments(dataset):
+def segments(dataset, exchange='sh'):
+    if exchange == 'hk':
+        if dataset == 'prices':
+            return [('tencent', 'prices_raw', 'fqkline/get'), ('tencent', 'prices_adjusted', 'hkfqkline/get')]
+        if dataset == 'financial':
+            from stock_analysis.domains.financials.hk_statement_parser import REPORTS
+            return [('eastmoney', 'financial.' + kind, interface) for kind, interface in REPORTS.items()]
+        if dataset == 'business_segments':
+            from stock_analysis.domains.financials.hk_segment_parser import INTERFACE
+            return [('stockanalysis', dataset, INTERFACE)]
+        if dataset == 'announcements':
+            from stock_analysis.domains.stocks.hk_announcement_parser import INTERFACE
+            return [('hkexnews', dataset, INTERFACE)]
+        if dataset == 'valuation':
+            return [('baidu', 'valuation.' + metric, 'opendata') for metric in ('pe', 'pb', 'market_cap')]
+        if dataset == 'dividends':
+            from stock_analysis.domains.stocks.hk_dividend_parser import INTERFACE
+            return [('eastmoney', dataset, INTERFACE)]
+        return []
     if dataset == 'financial':
         return [('sina', 'financial.' + kind, 'getFinanceReport2022:' + kind) for kind in ('lrb','fzb','llb','gjzb')]
     if dataset == 'prices':
@@ -26,8 +44,20 @@ def selected(dataset, interface=''):
     return allowed is None or (dataset, interface) in allowed or not interface and any(d==dataset for d,i in allowed)
 
 
-def versions(dataset):
+def versions(dataset, exchange='sh'):
     # Read the actual service constants at planning time; no duplicated version registry.
+    if exchange == 'hk' and not dataset.startswith('prices_'):
+        if dataset.startswith('financial.'):
+            from stock_analysis.domains.financials.hk_statement_parser import VERSION
+        elif dataset.startswith('valuation.'):
+            from stock_analysis.domains.valuation.hk_valuation import VERSION
+        elif dataset == 'business_segments':
+            from stock_analysis.domains.financials.hk_segment_parser import VERSION
+        elif dataset == 'announcements':
+            from stock_analysis.domains.stocks.hk_announcement_parser import VERSION
+        else:
+            from stock_analysis.domains.stocks.hk_dividend_parser import VERSION
+        return VERSION, VERSION
     if dataset.startswith('financial.'):
         from stock_analysis.domains.financials import fundamental_service as service
     elif dataset.startswith('prices_'):

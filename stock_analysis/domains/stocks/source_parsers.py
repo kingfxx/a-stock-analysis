@@ -250,6 +250,14 @@ def parse_stock_name(text: str, symbol: str) -> str:
     return fields[1].strip()
 
 
+def parse_hk_price_quote(node, symbol):
+    quote = (node.get('qt') or {}).get(symbol, [])
+    # Tencent's Hong Kong quote returns its own issue code and quotation currency.
+    if len(quote) <= 75 or quote[2] != symbol[2:] or quote[75] != 'HKD' or not quote[1].strip():
+        raise ValueError('腾讯港股行情未确认港元报价证券身份')
+    return quote[1].strip()
+
+
 def parse_price_history(payload: dict, symbol: str, adjust: str) -> list[dict]:
     """Full source record, including OHLC; adjusted history may be nonpositive."""
     if adjust not in ("", "qfq"):

@@ -16,7 +16,7 @@ from stock_analysis.domains.valuation.institution_forecast import fetch_institut
 from stock_analysis.domains.stocks.stock_library import StockLibrary
 from stock_analysis.domains.stocks.cached_charts import read as read_cached_chart
 from stock_analysis.domains.valuation.valuation_transport import compact_valuation
-from stock_analysis.domains.stocks.source_parsers import normalize_code
+from stock_analysis.domains.stocks.identity import stock_identity
 from stock_analysis import application as app
 
 
@@ -28,11 +28,14 @@ class StocksRoutes:
         try:
             query = parse_qs(parsed.query, keep_blank_values=True)
             if query.get('lookup') == ['1']:
-                code = normalize_code(query.get('code', [''])[0])
+                exchange, code = stock_identity(query.get('code', [''])[0])
                 has_data = app.data.has_stock_data(Database(app.settings.DATABASE_PATH), code)
-                self._ai_reply({'code': code, 'has_stock_data': has_data})
+                result = {'code': code, 'has_stock_data': has_data}
+                if exchange == 'hk':
+                    result['exchange'] = exchange
+                self._ai_reply(result)
             else:
-                code = normalize_code(parse_qs(parsed.query).get('code', ['601919'])[0])
+                _, code = stock_identity(parse_qs(parsed.query).get('code', ['601919'])[0])
                 self._ai_reply(app.stock_collections().page_status(code))
         except (ValueError, OSError, StorageError, sqlite3.DatabaseError) as exc:
             self._ai_reply({'error': str(exc)}, 400)
@@ -166,7 +169,7 @@ class StocksRoutes:
             query = parse_qs(parsed.query)
             try:
                 code = query.get("code", ["601919"])[0]
-                if Path(app.settings.DATABASE_PATH).exists() and StockLibrary(app.data.services()[0].db).is_unfollowed(normalize_code(code)):
+                if Path(app.settings.DATABASE_PATH).exists() and StockLibrary(app.data.services()[0].db).is_unfollowed(stock_identity(code)[1]):
                     raise ValueError('该股票已取消关注，请在后台维护中恢复关注后更新数据')
                 version_key = "version" if parsed.path == "/api/prices" else "price_version"
                 version = int(query[version_key][0]) if version_key in query else None

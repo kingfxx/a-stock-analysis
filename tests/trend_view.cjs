@@ -13,8 +13,8 @@ const metrics = {profit:{name:'利润',unit:'亿元',scale:1}, revenue:{name:'�
   period_end_market_cap:{name:'市值',unit:'亿元',scale:1}};
 const active = ['profit','revenue','period_end_market_cap'].map((key,i)=>({key,metric:metrics[key],
   label:'ABC'[i],color:['red','blue','green'][i],kind:i===2?'line':'bar',values:rows.map(r=>r[key])}));
-function draw(series) {
-  context.window.TrendView.draw({elements,rows,allRows:rows,active:series,selectedPeriod:'quarter',metrics,
+function draw(series, plottedRows = rows) {
+  context.window.TrendView.draw({elements,rows:plottedRows,allRows:plottedRows,active:series,selectedPeriod:'quarter',metrics,
     label:r=>r.period,positions:items=>items.map((_,i)=>i),isPriceOrCap:()=>false,hasMarketComparisons:()=>false});
   return plots.at(-1);
 }
@@ -27,4 +27,21 @@ const empty=draw([]);
 assert.equal(empty.traces.length,0);
 assert.equal(empty.layout.annotations.length,1);
 assert.equal(empty.layout.yaxis.visible,false);
+
+const sparse = [
+  {period:'2025-03-31',qfq_price:-6},
+  {period:'2025-06-30',qfq_price:null},
+  {period:'2025-09-30',qfq_price:9},
+  {period:'2025-12-31',qfq_price:10}
+];
+const priceMetric = {name:'披露日前复权股价',unit:'港元/股',scale:1,referenceKey:'qfq_price_reference',bridgeMissingPeriods:true};
+const priceSeries = {key:'qfq_price',label:'C',color:'gold',kind:'line',
+  metric:priceMetric,values:sparse.map(row=>row.qfq_price)};
+const sparsePlot = draw([priceSeries], sparse);
+assert.deepEqual(Array.from(sparsePlot.traces[0].y), [-6,null,9,10]);
+assert.equal(sparsePlot.traces[0].connectgaps, false);
+assert.equal(sparsePlot.traces[1].line.dash, 'dash');
+assert.deepEqual(Array.from(sparsePlot.traces[1].x), [0,2,null]);
+assert.deepEqual(Array.from(sparsePlot.traces[1].y), [-6,9,null]);
+assert.equal(draw([{...priceSeries,metric:{...priceMetric,bridgeMissingPeriods:false}}], sparse).traces.length, 1);
 console.log('trend view: shared units, separate market cap, zero alignment, empty selection');

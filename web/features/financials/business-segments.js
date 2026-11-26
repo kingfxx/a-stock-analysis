@@ -77,6 +77,12 @@
     sidebarFilters.querySelector('.business-filter-body').append(panel.querySelector('.bs-controls'));
     const initialBusinessActive=!panel.hidden;sidebarFilters.hidden=!initialBusinessActive;el('trend-tab').closest('.shell').classList.toggle('business-filters-active',initialBusinessActive);
     let data=null,rawData=null,nameView=null,dirty=true,sequence=0,controller=null,selected=new Set(),selectionDimension=null;
+    if (state.exchange==='hk') {
+      const dimension = el('bs-dimension');
+      dimension.querySelector('option[value="1"]').textContent = '按业务分部';
+      dimension.querySelector('option[value="2"]').hidden = true;
+      dimension.value = '1';
+    }
     const active=()=>!panel.hidden;
     const title=key=>el(`bs-${key}-title`);
     const note=key=>el(`bs-${key}-note`);
@@ -172,7 +178,8 @@
       note('region').textContent=`${dateLabel(latest.report_date)} · 按当前名称口径展示实际披露的地区项目；切换金额或占比，年份与范围跟随上方筛选。地区与产品、行业不可跨维度相加，缺失值留空。`;
       plot('bs-region',traces(periods,'3',regionShare?shares[field]:field,new Set(catalog(periods,'3').map(row=>row.item_key)),regionShare?0.01:scale,regionShare),regionShare?'%':unit);
       el('bs-history').innerHTML=table(periods,dimension);
-      el('bs-provenance').textContent=`来源：东方财富 RPT_F10_FN_MAINOP，本地已存当前修订。最新所选报告期 ${latest.report_date}，修订 ${latest.revision}，实际取得时间 ${window.DashboardTime.format(latest.obtained_at,'未记录')}。历史明细保留整维度合计及原始分类名称。`;
+      const source = state.exchange==='hk' ? 'Stock Analysis 港股年度收入表' : '东方财富 RPT_F10_FN_MAINOP';
+      el('bs-provenance').textContent=`来源：${source}${latest.report_currency?' · '+latest.report_currency:''}。最新所选报告期 ${latest.report_date}，修订 ${latest.revision}，实际取得时间 ${window.DashboardTime.format(latest.obtained_at,'未记录')}。`;
     }
     function applyNames() {
       data={...rawData,periods:el('bs-name-mode').value==='normalized'?nameView.periods:rawData.periods};
@@ -193,7 +200,8 @@
         rawData=fresh;
         nameView=window.businessSegmentNames.normalize(fresh.code,fresh.periods);
         applyNames();
-        el('bs-company').textContent=`${data.name||''} ${data.code}`;
+        const currencies = [...new Set(data.periods.map(item => item.report_currency).filter(Boolean))];
+        el('bs-company').textContent=`${data.name||''} ${data.code}${currencies.length?' · '+currencies.join(' / '):''}`;
         const available=Object.keys(frequencies).filter(f=>data.periods.some(p=>p.report_date.endsWith(f)));
         const previous=el('bs-frequency').value;
         el('bs-frequency').innerHTML=available.map(f=>`<option value="${f}">${frequencies[f]}</option>`).join('');

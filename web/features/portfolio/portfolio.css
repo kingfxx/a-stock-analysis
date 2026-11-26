@@ -83,6 +83,18 @@ meter::-webkit-meter-optimum-value { background: var(--cyan); }
 .performance-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .performance-summary-four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .performance-controls { margin-block: .6rem; }
+.performance-security-scope { min-width: 0; margin: 0; padding: 0; border: 0; }
+.performance-security-scope legend {
+  padding: 0; margin-bottom: .35rem; color: var(--muted); font-size: var(--research-detail-size);
+}
+.security-checkboxes {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .75rem; min-height: 42px;
+  padding: .2rem .65rem; border: 1px solid #4b616d; border-radius: 7px; background: #26343c;
+}
+.security-checkboxes label { display: flex; align-items: center; gap: .35rem; min-height: 30px; color: var(--ink); cursor: pointer; }
+.security-checkboxes label:has(input:disabled) { color: var(--muted); cursor: default; }
+.security-checkboxes input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--cyan); cursor: inherit; }
+#performance-data[data-no-scope] > :not(.performance-controls) { display: none !important; }
 .performance-chart-control { width: fit-content; margin-top: .65rem; }
 .performance-chart { width: 100%; height: 290px; margin-top: .6rem; overflow: hidden; }
 .calendar-head { margin-top: 1rem; align-items: end; }

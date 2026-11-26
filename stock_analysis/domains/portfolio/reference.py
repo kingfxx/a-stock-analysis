@@ -23,6 +23,14 @@ def previous_market_day(db, day):
     return sessions[-2] if len(sessions) >= 2 and sessions[-1] == day else None
 
 
+def read_hk_close_reference(db, code, day):
+    start = date.fromordinal(max(1, date.fromisoformat(day).toordinal() - 15)).isoformat()
+    prices = PriceService(db).read(code, 'raw', start=start, end=day, lease=False, exchange='hk')
+    latest = prices[-1] if prices else None
+    return {'close': latest['close'] if latest else None, 'close_date': latest['date'] if latest else None,
+            'valuation': {}}
+
+
 def read_stock_reference(db, code, as_of, *, cache, valuation_cache):
     prices = PriceService(db).read(code, 'raw', end=as_of, lease=False)
     dividends = DividendService(db, cache).read(code)

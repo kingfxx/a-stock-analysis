@@ -22,6 +22,7 @@ from threading import Lock, RLock
 from typing import Callable, Iterator
 
 from stock_analysis.domains.financials.financial_storage import compress_json, financial_row, migrate_financial_json, check_financial_json
+from stock_analysis.domains.stocks.identity import stock_identity
 
 DEFAULT_DATABASE = PROJECT_ROOT / "data" / "stock_analysis.sqlite3"
 APPLICATION_ID = 0x4153544B  # ASTK; refuse an unrelated SQLite file.
@@ -62,7 +63,11 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (50, "050_aluminum_forecast.sql"), (51, "051_portfolio.sql"),
               (52, "052_portfolio_display_fields.sql"),
               (53, "053_portfolio_historical_closes.sql"), (54, "054_etf_collection.sql"),
-              (55, "055_portfolio_revaluation_snapshots.sql"))
+              (55, "055_portfolio_revaluation_snapshots.sql"),
+              (56, "056_stock_market_identity.sql"),
+              (57, "057_hk_announcement_and_dividend.sql"),
+              (58, "058_hk_business_segment_source.sql"),
+              (59, "059_stock_fact_revisions.sql"))
 
 
 class StorageError(RuntimeError):
@@ -237,7 +242,7 @@ class Database:
             actual_mode = conn.execute(f"PRAGMA journal_mode={self.journal_mode}").fetchone()[0]
             if actual_mode != self.journal_mode:
                 raise StorageError(f"Could not select journal mode {self.journal_mode}: {actual_mode}")
-            if applied < 44:
+            if applied < 44 or any(applied < version <= len(migrations) for version in (56, 58)):
                 conn.execute("PRAGMA foreign_keys=OFF")
                 conn.execute("PRAGMA legacy_alter_table=ON")
             conn.execute("BEGIN IMMEDIATE")
@@ -328,16 +333,7 @@ class Database:
 
     def ensure_instrument(self, code: str, name: str | None = None) -> int:
         # Keep maintenance independent of requests/plotly.
-        code = str(code).strip().lower()
-        if code.startswith(("sh", "sz")):
-            prefix, code = code[:2], code[2:]
-        else:
-            prefix = None
-        if len(code) != 6 or not code.isascii() or not code.isdigit() or code[0] not in "036":
-            raise ValueError("Expected a six-digit Shanghai/Shenzhen A-share code")
-        exchange = "sh" if code.startswith("6") else "sz"
-        if prefix and prefix != exchange:
-            raise ValueError("Exchange and stock code disagree")
+        exchange, code = stock_identity(str(code))
         while True:
             with self.connection() as conn:
                 row = conn.execute('SELECT * FROM instruments WHERE exchange=? AND code=?', (exchange, code)).fetchone()
@@ -694,7 +690,8 @@ class Database:
                 invalid_provenance += conn.execute(
                     "SELECT count(*) FROM business_segment_items i JOIN business_segment_versions v ON v.id=i.version_id "
                     "JOIN collection_sources s ON s.id=i.source_id WHERE i.batch_id<>v.batch_id OR s.batch_id<>i.batch_id "
-                    "OR s.source_system<>'eastmoney' OR s.dataset<>'stock.business_segments'"
+                    "OR s.source_system<>CASE v.source WHEN 'stockanalysis:hk-segment-revenue' "
+                    "THEN 'stockanalysis' ELSE 'eastmoney' END OR s.dataset<>'stock.business_segments'"
                 ).fetchone()[0]
             if invalid_runs or invalid_versions or invalid_active or invalid_provenance:
                 raise StorageError("Successful synchronization/price version relationships are inconsistent")

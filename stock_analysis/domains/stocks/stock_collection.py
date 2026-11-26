@@ -59,7 +59,7 @@ class RoutedSession:
         else:
             expect = "json"
             query = (params or {}).get("param", "").split(",")
-            qfq_probe = (provider == "tencent" and len(query) >= 6 and query[0]
+            qfq_probe = (provider == "tencent" and len(query) >= 6 and query[0] and not query[0].startswith('hk')
                          and query[-1] == "qfq" and self._cooldown_expired(provider))
             candidate_token = self.recovery_token or (uuid4().hex if qfq_probe else None)
             validator = self._healthy_json(provider, url, params or {},
@@ -74,7 +74,9 @@ class RoutedSession:
         response, source_id = self.route["collector"].get(
             self.route["batch_id"], provider, self.route["dataset"], url, params,
             headers=headers, expect=expect, healthy_response=healthy, evidence_mode="metadata_only",
-            recovery_token=self.recovery_token or (candidate_token if expect == "json" else None), stock_fast=True)
+            recovery_token=self.recovery_token or (candidate_token if expect == "json" else None),
+            stock_fast=not ((params or {}).get('market') == 'hk' or
+                provider == 'tencent' and ((params or {}).get('param', '').startswith('hk') or '/q=hk' in url)))
         self.source_ids.append(source_id)
         return response
 
@@ -100,7 +102,7 @@ class RoutedSession:
             symbol = parse_qs(urlparse(url).query).get("q", [None])[0]
             if symbol is None:
                 symbol = urlparse(url).path.rsplit("/", 1)[-1].removeprefix("q=")
-            if not symbol or len(symbol) != 8 or symbol[:2] not in ("sh", "sz") or not symbol[2:].isdigit():
+            if not symbol or symbol[:2] not in ('sh', 'sz', 'hk') or len(symbol) != (7 if symbol.startswith('hk') else 8) or not symbol[2:].isdigit():
                 return False
             return bool(parse_stock_name(response.content.decode("gbk", errors="replace"), symbol))
         except (AttributeError, UnicodeError, ValueError):
@@ -144,9 +146,11 @@ class RoutedSession:
                     query = params.get("param", "").split(",")
                     symbol = query[0] if query else None
                     adjustment = query[-1] if query and query[-1] in ("qfq", "hfq") else ""
-                    from stock_analysis.domains.stocks.sources import parse_price_history
+                    from stock_analysis.domains.stocks.source_parsers import parse_hk_price_quote, parse_price_history
                     node = (payload.get("data") or {}).get(symbol, {})
-                    if adjustment == "qfq" and "qfqday" not in node and isinstance(node.get("day"), list):
+                    if (symbol or '').startswith('hk'):
+                        parse_hk_price_quote(node, symbol)
+                    if adjustment == "qfq" and not (symbol or '').startswith('hk') and "qfqday" not in node and isinstance(node.get("day"), list):
                         fallback = {**payload, "data": {symbol: {"qfqday": node["day"]}}}
                         rows = parse_price_history(fallback, symbol, "qfq")
                         return RECOVERY_PENDING if defer_qfq_fallback and rows else bool(rows)

@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from stock_analysis.domains.portfolio.activity_read import read_activity
 from stock_analysis.domains.portfolio.calculations import (
-    INCLUDED, combine_positions, daily_change, fill_snapshot_daily_pnl, reconcile, snapshot_totals, sum_known,
+    combine_positions, daily_change, fill_snapshot_daily_pnl, position_included, reconcile, snapshot_totals, sum_known,
 )
 from stock_analysis.domains.portfolio.cmb_transfers import parse_transfers
 from stock_analysis.domains.portfolio.cmb_xls import BIFF_SIGNATURE, decimal_text, parse_export
@@ -15,7 +15,7 @@ from stock_analysis.domains.portfolio.huatai_snapshot import HUATAI, parse_trans
 from stock_analysis.domains.portfolio.ledger_storage import archive, find_overlaps, save_entries
 from stock_analysis.domains.portfolio.manual_entries import manual_options, save_manual_entry
 from stock_analysis.domains.portfolio.performance_read import read_performance_reports
-from stock_analysis.domains.portfolio.reference import previous_market_day
+from stock_analysis.domains.portfolio.reference import previous_market_day, read_hk_close_reference
 from stock_analysis.domains.portfolio.revaluation import (
     display_revaluation, load_saved_revaluation, previous_revaluation_closes, read_revaluation, revaluation_directory,
     saved_revaluation, save_revaluation,
@@ -108,6 +108,7 @@ class Portfolio:
         if confirmation is None:
             if data['kind'] == 'snapshot':
                 return {**data, 'broker': broker, 'snapshot_date': day, 'session': session,
+                        'positions': [{**row, 'included': position_included(row)} for row in data['positions']],
                         'confirmed_cash': cash, 'preview': key, 'already_imported': state[2],
                         'requires_revision': bool(state[1] and not state[2]),
                         'reconciliation': reconcile(data['summary'], data['positions'])}
@@ -202,6 +203,8 @@ class Portfolio:
     def _reference(self, db, position, day):
         if position['asset_type'] == 'stock' and position['exchange'] in ('sh', 'sz'):
             return self.reference_reader(db, position['code'], day)
+        if position['asset_type'] == 'hong_kong' and position_included(position):
+            return read_hk_close_reference(db, position['code'], day)
         return None
 
     @staticmethod
@@ -265,7 +268,9 @@ class Portfolio:
         account_id, basis_ids, saved = load_saved_revaluation(self.db, estimate_id)
         payload = (self.snapshot(basis_ids[0]) if account_id is not None
                    else self.snapshot(day=saved['snapshot_date'], basis_ids=basis_ids))
-        positions = [row for row in payload['positions'] if row['asset_type'] in INCLUDED and row['quantity'] > 0]
+        keys = {(row['asset_type'], row['code']) for row in saved['positions']}
+        positions = [row for row in payload['positions'] if position_included(row) and row['quantity'] > 0
+                     and (row['asset_type'], row['code']) in keys]
         with self.db.shared_reader() as db:
             references = [self._reference(db, position, saved['quote_date']) for position in positions]
             previous = previous_revaluation_closes(db, positions, saved)

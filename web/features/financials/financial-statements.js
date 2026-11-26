@@ -10,8 +10,9 @@
     return value.toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}) +
       (item.unit === '元' ? ' '+selectedUnit : ' '+item.unit);
   };
-  const sourceText = item => !item ? '待补' : [item.source ? '新浪 '+item.source : '',
-    item.field, item.item_source ? '底层 '+item.item_source : '', item.period, item.method,
+  const sourceName = item => item.statement_source === 'eastmoney:hk-f10-statements' ? '东财港股 ' : '新浪 ';
+  const sourceText = item => !item ? '待补' : [item.source ? sourceName(item)+item.source : '',
+    item.source_field || item.field, item.item_source ? '底层 '+item.item_source : '', item.period, item.method,
     item.formula, item.reason, item.note].filter(Boolean).join(' · ');
   const waterfallLabel = label => {
     const lines = {
@@ -342,8 +343,8 @@
     return '';
   };
   const originText = item => !item ? '该期间无适用资料' : [
-    item.source ? '新浪'+({gjzb:'关键指标',fzb:'资产负债表',lrb:'利润表',llb:'现金流量表'}[item.source] || item.source) : '',
-    item.field ? '字段 '+item.field : '',item.item_source?'底层表 '+item.item_source:'',
+    item.source ? sourceName(item).trimEnd()+({gjzb:'关键指标',fzb:'资产负债表',lrb:'利润表',llb:'现金流量表'}[item.source] || item.source) : '',
+    item.field ? '字段 '+(item.source_field || item.field) : '',item.item_source?'底层表 '+item.item_source:'',
     item.method,item.baseline_source?'差分基期资料来源 '+item.baseline_source:'',
   ].filter(Boolean).join(' · ') || '该期间无适用资料';
   const inputHTML = (item,unit) => (item?.inputs || []).map(x=>`<li>${esc(x.label)}：${esc(amount(x,unit))}（${esc(x.period || '报告期待补')}）${x.reason?' · '+esc(x.reason):''}${x.inputs?`<ul>${inputHTML(x,unit)}</ul>`:''}</li>`).join('');
@@ -353,8 +354,8 @@
       if(!x)return;
       if(x.source || x.field){
         const key=[x.source,x.item_source,x.method,x.baseline_source].join(':');
-        if(!origins.has(key))origins.set(key,{...x,fields:new Set()});
-        if(x.field)origins.get(key).fields.add(x.field);
+        if(!origins.has(key))origins.set(key,{...x,source_field:null,fields:new Set()});
+        if(x.field)origins.get(key).fields.add(x.source_field || x.field);
       }
       (x.inputs || []).forEach(visit);
     };
@@ -773,7 +774,7 @@
       if(!data)return;
       const index=data.periods.indexOf(data.period);
       el('fs-prev').disabled=index<0||index===data.periods.length-1;el('fs-next').disabled=index<=0;
-      el('fs-company').textContent=state.code+' '+(data.name || '');
+      el('fs-company').textContent=state.code+' '+(data.name || '')+(data.report_currency?' · 列报币种 '+data.report_currency:'');
       el('fs-display-label').hidden=kind!=='fzb';
       if(!data.period){el('fs-content').hidden=true;el('fs-status').textContent='本地尚未保存三表。点击页面上方“刷新数据”获取当前股票财报。';return;}
       el('fs-content').hidden=false;

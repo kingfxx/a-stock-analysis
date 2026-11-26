@@ -180,7 +180,7 @@
   <div class="workspace-content">
   <header>
     <div>
-      <div class="eyebrow">A 股 · 本地研究</div>
+      <div class="eyebrow" id="stock-market-caption">A 股 · 本地研究</div>
       <h1>公司经营与市场表现</h1>
       <p class="sub">结合财务、估值、股东人数与融资变化，观察公司基本面和市场表现。</p>
     </div>
@@ -188,7 +188,7 @@
 
       <form id="stock-lookup" class="search" action="/" method="get">
         <label for="code">股票代码</label>
-        <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" value="__CODE__" aria-label="六位股票代码" required>
+        <input id="code" name="code" inputmode="numeric" pattern="[0-9]{5,6}" maxlength="6" value="__CODE__" aria-label="股票代码（A 股六位、港股五位）" required>
         <button type="submit">查看</button>
         <a id="refresh" class="refresh" href="#" title="刷新当前股票；批量采集统一在后台维护的采集管理">手动刷新</a>
         <button id="full-audit" class="refresh" type="button">全量刷新</button>
@@ -222,6 +222,7 @@
     <p id="financial-status" class="note" role="status" aria-live="polite"></p>
     <p id="announcement-status" class="note" role="status" aria-live="polite"></p>
     <p id="dividends-status" class="note" role="status" aria-live="polite"></p>
+    <p id="hk-latest-prices" class="note" hidden></p>
     <div id="trend-display-mount"></div>
     <p id="shipping-forecast-entry" class="forecast-entry" hidden><a class="industry-navigation" href="/?code=601919&amp;tab=shipping-forecast" target="_blank" rel="noopener">海控净利润测算/运价趋势</a></p>
     <p id="aluminum-forecast-entry" class="forecast-entry" hidden><a class="industry-navigation" href="/?code=601600&amp;tab=aluminum-forecast" target="_blank" rel="noopener">中国铝业周期盈利分析</a></p>
@@ -305,9 +306,10 @@
     </div>
   </section>
   <section class="chip-region" aria-label="筹码评估">
-    <h2>筹码评估</h2>
+    <details class="panel" id="hk-dividend-panel" hidden><summary>港股派息</summary><ul id="hk-dividend-events"></ul></details>
+    <h2 id="chips-heading">筹码评估</h2>
     <p id="prices-status" class="note" role="status" aria-live="polite"></p>
-    <p class="sub">对照股东人数、融资资金与股价变化，观察持有结构和杠杆资金的趋势。</p>
+    <p class="sub" id="chips-description">对照股东人数、融资资金与股价变化，观察持有结构和杠杆资金的趋势。</p>
     <section class="panel chip-panel" aria-label="股东人数与股价趋势">
       <div class="panel-head">
         <div><h3>股东人数与股价</h3><p>按实际统计频率采样 · 青色为股东人数，黄色为所选口径股价</p></div>
@@ -458,6 +460,10 @@
       if (result.code !== code || typeof result.has_stock_data !== 'boolean') throw new Error('查询结果无效');
       if (result.has_stock_data) {
         window.location.assign('/?' + new URLSearchParams({code:result.code}));
+      } else if (result.exchange === 'hk') {
+        if (window.confirm('打开港股个股分析并首次采集 ' + result.code + '？')) {
+          window.location.assign('/?' + new URLSearchParams({code:result.code}));
+        }
       } else {
         window.openIndustryCompanyPreview(result.code, [{code:result.code}], 'ttm', lookupButton);
       }
@@ -489,12 +495,20 @@
     event.currentTarget.href = '/indices?' + new URLSearchParams({stock:state.code || ''});
   });
   state.valuation = expandValuationPayload(state.valuation);
-  window.initAIChecklist(state);
+  if (state.exchange !== 'hk') {
+    window.initAIChecklist(state);
+  } else {
+    const notesTab = document.getElementById('notes-tab');
+    if (notesTab) {
+      if (notesTab.getAttribute('aria-selected') === 'true') document.getElementById('trend-tab').click();
+      notesTab.hidden = true;
+    }
+  }
   window.initFinancialStatements(state);
   window.initBusinessSegments(state);
   window.initIndustry(state);
   window.initMaintenance();
-  window.initInvestmentNotes(state);
+  if (state.exchange !== 'hk') window.initInvestmentNotes(state);
   const selectionsKey = 'investment-dashboard-selections-v1';
   let savedSelections = {};
   try { savedSelections = JSON.parse(sessionStorage.getItem(selectionsKey)) || {}; }
@@ -505,7 +519,30 @@
   function renderCurrentStock() {
     document.getElementById('stock-code').textContent = state.code ? state.code + (state.name ? ' - ' + state.name : '') : '—';
     document.getElementById('current-stock-name').textContent = state.name || '名称待补';
-    document.getElementById('current-stock-code').textContent = state.code || '—';
+    const hk = state.exchange === 'hk';
+    document.getElementById('current-stock-code').textContent = state.code ? state.code + (hk ? ' · 港股' : '') : '—';
+    document.getElementById('stock-market-caption').textContent = (hk ? '港股' : 'A 股') + ' · 本地研究';
+    document.getElementById('chips-heading').hidden = hk;
+    document.getElementById('chips-description').hidden = hk;
+    for (const panel of document.querySelectorAll('#trend-panel .chip-panel')) panel.hidden = hk;
+    document.getElementById('hk-dividend-panel').hidden = !hk;
+    const prices = document.getElementById('hk-latest-prices');
+    prices.hidden = !hk;
+    if (hk) {
+      const latest = state.hk_latest_prices || {};
+      prices.textContent = [['raw','未复权收盘价'],['qfq','前复权收盘价']].map(([kind,label]) => {
+        const point = latest[kind];
+        return point ? label + ' ' + Number(point.close).toFixed(2) + ' 港元（' + point.date + '）' : label + '暂无本地数据';
+      }).join(' · ');
+      const events = [...(state.hk_dividends || [])].reverse();
+      document.getElementById('hk-dividend-events').replaceChildren(...(events.length ? events : [{}]).map(event => {
+        const row = document.createElement('li');
+        row.textContent = event.ex_dividend_date ?
+          [event.ex_dividend_date + ' 除净', event.payment_date && event.payment_date + ' 派付',
+           event.payment_per_share ? '每股 ' + event.payment_per_share + ' ' + event.payment_currency : event.plan].filter(Boolean).join(' · ') : '尚无本地派息记录';
+        return row;
+      }));
+    }
   }
   renderCurrentStock();
   document.getElementById('refresh').href = '/?code=' + encodeURIComponent(state.code || '601919') + '&refresh=1';
@@ -537,7 +574,8 @@
   }
   renderWarnings();
   const trendAdapter = window.initEnterpriseTrend({state, savedSelections, saveSelections});
-  let valuationMetric = ['pe','pb','ps','dividend_yield'].includes(savedSelections.valuationMetric)
+  const availableValuationMetrics = state.exchange === 'hk' ? ['pe','pb'] : ['pe','pb','ps','dividend_yield'];
+  let valuationMetric = availableValuationMetrics.includes(savedSelections.valuationMetric)
     ? savedSelections.valuationMetric : 'pe';
   const valuationNames = {pe:'市盈率 PE(TTM)',pb:'市净率 PB(MRQ)',ps:'市销率 PS(TTM)',dividend_yield:'股息率（近 12 个月已实施派息）'};
   const valuationRange = document.getElementById('valuation-range');
@@ -557,8 +595,10 @@
   if (['3','5','10'].includes(savedSelections.valuationRange)) valuationRange.value = savedSelections.valuationRange;
   if (typeof savedSelections.valuationPriceOverlay === 'boolean')
     valuationPriceOverlay.setAttribute('aria-pressed', String(savedSelections.valuationPriceOverlay));
-  document.querySelectorAll('[data-valuation-metric]').forEach(button =>
-    button.classList.toggle('active', button.dataset.valuationMetric === valuationMetric));
+  document.querySelectorAll('[data-valuation-metric]').forEach(button => {
+    button.hidden = !availableValuationMetrics.includes(button.dataset.valuationMetric);
+    button.classList.toggle('active', button.dataset.valuationMetric === valuationMetric);
+  });
   function saveSelections() {
     const selections = {
       ...trendAdapter.selections(),
@@ -991,15 +1031,15 @@
         }
       }
     }
-    for (const key of ['name','updated_at','views','warnings','cached_stocks','announcement_sync']) {
+    for (const key of ['name','updated_at','views','warnings','cached_stocks','announcement_sync','hk_dividends','price_currency','hk_latest_prices']) {
       if (Object.hasOwn(data, key)) state[key] = data[key];
     }
     const announcement = state.announcement_sync || {};
     const announcementText = !announcement.has_data
-      ? '公告日期：尚未建档；需手动刷新财务以初始化。'
+      ? (state.exchange === 'hk' ? '公告日期：尚无核验记录。' : '公告日期：尚未建档；需手动刷新财务以初始化。')
       : announcement.error ? '公告日期：同步失败，保留已有判断。' + announcement.error
       : announcement.checked_at ? '公告日期：' + (announcement.status || '已检查') + '；检查时间 ' + window.DashboardTime.format(announcement.checked_at,'未记录')
-      : '公告日期：已保存判断，检查时间未记录。';
+      : (state.exchange === 'hk' ? '公告日期：已保存披露易核验日期。' : '公告日期：已保存判断，检查时间未记录。');
     document.getElementById('announcement-status').textContent = announcementText;
     renderCurrentStock();
     const selectedTab = document.querySelector('.research-tabs [aria-selected="true"]')?.id?.replace(/-tab$/,'');
@@ -1032,7 +1072,7 @@
   function applyPriceBundle(data) {
     if (!data) return;
     state.price_version = data.price_version;
-    if (Object.keys(data.financial?.views || {}).length) applyFinancial(data.financial, true, false);
+    if (data.financial && (state.exchange === 'hk' || Object.keys(data.financial.views || {}).length)) applyFinancial(data.financial, true, false);
     if (Object.keys(data.valuation?.views || {}).length) applyValuation(data.valuation, data.price_version);
     for (const section of ['shareholders','financing']) {
       state[section] = {...data[section], warnings:[...new Set([...(state[section]?.warnings || []), ...(data[section]?.warnings || [])])]};

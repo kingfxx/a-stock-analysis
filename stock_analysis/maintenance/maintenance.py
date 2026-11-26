@@ -94,6 +94,7 @@ DESCRIPTIONS={
  'adjusted_price_versions':('个股数据','复权价格版本及覆盖范围'),
  'valuation_observations':('个股数据','市值、估值、股息率等时点观测'),
  'dividend_events':('个股数据','分红方案及实施事件'),
+ 'stock_fact_revisions':('个股数据','个股已修订事实的旧版本，关联原同步运行和取得时间'),
  'financing_daily':('个股数据','融资融券日度数据'),
  'shareholder_observations':('个股数据','股东户数观测及公告信息'),
  'industry_snapshots':('个股数据','个股历史行业分类快照'),

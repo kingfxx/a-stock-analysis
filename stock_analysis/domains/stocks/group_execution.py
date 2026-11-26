@@ -7,14 +7,15 @@ from stock_analysis.collection.collection import RequestCollector
 from stock_analysis.collection.execution_context import execution_context
 from stock_analysis.domains.stocks.group_batches import complete_member
 from stock_analysis.domains.stocks.group_requests import GroupRequests
+from stock_analysis.domains.stocks.identity import stock_identity
 from stock_analysis.infrastructure.storage import utc_now
 
 
-def run_group(service, ref, operation, groups, factory=RequestCollector):
+def run_group(service, ref, operation, groups, factory=RequestCollector, *, batch_pacing=True):
     scope=json.loads(operation['scope_json'])
     broker=GroupRequests(service.db,lambda:service.cancelled(ref),factory)
-    from stock_analysis.domains.stocks.collection_operations import DATA_PROVIDERS
-    broker.open(sorted({provider for group in groups for provider in DATA_PROVIDERS[group['work_dataset']]}))
+    from stock_analysis.domains.stocks.collection_operations import providers_for
+    broker.open(sorted({provider for group in groups for provider in providers_for(group['code'], group['work_dataset'])}))
     def run(group):
         if service.cancelled(ref):return
         code,dataset=group['code'],group['work_dataset']
@@ -24,13 +25,13 @@ def run_group(service, ref, operation, groups, factory=RequestCollector):
         full=any(r['mode']=='full' for r in pending)
         error=None
         with execution_context(operation_id=ref,work_dataset=dataset,stock_code=code,selected_segments=allowed,
-                scope=dict(requested_mode='full' if full else 'incremental',batch_pacing=True,
+                scope=dict(requested_mode='full' if full else 'incremental',batch_pacing=batch_pacing,
                            **({'schedule':scope['schedule']} if 'schedule' in scope else {})),
                 trigger=operation['trigger_type'],cancelled=lambda:service.cancelled(ref),collector=broker,
-                request_reason='full' if full else 'incremental',batch_pacing=True,group_batches=broker.batches,batch_complete=complete_member):
+                request_reason='full' if full else 'incremental',batch_pacing=batch_pacing,group_batches=broker.batches,batch_complete=complete_member):
             try:
                 service.collect(code,dataset,full,broker)
-                if dataset=='financial':
+                if dataset=='financial' and len(code) == 6:
                     service.data._add_sqlite_missing_name(service.db,service.data.p4_services()[0].read(code),refresh=True)
             except Exception as exc:
                 error=str(exc)
@@ -51,7 +52,10 @@ def run_group(service, ref, operation, groups, factory=RequestCollector):
             dependents={code:[] for code in financial}
             roots=[]
             for group in groups:
-                if group['code'] in financial and group['work_dataset'] in ('announcements','valuation'):
+                dataset = group['work_dataset']
+                waits_for_financial = dataset == 'announcements' or (
+                    dataset == 'valuation' and stock_identity(group['code'])[0] != 'hk')
+                if group['code'] in financial and waits_for_financial:
                     dependents[group['code']].append(group)
                 else:roots.append(group)
             condition=Condition();remaining=len(groups);errors=[]

@@ -10,10 +10,11 @@ def _financial_payload(data: dict) -> dict:
     if not data:
         return {"views": {}, "warnings": []}
     reports = data.get("reports", [])
-    if data.get("report_date_basis") != contracts.REPORT_DATE_BASIS:
+    dates_confirmed = data.get('report_date_basis') in (contracts.REPORT_DATE_BASIS, 'hkex_disclosure_date_v1')
+    if not dates_confirmed:
         reports = normalize_report_dates(reports)
     prices = (data.get("prices", {}) if data.get("price_basis") == "disclosure"
-              and data.get("report_date_basis") == contracts.REPORT_DATE_BASIS else {})
+              and dates_confirmed else {})
     rows = build_period_rows(reports, prices.get("raw", []), prices.get("qfq", []),
                              prices.get("raw_reference"), prices.get("qfq_reference"),
                              data.get("dividend_events") or None,

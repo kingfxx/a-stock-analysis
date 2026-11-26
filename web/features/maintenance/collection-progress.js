@@ -1,6 +1,6 @@
 /* Shared collector progress: counts remain distinct from rows and coverage. */
 (()=>{'use strict';
-const labels={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所',mot:'交通运输部',user_excel:'本地研究资料',cninfo:'巨潮资讯',local:'本地'};
+const labels={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',hkexnews:'港交所披露易',stockanalysis:'Stock Analysis',sse:'上海航运交易所',mot:'交通运输部',user_excel:'本地研究资料',cninfo:'巨潮资讯',local:'本地'};
 function renderDataCounts(summary,list,result){
 if(result.provider_counts?.length){
  summary.textContent+=' 来源写入：'+result.provider_counts.map(counts=>`${labels[counts.provider]||counts.provider} ${Number.isInteger(counts.written)?`${counts.unrecorded_segments?'已知 ':''}${counts.written} 条${counts.unrecorded_segments?'（部分未记录）':''}`:'未记录写入数'}`).join('；')+'。';
@@ -35,6 +35,7 @@ function renderStocks(list,result){
  const stocks=new Map();for(const work of result.stock_results){if(!stocks.has(work.code))stocks.set(work.code,[]);stocks.get(work.code).push(work);}
  const names={financial:'财务',business_segments:'主营',announcements:'公告',prices:'价格',valuation:'估值',dividends:'分红',shareholders:'股东人数',financing:'融资融券'};
  for(const [code,works] of stocks){const p=document.createElement('p');p.textContent=code+' · '+works.map(w=>{
+   if(w.status==='not_applicable')return `${names[w.dataset]||w.dataset} 不适用`;
    const status=({complete:'成功',failed:'失败',cancelled:'已停止',pending:'待执行',running:'进行中',reused:'复用'})[w.status]||w.status;
    const entries=w.data_counts||[],known=entries.filter(e=>Number.isInteger(e.published));
    const total=key=>{const values=entries.map(e=>e[key]).filter(Number.isInteger);return values.length?values.reduce((a,b)=>a+b,0):'未记录';};

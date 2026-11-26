@@ -18,7 +18,7 @@ def stored_closes(conn, exchange, code, start, end):
 
 
 def read_closes(reader, securities, start, end, *, include_prior=False):
-    securities = sorted({(market, code) for market, code in securities if market in ('sh', 'sz')})
+    securities = sorted({(market, code) for market, code in securities if market in ('sh', 'sz', 'hk')})
     prices = {security: {} for security in securities}
     if not securities:
         return prices

@@ -5,7 +5,7 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from stock_analysis.domains.stocks.source_parsers import normalize_code
+from stock_analysis.domains.stocks.identity import stock_identity
 from stock_analysis.infrastructure.storage import utc_now
 
 _LOCKS, _LOCKS_GUARD = {}, Lock()
@@ -25,12 +25,10 @@ def digest(value):
 
 
 def instrument_id(db, code, *, exchange=None):
-    code = normalize_code(code)
+    market, code = stock_identity(code)
     with db.connection() as conn:
-        if exchange is None:
-            row = conn.execute("SELECT id FROM instruments WHERE code=?", (code,)).fetchone()
-        else:
-            row = conn.execute("SELECT id FROM instruments WHERE exchange=? AND code=?", (exchange, code)).fetchone()
+        row = conn.execute("SELECT id FROM instruments WHERE exchange=? AND code=?",
+                           (exchange or market, code)).fetchone()
         return row[0] if row else None
 
 

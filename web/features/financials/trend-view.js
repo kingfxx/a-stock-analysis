@@ -67,7 +67,7 @@
     for (const series of active) {
       const metric = series.metric;
       const showFinanceDates = financeSeries.at(-1)?.key === series.key;
-      const showMarketDate = marketDateSeries.at(-1)?.key === series.key;
+      const showMarketDate = metric.periodPrice || marketDateSeries.at(-1)?.key === series.key;
       const seriesCustom = custom.map((item, index) => {
         const row = rows[index];
         const payout = selectedPeriod !== 'year' || metric !== metrics.cash_dividend ? ''
@@ -78,6 +78,7 @@
           comparisonHoverText(row, series.key, periodOffsets.yoy, '同比'),
           comparisonHoverText(row, series.key, periodOffsets.qoq, '环比'),
           (() => {
+            if (metric.periodPrice) return '价格交易日：' + (row[metric.dateKey] || '无价格');
             const priceDate = row.price_date;
             const qfqDate = row.qfq_price_date;
             if (priceDate && qfqDate && priceDate === qfqDate) return '价格交易日：' + priceDate;
@@ -103,12 +104,20 @@
       const references = rows.map(row => row[metric.referenceKey] == null ? null : row[metric.referenceKey] / metric.scale);
       referenceCount += references.filter(value => value != null).length;
       const segmentX = [], segmentY = [];
-      for (let index = 1; index < rows.length; index++) {
-        const previous = series.values[index - 1] ?? references[index - 1];
+      const bridgeMissing = metric.bridgeMissingPeriods && series.kind === 'line';
+      let previousIndex = null;
+      for (let index = 0; index < rows.length; index++) {
         const current = series.values[index] ?? references[index];
-        if (previous == null || current == null || (references[index - 1] == null && references[index] == null)) continue;
-        segmentX.push(referenceXs[index - 1], referenceXs[index], null);
-        segmentY.push(previous, current, null);
+        if (current == null) {
+          if (!bridgeMissing) previousIndex = null;
+          continue;
+        }
+        if (previousIndex !== null &&
+            (previousIndex + 1 !== index || references[previousIndex] != null || references[index] != null)) {
+          segmentX.push(referenceXs[previousIndex], referenceXs[index], null);
+          segmentY.push(series.values[previousIndex] ?? references[previousIndex], current, null);
+        }
+        previousIndex = index;
       }
       if (segmentX.length) traces.push({type:'scatter', mode:'lines', x:segmentX, y:segmentY,
         yaxis:series.axis, connectgaps:false, hoverinfo:'skip', showlegend:false,

@@ -135,7 +135,8 @@ window.initStockPicker = function (state) {
         input.addEventListener('change', () => { if(input.checked)checked.add(stock.code);else checked.delete(stock.code);updateCount(); });
         node.appendChild(input);
       }
-      const text = document.createElement('span'); text.className = 'stock-name'; text.textContent = (stock.name || '名称暂缺') + ' · ' + stock.code;
+      const text = document.createElement('span'); text.className = 'stock-name';
+      text.textContent = (stock.name || '名称暂缺') + ' · ' + stock.code + (stock.exchange ? (stock.exchange==='hk' ? ' · 港股' : ' · A 股') : '');
       const tags = document.createElement('span'); tags.className = 'stock-tags';
       tags.textContent = (stock.code === state.code ? '当前查看 · ' : '') + (memberGroups(stock.code).map(group => group.name).join(' / ') || '未分组');
       text.appendChild(tags); node.appendChild(text);

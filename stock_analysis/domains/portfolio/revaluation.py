@@ -7,7 +7,7 @@ import json
 
 from stock_analysis.domains.etfs.storage import read_unadjusted_closes
 from stock_analysis.domains.portfolio.calculations import (
-    INCLUDED, position_cost, revalue_positions, snapshot_totals, sum_known,
+    position_cost, position_included, revalue_positions, snapshot_totals, sum_known,
 )
 from stock_analysis.domains.portfolio.history_prices import read_closes
 from stock_analysis.domains.portfolio.reference import local_market_days
@@ -40,25 +40,37 @@ def _display_position(source, close, market_value, holding_pnl, daily_pnl, refer
     cost = sum(costs) if None not in costs else None
     value, quantity = Decimal(market_value), source['quantity']
     opening = value - Decimal(daily_pnl) if daily_pnl is not None else None
+    hk = source['asset_type'] == 'hong_kong'
+    currency_rate = Decimal(source['exchange_rate']) if hk else Decimal(1)
     return {**source, 'price': close, 'market_value': market_value, 'holding_pnl': holding_pnl,
             'daily_pnl': daily_pnl, 'reference': reference,
             'holding_pnl_rate': format(Decimal(holding_pnl) * 100 / abs(cost), '.2f')
             if holding_pnl is not None and cost else None,
             'cost_price': source['cost_price'] if source['cost_price'] is not None else
-            (format(cost / quantity, '.6f') if cost is not None and quantity else None),
+            (format(cost / quantity / currency_rate, '.6f') if cost is not None and quantity else None),
             'daily_pnl_rate': format(Decimal(daily_pnl) * 100 / opening, '.2f') if opening and opening > 0 else None,
-            'daily_pnl_basis': 'local_close_estimate' if daily_pnl is not None else None}
+            'daily_pnl_basis': ('fixed_fx_estimate' if hk else 'local_close_estimate') if daily_pnl is not None else None}
 
 
 def display_revaluation(payload, saved, references, previous_closes):
     day = saved['quote_date']
-    source_rows = [row for row in payload['positions'] if row['asset_type'] in INCLUDED and row['quantity'] > 0]
-    positions = [row for row in payload['positions'] if row['asset_type'] not in INCLUDED]
+    keys = {(row['asset_type'], row['code']) for row in saved['positions']}
+    source_rows = []
+    positions = []
+    for row in payload['positions']:
+        if not position_included(row):
+            positions.append(row)
+        elif row['quantity'] > 0:
+            if (row['asset_type'], row['code']) in keys:
+                source_rows.append(row)
+            else:
+                positions.append({**row, 'exclusion_reason': '该估算版本未覆盖此证券'})
     for source, estimate, reference in zip(source_rows, saved['positions'], references, strict=True):
         close = estimate['close']
         daily = estimate['daily_pnl']
         previous = previous_closes.get((source['exchange'], source['code'], source['asset_type']))
-        if daily is None and previous is not None:
+        hk = source['asset_type'] == 'hong_kong'
+        if daily is None and previous is not None and not hk:
             daily = format((Decimal(close) - previous) * source['quantity'], '.2f')
         ref = {**(reference or {}), 'close': close, 'close_date': day,
                'valuation': (reference or {}).get('valuation', {})}
@@ -66,11 +78,15 @@ def display_revaluation(payload, saved, references, previous_closes):
         if source.get('accounts'):
             parts = []
             for part in source['accounts']:
-                value = Decimal(close) * part['quantity']
+                rate = Decimal(part['exchange_rate']) if hk else Decimal(1)
+                value = Decimal(close) * part['quantity'] * rate
                 cost = position_cost(part)
+                share = part['quantity'] / Decimal(source['quantity']) * rate
+                if hk:
+                    share /= Decimal(source['exchange_rate'])
                 parts.append(_display_position(part, close, format(value, '.2f'),
                                                format(value - cost, '.2f') if cost is not None else None,
-                                               format(Decimal(daily) * part['quantity'] / source['quantity'], '.2f')
+                                               format(Decimal(daily) * share, '.2f')
                                                if daily is not None else None, ref))
             row['accounts'] = parts
         positions.append(row)
@@ -107,6 +123,10 @@ def _read_prices(reader, positions, start, end):
                                         if row['asset_type'] == 'stock'}, start, end)
     prices = {(exchange, code, 'stock'): {day: value for day, (value, _) in series.items()}
               for (exchange, code), series in stock_closes.items()}
+    hk = {(row['exchange'], row['code']) for row in positions if row['asset_type'] == 'hong_kong'}
+    if hk:
+        for (exchange, code), series in read_closes(reader, hk, start, end).items():
+            prices[exchange, code, 'hong_kong'] = {day: value for day, (value, _) in series.items()}
     for exchange, code in {(row['exchange'], row['code']) for row in positions
                            if row['asset_type'] == 'etf' and row['exchange'] in ('sh', 'sz')}:
         closes = read_unadjusted_closes(reader.conn, exchange, code, start, end)
@@ -134,8 +154,9 @@ def read_revaluation(db, payload, now):
     baseline = snapshot['snapshot_date']
     today = now.date()
     # Daily providers can publish today's provisional bar during trading hours.
-    end = (today - timedelta(days=int(now.time() < time(15)))).isoformat()
-    positions = [row for row in payload['positions'] if row['asset_type'] in INCLUDED and row['quantity'] > 0]
+    positions = [row for row in payload['positions'] if position_included(row) and row['quantity'] > 0]
+    cutoff = time(16, 15) if any(row['asset_type'] == 'hong_kong' for row in positions) else time(15)
+    end = (today - timedelta(days=int(now.time() < cutoff))).isoformat()
     start = date.fromordinal(max(1, date.fromisoformat(baseline).toordinal() - 15)).isoformat()
     with db.shared_reader() as reader:
         prices, trading_days = _read_prices(reader, positions, start, end)

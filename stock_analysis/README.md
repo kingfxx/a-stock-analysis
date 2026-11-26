@@ -25,6 +25,8 @@
 | `domains/stocks/group_requests.py` | 独立来源通道、最多20股请求合并及全页校验/内存分流，同源仍走公共collector |
 | `domains/stocks/group_batches.py` | 真实共享分段合并、逐股同事务计数和批次终态，不复制source |
 | `domains/stocks/collection_schedules.py` | 分组规则/公共槽位适配、固定范围及管理页摘要；由唯一公共Scheduler调用 |
+| `domains/stocks/identity.py`、`hk_collection.py`、`hk_dashboard.py` | 共享证券身份、港股采集工作委派及三页本地数据组装；采集沿用 `stocks` 公共操作 |
+| `domains/financials/hk_statement_service.py`、`hk_segments.py` | 东财港股财务和年度主营收入来源适配；解析与共享事实发布分别由纯解析模块和存储函数承担 |
 | `collection/collection_schedule.py` | 纯北京时间日历计算，包含日检查日期与财报季截止日前后窗口；不请求或读写数据库 |
 | `collection/schedules.py` | 各模块多日程身份、合并配置及软删除；执行槽位仍由唯一Scheduler管理 |
 | `collection/source_archive.py` / `source_archive_read.py` | 公共响应按月分卷、校验、清理与单文件恢复；透明读取和旧快照清单回退 |
@@ -46,6 +48,7 @@
 | `domains/portfolio/manual_fields.py` / `manual_entries.py` / `ledger_storage.py` | 手工录入的字段与业务归一、本地候选和事务编排、手录及文件导入共用的账本保存与归档 |
 | `domains/portfolio/activity_read.py` | 历史成交及银证转账的北京时间范围、列筛选、排序和分页 |
 | `domains/portfolio/cash_history.py` | 以确认的券商期末现金及实际流水倒推余额，并计算含现金的资产估算 |
+| `domains/portfolio/hk_performance.py` | 以券商快照汇率及未复权日线估算招商 01919 人民币市值，按实际入账日复算已确认股息 |
 | `domains/portfolio/history_collection.py` / `history_source.py` / `history_prices.py` | 清仓窗口的手动补采与分段发布、腾讯分页证据适配、区间行情及出处查询 |
 | `domains/research/` | 研究报告、Checklist、经营判断、模型适配及行业专题 |
 

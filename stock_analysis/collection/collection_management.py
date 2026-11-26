@@ -21,7 +21,7 @@ ZONE = market_congestion.ZONE
 TASKS = {
     history_collection.TASK_KEY: dict(name='清仓股票未复权日线补采', group='持仓分析', providers=['tencent'],
         modes=['incremental'], manual_only=True, no_file=True, fixed_pacing=True),
-    'stocks': dict(name='个股采集', group='个股', providers=['sina','eastmoney','tencent','baidu','cninfo'], modes=['incremental','full','resume']),
+    'stocks': dict(name='个股采集', group='个股', providers=['sina','eastmoney','tencent','baidu','cninfo','hkexnews','stockanalysis'], modes=['incremental','full','resume']),
     etf_collection.TASK_KEY: dict(name='ETF 采集', group='ETF', providers=['sina','eastmoney','tencent','sse_fund','szse_fund','cninfo'],
         modes=['incremental','full','resume'],datasets=etf_collection.DATASETS),
     'shipping_research_import': dict(name='航运既有研究资料导入', group='航运研究', providers=['user_excel'], modes=['incremental'], manual_only=True),

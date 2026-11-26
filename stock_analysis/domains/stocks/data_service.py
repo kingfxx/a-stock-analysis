@@ -686,6 +686,23 @@ class StockDataService:
 
     def page_payload(self, code: str, refresh: bool) -> tuple[str, dict, str]:
         """Return cached charts immediately, without making any external requests."""
+        from stock_analysis.domains.stocks.identity import stock_identity
+        try:
+            exchange, canonical = stock_identity(code)
+        except ValueError:
+            exchange = None
+        if exchange == 'hk' and Path(self.settings.DATABASE_PATH).exists():
+            from stock_analysis.domains.stocks.hk_dashboard import read_panels
+            from stock_analysis.domains.stocks.collection_operations import StockCollections
+            db = self.services()[0].db
+            panels = read_panels(db, canonical)
+            library = StockLibrary(db)
+            payload = {**panels, **panels['financial'], 'stock_library': library.read(),
+                       'unfollowed': library.is_unfollowed(canonical), 'loading': {},
+                       'collection': StockCollections(db, self).page_status(canonical),
+                       'refresh_requested': False, 'price_needs_update': False}
+            payload['valuation'] = compact_valuation(payload['valuation'])
+            return canonical, payload, ''
         payload = {"code": code, "views": {}, "warnings": [], "valuation": {"views": {}},
                    "loading": {"financial": True, "dividends": True, "valuation": True},
                    "refresh_requested": refresh, "price_version": None, "price_needs_update": True}
@@ -761,6 +778,11 @@ class StockDataService:
         return code, payload, error
 
     def read_announcements(self, code):
+        from stock_analysis.domains.stocks.identity import stock_identity
+        exchange, code = stock_identity(code)
+        if exchange == 'hk':
+            from stock_analysis.domains.stocks.hk_announcements import read
+            return read(self.services()[0].db, code)
         code = normalize_code(code)
         db = self.services()[0].db
         with db.connection() as conn:

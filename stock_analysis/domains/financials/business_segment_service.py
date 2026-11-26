@@ -1,11 +1,13 @@
 """Individual-stock MAINOP history: validated pages and immutable business revisions."""
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
+from stock_analysis.domains.financials.business_segment_storage import business_content, publish_versions
+from stock_analysis.domains.financials.hk_segment_parser import SOURCE as HK_SOURCE
+from stock_analysis.domains.stocks.identity import stock_identity
 from stock_analysis.infrastructure.network import create_data_session
 from stock_analysis.domains.stocks.source_parsers import normalize_code
 from stock_analysis.infrastructure.storage import SyncKey, SyncResult
@@ -81,12 +83,6 @@ def parse_rows(rows, secucode, start, end):
     return result
 
 
-def business_content(rows):
-    return sorted(({k: v for k, v in row.items() if k not in
-                    ('display_rank', 'source_id', 'obtained_at')} for row in rows),
-                  key=lambda row: (row['report_date'], row['dimension_type'], row['item_key']))
-
-
 class BusinessSegmentService:
     def __init__(self, db, *, collector=None):
         self.db, self.collector = db, collector
@@ -152,38 +148,41 @@ class BusinessSegmentService:
                            'report_dates': sorted({r['report_date'] for r in collected}),
                            'missing_fields': {field: sum(r[field] is None for r in collected) for field in FIELDS}}
 
-    def _saved(self, identity):
+    def _saved(self, identity, source=SOURCE):
         with self.db.connection() as conn:
-            versions = [dict(r) for r in conn.execute('SELECT * FROM business_segment_versions WHERE instrument_id=? AND source=? AND is_current=1 ORDER BY report_date', (identity, SOURCE))]
+            versions = [dict(r) for r in conn.execute('SELECT * FROM business_segment_versions WHERE instrument_id=? AND source=? AND is_current=1 ORDER BY report_date', (identity, source))]
             for version in versions:
                 version['items'] = [dict(r) for r in conn.execute('SELECT * FROM business_segment_items WHERE version_id=? ORDER BY dimension_type,item_key', (version['id'],))]
         return versions
 
     def read(self, code, *, start=None, end=None):
-        code = normalize_code(code)
+        exchange, code = stock_identity(code)
+        source = HK_SOURCE if exchange == 'hk' else SOURCE
         today = today_shanghai()
         start = date.fromisoformat(start).isoformat() if start else ten_year_floor(today).isoformat()
         end = date.fromisoformat(end).isoformat() if end else today.isoformat()
         if start > end:
             raise ValueError('主营构成查询范围倒置')
         with self.db.connection() as conn:
-            instrument = conn.execute('SELECT id,name FROM instruments WHERE code=?', (code,)).fetchone()
+            instrument = conn.execute('SELECT id,name FROM instruments WHERE exchange=? AND code=?', (exchange, code)).fetchone()
         if not instrument:
             return {'code': code, 'name': None, 'periods': [], 'sync': {}, 'warnings': []}
-        key = SyncKey(instrument['id'], DATASET, SOURCE)
+        key = SyncKey(instrument['id'], DATASET, source)
         state = sync_state(self.db, key)
         with self.db.connection() as conn:
             last = conn.execute('SELECT status,error,finished_at FROM sync_runs WHERE instrument_id=? AND dataset=? AND source=? AND adjustment=? ORDER BY id DESC LIMIT 1', key.values()).fetchone()
             latest_report = conn.execute('SELECT max(period) FROM financial_reports WHERE instrument_id=?', (instrument['id'],)).fetchone()[0]
         periods = []
-        for version in self._saved(instrument['id']):
+        for version in self._saved(instrument['id'], source):
             if not start <= version['report_date'] <= end:
                 continue
             dimensions = {kind: [] for kind in ('1', '2', '3')}
             for item in version['items']:
                 dimensions[item['dimension_type']].append({**item, **{field: float(Decimal(item[field])) if item[field] is not None else None for field in FIELDS}})
             periods.append({k: v for k, v in version.items() if k != 'items'} | {'dimensions': dimensions})
-        warnings = ['主营构成为来源实际累计报告期；行业、产品、地区不能跨维度加总，跨期分类未自动映射。']
+        warnings = (['港股主营为来源公开年度分部和地区收入，金额沿用来源展示精度。缺少分部、成本及毛利时留空。']
+                    if exchange == 'hk' else
+                    ['主营构成为来源实际累计报告期；行业、产品、地区不能跨维度加总，跨期分类未自动映射。'])
         if latest_report and (not state.get('data_watermark') or latest_report > state['data_watermark']):
             warnings.append(f'本地财报最新期为{latest_report}，主营构成尚无对应记录；来源可能尚未更新，也可能未披露该期构成。')
         if last and last['status'] == 'failed':
@@ -233,33 +232,7 @@ class BusinessSegmentService:
                 summary['sync_run_id'] = run
                 old_by_period = {v['report_date']: v for v in saved}
                 def write(conn):
-                    from stock_analysis.collection.publication_counts import counts, observe, published
-                    counters = counts(len(rows))
-                    for period, items in sorted(by_period.items()):
-                        names = {r['report_name'] for r in items}
-                        if len(names) != 1:
-                            raise ValueError('主营构成同一期报告名称冲突')
-                        fingerprint = hashlib.sha256(encoded({'definition': DEFINITION, 'items': business_content(items)}).encode()).hexdigest()
-                        old = old_by_period.get(period)
-                        if old and old['content_hash'] == fingerprint:
-                            counters['unchanged'] += len(items)
-                            continue
-                        previous_items = {(r['dimension_type'],r['item_key']):r for r in old['items']} if old else {}
-                        fields = ('item_code','item_name',*FIELDS)
-                        for item in items:
-                            previous = previous_items.get((item['dimension_type'],item['item_key']))
-                            observe(counters, (old['report_name'], *(previous[f] for f in fields)) if previous else None,
-                                    (items[0]['report_name'], *(item[f] for f in fields)))
-                        if old:
-                            conn.execute('UPDATE business_segment_versions SET is_current=0 WHERE id=?', (old['id'],))
-                        version = conn.execute('INSERT INTO business_segment_versions(instrument_id,source,report_date,report_name,revision,supersedes_id,is_current,content_hash,definition_version,row_count,run_id,batch_id,obtained_at) VALUES (?,?,?,?,?,?,1,?,?,?,?,?,?)',
-                            (identity, SOURCE, period, items[0]['report_name'], old['revision'] + 1 if old else 1,
-                             old['id'] if old else None, fingerprint, DEFINITION, len(items), run, batch, max(r['obtained_at'] for r in items))).lastrowid
-                        columns = ('dimension_type', 'item_key', 'item_code', 'item_name', *FIELDS, 'display_rank', 'source_id')
-                        for item in items:
-                            conn.execute('INSERT INTO business_segment_items(version_id,' + ','.join(columns) + ',batch_id) VALUES (' + ','.join('?' for _ in range(len(columns) + 2)) + ')',
-                                         (version, *(item[c] for c in columns), batch))
-                    return published(counters)
+                    return publish_versions(conn, by_period, old_by_period, identity, SOURCE, DEFINITION, run, batch, FIELDS)
                 actual = sorted({v['report_date'] for v in saved} | set(by_period))
                 coverage_start = min(start, state.get('coverage_start') or start)
                 coverage_end = max(end, state.get('coverage_end') or end)

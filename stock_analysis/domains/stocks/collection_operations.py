@@ -8,14 +8,20 @@ from uuid import uuid4
 from stock_analysis.collection.collection import RequestCollector, encoded
 from stock_analysis.collection.execution_context import execution_context
 from stock_analysis.domains.stocks.collection_plan import segments, selected, versions
-from stock_analysis.domains.stocks.source_parsers import normalize_code
+from stock_analysis.domains.stocks.identity import stock_identity
 from stock_analysis.infrastructure.storage import utc_now
 
 DATASETS = dict(financial='财务报表', business_segments='主营构成', announcements='公告元数据',
                 prices='价格', valuation='估值', dividends='分红', shareholders='股东人数', financing='融资融券')
-PROVIDERS = ['sina', 'eastmoney', 'tencent', 'baidu', 'cninfo']
+PROVIDERS = ['sina', 'eastmoney', 'tencent', 'baidu', 'cninfo', 'hkexnews', 'stockanalysis']
 DATA_PROVIDERS = dict(financial=['sina','tencent'], business_segments=['eastmoney'], announcements=['cninfo'],
     prices=['tencent'], valuation=['baidu','eastmoney'], dividends=['eastmoney'], shareholders=['eastmoney'], financing=['eastmoney'])
+
+def providers_for(code, dataset):
+    exchange, _ = stock_identity(code)
+    if exchange == 'hk':
+        return {provider for provider, _, _ in segments(dataset, exchange)}
+    return set(DATA_PROVIDERS[dataset])
 
 
 def previously_initialized(conn, code):
@@ -30,7 +36,7 @@ def previously_initialized(conn, code):
 
 
 def validate_params(params):
-    if not isinstance(params, dict) or set(params) - {'mode', 'codes', 'group_id', 'datasets'}:
+    if not isinstance(params, dict) or set(params) - {'mode', 'codes', 'group_id', 'datasets', 'include_hk'}:
         raise ValueError('个股采集参数无效')
     mode = params.get('mode', 'incremental')
     if mode not in ('incremental', 'full', 'resume'):
@@ -43,12 +49,24 @@ def validate_params(params):
         if type(params['group_id']) is not int or 'codes' in params:
             raise ValueError('请选择一个分组或指定股票')
         result['group_id'] = params['group_id']
+        if 'include_hk' in params:
+            if type(params['include_hk']) is not bool:
+                raise ValueError('港股纳入范围无效')
+            result['include_hk'] = params['include_hk']
     else:
         codes = params.get('codes')
-        if not isinstance(codes, list) or not 1 <= len(codes) <= 2000 or any(not isinstance(c, str) for c in codes):
+        if 'include_hk' in params or not isinstance(codes, list) or not 1 <= len(codes) <= 2000 or any(not isinstance(c, str) for c in codes):
             raise ValueError('请指定股票代码或分组')
-        result['codes'] = list(dict.fromkeys(normalize_code(c) for c in codes))
+        result['codes'] = list(dict.fromkeys(stock_identity(code)[1] for code in codes))
     return result
+
+
+def group_members(conn, group_id, *, include_hk):
+    return [row['code'] for row in conn.execute(
+        'SELECT i.code FROM stock_group_members m JOIN instruments i ON i.id=m.instrument_id '
+        'WHERE m.group_id=? AND (? OR i.exchange<>\'hk\') '
+        'AND NOT EXISTS (SELECT 1 FROM stock_unfollowed u WHERE u.instrument_id=i.id) ORDER BY m.position,i.code',
+        (group_id, include_hk))]
 
 
 class StockCollections:
@@ -61,8 +79,7 @@ class StockCollections:
             group = conn.execute('SELECT name FROM stock_groups WHERE id=?', (params['group_id'],)).fetchone()
             if not group:
                 raise ValueError('分组已不存在')
-            codes = [r[0] for r in conn.execute('SELECT i.code FROM stock_group_members m JOIN instruments i ON i.id=m.instrument_id '
-                'WHERE m.group_id=? AND NOT EXISTS (SELECT 1 FROM stock_unfollowed u WHERE u.instrument_id=i.id) ORDER BY m.position,i.code', (params['group_id'],))]
+            codes = group_members(conn, params['group_id'], include_hk=params.get('include_hk', trigger != 'scheduled'))
             params['group_name'] = group[0]
         else:
             codes = params['codes']
@@ -73,11 +90,16 @@ class StockCollections:
         if initial_code:
             scope['initial_code'] = initial_code
         ref, stamp = 'stock:' + uuid4().hex, utc_now()
-        work=[]
+        work, unavailable = [], set()
         sequence = 0
         for code in codes:
+            exchange, _ = stock_identity(code)
             for dataset in DATASETS:
                 if dataset not in params['datasets']:
+                    continue
+                planned = segments(dataset, exchange)
+                if not planned:
+                    unavailable.add(dataset)
                     continue
                 conflict = conn.execute("SELECT 1 FROM collection_operations o,json_each(o.scope_json,'$.codes') c,"
                     "json_each(o.scope_json,'$.datasets') d WHERE o.task_key='stocks' AND o.status='running' "
@@ -89,10 +111,10 @@ class StockCollections:
                     old_work=conn.execute("SELECT json_extract(w.value,'$.mode') FROM collection_operations o,json_each(o.result_json,'$.legacy_unsegmented_work') w "
                         "WHERE o.task_key='stocks' AND json_extract(w.value,'$.code')=? AND json_extract(w.value,'$.dataset')=? ORDER BY o.started_at DESC LIMIT 1",(code,dataset)).fetchone()
                     legacy_mode=old_work[0] if old_work and old_work[0] in ('full','incremental') else None
-                for provider, detail, interface in segments(dataset):
+                for provider, detail, interface in planned:
                     sequence += 1
                     work_key = ':'.join((code,detail,provider,interface))
-                    parser,definition=versions(detail)
+                    parser,definition=versions(detail, exchange)
                     prior = conn.execute("SELECT id,status,finished_at,mode,parser_version,definition_version,result_json,scope_json FROM collection_batches WHERE (code=? OR EXISTS (SELECT 1 FROM json_each(scope_json,'$.stock_members') m WHERE json_extract(m.value,'$.code')=?)) AND work_dataset=? "
                         "AND dataset=? AND source_system=? AND coalesce(json_extract(scope_json,'$.source_interface'),'')=? "
                         "AND status IN ('complete','failed','cancelled','reused','skipped') ORDER BY id DESC LIMIT 1",
@@ -104,13 +126,17 @@ class StockCollections:
                     reused = bool(prior and prior['parser_version']==parser and prior['definition_version']==definition and prior['status'] in ('complete','reused','skipped') and
                         (params['mode']=='resume' or since and prior['finished_at'] and prior['finished_at']>=since))
                     mode = prior['mode'] if params['mode']=='resume' and prior and prior['mode'] else legacy_mode or ('full' if params['mode']=='full' else 'incremental')
-                    details = dict(code=code,evidence_mode='metadata_only')
+                    details = dict(code=code,exchange=exchange,evidence_mode='metadata_only')
                     if interface:
                         details['source_interface'] = interface
 
                     work.append((ref,'stock','stock.'+detail,provider,encoded(details),trigger,'reused' if reused else 'pending',stamp,
                          stamp if reused else None,code,dataset,work_key,sequence,mode,prior['id'] if reused else None,parser,definition))
 
+        if unavailable and not work and trigger == 'manual':
+            raise ValueError('所选数据项对指定证券均不适用')
+        if unavailable:
+            scope['hk_not_applicable'] = sorted(unavailable)
         conn.execute('INSERT INTO collection_operations(operation_id,task_key,mode,trigger_type,scope_json,status,started_at) '
                      "VALUES(?,'stocks',?,?,?,'running',?)", (ref, params['mode'], trigger, encoded(scope), stamp))
         conn.executemany('INSERT INTO collection_batches(operation_id,domain,dataset,source_system,scope_json,trigger_type,'
@@ -147,6 +173,10 @@ class StockCollections:
         return dict(cancel_requested=True)
 
     def collect(self, code, dataset, full, collector):
+        if dataset != 'prices' and stock_identity(code)[0] == 'hk':
+            from stock_analysis.domains.stocks.hk_collection import collect
+            collect(self.db, collector, code, dataset, full)
+            return
         fundamentals, dividends, valuation = self.data.p4_services()
         chips, prices = self.data.services()
         if dataset == 'financial':
@@ -195,9 +225,9 @@ class StockCollections:
                 "AND status='pending' GROUP BY code,work_dataset,mode ORDER BY position", (ref,)).fetchall()
         scope = json.loads(operation['scope_json'])
         pacing = operation['trigger_type']=='scheduled' or 'group_id' in scope or len(scope['codes'])>1
-        if pacing:
+        if pacing or any(stock_identity(code)[0] == 'hk' for code in scope['codes']):
             from stock_analysis.domains.stocks.group_execution import run_group
-            run_group(self,ref,operation,groups,factory=RequestCollector)
+            run_group(self,ref,operation,groups,factory=RequestCollector,batch_pacing=pacing)
             self._finish(ref)
             return
         collector = RequestCollector(self.db, cancelled=lambda: self.cancelled(ref))
@@ -218,7 +248,7 @@ class StockCollections:
                         trigger=operation['trigger_type'],cancelled=lambda:self.cancelled(ref),collector=collector,batch_pacing=pacing):
                     try:
                         self.collect(code,dataset,full,collector)
-                        if dataset=='financial':
+                        if dataset=='financial' and len(code) == 6:
                             self.data._add_sqlite_missing_name(self.db,self.data.p4_services()[0].read(code),refresh=True)
                     except Exception as exc:
                         error = str(exc)
@@ -297,7 +327,12 @@ def work_summary(conn, ref):
         states=item.pop('statuses')
         item['status']=next((state for state in ('running','pending','failed','cancelled') if state in states),'reused' if all(s=='reused' for s in states) else 'complete')
     # Only legacy aggregates without provable segment identity take this path.
-    result=conn.execute('SELECT result_json FROM collection_operations WHERE operation_id=?',(ref,)).fetchone()
+    result=conn.execute('SELECT result_json,scope_json FROM collection_operations WHERE operation_id=?',(ref,)).fetchone()
     for old in json.loads(result[0]).get('legacy_unsegmented_work',[]) if result else []:
         groups.setdefault((old['code'],old['dataset']),old)
+    scope = json.loads(result[1]) if result else {}
+    for code in scope.get('codes', []):
+        if len(code) == 5:
+            for dataset in scope.get('hk_not_applicable', []):
+                groups.setdefault((code, dataset), dict(code=code, dataset=dataset, status='not_applicable', sync_runs=[]))
     return list(groups.values())

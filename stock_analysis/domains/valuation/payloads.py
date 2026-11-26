@@ -17,12 +17,14 @@ def _valuation_payload(data: dict) -> dict:
         "updated_on": data.get("updated_on"), "peer_count": industry.get("peer_count"),
         "warnings": data.get("warnings", [])}
 
-def _p4_valuation_payload(data, *, raw=None, qfq=None, events=None):
+def _p4_valuation_payload(data, *, raw=None, qfq=None, events=None, include_dividend_yield=True):
     """Project saved observations at all display frequencies without source requests."""
     if not data:
         return {"views": {}, "warnings": []}
     raw, qfq, events = raw or [], qfq or [], events or []
-    rows = merge_dividend_yields(data.get("rows", []), monthly_dividend_yields(raw, events)) if raw else data.get("rows", [])
+    rows = data.get("rows", [])
+    if raw and include_dividend_yield:
+        rows = merge_dividend_yields(rows, monthly_dividend_yields(raw, events))
     rows = merge_adjusted_prices(rows, month_closes(qfq)) if qfq else rows
     observation_rows = [dict(row) for row in data.get("observation_rows", [])]
     qfq_by_day = {row["date"]: row["close"] for row in qfq}
@@ -36,6 +38,8 @@ def _p4_valuation_payload(data, *, raw=None, qfq=None, events=None):
                     observation_rows, metric, years, data.get("industry", {}), trading_dates=trading_dates)
             else:
                 views[str(years)][metric] = valuation_summary(rows, metric, years, data.get("industry", {}))
+        if not include_dividend_yield:
+            continue
         daily_yield_rows = daily_dividend_yield_observations(raw, events) if raw else None
         yield_summary = valuation_summary(rows, "dividend_yield", years, data.get("industry", {}),
                                           sample_rows=daily_yield_rows or None)

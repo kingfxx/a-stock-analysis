@@ -133,6 +133,10 @@ def fetch_daily_prices(code: str, session: requests.Session, adjust: str,
     return [prices[key] for key in sorted(prices)]
 
 
+def price_history_interface(exchange, adjust):
+    return 'hkfqkline/get' if exchange == 'hk' and adjust == 'qfq' else 'fqkline/get'
+
+
 def fetch_price_history(code, session, adjust, start="1990-01-01", end=None, *, on_page=None):
     """Backward pages deliberately overlap 20 trades and validate their basis.
 
@@ -144,19 +148,26 @@ def fetch_price_history(code, session, adjust, start="1990-01-01", end=None, *, 
     date.fromisoformat(end)
     if start > end:
         raise ValueError("行情请求范围颠倒")
-    symbol = symbol_for(code)
+    from stock_analysis.domains.stocks.identity import stock_identity
+    exchange, code = stock_identity(code)
+    symbol = exchange + code
+    url = TENCENT_URL.replace('fqkline/get', price_history_interface(exchange, adjust))
     prices, previous, request_end = {}, None, end
     for _ in range(50):
         remaining_days = (date.fromisoformat(request_end) - date.fromisoformat(start)).days + 1
         page_size = min(640, max(21 if previous is not None else 1, remaining_days))
-        response = session.get(TENCENT_URL, params={
+        response = session.get(url, params={
             "param": f"{symbol},day,,{request_end},{page_size},{adjust}"},
             headers={"Referer": "https://gu.qq.com/"}, timeout=18)
         response.raise_for_status()
         payload = response.json()
         node = (payload.get("data") or {}).get(symbol, {})
+        hk_name = None
+        if exchange == 'hk' and previous is None:
+            from stock_analysis.domains.stocks.source_parsers import parse_hk_price_quote
+            hk_name = parse_hk_price_quote(node, symbol)
         verified_unadjusted = False
-        if adjust == "qfq" and "qfqday" not in node and isinstance(node.get("day"), list):
+        if exchange != 'hk' and adjust == "qfq" and "qfqday" not in node and isinstance(node.get("day"), list):
             # Tencent can return day for an explicitly adjusted request with no
             # adjustment. Never infer this from a raw payload alone: cross-check
             # the same window against both raw and backward-adjusted requests.
@@ -182,6 +193,9 @@ def fetch_price_history(code, session, adjust, start="1990-01-01", end=None, *, 
             payload = {**payload, "data": {symbol: {"qfqday": node["day"]}}}
             verified_unadjusted = True
         batch = parse_price_history(payload, symbol, adjust)
+        if hk_name:
+            for row in batch:
+                row['security_name'] = hk_name
         if verified_unadjusted:
             for row in batch:
                 row["source_basis"] = "tencent-current-ohlc-verified-unadjusted"

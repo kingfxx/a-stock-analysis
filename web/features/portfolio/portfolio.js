@@ -63,7 +63,7 @@
     return cell;
   }
 
-  function pnlPair(amount, rate, estimated = false) {
+  function pnlPair(amount, rate, basis) {
     const cell = node('td');
     const main = node('span');
     setPnl(main, amount);
@@ -73,8 +73,10 @@
       setRate(line, rate);
       cell.append(line);
     }
-    if (estimated) {
+    if (basis === 'local_close_estimate') {
       cell.title = '相邻交易日未复权收盘价差 × 持仓数量';
+    } else if (basis === 'fixed_fx_estimate') {
+      cell.title = '相邻港股交易日未复权收盘价差 × 持仓数量 × 快照固定汇率';
     }
     return cell;
   }
@@ -97,10 +99,16 @@
   function renderPosition(position) {
     const row = node('tr');
     const name = node('td');
+    const hk = position.asset_type === 'hong_kong';
+    const quote = (value) => value != null && hk ? `${display(value)} HKD` : display(value);
     if (position.asset_type === 'stock' && ['sh', 'sz'].includes(position.exchange)) {
       const link = node('a', position.name);
       link.href = `/?${new URLSearchParams({ code: position.code, tab: 'notes' })}`;
       link.title = '打开个股投资笔记';
+      name.append(link);
+    } else if (hk) {
+      const link = node('a', position.name);
+      link.href = `/?${new URLSearchParams({ code: position.code, tab: 'trend' })}`;
       name.append(link);
     } else {
       name.append(node('span', position.name));
@@ -111,7 +119,7 @@
       const accounts = node('details', null, 'subline account-breakdown');
       accounts.append(node('summary', position.accounts.length > 1 ? '查看分户持仓' : position.accounts[0].broker));
       for (const part of position.accounts) {
-        const cost = part.cost_price == null ? '成本待核对' : `成本 ${display(part.cost_price)}`;
+        const cost = part.cost_price == null ? '成本待核对' : `成本 ${quote(part.cost_price)}`;
         const daily = part.daily_pnl == null ? '今日盈亏待核对'
           : `今日 ${part.daily_pnl > 0 ? '+' : ''}${money(part.daily_pnl)}${part.daily_pnl_basis ? '（估算）' : ''}`;
         accounts.append(node('div', `${part.broker}　${display(part.quantity)} 股／份　${cost}　市值 ${money(part.market_value)}　持仓盈亏 ${money(part.holding_pnl)}　${daily}`));
@@ -138,16 +146,19 @@
         reference.append(line);
       }
       if (position.reference.close_date) {
-        reference.append(node('span', `未复权收盘 ${display(position.reference.close)} · ${position.reference.close_date}`, 'subline'));
+        reference.append(node('span', `未复权收盘 ${quote(position.reference.close)} · ${position.reference.close_date}`, 'subline'));
       }
+    }
+    if (hk && position.exchange_rate != null) {
+      reference.append(node('span', `快照汇率 ${display(position.exchange_rate)} CNY/HKD`, 'subline'));
     }
     if (!reference.childElementCount) {
       reference.textContent = position.asset_type === 'etf' ? '券商快照 · 暂无本地行情' : '暂无本地估值';
     }
     row.append(name, node('td', money(position.market_value), 'market-column'), node('td', display(position.quantity)),
-      paired(display(position.price), display(position.cost_price)),
+      paired(quote(position.price), quote(position.cost_price)),
       pnlPair(position.holding_pnl, position.holding_pnl_rate),
-      pnlPair(position.daily_pnl, position.daily_pnl_rate, position.daily_pnl_basis === 'local_close_estimate'),
+      pnlPair(position.daily_pnl, position.daily_pnl_rate, position.daily_pnl_basis),
       weight, reference);
     return row;
   }
@@ -177,8 +188,9 @@
     if (latest && !options.snapshot && !options.day && !options.estimate &&
         (latest.quote_date > data.snapshot.snapshot_date ||
          (latest.quote_date === data.snapshot.snapshot_date && data.snapshot.session !== 'close'))) {
-      data = await request(`/api/portfolio/snapshots?estimate=${latest.id}`);
+      const estimate = await request(`/api/portfolio/snapshots?estimate=${latest.id}`);
       if (current !== snapshotRequest) return;
+      if (!estimate.positions.some((row) => row.asset_type === 'hong_kong' && row.exclusion_reason)) data = estimate;
     }
     token = data.session_token;
     snapshotScope = data.scope;
@@ -203,7 +215,10 @@
     $('current-portfolio-account').textContent = snapshot.snapshot_date;
     const missing = data.missing_accounts?.length ? ` · ${data.missing_accounts.join('、')}缺同日快照` : '';
     const basis = data.estimate_id ? ` · 本地估算，仓位与现金沿用 ${data.basis_date} 快照` : '';
-    $('snapshot-context').textContent = `${snapshot.snapshot_date} · ${sessionLabel(snapshot.session)} · A 股及境内 ETF${missing}${basis}`;
+    const hk = data.positions.some((row) => row.included && row.asset_type === 'hong_kong');
+    const scope = hk ? 'A 股、境内 ETF 及港股' : 'A 股及境内 ETF';
+    const fx = hk && data.estimate_id ? ' · 港股按快照固定汇率' : '';
+    $('snapshot-context').textContent = `${snapshot.snapshot_date} · ${sessionLabel(snapshot.session)} · ${scope}${missing}${basis}${fx}`;
     const versions = combined
       ? data.days.map((day) => ({ day, value: day, label: `${day} 收盘` }))
       : data.directory.filter((entry) => entry.account_id === snapshot.account_id).map((entry) => ({
@@ -236,13 +251,13 @@
     }
     document.querySelector('[data-sort="weight"]').title = data.totals.weight_basis === 'assets'
       ? '占纳入总资产比例' : data.totals.weight_basis === 'securities' ? '占纳入证券市值比例' : '';
-    positionRows = data.positions.filter((row) => ['stock', 'etf'].includes(row.asset_type));
+    positionRows = data.positions.filter((row) => row.included);
     renderSortedPositions();
-    const excluded = data.positions.filter((value) => !['stock', 'etf'].includes(value.asset_type));
+    const excluded = data.positions.filter((row) => !row.included);
     $('excluded').hidden = excluded.length === 0;
     $('excluded-title').textContent = `排除明细（${excluded.length} 条）`;
     $('excluded-list').replaceChildren(...excluded.map((row) => node('li',
-      `${row.code} ${row.name} · ${labels[row.asset_type]}`)));
+      [row.code, row.name, labels[row.asset_type], row.exclusion_reason].filter(Boolean).join(' · '))));
     $('funds-title').textContent = data.estimate_id ? '原券商快照资金与市值核对' : '券商资金与市值核对';
     const funds = data.funds ?? [{ snapshot, reconciliation: data.reconciliation }];
     $('funds-details').replaceChildren(...funds.map((entry) => {
@@ -275,7 +290,7 @@
       } else if (result.quote_date !== result.today) {
         notice('当天收盘行情尚未入库，未生成收盘版本。');
       } else {
-        const missing = result.positions.filter((position) => position.close == null).map((position) => position.code);
+        const missing = result.positions.filter((position) => position.market_value == null).map((position) => position.code);
         notice(`缺少当天收盘价：${missing.join('、')}。未生成收盘版本。`);
       }
     } catch (error) {
@@ -398,7 +413,7 @@
 
   function renderPreview(data) {
     if (data.kind === 'snapshot') {
-      const count = data.positions.filter((position) => ['stock', 'etf'].includes(position.asset_type)).length;
+      const count = data.positions.filter((position) => position.included).length;
       const caption = node('p', `读取 ${data.positions.length} 条持仓，纳入 ${count} 条。`, 'muted');
       const funds = node('dl');
       renderFunds(data.summary, data.reconciliation, funds);

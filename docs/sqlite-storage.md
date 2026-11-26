@@ -565,7 +565,7 @@ v50 新增 `research_aluminum_forecast_versions`，一行表示 601600 的一个
 | `portfolio_accounts` | 已导入数据的券商账户 | `created_at` |
 | `portfolio_snapshots` | 一个账户某交易日及盘中／收盘状态的一版快照，含券商资金汇总、确认现金、来源哈希和修订关系 | `imported_at` |
 | `portfolio_revaluation_snapshots` | v55 本地估算快照，每行保存一个账户或合并范围在估值日的一版结果、券商快照 ID 及采用的收盘价和估算金额。相同内容重复请求返回已有版本 | `written_at` |
-| `portfolio_snapshot_positions` | 快照中逐条证券持仓，外键关联快照头，保留原始行号和港股排除所需信息 | 关联 `portfolio_snapshots.imported_at` |
+| `portfolio_snapshot_positions` | 快照中逐条证券持仓，外键关联快照头，保留原始行号和港股报价、汇率及折算市值核对所需信息 | 关联 `portfolio_snapshots.imported_at` |
 | `portfolio_ledger_entries` | 券商历史成交、银证转账及相关业务事件。保留源行及原表金额。成功转账在净现金列保存方向，作废等无效转账净现金留空 | `imported_at` |
 | `portfolio_historical_closes` | 清仓股票人民币未复权日收盘价。按市场、代码、交易日与修订保存来源精度，通过组合外键引用真实腾讯分页及批次。相同收盘价保留既有修订和出处 | `written_at` |
 | `etf_daily_prices` | 沪深 ETF 未复权日行情，按市场、代码、来源、交易日和修订保存。成交量为份，成交额为元；振幅、涨跌幅、涨跌额、换手率为可空列。百分数按百分点数值保存。通过组合外键关联来源及批次 | `updated_at` |
@@ -632,3 +632,8 @@ collection_schedules的schedule_id为规则主键，task_key为可重复模块�
 没有新增表或迁移。复用collection_operations.mode=missing及既有financial_period动作，collection_batches仍使用market.financial.income/balance/cashflow/performance，parser_version=market-financial-missing-v1区分补缺与全量缓存。scope_json登记报告期、至多200公司／交易所、成员版本及快照日期参考；来源仍引用公共collection_sources，并保留ALL原文及双哈希。
 
 已完整返回的分段result_json.full_scope可用于失败重试归档复用；部分／空响应不可复用。四类事实只插尚无最新行的键，使用新的公共批次／来源引用，已有行不改写；所有实际需要分段同事务发布。补缺batch的coverage_status为unknown，只证明本次选定范围执行，避免自动日程误认整期全市场完整。详细行为见[采集管理补缺](collection-management.md#全市场财务手动补缺2026-10-31)。
+## 港股证券和个股事实修订（v56–v59）
+
+证券主表 `instruments` 支持沪深六位和港股五位文本代码。迁移保留原 ID、分组和历史引用。行情、财务、估值、公告、主营与分红共用原事实表，各自按证券、真实来源和口径隔离。分红表增加宣派及支付的可空币种、金额和派付日。主营版本增加列报币种并按来源约束证券、批次和来源请求。
+
+`stock_fact_revisions` 保存港股日线、财务报表、分红和估值的旧业务值，发生确认变更时与新事实短事务发布。键按原同步运行及原事实记录键保留，`obtained_at` 为旧事实取得时间，`archived_at` 为旧版本保存时间。维护页分类为「个股数据」，以真实取得和归档时间统计，空表无更新时间。公告、主营和前复权行情沿用其已有版本链。

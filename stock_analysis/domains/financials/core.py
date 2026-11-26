@@ -142,6 +142,8 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
                 return None
             if is_q1:
                 return current
+            if report.get('exchange') == 'hk' and prior and prior.get('report_currency') != report.get('report_currency'):
+                return None
             previous = prior.get(field, default) if prior else None
             return current - previous if previous is not None else None
 
@@ -236,7 +238,8 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             if previous is None:
                 break
             chain.append(previous)
-        if len(chain) == 4:
+        if len(chain) == 4 and (row.get('exchange') != 'hk' or
+                                all(item.get('report_currency') == row.get('report_currency') for item in chain)):
             ttm_events = [event for item in chain
                           for event in dividends_by_period.get(item["period"], [])]
             row["cash_dividend_ttm"], row["cash_dividend_details_ttm"] = dividend_values(ttm_events)
@@ -249,6 +252,8 @@ def build_period_rows(reports: list[dict], raw_prices: list[dict], qfq_prices: l
             row["cash_dividend_ttm"] = None
             row["cash_dividend_details_ttm"] = ""
         previous_year = by_row.get(_year_before(row["period"]))
+        if row.get('exchange') == 'hk' and previous_year and previous_year.get('report_currency') != row.get('report_currency'):
+            previous_year = None
         for suffix in ("ttm", "ytd"):
             profit_inputs = {field: row.get(f"{field}_{suffix}",
                                            0 if field == "non_operating_adjustments" else None)

@@ -7,6 +7,20 @@ from itertools import groupby
 INCLUDED = {'stock', 'etf'}
 
 
+def position_included(row):
+    if row['asset_type'] in INCLUDED:
+        return True
+    if (row['asset_type'] != 'hong_kong' or row.get('currency') != 'HKD'
+            or row.get('exchange') != 'hk' or row.get('exclusion_reason')):
+        return False
+    if row.get('accounts'):
+        return all(position_included(part) for part in row['accounts'])
+    if any(row.get(key) is None for key in ('price', 'market_value', 'exchange_rate')):
+        return False
+    price, value, rate = (Decimal(row[key]) for key in ('price', 'market_value', 'exchange_rate'))
+    return price > 0 and rate > 0 and abs(price * row['quantity'] * rate - value) <= Decimal('0.01')
+
+
 def sum_known(rows, key):
     values = [row[key] for row in rows]
     return None if any(value is None for value in values) else sum(map(Decimal, values), Decimal(0))
@@ -26,11 +40,15 @@ def revalue_positions(positions, prices, day, previous_day):
         code, name, exchange, asset_type, quantity = (
             position[key] for key in ('code', 'name', 'exchange', 'asset_type', 'quantity'))
         series = prices.get((exchange, code, asset_type), {})
-        close, previous = series.get(day), series.get(previous_day)
+        close = series.get(day)
+        hk = asset_type == 'hong_kong'
+        prior = max((stamp for stamp in series if day and stamp < day), default=None) if hk else previous_day
+        previous = series.get(prior)
+        rate = Decimal(position['exchange_rate']) if hk else Decimal(1)
         costs = [position_cost(part) for part in position.get('accounts', [position])]
-        value = close * quantity if close is not None else None
+        value = close * quantity * rate if close is not None else None
         pnl = value - sum(costs) if value is not None and None not in costs else None
-        daily = (close - previous) * quantity if close is not None and previous is not None else None
+        daily = (close - previous) * quantity * rate if close is not None and previous is not None else None
         rows.append(dict(code=code, name=name, asset_type=asset_type, quantity=quantity,
                          close=format(close, 'f') if close is not None else None,
                          market_value=format(value, '.2f') if value is not None else None,
@@ -75,7 +93,7 @@ def fill_snapshot_daily_pnl(snapshot, positions, previous_day):
     estimates = []
     for row in positions:
         reference = row.get('reference')
-        if (row['daily_pnl'] is not None or not reference or row['price'] is None
+        if (row['asset_type'] == 'hong_kong' or row['daily_pnl'] is not None or not reference or row['price'] is None
                 or reference.get('close_date') != snapshot['snapshot_date']
                 or reference.get('previous_close_date') != previous_day):
             continue
@@ -88,7 +106,7 @@ def fill_snapshot_daily_pnl(snapshot, positions, previous_day):
     if not estimates:
         return
     broker_total = snapshot.get('broker_daily_pnl')
-    if broker_total is not None and all(row['asset_type'] in INCLUDED for row in positions):
+    if broker_total is not None and all(position_included(row) for row in positions):
         existing = [row['daily_pnl'] for row in positions if row['daily_pnl'] is not None]
         if len(existing) + len(estimates) != len(positions):
             return
@@ -100,7 +118,9 @@ def fill_snapshot_daily_pnl(snapshot, positions, previous_day):
 
 
 def snapshot_totals(snapshot, positions):
-    included = [row for row in positions if row['asset_type'] in INCLUDED]
+    for row in positions:
+        row['included'] = position_included(row)
+    included = [row for row in positions if row['included']]
     market = sum_known(included, 'market_value')
     pnl = sum_known(included, 'holding_pnl')
     daily = sum_known(included, 'daily_pnl')
@@ -112,7 +132,7 @@ def snapshot_totals(snapshot, positions):
     for row in positions:
         value = row['market_value']
         row['weight'] = (format(Decimal(value) * 100 / base, '.2f')
-                         if row['asset_type'] in INCLUDED and value is not None and base and base > 0 else None)
+                         if row['included'] and value is not None and base and base > 0 else None)
     return {
         'market_value': str(market) if market is not None else None,
         'holding_pnl': str(pnl) if pnl is not None else None,
@@ -131,7 +151,7 @@ def combine_positions(positions, day):
         return row['exchange'] or '', row['asset_type'], row['code']
 
     combined = []
-    eligible = sorted((row for row in positions if row['asset_type'] in INCLUDED), key=identity)
+    eligible = sorted((row for row in positions if position_included(row)), key=identity)
     for _, group in groupby(eligible, key=identity):
         parts = list(group)
         row = dict(parts[0])
@@ -143,7 +163,14 @@ def combine_positions(positions, day):
             row['cost_price'] = None
             row['cost_amount'] = None
             ref = row['reference']
-            if ref and ref['close_date'] == day:
+            if row['asset_type'] == 'hong_kong':
+                row['market_value'] = str(sum_known(parts, 'market_value'))
+                share_rate = sum(Decimal(part['exchange_rate']) * part['quantity'] for part in parts)
+                if row['quantity']:
+                    row['exchange_rate'] = str(share_rate / row['quantity'])
+                if not all(part['price'] == row['price'] for part in parts):
+                    row['price'] = None
+            elif ref and ref['close_date'] == day:
                 close = Decimal(str(ref['close']))
             elif (row['price'] is not None and all(part['price'] == row['price'] and part['market_value'] is not None
                   and abs(Decimal(part['market_value']) - part['quantity'] * Decimal(row['price'])) <= Decimal('0.01')
@@ -151,8 +178,9 @@ def combine_positions(positions, day):
                 close = Decimal(row['price'])
             else:
                 close = None
-            row['market_value'] = str(close * row['quantity']) if close is not None else None
-            row['price'] = str(close) if close is not None else None
+            if row['asset_type'] != 'hong_kong':
+                row['market_value'] = str(close * row['quantity']) if close is not None else None
+                row['price'] = str(close) if close is not None else None
             pnl = sum_known(parts, 'holding_pnl')
             row['holding_pnl'] = str(pnl) if pnl is not None else None
             daily = sum_known(parts, 'daily_pnl')
@@ -164,4 +192,4 @@ def combine_positions(positions, day):
                 if previous and row['quantity']:
                     row['daily_pnl_rate'] = format(daily * 100 / (Decimal(str(previous)) * row['quantity']), '.2f')
         combined.append(row)
-    return combined + [row for row in positions if row['asset_type'] not in INCLUDED]
+    return combined + [row for row in positions if not position_included(row)]

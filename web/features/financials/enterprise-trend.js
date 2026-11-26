@@ -20,13 +20,19 @@ window.initEnterpriseTrend = function({state, savedSelections, saveSelections}) 
     net_cash: {name:'净现金／净负债', unit:'亿元', scale:1e8},
     period_end_market_cap: {name:'季末市值', unit:'亿元', scale:1e8, dateKey:'period_end_price_date'},
     market_cap: {name:'披露日估算市值', unit:'亿元', scale:1e8, dateKey:'price_date', referenceKey:'market_cap_reference'},
-    qfq_price: {name:'披露日前复权股价', unit:'元/股', scale:1, dateKey:'qfq_price_date', referenceKey:'qfq_price_reference'}
+    qfq_price: {name:'披露日前复权股价', unit:state.exchange==='hk'?'港元/股':'元/股', scale:1, dateKey:'qfq_price_date',
+      referenceKey:'qfq_price_reference', bridgeMissingPeriods:state.exchange==='hk'}
   };
+  if (state.exchange === 'hk') {
+    metrics.period_end_price = {name:'报告期末未复权股价', unit:'港元/股', scale:1, dateKey:'period_end_price_date', periodPrice:true};
+    metrics.period_end_qfq_price = {name:'报告期末前复权股价', unit:'港元/股', scale:1, dateKey:'period_end_qfq_price_date', periodPrice:true};
+  }
   const disclosureSourceLabel = value => ({manual:'人工覆盖',cninfo_original:'巨潮原始正式报告',
     cninfo:'巨潮冲突候选',sina_unverified:'新浪校正日期（未核验）',none:'无可用日期'})[value] || '未记录';
   const disclosureStatusLabel = value => ({matched_original:'已匹配原始报告',conflict_retained:'候选冲突，保留原日期',
     pending:'待核验',failed:'同步失败',sina_unverified:'新浪日期未核验',manual_override:'人工确认'})[value] || '未记录';
-  let selectedPeriod = ['quarter','ytd','year','ttm'].includes(savedSelections.period) ? savedSelections.period : 'quarter';
+  let selectedPeriod = ['quarter','ytd','year','ttm'].includes(savedSelections.period) ?
+    savedSelections.period : state.exchange==='hk'?'ytd':'quarter';
   const comparisonRange = document.getElementById('comparison-range');
   comparisonRange.value = ['all','10','5'].includes(savedSelections.comparisonRange) ? savedSelections.comparisonRange : '10';
   const seriesControls = [
@@ -37,6 +43,12 @@ window.initEnterpriseTrend = function({state, savedSelections, saveSelections}) 
     buttons:[...document.getElementById(series.id).parentElement.querySelectorAll('[data-series-mode]')]}));
   const modeOf = series => series.buttons.find(button => button.getAttribute('aria-pressed') === 'true')?.dataset.seriesMode || null;
   for (const series of seriesControls) {
+    if (state.exchange === 'hk') {
+      for (const key of ['period_end_price','period_end_qfq_price']) {
+        series.control.add(new Option(metrics[key].name, key));
+      }
+      if (series.id === 'line-metric') series.control.value = 'period_end_qfq_price';
+    }
     const metric = savedSelections.metrics?.[series.id];
     if ([...series.control.options].some(option => option.value === metric)) series.control.value = metric;
     const savedMode = savedSelections.display?.[series.id];
@@ -87,8 +99,8 @@ window.initEnterpriseTrend = function({state, savedSelections, saveSelections}) 
     }));
     const {referenceCount, showQoq, comparisonText, periodOffsets} = TrendView.draw({
       elements:trendElements, rows, allRows, active, selectedPeriod, metrics, label, positions,
-      isPriceOrCap:key => ['qfq_price','market_cap'].includes(key),
-      hasMarketComparisons:key => ['qfq_price','market_cap','period_end_market_cap'].includes(key)
+      isPriceOrCap:key => ['qfq_price','market_cap'].includes(key) || Boolean(metrics[key]?.periodPrice),
+      hasMarketComparisons:key => ['qfq_price','market_cap','period_end_market_cap'].includes(key) || Boolean(metrics[key]?.periodPrice)
     });
     const selectedMetrics = new Set(active.map(series => series.key));
     const hasFinancial = [...selectedMetrics].some(metric => !['market_cap','period_end_market_cap','qfq_price','interest_bearing_debt','net_cash','cash_dividend'].includes(metric));
@@ -99,12 +111,17 @@ window.initEnterpriseTrend = function({state, savedSelections, saveSelections}) 
       const missing = series.values.filter(value => value == null).length;
       return missing ? ' ' + series.label + '有 ' + missing + ' 个正式值缺失。' : '';
     }).join('');
-    note.textContent = (!active.length ? '请选择柱形或折线，显示至少一个指标。' : '') +
+    const currencies = [...new Set(rows.map(row => row.report_currency).filter(Boolean))];
+    note.textContent = (state.exchange==='hk' && currencies.length ? '财报列报币种：'+currencies.join(' / ')+'。' : '') +
+      (!active.length ? '请选择柱形或折线，显示至少一个指标。' : '') +
       (hasFinancial ? (selectedPeriod === 'quarter' ? '单季度财务值由当年累计报表差分得到。' : selectedPeriod === 'ytd' ? '当年累计直接取财报年初至报告期末的累计金额：Q1、Q1+Q2、Q1+Q2+Q3、全年；同比比较去年相同累计期间，财务指标仅显示同比；股价和市值仍按原有时点取值并显示同比、环比。' : selectedPeriod === 'ttm' ? '财务 TTM 为连续四个单季度之和；缺期则留空。' : '年度财务值取当年年报累计数。') : '') +
       (hasMarket ? (hasFinancial ? ' ' : '') + '市场指标正式值取对应报告披露日附近的价格快照。' : '') +
+      (active.some(series => series.metric.periodPrice) ? ' 报告期末价格取期末当日或此前最近交易日收盘价，相隔超过 15 天留空。' : '') +
       (selectedMetrics.has('period_end_market_cap') ? ' 季末市值＝季末当日或此前最近交易日的不复权收盘价×该报告期末总股本；价格相隔超过 15 天或股本缺失时留空。年度显示年末值，TTM 保留各季末时点值，不加总。' : '') +
       (selectedMetrics.has('market_cap') ? ' 估算市值按披露日前最近未复权收盘价×报告期末股本计算。' : '') +
       (selectedMetrics.has('qfq_price') ? ' 前复权价格采用数据源当前调整后的历史序列。' : '') +
+      (active.some(series => series.metric.bridgeMissingPeriods && series.kind === 'line') ?
+        ' 缺少披露日价格的季度留空，相邻已观察价格点之间用虚线跨过缺口。' : '') +
       (hasNegativeAdjusted ? ' 部分历史前复权值为负，图中保留数据源原值；它不是当时的未复权成交价。' : '') +
       ([...selectedMetrics].some(metric => metric.endsWith('_growth')) ? ' 同比增长率按去年相同报告期、相同周期口径比较；基期小于等于零或缺失时留空。' : '') +
       (selectedMetrics.has('roe') ? ' ROE（TTM 估算）＝连续四季度归母净利润÷本期与上年同期归母净资产均值；非官方加权平均 ROE。' : '') +

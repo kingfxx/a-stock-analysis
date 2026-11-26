@@ -228,7 +228,7 @@
     });
 
     const collectionVisible=()=>!panel.hidden&&!el('maintenance-collection-panel').hidden&&!document.hidden;
-    const providerNames={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',cninfo:'巨潮资讯',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所 / 航运研究所',sse_fund:'上海证券交易所',szse_fund:'深圳证券交易所',mot:'交通运输部'};
+    const providerNames={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',cninfo:'巨潮资讯',hkexnews:'港交所披露易',stockanalysis:'Stock Analysis',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所 / 航运研究所',sse_fund:'上海证券交易所',szse_fund:'深圳证券交易所',mot:'交通运输部'};
     const progressMarkup='<div class="index-progress-details" role="status" aria-live="polite"><p data-progress-summary></p><ul data-progress-sources></ul></div>';
     const modeNames={missing:'补缺（仅缺失公司）',resume:'继续失败部分',incremental:'增量更新／原范围续跑',review:'修订核对',full:'历史初始化／恢复全量',audit:'覆盖核查',backfill:'指定范围回填'};
     function providerMenu(task,selected,title){
@@ -265,7 +265,7 @@
       return Boolean(left.action)===Boolean(right.action);
     }
     function stockFields(task, scheduled=false) {
-      return `<label>股票分组<select name="group_id" ${scheduled?'data-stock-schedule-group':''}><option value="">${scheduled?'请选择分组':'指定股票代码'}</option>${task.groups.map(group=>`<option value="${group.id}">${esc(group.name)}（${group.member_count??0}只）</option>`).join('')}</select></label>${scheduled?'':'<label>指定股票（逗号或空格分隔）<input name="codes" placeholder="601919 605499"></label>'}
+      return `<label>股票分组<select name="group_id" ${scheduled?'data-stock-schedule-group':''}><option value="">${scheduled?'请选择分组':'指定股票代码'}</option>${task.groups.map(group=>`<option value="${group.id}">${esc(group.name)}（${group.member_count??0}只）</option>`).join('')}</select></label>${scheduled?'<label><input type="checkbox" name="include_hk">纳入分组内港股</label>':'<label>指定股票（逗号或空格分隔）<input name="codes" placeholder="601919 01919"></label>'}
         <fieldset><legend>刷新数据（公告核验、估值需要已有财务报告期）</legend>${Object.entries(task.datasets).map(([value,label])=>`<label><input type="checkbox" name="dataset" value="${value}" checked>${esc(label)}</label>`).join('')}</fieldset>`;
     }
     function etfFields(task, params={}) {
@@ -330,6 +330,7 @@
       const saved=task.rules.find(rule=>rule.task_key===key);
       form.elements.schedule_key.value=saved?.task_key||'';
       if(saved)form.elements.group_id.value=String(saved.params.group_id);
+      form.elements.include_hk.checked=Boolean(saved?.params.include_hk);
       form.elements.enabled.checked=Boolean(saved?.enabled);
       form.elements.local_time.value=saved?.local_time||'18:00';
       form.elements.frequency.value=saved?.rule.frequency||'daily';
@@ -521,6 +522,7 @@
         params.datasets=values.getAll('dataset');
         if(values.get('group_id')) params.group_id=Number(values.get('group_id'));
         else if(!isSchedule) params.codes=values.get('codes').split(/[,，\s]+/).filter(Boolean);
+        if(isSchedule && values.has('include_hk')) params.include_hk=true;
       }
       if(key==='etfs'){
         if(params.mode==='resume'){

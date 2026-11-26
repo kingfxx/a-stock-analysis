@@ -6,8 +6,10 @@ import json
 from datetime import date, datetime, timedelta, timezone
 
 from stock_analysis.infrastructure.network import create_data_session
-from stock_analysis.domains.stocks.sources import fetch_price_history
-from stock_analysis.domains.stocks.source_parsers import normalize_code, price_equal
+from stock_analysis.domains.stocks.sources import fetch_price_history, price_history_interface
+from stock_analysis.domains.stocks.source_parsers import price_equal
+from stock_analysis.domains.stocks.identity import stock_identity
+from stock_analysis.domains.stocks.fact_revisions import retain_previous
 from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, StorageError, utc_now
 from stock_analysis.domains.stocks.stock_collection import begin_stock_batch, routed_stock_requests
 from stock_analysis.domains.stocks.sync_support import audit_due, data_lock, digest, encoded, instrument_id, mark_failed, next_audit, recently_checked, recent_sync_failure, checked_today, sync_state, backup_before_update
@@ -53,15 +55,16 @@ class PriceService:
         return sync_state(self.db, SyncKey(identity, "prices_adjusted", SOURCE, "qfq")).get("active_price_version_id")
 
     def version_info(self, code, version):
+        exchange, code = stock_identity(code)
         with self.db.connection() as conn:
             row = conn.execute("SELECT v.id,v.validated_at,v.coverage_start,v.coverage_end,v.source_basis "
                                "FROM adjusted_price_versions v JOIN instruments i ON i.id=v.instrument_id "
-                               "WHERE v.id=? AND i.code=? AND v.source=? AND v.status='complete'",
-                               (version, normalize_code(code), SOURCE)).fetchone()
+                               "WHERE v.id=? AND i.exchange=? AND i.code=? AND v.source=? AND v.status='complete'",
+                               (version, exchange, code, SOURCE)).fetchone()
             return dict(row) if row else {}
 
     def read(self, code, adjustment="qfq", *, version=None, start="1990-01-01", end="9999-12-31", lease=True, exchange=None):
-        code = normalize_code(code)
+        _, code = stock_identity(code)
         identity = (instrument_id(self.db, code, exchange=exchange) if adjustment == "raw" and exchange is not None
                     else instrument_id(self.db, code))
         if identity is None:
@@ -106,7 +109,8 @@ class PriceService:
             raise ValueError("价格候选未按交易日期排序")
 
     def ensure(self, code, adjustment="qfq", *, refresh=False, full=False, today=None):
-        code, today = normalize_code(code), today or date.today()
+        exchange, code = stock_identity(code)
+        today = today or date.today()
         backup_before_update(self.db)
         requested_at = utc_now()
         with data_lock(self.db, "prices:" + adjustment, code):
@@ -146,7 +150,7 @@ class PriceService:
             batch_id = begin_stock_batch(self.db, run, "tencent", dataset, code, start=start, end=end,
                                          trigger="manual_full" if full else "manual_refresh" if refresh else "automatic",
                                          scope={"adjustment": adjustment, "mode": "full" if rebuild else "incremental",
-                                                "source_interface": "fqkline/get"},
+                                                "source_interface": price_history_interface(exchange, adjustment)},
                                          parser_version=COLLECTION_PARSER_VERSION, definition_version=COLLECTION_DEFINITION_VERSION)
             try:
                 rows = self._scheduled_fetch(code, adjustment, start, end, batch_id, 'historical_rebuild' if rebuild else 'incremental')
@@ -197,8 +201,20 @@ class PriceService:
                     # only a validated rebuild publishes revisions of old dates.
                     observe(counters,old_values,old_values if adjustment=='qfq' and previous and (not rebuild or not changed) else values)
                 publication = published(counters)
+                if exchange == 'hk':
+                    name = next((row['security_name'] for row in reversed(rows) if row.get('security_name')), None)
+                    if name:
+                        self.db.ensure_instrument(code, name)
                 if adjustment == "raw":
                     def write(conn):
+                        if exchange == 'hk':
+                            for row in rows:
+                                prior = old_by_day.get(row['date'])
+                                if prior and any(prior[field] != row[field] for field in fields):
+                                    previous = conn.execute('SELECT run_id,obtained_at,raw_json FROM raw_daily_prices '
+                                        'WHERE instrument_id=? AND source=? AND trade_date=?',
+                                        (identity, SOURCE, row['date'])).fetchone()
+                                    retain_previous(conn, row['date'], previous)
                         conn.executemany("INSERT INTO raw_daily_prices(instrument_id,source,trade_date,open,close,high,low,volume,"
                                          "raw_json,content_hash,obtained_at,run_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
                                          "ON CONFLICT(instrument_id,source,trade_date) DO UPDATE SET open=excluded.open,close=excluded.close,"

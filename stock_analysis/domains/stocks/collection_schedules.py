@@ -5,7 +5,7 @@ from uuid import uuid4
 from datetime import datetime, timezone
 
 from stock_analysis.collection.collection import encoded
-from stock_analysis.domains.stocks.collection_operations import DATASETS, PROVIDERS, DATA_PROVIDERS, validate_params
+from stock_analysis.domains.stocks.collection_operations import DATASETS, PROVIDERS, group_members, providers_for, validate_params
 from stock_analysis.infrastructure.storage import utc_now
 from stock_analysis.collection import schedules
 from stock_analysis.domains.stocks.collection_operations import work_summary
@@ -97,10 +97,6 @@ def tick(service, now, stopped):
             old = conn.execute('SELECT * FROM collection_schedule_slots WHERE schedule_id=? AND slot_key=?', (key, slot)).fetchone()
             if old and old['status'] != 'pending':
                 continue
-            providers = sorted({p for dataset in rule['params']['datasets'] for p in DATA_PROVIDERS[dataset]})
-            cooling = conn.execute('SELECT cooldown_until FROM collection_provider_state WHERE source_system IN (' + ','.join('?' for _ in providers) + ')', providers)
-            if any(r[0] and datetime.fromisoformat(r[0]) > now for r in cooling):
-                continue
             params = rule['params']
             if old and old['operation_ref']:
                 prior = conn.execute('SELECT scope_json FROM collection_operations WHERE operation_id=?', (old['operation_ref'],)).fetchone()
@@ -110,6 +106,13 @@ def tick(service, now, stopped):
                         conn.execute("UPDATE collection_schedule_slots SET status='complete',finished_at=?,updated_at=?,error='原范围为空，无待恢复数据项' WHERE schedule_id=? AND slot_key=?", (utc_now(),utc_now(),key,slot))
                         continue
                     params = dict(codes=fixed['codes'], datasets=fixed['datasets'], mode='incremental')
+            codes = params.get('codes')
+            if codes is None:
+                codes = group_members(conn, params['group_id'], include_hk=params.get('include_hk', False))
+            providers = sorted({p for code in codes for dataset in params['datasets'] for p in providers_for(code, dataset)})
+            cooling = conn.execute('SELECT cooldown_until FROM collection_provider_state WHERE source_system IN (' + ','.join('?' for _ in providers) + ')', providers)
+            if any(r[0] and datetime.fromisoformat(r[0]) > now for r in cooling):
+                continue
             try:
                 ref = service.reserve(conn, params, trigger='scheduled', since=scheduled_at.astimezone(timezone.utc).isoformat())
             except ValueError:
@@ -131,9 +134,9 @@ def decorate_runs(conn, rows):
     from stock_analysis.collection.collection_progress import attach_data_counts
     for row in rows:
         works=work_summary(conn,row['operation_ref'])
-        counts={state:sum(w['status']==state for w in works) for state in ('pending','running','complete','failed','cancelled','reused')}
+        counts={state:sum(w['status']==state for w in works) for state in ('pending','running','complete','failed','cancelled','reused','not_applicable')}
         row['result']=dict(message='股票数据项：'+'，'.join(f'{k} {v}' for k,v in counts.items() if v))
-        row['result']['work_progress']=dict(total=len(works),success=counts['complete'],skipped=counts['reused'],failed=counts['failed'],cancelled=counts['cancelled'],running=counts['running'],pending=counts['pending'],providers={},unit='股票数据项')
+        row['result']['work_progress']=dict(total=len(works),success=counts['complete'],skipped=counts['reused']+counts['not_applicable'],failed=counts['failed'],cancelled=counts['cancelled'],running=counts['running'],pending=counts['pending'],providers={},unit='股票数据项')
         codes=list(dict.fromkeys(w['code'] for w in works))
         row['result']['stock_results']=[w for w in works if w['code'] in codes[:20]]
         row['result']['stock_results_truncated']=max(0,len(codes)-20)

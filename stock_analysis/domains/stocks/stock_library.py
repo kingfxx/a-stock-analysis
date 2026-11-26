@@ -11,7 +11,7 @@ class StockLibrary:
     def read(self):
         with self.db.connection() as conn:
             stocks = [dict(row) for row in conn.execute(
-                "SELECT code,name,search_pinyin,search_initials FROM instruments WHERE id NOT IN (SELECT instrument_id FROM stock_unfollowed) ORDER BY code")]
+                "SELECT exchange,code,name,search_pinyin,search_initials FROM instruments WHERE id NOT IN (SELECT instrument_id FROM stock_unfollowed) ORDER BY code")]
             groups = [dict(row) for row in conn.execute("SELECT id,name FROM stock_groups ORDER BY position,id")]
             members = conn.execute("SELECT group_id,code FROM stock_group_members JOIN instruments "
                                    "ON instrument_id=instruments.id WHERE instrument_id NOT IN "

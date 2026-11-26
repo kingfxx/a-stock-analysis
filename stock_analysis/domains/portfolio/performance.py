@@ -47,7 +47,7 @@ def advance_positions(positions, events, anchor_day):
     return held
 
 
-def _market_value(held, prices, day, components, sign):
+def _market_value(held, prices, day, components, sign, round_marks):
     value = Decimal(0)
     missing = {}
     for key, quantity in held.items():
@@ -58,14 +58,16 @@ def _market_value(held, prices, day, components, sign):
             missing[key] = quantity
         else:
             amount = close * quantity
+            if round_marks:
+                amount = amount.quantize(CENT)
             value += amount
             components[key] += sign * amount
     return value, missing
 
 
-def _daily_values(before, held, prices, price_days, previous, day, issues, components):
-    opening, missing_open = _market_value(before, prices, previous, components, -1)
-    closing, missing_close = _market_value(held, prices, day, components, 1)
+def _daily_values(before, held, prices, price_days, previous, day, issues, components, round_marks):
+    opening, missing_open = _market_value(before, prices, previous, components, -1, round_marks)
+    closing, missing_close = _market_value(held, prices, day, components, 1, round_marks)
     missing_keys = missing_open.keys() | missing_close.keys()
     estimates = []
 
@@ -80,6 +82,8 @@ def _daily_values(before, held, prices, price_days, previous, day, issues, compo
                 quote_day = known[offset - 1]
                 estimates.append(dict(code=key[1], date=target, price_date=quote_day))
                 amount = quantity * prices[key][quote_day]
+                if round_marks:
+                    amount = amount.quantize(CENT)
                 components[key] += sign * amount
                 return value + amount
         issues.update(f'{key[1]} 缺少 {target} 收盘价' for key in missing)
@@ -88,7 +92,7 @@ def _daily_values(before, held, prices, price_days, previous, day, issues, compo
     return resolve(opening, missing_open, previous, -1), resolve(closing, missing_close, day, 1), estimates
 
 
-def reconstruct(days, closing, events, prices, dividends=()):
+def reconstruct(days, closing, events, prices, dividends=(), *, round_marks=False):
     """Walk backward from recorded shares, then report coverage and cumulative amounts."""
     calendar = set(days[1:])
     unplaced = sorted({event['event_date'] for event in events if event['event_date'] not in calendar})
@@ -138,7 +142,7 @@ def reconstruct(days, closing, events, prices, dividends=()):
         if any(quantity < 0 for quantity in before.values()):
             return {'records': [], 'blocked_dates': [day]}
         opening_value, closing_value, estimates = _daily_values(
-            before, held, prices, price_days, previous, day, issues, components)
+            before, held, prices, price_days, previous, day, issues, components, round_marks)
         results.append({
             'date': day, 'issues': issues, 'opening': opening_value, 'closing': closing_value,
             'cash': cash, 'buys': buys, 'income': income,
@@ -249,6 +253,8 @@ def merge_performance(reports):
 
     combined = merge_scope(reports)
     stocks = merge_scope([report['stocks'] for report in reports])
+    etf_scope = {'etfs': merge_scope([report['etfs'] for report in reports])} if all(
+        'etfs' in report for report in reports) else {}
     if not combined['records'] and not stocks['records']:
         return {**base, 'error': '暂无可复算的交易日'}
     transfers = defaultdict(lambda: {'in': Decimal('0.00'), 'out': Decimal('0.00')})
@@ -263,7 +269,7 @@ def merge_performance(reports):
     gaps = {day for report in reports for day in report.get('return_gaps', ())}
     gaps.update(report['start'] for report in reports
                 if report['start'] > start and (report.get('opening_assets') is None or Decimal(report['opening_assets']) != 0))
-    return {**base, **combined, 'stocks': stocks, 'start': start, 'as_of': end, 'year': int(end[:4]),
+    return {**base, **combined, **etf_scope, 'stocks': stocks, 'start': start, 'as_of': end, 'year': int(end[:4]),
             'local_close_from': min((report['local_close_from'] for report in reports if report.get('local_close_from')),
                                     default=None),
             'opening_assets': opening_assets, 'return_gaps': sorted(gaps),
@@ -272,6 +278,91 @@ def merge_performance(reports):
             'trading_days': max(len(combined['records']), len(stocks['records'])),
             'transfers': [{'date': day, **{key: str(value) for key, value in amounts.items()}}
                           for day, amounts in sorted(transfers.items())]}
+
+
+def _sum_amounts(values):
+    return str(sum(map(Decimal, values))) if None not in values else None
+
+
+def _sum_security_rows(day, rows, cumulative):
+    combined = {
+        'date': day, 'issues': [issue for row in rows for issue in row['issues']],
+        'estimated_closes': [stamp for row in rows for stamp in row['estimated_closes']],
+        'trades': sum(row['trades'] for row in rows),
+        'fee_gap_count': sum(row['fee_gap_count'] for row in rows),
+    }
+    for column in ('pnl', 'dividend_net', 'estimated_dividend'):
+        combined[column] = _sum_amounts([row[column] for row in rows])
+    combined['cumulative'] = None
+    if combined['pnl'] is not None:
+        cumulative += Decimal(combined['pnl'])
+        combined['cumulative'] = str(cumulative)
+        components = defaultdict(int)
+        for row in rows:
+            for key, amount in row.get('security_pnl', {}).items():
+                components[key] += amount
+        combined['security_pnl'] = components
+    return combined, cumulative
+
+
+def sum_domestic_performance(stocks, etfs):
+    """Add independently calculated cents for scopes on the same daily calendar."""
+    blocked = sorted(set(stocks['blocked_dates']) | set(etfs['blocked_dates']))
+    if blocked:
+        return {'records': [], 'blocked_dates': blocked}
+    records = []
+    cumulative = Decimal('0.00')
+    for stock, etf in zip(stocks['records'], etfs['records'], strict=True):
+        rows = (stock, etf)
+        combined, cumulative = _sum_security_rows(stock['date'], rows, cumulative)
+        for column in ('opening_market_value', 'market_value', 'return_base'):
+            combined[column] = _sum_amounts([row[column] for row in rows])
+        pnl, capital = combined['pnl'], combined['return_base']
+        combined['return_rate'] = str(Decimal(pnl) / Decimal(capital)) if (
+            pnl is not None and capital is not None and Decimal(capital) > 0) else None
+        records.append(combined)
+    return {'records': records, 'blocked_dates': []}
+
+
+def combine_market_performance(domestic, hong_kong, *, domestic_label='A 股及 ETF'):
+    if not domestic['records'] or not hong_kong['records']:
+        return None
+    scopes = (domestic, hong_kong)
+    end = min(scope['as_of'] for scope in scopes)
+    if max(scope['start'] for scope in scopes) > end:
+        return None
+    markets = (domestic_label, '港股')
+    by_market = [{row['date']: row for row in scope['records'] if row['date'] <= end} for scope in scopes]
+    records = []
+    last = [None, None]
+    cumulative = Decimal('0.00')
+    for day in sorted(by_market[0].keys() | by_market[1].keys()):
+        daily = []
+        marks = []
+        carried = []
+        for index, rows in enumerate(by_market):
+            row = rows.get(day)
+            if row is not None:
+                daily.append(row)
+                last[index] = row
+            mark = last[index]
+            if mark is not None:
+                marks.append(mark['market_value'])
+                if row is None:
+                    carried.append({'market': markets[index], 'valuation_date': mark['date']})
+        combined, cumulative = _sum_security_rows(day, daily, cumulative)
+        combined['carried_markets'] = carried
+        combined['market_value'] = _sum_amounts(marks)
+        records.append(combined)
+    return {
+        'records': records, 'start': min(scope['start'] for scope in scopes), 'as_of': end, 'year': int(end[:4]),
+        'domestic_label': domestic_label, 'domestic_from': domestic['start'], 'hong_kong_from': hong_kong['start'],
+        'fixed_fx': hong_kong['fixed_fx'], 'fx_basis_date': hong_kong['fx_basis_date'],
+        'local_close_from': min((scope['local_close_from'] for scope in scopes
+                                 if scope.get('local_close_from') and scope['local_close_from'] <= end), default=None),
+        'blocked_dates': sorted({day for scope in scopes for day in scope['blocked_dates'] if day <= end}),
+        'fee_gap_count': sum(row['fee_gap_count'] for row in records), 'transfers': [],
+    }
 
 
 def attach_monthly_security_pnl(scope):

@@ -20,16 +20,22 @@ BAIDU_WINDOWS = ("近十年", "近五年", "近三年", "近一年")
 
 
 def fetch_valuation_indicator(code: str, session: requests.Session, metric: str,
-                              window: str = "近十年") -> list[dict]:
+                              window: str = "近十年", *, market="ab") -> list[dict]:
     """One Baidu metric and source window; capitalization values are in 亿元."""
-    code = normalize_code(code)
-    if metric not in BAIDU_INDICATORS or window not in BAIDU_WINDOWS:
+    if market == 'hk':
+        from stock_analysis.domains.stocks.identity import stock_identity
+        exchange, code = stock_identity(code)
+        if exchange != 'hk':
+            raise ValueError('百度港股估值证券身份无效')
+    else:
+        code = normalize_code(code)
+    if metric not in BAIDU_INDICATORS or window not in (('全部', '近一年', '近三年') if market == 'hk' else BAIDU_WINDOWS):
         raise ValueError("不支持的百度估值指标或时间范围")
     indicator = BAIDU_INDICATORS[metric]
     response = session.get(BAIDU_URL, params={
         "openapi": "1", "dspName": "iphone", "tn": "tangram", "client": "app",
         "query": indicator, "code": code, "word": "", "resource_id": "51171",
-        "market": "ab", "tag": indicator, "chart_select": window,
+        "market": market, "tag": indicator, "chart_select": window,
         "industry_select": "", "skip_industry": "1", "finClientType": "pc",
     }, timeout=20)
     response.raise_for_status()
