@@ -12,6 +12,32 @@ def sum_known(rows, key):
     return None if any(value is None for value in values) else sum(map(Decimal, values), Decimal(0))
 
 
+def revalue_positions(positions, prices, day, previous_day):
+    def cost(part):
+        if part['cost_amount'] is not None:
+            return Decimal(part['cost_amount'])
+        if part['market_value'] is not None and part['holding_pnl'] is not None:
+            return Decimal(part['market_value']) - Decimal(part['holding_pnl'])
+        return None
+
+    rows = []
+    for position in positions:
+        code, name, exchange, asset_type, quantity = (
+            position[key] for key in ('code', 'name', 'exchange', 'asset_type', 'quantity'))
+        series = prices.get((exchange, code, asset_type), {})
+        close, previous = series.get(day), series.get(previous_day)
+        costs = [cost(part) for part in position.get('accounts', [position])]
+        value = close * quantity if close is not None else None
+        pnl = value - sum(costs) if value is not None and None not in costs else None
+        daily = (close - previous) * quantity if close is not None and previous is not None else None
+        rows.append(dict(code=code, name=name, asset_type=asset_type, quantity=quantity,
+                         close=format(close, 'f') if close is not None else None,
+                         market_value=format(value, '.2f') if value is not None else None,
+                         holding_pnl=format(pnl, '.2f') if pnl is not None else None,
+                         daily_pnl=format(daily, '.2f') if daily is not None else None))
+    return rows
+
+
 def reconcile(summary, positions):
     market_total = sum_known(positions, 'market_value')
     target = summary['broker_market_value']

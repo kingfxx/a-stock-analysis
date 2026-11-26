@@ -3,30 +3,27 @@
 from datetime import date, datetime
 from hashlib import sha256
 import json
-import os
-from pathlib import Path
-from tempfile import NamedTemporaryFile
 from zoneinfo import ZoneInfo
 
+from stock_analysis.domains.portfolio.activity_read import read_activity
 from stock_analysis.domains.portfolio.calculations import (
     combine_positions, daily_change, fill_snapshot_daily_pnl, reconcile, snapshot_totals, sum_known,
 )
-from stock_analysis.domains.portfolio.cmb_transfers import TRANSFER_TYPES, parse_transfers
+from stock_analysis.domains.portfolio.cmb_transfers import parse_transfers
 from stock_analysis.domains.portfolio.cmb_xls import BIFF_SIGNATURE, decimal_text, parse_export
 from stock_analysis.domains.portfolio.huatai_snapshot import HUATAI, parse_transcription
-from stock_analysis.domains.portfolio.performance_read import read_performance
+from stock_analysis.domains.portfolio.ledger_storage import archive, find_overlaps, save_entries
+from stock_analysis.domains.portfolio.manual_entries import manual_options, save_manual_entry
+from stock_analysis.domains.portfolio.performance_read import read_performance_reports
 from stock_analysis.domains.portfolio.reference import previous_market_day
-from stock_analysis.infrastructure.storage import StorageError, utc_now
+from stock_analysis.domains.portfolio.revaluation import read_revaluation, revaluation_directory, saved_revaluation, save_revaluation
+from stock_analysis.infrastructure.storage import utc_now
 
 
 BROKER = '招商证券'
 POSITION_COLUMNS = ('source_row', 'exchange', 'code', 'name', 'asset_type', 'currency', 'quantity',
                     'available_quantity', 'price', 'cost_price', 'cost_amount', 'market_value',
                     'holding_pnl', 'exchange_rate', 'holding_pnl_rate', 'daily_pnl', 'daily_pnl_rate')
-EVENT_COLUMNS = ('event_date', 'event_time', 'event_type', 'source_label', 'exchange', 'code', 'name',
-                 'asset_type', 'price', 'quantity', 'gross_amount', 'net_cash', 'execution_reference',
-                 'order_reference', 'source_row', 'fingerprint')
-
 
 class ImportConflict(ValueError):
     pass
@@ -40,28 +37,6 @@ def check_day(value):
     if not isinstance(value, str) or date.fromisoformat(value).isoformat() != value or value > local_day():
         raise ValueError('请输入有效的历史日期（北京时间）')
     return value
-
-
-def _archive(root, content, digest, extension):
-    root.mkdir(parents=True, exist_ok=True)
-    target = root / f'{digest}.{extension}'
-    if target.is_symlink():
-        raise StorageError('持仓原件路径无效')
-    if target.is_file():
-        if sha256(target.read_bytes()).hexdigest() != digest:
-            raise StorageError('已归档的券商原件校验失败')
-        return
-    temporary = None
-    try:
-        with NamedTemporaryFile(dir=root, prefix='import-', suffix='.tmp', delete=False) as output:
-            temporary = Path(output.name)
-            output.write(content)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, target)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
 
 
 class Portfolio:
@@ -88,20 +63,14 @@ class Portfolio:
             return ('snapshot', current['id'] if current else None, same)
         existing = conn.execute('SELECT count(*) FROM portfolio_ledger_entries WHERE account_id=? AND source_sha256=?',
                                 (account_id, digest)).fetchone()[0]
-        overlaps = {}
-        if account_id and not existing:
-            matches = {}
-            for entry in data['entries']:
-                fingerprint = entry['fingerprint']
-                if fingerprint not in matches:
-                    matches[fingerprint] = iter(conn.execute("""
-                    SELECT id FROM portfolio_ledger_entries WHERE account_id=? AND fingerprint=?
-                    AND duplicate_of_id IS NULL ORDER BY id
-                    """, (account_id, fingerprint)).fetchall())
-                match = next(matches[fingerprint], None)
-                if match:
-                    overlaps[entry['source_row']] = match['id']
+        overlaps = find_overlaps(conn, account_id, data['entries']) if account_id and not existing else {}
         return (data['kind'], overlaps, existing)
+
+    def manual_options(self, query='', account_id=None):
+        return manual_options(self.db, local_day(), query, account_id)
+
+    def save_manual(self, kind, body):
+        return save_manual_entry(self.db, self.source_root, kind, body, local_day())
 
     def ingest(self, content, name, *, day=None, session=None, cash=None, confirmation=None,
                revise=False, overlap=None, draft=None):
@@ -163,7 +132,7 @@ class Portfolio:
         if data['kind'] != 'snapshot' and state[1] and overlap not in ('keep', 'mark'):
             raise ImportConflict('请先确认疑似重复记录')
 
-        _archive(self.source_root, content, digest, 'jpg' if broker == HUATAI else 'xls')
+        archive(self.source_root, content, digest, 'jpg' if broker == HUATAI else 'xls')
         with self.db.connection(write=True) as conn:
             latest = self._assess(conn, broker, data, digest, day, session, cash)
             if latest[2]:
@@ -176,7 +145,7 @@ class Portfolio:
             account_id = conn.execute('SELECT id FROM portfolio_accounts WHERE broker=?', (broker,)).fetchone()[0]
             if data['kind'] == 'snapshot':
                 return self._save_snapshot(conn, account_id, data, day, session, cash, state[1], digest, name, now)
-            return self._save_entries(conn, account_id, data, state[1] if overlap == 'mark' else {},
+            return save_entries(conn, account_id, data, state[1] if overlap == 'mark' else {},
                                       digest, name, now)
 
     @staticmethod
@@ -195,19 +164,6 @@ class Portfolio:
         conn.executemany(f'INSERT INTO portfolio_snapshot_positions(snapshot_id,{columns}) VALUES ({marks})',
                          [(snapshot_id, *(row[col] for col in POSITION_COLUMNS)) for row in data['positions']])
         return {'kind': 'snapshot', 'snapshot_id': snapshot_id, 'saved_count': len(data['positions'])}
-
-    @staticmethod
-    def _save_entries(conn, account_id, data, overlaps, digest, name, now):
-        entries = data['entries']
-        columns = ','.join(EVENT_COLUMNS)
-        marks = ','.join('?' for _ in range(len(EVENT_COLUMNS) + 5))
-        conn.executemany(f"""
-            INSERT INTO portfolio_ledger_entries(account_id,{columns},source_sha256,source_name,imported_at,duplicate_of_id)
-            VALUES ({marks})
-        """, [(account_id, *(entry[col] for col in EVENT_COLUMNS), digest, name, now, overlaps.get(entry['source_row']))
-              for entry in entries])
-        return {'kind': data['kind'], 'saved_count': len(entries), 'duplicate_count': len(overlaps),
-                'ignored_count': data.get('ignored_count', 0)}
 
     def snapshot(self, snapshot_id=None, *, account_id=None, day=None):
         if day is not None:
@@ -236,6 +192,7 @@ class Portfolio:
                 position['reference'] = self._reference(db, position, snapshot['snapshot_date'])
             fill_snapshot_daily_pnl(snapshot, positions, previous_market_day(db, snapshot['snapshot_date']))
             return {**payload, 'snapshot': snapshot, 'positions': positions,
+                    'revaluations': revaluation_directory(conn, snapshot['account_id']),
                     'totals': snapshot_totals(snapshot, positions),
                     'reconciliation': reconcile(snapshot, positions)}
 
@@ -285,25 +242,20 @@ class Portfolio:
         daily = sum_known([entry['totals'] for entry in funds], 'daily_pnl') if funds else None
         totals.update(daily_change(totals['assets'], daily))
         return {'scope': 'combined', 'directory': directory, 'accounts': accounts, 'days': days,
+                'revaluations': revaluation_directory(db.conn, None),
                 'snapshot': headline if funds else None, 'positions': holdings, 'funds': funds,
                 'missing_accounts': missing, 'totals': totals}
 
     def performance(self):
-        return read_performance(self.db, BROKER)
+        return read_performance_reports(self.db, BROKER)
 
-    def history(self, start=None, end=None, offset=0, *, transfers=False):
-        start = check_day(start) if start is not None else '0001-01-01'
-        end = check_day(end) if end is not None else local_day()
-        if start > end or not 0 <= offset <= 1_000_000:
-            raise ValueError('成交查询范围无效')
-        with self.db.connection() as conn:
-            params = (BROKER, start, end, *TRANSFER_TYPES)
-            scope = """FROM portfolio_ledger_entries l JOIN portfolio_accounts a ON a.id=l.account_id
-                       WHERE a.broker=? AND l.event_date BETWEEN ? AND ? AND l.duplicate_of_id IS NULL"""
-            scope += ' AND l.event_type ' + ('IN' if transfers else 'NOT IN') + ' (?,?,?)'
-            count = conn.execute('SELECT count(*) ' + scope, params).fetchone()[0]
-            entries = conn.execute("""
-                SELECT l.id,l.event_date,l.event_time,l.event_type,l.source_label,l.exchange,l.code,l.name,l.asset_type,
-                       l.quantity,l.price,l.gross_amount,l.fees,l.net_cash,l.source_name,l.source_row
-            """ + scope + ' ORDER BY l.event_date DESC,l.event_time DESC,l.id DESC LIMIT 100 OFFSET ?', (*params, offset))
-            return {'total_count': count, 'offset': offset, 'entries': [dict(row) for row in entries]}
+    def revaluation(self, snapshot_id=None, *, account_id=None, day=None, save=False):
+        payload = self.snapshot(snapshot_id, account_id=account_id, day=day)
+        result = read_revaluation(self.db, payload, datetime.now(ZoneInfo('Asia/Shanghai')))
+        return save_revaluation(self.db, payload, result) if save else result
+
+    def saved_revaluation(self, estimate_id):
+        return saved_revaluation(self.db, estimate_id)
+
+    def history(self, start=None, end=None, offset=0, *, transfers=False, **options):
+        return read_activity(self.db, local_day(), start, end, offset, transfers, options)

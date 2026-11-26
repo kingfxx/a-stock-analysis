@@ -6,7 +6,9 @@
   <title>持仓分析</title>
   <link rel="stylesheet" href="/research-layout.css">
   <link rel="stylesheet" href="/portfolio.css">
+  <script src="/portfolio-returns.js" defer></script>
   <script src="/portfolio-performance.js" defer></script>
+  <script src="/portfolio-manual.js" defer></script>
   <script src="/portfolio.js" defer></script>
 </head>
 <body>
@@ -30,6 +32,7 @@
         <div class="fields">
           <label id="account-control" hidden>账户<select id="account-select"></select></label>
           <label id="snapshot-control" hidden>快照日期<select id="snapshot-select"></select></label>
+          <button id="open-revaluation" type="button" aria-haspopup="dialog" hidden>重估并保存</button>
         </div>
       </div>
       <p id="holdings-empty" class="empty">导入招商证券持仓表后查看仓位与估值。</p>
@@ -61,15 +64,38 @@
       </div>
     </section>
     <section id="transfers" class="panel" role="tabpanel" aria-labelledby="transfers-tab" hidden>
-      <div class="panel-head"><div><h2>银证转账</h2><p id="transfers-count" class="muted"></p></div></div>
+      <div class="panel-head">
+        <div><h2>银证转账</h2><p id="transfers-count" class="muted"></p></div>
+        <button type="button" data-manual-entry="transfers" aria-haspopup="dialog">手动添加转账</button>
+      </div>
       <form id="transfers-filter" class="fields">
+        <label>时间范围<select name="range">
+          <option value="month">本月</option><option value="quarter">本季度</option><option value="year">本年</option>
+          <option value="all" selected>开户至今</option><option value="custom">自定义</option>
+        </select></label>
         <label>开始日期<input name="start" type="date"></label>
         <label>结束日期<input name="end" type="date"></label>
         <button type="submit">查询</button>
+        <button type="reset">重置</button>
       </form>
-      <div class="table-scroll" tabindex="0" aria-label="银证转账明细，可横向滚动">
-        <table>
-          <thead><tr><th scope="col">转账日期</th><th scope="col">方向与状态</th><th scope="col">原表金额</th><th scope="col">资金变动（元）</th></tr></thead>
+      <div class="table-scroll activity-scroll" tabindex="0" aria-label="银证转账明细，可横向及纵向滚动">
+        <table class="activity-table">
+          <thead>
+            <tr>
+              <th scope="col" aria-sort="descending"><button type="button" data-activity-sort="date">转账日期 <span aria-hidden="true">↓</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="broker">券商 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="business">方向与状态 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="amount">原表金额 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="net_cash">资金变动（元） <span aria-hidden="true">↕</span></button></th>
+            </tr>
+            <tr class="activity-filters">
+              <td></td>
+              <td><select form="transfers-filter" name="broker" aria-label="券商筛选" data-activity-filter><option value="">全部</option></select></td>
+              <td><select form="transfers-filter" name="business" aria-label="方向与状态筛选" data-activity-filter><option value="">全部</option></select></td>
+              <td><input form="transfers-filter" name="amount" aria-label="原表金额筛选" placeholder="精确值" maxlength="40" inputmode="decimal" data-activity-filter></td>
+              <td><input form="transfers-filter" name="net_cash" aria-label="资金变动（元）筛选" placeholder="精确值" maxlength="40" inputmode="decimal" data-activity-filter></td>
+            </tr>
+          </thead>
           <tbody id="transfers-body"></tbody>
         </table>
       </div>
@@ -80,7 +106,10 @@
       </div>
     </section>
     <section id="performance" class="panel performance-panel" role="tabpanel" aria-labelledby="performance-tab" hidden>
-      <div class="panel-head"><div><h2>盈亏分析</h2><p id="performance-scope" class="muted">招商证券 · A 股及 ETF</p></div></div>
+      <div class="panel-head">
+        <h2>盈亏分析</h2>
+        <label id="performance-account-control" hidden>券商账户<select id="performance-account"></select></label>
+      </div>
       <p id="performance-status" class="muted" role="status">正在读取本地成交与行情。</p>
       <div id="performance-data" hidden>
         <div class="fields performance-controls">
@@ -89,42 +118,89 @@
           </select></label>
           <label>时间范围<select id="performance-range">
             <option value="month">本月</option><option value="year" selected>今年</option>
-            <option value="all">开户至今</option><option value="custom">自定义</option>
+            <option value="by-year">按年</option><option value="all">开户至今</option><option value="custom">自定义</option>
           </select></label>
+          <label id="performance-year-control" hidden>年份<select id="performance-year"></select></label>
           <div id="performance-dates" class="fields" hidden>
             <label>开始日期<input id="performance-start" type="date"></label>
             <label>结束日期<input id="performance-end" type="date"></label>
           </div>
           <label>收益率口径<select id="performance-return-mode">
-            <option value="simple">单利</option><option value="compound">复利</option>
+            <option value="simple">单利（修正迪茨）</option><option value="compound">复利（XIRR 年化）</option>
           </select></label>
         </div>
         <p id="performance-period" class="muted" role="status"></p>
-        <dl class="balance-strip performance-summary">
+        <dl class="balance-strip performance-summary performance-summary-four">
           <div><dt id="performance-total-label">累计盈亏估算</dt><dd id="performance-total"></dd></div>
-          <div><dt id="performance-return-label">收益率估算 · 单利</dt><dd id="performance-return"></dd></div>
-          <div><dt>盈利／亏损天数</dt><dd id="performance-positive"></dd></div>
-          <div><dt>日线覆盖</dt><dd id="performance-covered"></dd></div>
+          <div><dt id="performance-return-label">单利（修正迪茨）</dt><dd id="performance-return"></dd></div>
+          <div><dt>净投入</dt><dd id="performance-net-investment"></dd></div>
+          <div>
+            <dt>股息收入 / 账户股息率</dt>
+            <dd><span id="performance-dividend-income"></span> / <span id="performance-dividend-yield"></span></dd>
+          </div>
         </dl>
-        <p id="performance-basis" class="muted"></p>
         <label class="performance-chart-control">曲线指标<select id="performance-chart-metric">
-          <option value="amount">累计盈亏</option><option value="rate">累计收益率</option>
+          <option value="amount">累计盈亏</option><option value="rate">账户收益率</option>
         </select></label>
         <div id="performance-chart" class="performance-chart" role="region" aria-label="累计盈亏曲线"></div>
+        <details id="performance-explanation" class="reconciliation performance-explanation">
+          <summary>说明</summary>
+          <p id="performance-scope"></p>
+          <p id="performance-account-coverage"></p>
+          <p>盈利／亏损天数 <span id="performance-positive"></span> · 日线覆盖 <span id="performance-covered"></span></p>
+          <p>净投入为所选日期范围内已入库的银证转入减转出。</p>
+          <p>股息收入为所选时间和证券范围内的股息及分红扣除股息红利补税后的净额。账户股息率为该净额除以区间最后一个交易日的账户 A 股及 ETF 总市值。</p>
+          <p id="performance-basis"></p>
+          <p>单利采用修正迪茨法。区间净收益为期末总资产减期初总资产和外部净入金。分母为期初总资产加按剩余自然日加权的净入金，期末当天的现金流权重为零。</p>
+          <p>复利采用 XIRR。将期初总资产及各笔转入视为投入，转出和期末总资产视为收回，按实际日期及 365 天年化。盈亏日历的收益率统一采用修正迪茨法，按日、月或年对应的区间显示。</p>
+          <p>账户收益率使用 A 股及 ETF 收盘市值和人民币现金，证券筛选影响盈亏金额和资产曲线。外部流水使用已入库的银证转账，同日转入转出按净额计算。所选区间采用此前最近一次收盘估值作为期初，缺少有效估值、流水或唯一可识别的收益率时留空。</p>
+          <p id="performance-opening-note"></p>
+        </details>
         <div class="panel-head calendar-head">
-          <div><h2>资产轨迹</h2><p id="performance-assets-scope" class="muted"></p></div>
+          <h2>资产轨迹</h2>
         </div>
-        <p id="asset-flow-summary" class="muted"></p>
-        <div id="performance-assets" class="performance-chart" role="region" aria-label="证券收盘市值与银证转账"></div>
+        <dl class="balance-strip performance-summary">
+          <div><dt>总资产</dt><dd id="asset-total"></dd></div>
+          <div><dt>总市值</dt><dd id="asset-market-value"></dd></div>
+          <div><dt>现金</dt><dd id="asset-cash"></dd></div>
+        </dl>
+        <div id="performance-assets" class="performance-chart" role="region" aria-label="总资产估算与银证转账"></div>
+        <details id="asset-explanation" class="reconciliation performance-explanation">
+          <summary>说明</summary>
+          <p id="performance-assets-scope"></p>
+          <p id="asset-card-date"></p>
+          <p id="asset-cash-summary"></p>
+          <p id="asset-flow-summary"></p>
+          <p>历史现金以券商确认的收盘余额为锚点，按已识别人民币流水倒推。缺实际交收的成交按已知成交额和费用估算。港股流水、未确认的交收修正和未入账的公告分红未计入。</p>
+        </details>
         <div class="panel-head calendar-head">
-          <div><h2>盈亏日历</h2><p id="calendar-total" class="muted"></p></div>
+          <div><h2>盈亏日历</h2><p id="calendar-total" class="muted">盈亏 <strong id="calendar-total-pnl"></strong> / 收益率 <strong id="calendar-total-rate"></strong></p></div>
           <div class="fields">
-            <label>视图<select id="calendar-view"><option value="month">月</option><option value="year">年</option></select></label>
-            <label>显示<select id="calendar-metric"><option value="amount">金额</option><option value="rate">收益率</option></select></label>
-            <label id="calendar-year-control" hidden>年份<select id="calendar-year"></select></label>
+            <div class="calendar-control-field">
+              <span id="calendar-view-label">视图</span>
+              <div id="calendar-view" class="metric-mode-group" role="group" aria-labelledby="calendar-view-label">
+                <button class="metric-mode" type="button" value="month" aria-pressed="true">月</button>
+                <button class="metric-mode" type="button" value="year" aria-pressed="false">年</button>
+              </div>
+            </div>
+            <div class="calendar-control-field">
+              <span id="calendar-metric-label">显示</span>
+              <div id="calendar-metric" class="metric-mode-group" role="group" aria-labelledby="calendar-metric-label">
+                <button class="metric-mode" type="button" value="amount" aria-pressed="true">金额</button>
+                <button class="metric-mode" type="button" value="rate" aria-pressed="false">收益率</button>
+              </div>
+            </div>
+            <div id="calendar-year-control" class="fields" hidden>
+              <button id="calendar-year-prev" type="button" aria-label="上一年">‹</button>
+              <label>年份<select id="calendar-year"></select></label>
+              <button id="calendar-year-next" type="button" aria-label="下一年">›</button>
+            </div>
             <div id="calendar-month-controls" class="fields">
               <button id="calendar-prev" type="button" aria-label="上个月">‹</button>
-              <label>月份<select id="calendar-month"></select></label>
+              <div class="calendar-control-field">
+                <span>月份</span>
+                <button id="calendar-month" type="button" aria-haspopup="dialog" aria-controls="calendar-month-picker"></button>
+              </div>
               <button id="calendar-next" type="button" aria-label="下个月">›</button>
             </div>
           </div>
@@ -135,18 +211,59 @@
         </table>
         <div id="calendar-year-grid" class="calendar-year-grid" role="group" aria-label="年度盈亏日历" hidden></div>
         <p id="calendar-day-detail" class="calendar-detail muted" aria-live="polite"></p>
+        <details id="calendar-securities" class="reconciliation performance-explanation">
+          <summary>按证券查看盈亏</summary>
+          <p id="calendar-security-period"></p>
+          <div class="calendar-security-columns">
+            <section aria-labelledby="calendar-gainers-title">
+              <h3 id="calendar-gainers-title" class="gain">盈利股票及 ETF</h3>
+              <ul id="calendar-gainers" class="calendar-security-list"></ul>
+            </section>
+            <section aria-labelledby="calendar-losers-title">
+              <h3 id="calendar-losers-title" class="loss">亏损股票及 ETF</h3>
+              <ul id="calendar-losers" class="calendar-security-list"></ul>
+            </section>
+          </div>
+        </details>
       </div>
     </section>
     <section id="history" class="panel" role="tabpanel" aria-labelledby="history-tab" hidden>
-      <div class="panel-head"><div><h2 id="history-title">历史成交</h2><p id="history-count" class="muted"></p></div></div>
+      <div class="panel-head">
+        <div><h2 id="history-title">历史成交</h2><p id="history-count" class="muted"></p></div>
+        <button type="button" data-manual-entry="history" aria-haspopup="dialog">手动添加交易</button>
+      </div>
       <form id="history-filter" class="fields">
+        <label>时间范围<select name="range">
+          <option value="month">本月</option><option value="quarter">本季度</option><option value="year">本年</option>
+          <option value="all" selected>开户至今</option><option value="custom">自定义</option>
+        </select></label>
         <label>开始日期<input name="start" type="date"></label>
         <label>结束日期<input name="end" type="date"></label>
         <button type="submit">查询</button>
+        <button type="reset">重置</button>
       </form>
-      <div class="table-scroll" tabindex="0" aria-label="历史成交明细，可横向滚动">
-        <table>
-          <thead><tr><th scope="col">成交日期</th><th scope="col">业务</th><th scope="col">证券</th><th scope="col">数量</th><th scope="col">成交价</th><th scope="col">原表金额</th></tr></thead>
+      <div class="table-scroll activity-scroll" tabindex="0" aria-label="历史成交明细，可横向及纵向滚动">
+        <table class="activity-table">
+          <thead>
+            <tr>
+              <th scope="col" aria-sort="descending"><button type="button" data-activity-sort="date">成交日期 <span aria-hidden="true">↓</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="broker">券商 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="business">业务 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="security">证券 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="quantity">数量 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="price">成交价 <span aria-hidden="true">↕</span></button></th>
+              <th scope="col"><button type="button" data-activity-sort="amount">原表金额 <span aria-hidden="true">↕</span></button></th>
+            </tr>
+            <tr class="activity-filters">
+              <td></td>
+              <td><select form="history-filter" name="broker" aria-label="券商筛选" data-activity-filter><option value="">全部</option></select></td>
+              <td><select form="history-filter" name="business" aria-label="业务筛选" data-activity-filter><option value="">全部</option></select></td>
+              <td><input form="history-filter" name="security" aria-label="证券筛选" placeholder="代码或名称" maxlength="40" data-activity-filter></td>
+              <td><input form="history-filter" name="quantity" aria-label="数量筛选" placeholder="精确值" maxlength="40" inputmode="decimal" data-activity-filter></td>
+              <td><input form="history-filter" name="price" aria-label="成交价筛选" placeholder="精确值" maxlength="40" inputmode="decimal" data-activity-filter></td>
+              <td><input form="history-filter" name="amount" aria-label="原表金额筛选" placeholder="精确值" maxlength="40" inputmode="decimal" data-activity-filter></td>
+            </tr>
+          </thead>
           <tbody id="history-body"></tbody>
         </table>
       </div>
@@ -158,6 +275,65 @@
     </section>
   </div>
 </main>
+<dialog id="manual-dialog" aria-labelledby="manual-title">
+  <form id="manual-entry-form">
+    <div class="dialog-head">
+      <h2 id="manual-title"></h2><button id="manual-close" type="button">关闭</button>
+    </div>
+    <div class="manual-fields">
+      <div id="manual-broker-box"></div>
+      <div id="manual-business-box"></div>
+      <label><span id="manual-date-label">日期</span><input name="event_date" type="date" required></label>
+      <div id="manual-security-box"></div>
+      <label id="manual-name-field">证券名称<input name="name" maxlength="80" autocomplete="off"></label>
+      <label id="manual-quantity-field"><span id="manual-quantity-label">数量</span><input name="quantity" inputmode="numeric"></label>
+      <label id="manual-price-field">成交均价<input name="price" inputmode="decimal"></label>
+      <label id="manual-amount-field"><span id="manual-amount-label">金额</span><input name="gross_amount" inputmode="decimal"></label>
+    </div>
+    <p id="manual-preview" class="muted" aria-live="polite"></p>
+    <details id="manual-more">
+      <summary>更多字段</summary>
+      <div class="manual-fields">
+        <label>时间<input name="event_time" type="time" step="1"></label>
+        <label id="manual-fees-field">合计手续费<input name="fees" inputmode="decimal"></label>
+        <label id="manual-net-field">实际净收付<input name="net_cash" inputmode="decimal" placeholder="流入为正，流出为负"></label>
+        <label><span id="manual-reference-label">成交编号</span><input name="execution_reference" maxlength="80"></label>
+        <label id="manual-order-field">委托号<input name="order_reference" maxlength="80"></label>
+      </div>
+    </details>
+    <p id="manual-status" role="status" aria-live="polite"></p>
+    <ul id="manual-candidates" class="muted" hidden></ul>
+    <div class="fields dialog-actions"><button id="manual-save" class="primary" type="submit">保存</button></div>
+  </form>
+</dialog>
+<dialog id="revaluation-dialog" aria-labelledby="revaluation-title">
+  <form method="dialog" class="dialog-head">
+    <h2 id="revaluation-title">持仓重估</h2><button type="submit">关闭</button>
+  </form>
+  <p id="revaluation-status" class="muted" role="status"></p>
+  <div id="revaluation-data" hidden>
+    <p class="muted">按快照仓位和成本估算。快照后的实际买卖和现金变动需以较新券商快照为准。</p>
+    <div class="table-scroll" tabindex="0" aria-label="持仓重估明细，可横向滚动">
+      <table>
+        <thead><tr><th scope="col">证券</th><th scope="col">数量</th><th scope="col">未复权收盘</th><th scope="col">估算市值</th><th scope="col">估算持仓盈亏</th><th scope="col">当日价格变动盈亏</th></tr></thead>
+        <tbody id="revaluation-body"></tbody>
+        <tfoot><tr><th scope="row" colspan="3">合计（元）</th><td id="revaluation-market"></td><td id="revaluation-pnl"></td><td id="revaluation-daily"></td></tr></tfoot>
+      </table>
+    </div>
+  </div>
+</dialog>
+<dialog id="calendar-month-picker" aria-labelledby="calendar-month-picker-title">
+  <form method="dialog" class="dialog-head">
+    <h2 id="calendar-month-picker-title">选择月份</h2>
+    <button type="submit" aria-label="关闭月份选择">关闭</button>
+  </form>
+  <div class="calendar-picker-years">
+    <button id="calendar-picker-prev" type="button" aria-label="上一年">‹</button>
+    <strong id="calendar-picker-year" aria-live="polite"></strong>
+    <button id="calendar-picker-next" type="button" aria-label="下一年">›</button>
+  </div>
+  <div id="calendar-picker-months" role="group" aria-label="月份"></div>
+</dialog>
 <dialog id="import-dialog" aria-labelledby="import-title">
   <form method="dialog" class="dialog-head"><h2 id="import-title">导入招商证券文件</h2><button type="submit" aria-label="关闭导入">关闭</button></form>
   <p class="muted">选择招商证券导出的持仓、历史成交或银证转账 XLS 文件。</p>

@@ -35,4 +35,3 @@
 .bs-table .bs-report-row th{position:static;text-align:left;background:#22343d;color:#b9dbe0;font-size:11px;white-space:normal}
 .bs-history summary{padding:0 24px 16px;font-size:13px}.bs-explanation{padding:18px 24px;font-size:13px}.bs-explanation p{color:var(--muted);line-height:1.9}
 @media(max-width:800px){#business-panel{scroll-margin-top:185px}.bs-summary{grid-template-columns:1fr}.bs-metric{padding:14px 16px}.bs-table-scroll{margin:12px 14px 16px}.bs-chart{height:440px}.bs-history summary{padding-left:14px}.bs-explanation{padding:16px}}
-@media(max-width:800px){.stock-sidebar .research-tabs>button,.stock-sidebar .research-tabs>.nav-link{flex:1 1 calc(33.333% - 6px)}}

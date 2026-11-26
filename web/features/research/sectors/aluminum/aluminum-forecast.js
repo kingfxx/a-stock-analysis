@@ -175,8 +175,8 @@
         ? '<a href="https://hq.smm.cn/data/futures/shfe-al0000" target="_blank" rel="noopener">上海有色行情</a> · 数据来自上期所'
         : `<a href="${esc(quote?.url)}" target="_blank" rel="noopener">上期所来源</a>`;
       return `<article class="quote-card"><h3>${label}</h3><p class="quote-price">${quote ? format(quote.price) + ' 元/吨' : '—'}</p>
-        <p class="muted">${quote ? `${esc(quote.trade_date)} · ${esc(quote.contract)}${age}` : '暂无报价，可刷新或手填。'}</p>
-        ${quote ? `<p class="muted">${source} · 获取于 ${esc(time)}</p>` : ''}
+        <p class="muted">${quote ? `结算日 ${esc(quote.trade_date)} · ${esc(quote.contract)}${age}` : '暂无报价，可刷新或手填。'}</p>
+        ${quote ? `<p class="muted">${source} · 查询于 ${esc(time)}</p>` : ''}
         ${rollover}${error ? `<p class="warning">${esc(error)}</p>` : ''}</article>`;
     }).join('');
     const references = quoteState.references || initial?.quotes.references || {};
@@ -184,7 +184,7 @@
     $('quotes').insertAdjacentHTML('beforeend', `<article class="quote-card" id="spot-quote">
       <h3>电解铝现货 · 华东 A00 铝锭</h3>
       <p class="quote-price">${spot ? format(spot.price) + ' 元/吨' : '—'}</p>
-      <p class="muted">${spot ? `${esc(spot.trade_date)} · ${format(spot.low)}–${format(spot.high)} 元/吨${spot.archived ? ' · 最近本地归档' : ''}` : '暂无现货报价，可刷新市场行情。'}</p>
+      <p class="muted">${spot ? `报价日 ${esc(spot.trade_date)} · ${format(spot.low)}–${format(spot.high)} 元/吨${spot.archived ? ' · 最近本地归档' : ''}` : '暂无现货报价，可刷新市场行情。'}</p>
       ${spot ? '<p class="muted"><a href="https://list1.mysteel.com/market/p-975-----020204-0--------1.html" target="_blank" rel="noopener">我的钢铁网行情</a> · 数据为长江有色华东中间价</p>' : ''}
       ${references.errors?.spot ? `<p class="warning">${esc(references.errors.spot)}</p>` : ''}</article>`);
     renderMonthly(references.monthly, references.errors?.monthly);
@@ -572,8 +572,19 @@
   }
 
   async function refresh() {
-    status('正在查询期货结算价、现货和月线…');
-    const state = await api('/refresh-quotes', {});
+    const previous = quoteState;
+    const feedback = $('market-status');
+    feedback.hidden = false;
+    feedback.classList.remove('warning');
+    feedback.textContent = '正在查询期货结算价、现货和月线…';
+    let state;
+    try {
+      state = await api('/refresh-quotes', {});
+    } catch (error) {
+      feedback.classList.add('warning');
+      feedback.textContent = error.message;
+      return;
+    }
     quoteState = state;
     if (!state.pending && !dirty && parentId === null && Object.keys(state.quotes).length) {
       initial = await api();
@@ -581,8 +592,25 @@
     }
     renderQuotes();
     const partial = Object.keys(state.errors).length > 0 || Object.keys(state.references?.errors || {}).length > 0;
-    status(state.pending ? '已有行情刷新在运行。' : state.reused && !partial ? '已更新参考行情。'
-      : partial ? '部分行情尚未取得，可继续手填或使用已保存方案。' : '已更新参考报价，预测参数仍可单独调整。', partial);
+    const updates = Object.entries(products).map(([key, label]) => {
+      const before = previous.quotes[key]?.value;
+      const after = state.quotes[key]?.value;
+      if (state.errors[key] || !after) return `${label}暂未取得新结算价`;
+      const changed = ['trade_date', 'contract', 'price'].some(field => before?.[field] !== after[field]);
+      const outcome = changed ? '已更新' : state.reused ? '沿用缓存' : '未变';
+      return `${label} ${after.trade_date} 结算价${outcome}`;
+    });
+    const spotBefore = previous.references?.spot;
+    const spotAfter = state.references?.spot;
+    if (state.references?.errors?.spot || !spotAfter) {
+      updates.push('现货暂未取得新报价');
+    } else {
+      const changed = ['trade_date', 'price', 'low', 'high'].some(field => spotBefore?.[field] !== spotAfter[field]);
+      updates.push(`现货 ${spotAfter.trade_date} 报价${changed ? '已更新' : '未变'}`);
+    }
+    if (state.references?.errors?.monthly) updates.push('月线暂未取得新数据');
+    feedback.classList.toggle('warning', partial);
+    feedback.textContent = state.pending ? '已有行情刷新在运行。' : updates.join('；') + '。';
   }
 
   function fork() {

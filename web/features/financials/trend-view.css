@@ -12,11 +12,6 @@
     .metric-choice { display:flex; flex-direction:column; gap:6px; min-width:170px; }
     .metric-choice-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
     .metric-choice-name { color:var(--muted); font-size:12px; font-weight:700; white-space:nowrap; }
-    .metric-mode-group { display:inline-flex; border:1px solid #4b616d; border-radius:6px; overflow:hidden; }
-    .metric-mode { padding:4px 9px; border-radius:0; background:transparent; color:var(--muted); font-size:12px; }
-    .metric-mode + .metric-mode { border-left:1px solid #4b616d; }
-    .metric-mode[aria-pressed="true"] { background:#355363; color:#fff; }
-    .metric-mode:hover { color:#fff; }
     .series-key { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:10px; color:var(--muted); font-size:12px; }
     .series-key span { display:inline-flex; align-items:center; gap:6px; }
     .series-key i { width:9px; height:9px; background:var(--series-color); border-radius:2px; }

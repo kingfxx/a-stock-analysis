@@ -14,10 +14,11 @@
   let importPreview;
   let snapshotRequest = 0;
   const activity = {
-    history: { offset: 0, request: 0, loaded: false },
-    transfers: { offset: 0, request: 0, loaded: false }
+    history: { offset: 0, request: 0, loaded: false, sort: 'date', direction: 'desc' },
+    transfers: { offset: 0, request: 0, loaded: false, sort: 'date', direction: 'desc' }
   };
   let snapshotScope = 'account';
+  let snapshotSelection;
   let positionRows = [];
   let positionSort = { key: 'market_value', direction: -1 };
 
@@ -176,6 +177,8 @@
     token = data.session_token;
     snapshotScope = data.scope;
     const snapshot = data.snapshot;
+    snapshotSelection = snapshot ? (data.scope === 'combined' ? { day: snapshot.snapshot_date } : { snapshot: snapshot.id }) : null;
+    $('open-revaluation').hidden = !snapshot;
     const combined = data.scope === 'combined';
     const accounts = Object.entries(data.accounts);
     $('account-control').hidden = accounts.length < 2;
@@ -199,6 +202,13 @@
         `${entry.snapshot_date} ${sessionLabel(entry.session)}${entry.supersedes_id ? ` · 修订 #${entry.id}` : ''}`,
         entry.id, false, entry.id === snapshot.id
       ))));
+    if (data.revaluations?.length) {
+      const estimates = node('optgroup');
+      estimates.label = '本地估算快照';
+      estimates.append(...data.revaluations.map(({id, quote_date}) =>
+        new Option(`${quote_date} 本地估算 #${id}`, `estimate:${id}`)));
+      $('snapshot-select').append(estimates);
+    }
     $('market-value').textContent = money(data.totals.market_value);
     $('cash-value').textContent = data.totals.cash == null ? '待核对' : money(data.totals.cash);
     $('asset-value').textContent = money(data.totals.assets ?? snapshot.broker_assets);
@@ -237,12 +247,58 @@
     }));
   }
 
+  async function openRevaluation(estimateId) {
+    if (!snapshotSelection) return;
+    const button = $('open-revaluation');
+    const status = $('revaluation-status');
+    const content = $('revaluation-data');
+    $('revaluation-dialog').showModal();
+    content.hidden = true;
+    status.textContent = estimateId ? '正在打开已保存的估算快照。' : '正在读取本地收盘行情并检查保存条件。';
+    button.disabled = true;
+    try {
+      const selection = snapshotSelection;
+      const url = '/api/portfolio/revaluation';
+      const result = estimateId ? await request(`${url}?${new URLSearchParams({ estimate: estimateId })}`)
+        : await request(url, Object.fromEntries(new URLSearchParams(selection)));
+      const missing = result.positions.filter((position) => position.close == null).map((position) => position.code);
+      const quote = result.quote_date
+        ? `行情 ${result.quote_date} 收盘${result.quote_date < result.today ? ' · 暂无今日收盘数据' : ''}`
+        : '暂无快照当日或之后的本地收盘数据';
+      status.textContent = [result.broker, `仓位快照 ${result.snapshot_date}`, quote,
+        result.saved_id ? '已保存本地估算快照' : '仅预览，当日收盘行情齐全后可保存',
+        missing.length ? `缺少收盘价：${missing.join('、')}` : '',
+        result.missing_accounts.length ? `缺少账户快照：${result.missing_accounts.join('、')}` : '',
+        !result.positions.length ? '暂无可重估的持仓' : ''].filter(Boolean).join(' · ');
+      $('revaluation-body').replaceChildren(...result.positions.map((position) => {
+        const row = node('tr');
+        row.append(node('td', `${position.code} ${position.name}`), node('td', display(position.quantity)),
+          node('td', display(position.close)), node('td', money(position.market_value)),
+          pnlPair(position.holding_pnl, null), pnlPair(position.daily_pnl, null));
+        return row;
+      }));
+      $('revaluation-market').textContent = money(result.totals.market_value);
+      setPnl($('revaluation-pnl'), result.totals.holding_pnl);
+      setPnl($('revaluation-daily'), result.totals.daily_pnl);
+      content.hidden = !result.positions.length;
+      if (!estimateId && result.saved_id && selection === snapshotSelection) {
+        await loadSnapshot(selection).catch((error) => notice(error.message));
+      }
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function historyRow(entry, preview = false) {
     const row = node('tr');
     const date = [entry.event_date, entry.event_time].filter(Boolean).join(' ');
     const label = [entry.source_label, entry.asset_type === 'hong_kong' ? '港股' : '',
       preview && entry.overlap ? '疑似重复' : ''].filter(Boolean).join(' · ');
-    for (const value of [date, label, `${entry.code} ${entry.name}`.trim(),
+    row.append(node('td', date));
+    if (!preview) row.append(node('td', entry.broker));
+    for (const value of [label, `${entry.code} ${entry.name}`.trim(),
       display(entry.quantity), display(entry.price), money(entry.gross_amount)]) row.append(node('td', value));
     return row;
   }
@@ -252,28 +308,54 @@
     const date = [entry.event_date, entry.event_time].filter(Boolean).join(' ');
     const label = entry.source_label + (preview && entry.overlap ? ' · 疑似重复' : '');
     const cash = entry.net_cash > 0 ? `+${money(entry.net_cash)}` : money(entry.net_cash);
-    row.append(...[date, label, money(entry.gross_amount), cash].map((value) => node('td', value)));
+    row.append(node('td', date));
+    if (!preview) row.append(node('td', entry.broker));
+    row.append(...[label, money(entry.gross_amount), cash].map((value) => node('td', value)));
     return row;
   }
 
   async function loadActivity(kind, offset = 0) {
     const state = activity[kind];
     const current = ++state.request;
-    const params = new URLSearchParams({ offset });
-    for (const [name, value] of new FormData($(`${kind}-filter`))) if (value) params.set(name, value);
+    const form = $(`${kind}-filter`);
+    const params = new URLSearchParams({ offset, sort: state.sort, direction: state.direction });
+    for (const [name, value] of new FormData(form)) {
+      if (value && (!['start', 'end'].includes(name) || form.elements.range.value === 'custom')) {
+        params.set(name, value.trim());
+      }
+    }
     const data = await request(`/api/portfolio/${kind}?${params}`);
     if (current !== state.request) return;
     state.loaded = true;
     state.offset = data.offset;
     const transfers = kind === 'transfers';
-    $(`${kind}-count`).textContent = `招商证券 · ${data.total_count} 条` +
-      (transfers ? ' · 含作废记录' : ' · 原表金额，费用及净交收待核对');
+    $(`${kind}-count`).textContent = `${params.get('broker') || '全部券商'} · ${data.total_count} 条` +
+      (transfers && !params.has('business') ? ' · 含作废记录' : '');
+    for (const key of ['broker', 'business']) {
+      const filter = form.elements.namedItem(key);
+      const selected = params.get(key) || '';
+      filter.replaceChildren(new Option('全部', ''), ...data.facets[key].map((value) => new Option(value, value)));
+      filter.value = selected;
+    }
+    if (params.get('range') !== 'custom') {
+      form.elements.start.value = data.period.start || '';
+      form.elements.end.value = data.period.end;
+    }
     const renderRow = transfers ? transferRow : historyRow;
     $(`${kind}-body`).replaceChildren(...data.entries.map((entry) => renderRow(entry)));
     $(`${kind}-empty`).hidden = Boolean(data.entries.length);
     $(`${kind}-pages`).hidden = data.total_count <= 100;
     $(`${kind}-prev`).disabled = state.offset === 0;
     $(`${kind}-next`).disabled = state.offset + 100 >= data.total_count;
+    const panel = $(kind);
+    panel.querySelector('.activity-scroll').scrollTop = 0;
+    for (const button of panel.querySelectorAll('[data-activity-sort]')) {
+      const header = button.closest('th');
+      const active = button.dataset.activitySort === state.sort;
+      if (active) header.setAttribute('aria-sort', state.direction === 'asc' ? 'ascending' : 'descending');
+      else header.removeAttribute('aria-sort');
+      button.querySelector('span').textContent = active ? (state.direction === 'asc' ? '↑' : '↓') : '↕';
+    }
   }
 
   const tabs = Array.from(document.querySelectorAll('.portfolio-nav [role="tab"]'));
@@ -443,6 +525,7 @@
   }
 
   $('open-import').addEventListener('click', () => $('import-dialog').showModal());
+  $('open-revaluation').addEventListener('click', () => openRevaluation());
   $('import-file').addEventListener('change', () => {
     importPreview = null;
     $('preview-content').replaceChildren();
@@ -467,17 +550,63 @@
     });
   }
   $('snapshot-select').addEventListener('change', (event) => {
+    const selected = event.target.value;
+    if (selected.startsWith('estimate:')) {
+      event.target.value = snapshotSelection.day ?? snapshotSelection.snapshot;
+      openRevaluation(selected.slice('estimate:'.length));
+      return;
+    }
     const key = snapshotScope === 'combined' ? 'day' : 'snapshot';
-    loadSnapshot({ [key]: event.target.value }).catch((error) => notice(error.message));
+    loadSnapshot({ [key]: selected }).catch((error) => notice(error.message));
   });
   for (const [kind, state] of Object.entries(activity)) {
-    $(`${kind}-filter`).addEventListener('submit', (event) => {
+    const form = $(`${kind}-filter`);
+    const reload = () => loadActivity(kind).catch((error) => notice(error.message));
+    form.addEventListener('submit', (event) => {
       event.preventDefault();
-      loadActivity(kind).catch((error) => notice(error.message));
+      reload();
     });
+    form.elements.range.addEventListener('change', () => {
+      if (form.elements.range.value !== 'custom') reload();
+    });
+    for (const name of ['start', 'end']) {
+      form.elements.namedItem(name).addEventListener('input', () => { form.elements.range.value = 'custom'; });
+    }
+    form.addEventListener('reset', (event) => {
+      event.preventDefault();
+      for (const key of ['broker', 'business', 'security', 'quantity', 'price', 'amount', 'net_cash', 'start', 'end']) {
+        const control = form.elements.namedItem(key);
+        if (control) control.value = '';
+      }
+      form.elements.range.value = 'all';
+      state.sort = 'date';
+      state.direction = 'desc';
+      reload();
+    });
+    for (const filter of $(kind).querySelectorAll('[data-activity-filter]')) {
+      filter.addEventListener('change', reload);
+    }
+    for (const button of $(kind).querySelectorAll('[data-activity-sort]')) {
+      button.addEventListener('click', () => {
+        const sort = button.dataset.activitySort;
+        state.direction = state.sort === sort ? (state.direction === 'asc' ? 'desc' : 'asc')
+          : (['date', 'quantity', 'price', 'amount', 'net_cash'].includes(sort) ? 'desc' : 'asc');
+        state.sort = sort;
+        reload();
+      });
+    }
     $(`${kind}-prev`).addEventListener('click', () => loadActivity(kind, state.offset - 100).catch((error) => notice(error.message)));
     $(`${kind}-next`).addEventListener('click', () => loadActivity(kind, state.offset + 100).catch((error) => notice(error.message)));
   }
   selectTabFromLocation();
+  window.initPortfolioManual({
+    request,
+    onSaved(kind, result) {
+      document.dispatchEvent(new Event('portfolio:ledger-changed'));
+      notice(result.already_saved ? `${result.event_date} 的这笔记录已保存。` : `已保存 ${result.event_date} 的记录。`);
+      activity[kind].loaded = false;
+      loadActivity(kind).catch((error) => notice(`记录已保存。列表刷新失败：${error.message}`));
+    }
+  });
   loadSnapshot().catch((error) => notice(error.message));
 })();

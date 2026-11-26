@@ -7,6 +7,7 @@ import sqlite3
 from urllib.parse import parse_qs
 
 from stock_analysis import application as app
+from stock_analysis.domains.portfolio.activity_read import ACTIVITY_FIELDS
 from stock_analysis.domains.portfolio.service import ImportConflict
 from stock_analysis.http.assets import asset_path
 from stock_analysis.http.rendering import render_portfolio
@@ -16,14 +17,18 @@ from stock_analysis.infrastructure.storage import StorageError
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_REQUEST_BYTES = ((MAX_FILE_BYTES + 2) // 3) * 4 + 4096
 ASSETS = {'/portfolio.css': 'text/css', '/portfolio.js': 'text/javascript',
-          '/portfolio-performance.js': 'text/javascript'}
+          '/portfolio-performance.js': 'text/javascript', '/portfolio-returns.js': 'text/javascript',
+          '/portfolio-manual.js': 'text/javascript'}
+SNAPSHOT_READS = {'/api/portfolio/snapshots', '/api/portfolio/revaluation'}
+MANUAL_OPTIONS = '/api/portfolio/manual-options'
+MANUAL_WRITES = {'/api/portfolio/manual/trade': 'history', '/api/portfolio/manual/transfer': 'transfers'}
 
 
 class PortfolioRoutes:
     def _get_portfolio(self, parsed):
         path = parsed.path
-        if path not in {'/portfolio', '/api/portfolio/snapshots', '/api/portfolio/history',
-                        '/api/portfolio/transfers', '/api/portfolio/performance', *ASSETS}:
+        if path not in {'/portfolio', *SNAPSHOT_READS, '/api/portfolio/history',
+                        '/api/portfolio/transfers', '/api/portfolio/performance', MANUAL_OPTIONS, *ASSETS}:
             return False
         try:
             self._ai_host()
@@ -34,22 +39,34 @@ class PortfolioRoutes:
                 self._send_body(200, render_portfolio().encode(), 'text/html; charset=utf-8')
                 return True
             query = parse_qs(parsed.query, keep_blank_values=True)
-            allowed = {'snapshot', 'account', 'day'} if path.endswith('/snapshots') else (
-                set() if path.endswith('/performance') else {'start', 'end', 'offset'})
+            allowed = {'snapshot', 'account', 'day'} if path in SNAPSHOT_READS else (
+                set() if path.endswith('/performance') else {'start', 'end', 'offset', *ACTIVITY_FIELDS})
+            if path.endswith('/revaluation'):
+                allowed.add('estimate')
+            if path == MANUAL_OPTIONS:
+                allowed = {'q', 'account'}
             if query.keys() - allowed or any(len(values) != 1 for values in query.values()):
                 raise ValueError('持仓查询参数无效')
             args = {key: values[0] for key, values in query.items()}
             service = app.portfolio_service()
-            if path.endswith('/snapshots'):
-                result = service.snapshot(int(args['snapshot']) if 'snapshot' in args else None,
-                                          account_id=int(args['account']) if 'account' in args else None,
-                                          day=args.get('day'))
-                result['session_token'] = app.LOCAL_SESSION_TOKEN
+            if path == MANUAL_OPTIONS:
+                result = service.manual_options(args.get('q', ''), int(args['account']) if 'account' in args else None)
+            elif 'estimate' in args:
+                if len(args) != 1:
+                    raise ValueError('请选择一份估算快照')
+                result = service.saved_revaluation(int(args['estimate']))
+            elif path in SNAPSHOT_READS:
+                read = service.snapshot if path.endswith('/snapshots') else service.revaluation
+                result = read(int(args['snapshot']) if 'snapshot' in args else None,
+                              account_id=int(args['account']) if 'account' in args else None,
+                              day=args.get('day'))
+                if path.endswith('/snapshots'):
+                    result['session_token'] = app.LOCAL_SESSION_TOKEN
             elif path.endswith('/performance'):
                 result = service.performance()
             else:
-                result = service.history(args.get('start'), args.get('end'), int(args.get('offset', 0)),
-                                         transfers=path.endswith('/transfers'))
+                offset = int(args.pop('offset', 0))
+                result = service.history(offset=offset, transfers=path.endswith('/transfers'), **args)
             self._ai_reply(result)
         except ValueError as exc:
             self._ai_reply({'error': str(exc)}, 400)
@@ -60,18 +77,33 @@ class PortfolioRoutes:
         return True
 
     def _post_portfolio(self, path):
-        if path not in {'/api/portfolio/import/preview', '/api/portfolio/import/confirm'}:
+        revaluation = path == '/api/portfolio/revaluation'
+        manual = MANUAL_WRITES.get(path)
+        if not revaluation and not manual and path not in {'/api/portfolio/import/preview', '/api/portfolio/import/confirm'}:
             return False
+        operation = '手工录入' if manual else '重估' if revaluation else '导入'
         try:
             try:
                 self._maintenance_auth()
             except ValueError:
-                self._ai_reply({'error': '请从本机持仓页面发起导入'}, 403)
+                self._ai_reply({'error': '请从本机持仓页面发起' + operation}, 403)
                 return True
             length = int(self.headers.get('Content-Length', '0'))
-            if self.headers.get_content_type() != 'application/json' or not 0 < length <= MAX_REQUEST_BYTES:
-                raise ValueError('文件须为 4 MiB 以内的 XLS')
+            limit = 4096 if manual else 1024 if revaluation else MAX_REQUEST_BYTES
+            if self.headers.get_content_type() != 'application/json' or not 0 < length <= limit:
+                raise ValueError('持仓请求格式无效' if revaluation or manual else '文件须为 4 MiB 以内的 XLS')
             request = json.loads(self.rfile.read(length).decode('utf-8'))
+            if manual:
+                self._ai_reply(app.portfolio_service().save_manual(manual, request))
+                return True
+            if revaluation:
+                if (not isinstance(request, dict) or set(request) not in ({'snapshot'}, {'day'})
+                        or any(not isinstance(value, str) for value in request.values())):
+                    raise ValueError('请选择一份仓位快照')
+                result = app.portfolio_service().revaluation(
+                    int(request['snapshot']) if 'snapshot' in request else None, day=request.get('day'), save=True)
+                self._ai_reply(result)
+                return True
             if not isinstance(request, dict):
                 raise ValueError('导入请求格式无效')
             file = request.pop('file', None)
@@ -98,9 +130,12 @@ class PortfolioRoutes:
             self._ai_reply(result)
         except ImportConflict as exc:
             self._ai_reply({'error': str(exc)}, 409)
+        except LookupError as exc:
+            self._ai_reply({'error': str(exc)}, 404)
         except (ValueError, UnicodeError, Base64Error) as exc:
-            message = '无法读取导入请求' if isinstance(exc, (UnicodeError, Base64Error, json.JSONDecodeError)) else str(exc)
+            message = ('无法读取' + operation + '请求') if isinstance(
+                exc, (UnicodeError, Base64Error, json.JSONDecodeError)) else str(exc)
             self._ai_reply({'error': message}, 400)
         except (OSError, StorageError, sqlite3.DatabaseError):
-            self._ai_reply({'error': '导入未完成，请查看后台状态后重试'}, 503)
+            self._ai_reply({'error': operation + '未完成，请查看后台状态后重试'}, 503)
         return True

@@ -45,6 +45,7 @@ def compact_database(db, validate):
 DESCRIPTIONS={
  'portfolio_accounts':('持仓分析','券商账户及建立时间'),
  'portfolio_snapshots':('持仓分析','券商同日资金与持仓快照、原件哈希及修订关系'),
+ 'portfolio_revaluation_snapshots':('持仓分析','本地收盘估算快照、券商仓位依据及保存的报价结果'),
  'portfolio_snapshot_positions':('持仓分析','各版持仓快照的证券数量、成本、市值和盈亏'),
  'portfolio_ledger_entries':('持仓分析','券商历史成交、银证转账和其他业务事件、导入来源及重复关联'),
  'portfolio_historical_closes':('持仓分析','清仓股票人民币未复权日收盘价、修订与腾讯来源页引用'),

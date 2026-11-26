@@ -25,7 +25,8 @@
         <button type="button" id="refresh-quotes">刷新市场行情</button>
       </div>
       <div id="quotes" class="quote-grid"></div>
-      <p class="muted">沪铝和氧化铝使用上期所交割月合约日结算价，按持仓量选取。华东 A00 铝锭现货仅作参考。</p>
+      <p id="market-status" class="muted" role="status" hidden></p>
+      <p class="muted">沪铝和氧化铝显示上期所日结算价，合约按持仓量选取。北京时间 15:45 起查询当日结算价，发布前显示最近已发布的结算价。华东 A00 铝锭为独立现货报价。</p>
       <div class="monthly-market">
         <h3>沪铝主连近 12 个月</h3>
         <div id="monthly-chart" class="chart"></div>

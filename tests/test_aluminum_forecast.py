@@ -230,14 +230,14 @@ def test_remaining_price_defaults_require_matching_period_and_current_quote(db):
 
 def test_existing_schema_upgrades_with_pre_migration_backup(tmp_path, monkeypatch):
     from stock_analysis.infrastructure import storage
-    current = storage.MIGRATIONS
+    aluminum_migrations = tuple(migration for migration in storage.MIGRATIONS if migration[0] <= 50)
     database = Database(tmp_path / 'upgrade.sqlite3')
-    monkeypatch.setattr(storage, 'MIGRATIONS', current[:-1])
+    monkeypatch.setattr(storage, 'MIGRATIONS', aluminum_migrations[:-1])
     assert database.initialize()['schema_version'] == 49
     with database.connection(write=True) as conn:
         conn.execute("INSERT INTO research_shipping_forecast_versions "
                      "VALUES(1,'2026Q3','旧航运','forecast','shipping-v1','hash','{}','2026-11-25')")
-    monkeypatch.setattr(storage, 'MIGRATIONS', current)
+    monkeypatch.setattr(storage, 'MIGRATIONS', aluminum_migrations)
     assert database.initialize()['schema_version'] == 50
     with database.connection() as conn:
         assert conn.execute('SELECT name FROM research_shipping_forecast_versions').fetchone()[0] == '旧航运'
