@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from stock_analysis.domains.portfolio.performance import TRADE_TYPES, reconstruct
 from stock_analysis.domains.portfolio.reference import local_market_days
-from stock_analysis.domains.stocks.price_service import PriceService
+from stock_analysis.domains.portfolio.history_prices import read_closes
 
 
 YEAR = 2026
@@ -44,12 +44,10 @@ def read_performance(db, broker):
             events.append(event)
         if not closing and not events:
             return {**base, 'as_of': end, 'error': '这个区间没有可复算的 A 股持仓或成交'}
-        service = PriceService(reader)
+        closes = read_closes(reader, closing.keys() | {event['security'] for event in events}, OPENING, end)
         prices = {
-            (exchange, code): {row['date']: Decimal(str(row['close']))
-                               for row in service.read(code, 'raw', start=OPENING, end=end, lease=False)}
-            for exchange, code in closing.keys() | {event['security'] for event in events}
-            if exchange in ('sh', 'sz')
+            security: {day: close for day, (close, origin) in values.items()}
+            for security, values in closes.items()
         }
         transfers = {}
         for row in conn.execute("""

@@ -228,7 +228,7 @@
     });
 
     const collectionVisible=()=>!panel.hidden&&!el('maintenance-collection-panel').hidden&&!document.hidden;
-    const providerNames={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',cninfo:'巨潮资讯',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所 / 航运研究所',mot:'交通运输部'};
+    const providerNames={sina:'新浪财经',tencent:'腾讯行情',baidu:'百度股市通',cninfo:'巨潮资讯',csindex:'中证指数',legu:'乐咕乐股',sws:'申万宏源',eastmoney:'东方财富',sse:'上海航运交易所 / 航运研究所',sse_fund:'上海证券交易所',szse_fund:'深圳证券交易所',mot:'交通运输部'};
     const progressMarkup='<div class="index-progress-details" role="status" aria-live="polite"><p data-progress-summary></p><ul data-progress-sources></ul></div>';
     const modeNames={missing:'补缺（仅缺失公司）',resume:'继续失败部分',incremental:'增量更新／原范围续跑',review:'修订核对',full:'历史初始化／恢复全量',audit:'覆盖核查',backfill:'指定范围回填'};
     function providerMenu(task,selected,title){
@@ -246,9 +246,10 @@
     const rateFields={interval:'完成后间隔（秒）',jitter:'随机追加等待上限（秒）',window_requests:'60秒最多请求数',rest_every:'每完成多少次休息',rest_min:'休息最短（秒）',rest_max:'休息最长（秒）',max_concurrency:'同源最大并发'};
     const rateBounds={interval:[1,3600],jitter:[0,600],window_requests:[1,60],rest_every:[1,1000],rest_min:[0,3600],rest_max:[0,3600],max_concurrency:[1,2]};
     function rateSettings(task){
+      if(task.fixed_pacing)return '<p>腾讯按公共保守限速串行采集。</p>';
       if(task.manual_only)return '<details data-task-rates><summary>限速设置</summary><p>本地资料导入不产生网络请求，无需设置限速。</p></details>';
       if(!task.rate_limits)return '<details data-task-rates><summary>限速设置</summary><p>新功能需在后台重启后使用。</p></details>';
-      return `<details data-task-rates><summary>限速设置</summary><p>按任务和提供方保存，手动与自动采集共用。保存不会启动采集或清空已有预算，下一次任务生效；有任务运行时请待结束后保存。同一来源仍跨任务、进程和重启共享锁、预算及冷却。并发为上限，串行分页不会因此并行。</p>${task.rate_limits.map(rate=>`<form data-task-rate-form data-rate-provider="${esc(rate.provider)}"><h4>${esc(providerNames[rate.provider]||rate.provider)}</h4><p data-rate-saved></p><div class="collection-fields"><label>配置模板<select data-rate-preset aria-label="${esc(providerNames[rate.provider]||rate.provider)}限速模板"><option value="current">当前参数</option><option value="default">默认</option><option value="faster">较快</option><option value="custom">手动调整</option></select></label>${Object.entries(rateFields).map(([name,label])=>`<label>${label}<input type="number" name="${name}" min="${rateBounds[name][0]}" max="${name==='max_concurrency'?rate.max_concurrency:rateBounds[name][1]}" step="${['interval','jitter','rest_min','rest_max'].includes(name)?'any':'1'}" value="${rate.current[name]}" required></label>`).join('')}<button type="submit">保存限速设置</button></div><p>滚动窗口固定60秒；拒绝后立即停止，冷却至少1小时并遵守更长 Retry-After；最多${rate.max_attempts}次尝试，重试仍等待60／120秒。支持同源并发上限：${rate.max_concurrency}。</p><p data-rate-status role="status" aria-live="polite"></p></form>`).join('')}</details>`;
+      return `<details data-task-rates><summary>限速设置</summary><p>按任务和提供方保存，手动与自动采集共用。保存不会启动采集或清空已有预算，下一次任务生效；有任务运行时请待结束后保存。同一来源仍跨任务、进程和重启共享锁、预算及冷却。并发为上限，串行分页不会因此并行。</p>${task.rate_limits.map(rate=>`<form data-task-rate-form data-rate-provider="${esc(rate.provider)}"><h4>${esc(providerNames[rate.provider]||rate.provider)}</h4><p data-rate-saved></p><div class="collection-fields"><label>配置模板<select data-rate-preset aria-label="${esc(providerNames[rate.provider]||rate.provider)}限速模板"><option value="current">当前参数</option><option value="default">默认</option>${rate.faster?'<option value="faster">较快</option>':''}<option value="custom">手动调整</option></select></label>${Object.entries(rateFields).map(([name,label])=>`<label>${label}<input type="number" name="${name}" min="${rateBounds[name][0]}" max="${name==='max_concurrency'?rate.max_concurrency:rateBounds[name][1]}" step="${['interval','jitter','rest_min','rest_max'].includes(name)?'any':'1'}" value="${rate.current[name]}" required></label>`).join('')}<button type="submit">保存限速设置</button></div><p>滚动窗口固定60秒；拒绝后立即停止，冷却至少1小时并遵守更长 Retry-After；最多${rate.max_attempts}次尝试，重试仍等待60／120秒。支持同源并发上限：${rate.max_concurrency}。</p><p data-rate-status role="status" aria-live="polite"></p></form>`).join('')}</details>`;
     }
     function updateRateForms(card,task){
       for(const rate of task.rate_limits||[]){
@@ -266,6 +267,10 @@
     function stockFields(task, scheduled=false) {
       return `<label>股票分组<select name="group_id" ${scheduled?'data-stock-schedule-group':''}><option value="">${scheduled?'请选择分组':'指定股票代码'}</option>${task.groups.map(group=>`<option value="${group.id}">${esc(group.name)}（${group.member_count??0}只）</option>`).join('')}</select></label>${scheduled?'':'<label>指定股票（逗号或空格分隔）<input name="codes" placeholder="601919 605499"></label>'}
         <fieldset><legend>刷新数据（公告核验、估值需要已有财务报告期）</legend>${Object.entries(task.datasets).map(([value,label])=>`<label><input type="checkbox" name="dataset" value="${value}" checked>${esc(label)}</label>`).join('')}</fieldset>`;
+    }
+    function etfFields(task, params={}) {
+      return `<div class="collection-fields" data-etf-fields><label>指定 ETF 代码（逗号或空格分隔）<input name="codes" value="${esc((params.codes||[]).join(' '))}" placeholder="510300 159938"></label>
+        <fieldset><legend>采集数据</legend>${Object.entries(task.datasets).map(([value,label])=>`<label><input type="checkbox" name="dataset" value="${value}" ${!params.datasets||params.datasets.includes(value)?'checked':''}>${esc(label)}</label>`).join('')}</fieldset></div>`;
     }
     const frequencyNames={daily:'每日',weekly:'每周',monthly:'每月',financial_season:'财报季'};
     function seasonFields(rule={}) {
@@ -299,7 +304,7 @@
       for(const name of ['day','window_start','window_end']) {
         const input=form.elements[name];
         if(input) {
-          const hidden=frequency!=='monthly';
+          const hidden=frequency!=='monthly'||(form.closest('[data-task]')?.dataset.task==='etfs'&&name.startsWith('window_'));
           input.closest('label').hidden=hidden;input.disabled=hidden;
         }
       }
@@ -344,21 +349,23 @@
         ${key==='shipping_monthly'?'<p>同一次采集自动处理 HTML 表格和图片，校验后发布月度指数及已披露的吞吐量。不确定的图片保留缺口，可在下方人工核验补正。</p>':''}
         ${key==='market_financial'?'<p>补缺用于该期已普通采集之后：只请求本地已知A股范围的接口缺行，不重抓已有公司、不补字段空值；普通采集和修订核对保持原行为。补缺仅手动运行。</p>':''}
         ${key==='sovereign_yields'?'<p>本入口独立采集东方财富中美国债收益率。旧联合运行历史见指数采集，以下仅列国债独立运行。</p>':key==='indices'?'<p>本入口只采集所选指数来源；国债使用独立入口。所有批量采集统一在此管理。</p>':''}
-        <form data-task-run><h4>手动采集</h4><div class="collection-fields"><label>模式<select name="mode">${task.modes.map(mode=>`<option value="${mode}">${esc(modeNames[mode])}</option>`).join('')}</select></label>
+        <form data-task-run><h4>手动采集</h4><div class="collection-fields"><label>模式<select name="mode">${task.modes.map(mode=>`<option value="${mode}">${esc(key==='etfs'?{incremental:'增量更新',full:'全量复核',resume:'按原范围续跑'}[mode]:modeNames[mode])}</option>`).join('')}</select></label>
+        ${key==='etfs'?`${etfFields(task)}<label data-etf-resume hidden>原运行引用（可选）<input name="operation_ref" placeholder="留空续跑最近有待处理分段的运行"></label><label data-etf-announcement hidden>正式分红公告 PDF（单只 ETF，仅选历史分红）<input type="url" name="announcement_url" placeholder="交易所或巨潮公告链接" disabled></label>`:''}
         ${key==='stocks'?stockFields(task):''}${task.action?targetPicker(task,target,'manual'):''}${task.manual_only&&!task.no_file?'<label>本地文件路径<input name="file" required placeholder="Excel原件或已核验JSON"></label>':''}
         ${key==='indices'||key==='shipping_monthly'?`${key==='indices'?providerMenu(task,task.providers,'提供方'):''}<label>起始日（可选）<input type="date" name="start"></label><label>结束日（可选）<input type="date" name="end"></label>`:''}
         ${key==='stocks'?'<div class="stock-run-actions">':''}<button type="submit">运行所选范围…</button>${task.supports_cancel?'<button type="button" data-task-cancel>请求停止</button>':'<span>暂不提供用户停止；失败后可按原范围续跑。</span>'}${key==='stocks'?'</div>':''}</div></form>
-        ${key==='stocks'?stockScheduleForm(task):task.manual_only?'<p>本地资料导入仅手动，不提供自动检查。</p>':`<details><summary>${key==='stocks'?'分组自动检查（选择分组编辑）':`自动检查：${schedule.enabled?'已开启':'已关闭'} · 北京时间 ${esc(schedule.local_time)}`}</summary><form data-task-schedule>
+        ${key==='stocks'?stockScheduleForm(task):task.manual_only?'<p>仅手动运行。</p>':`<details><summary>${key==='stocks'?'分组自动检查（选择分组编辑）':`自动检查：${schedule.enabled?'已开启':'已关闭'} · 北京时间 ${esc(schedule.local_time)}`}</summary><form data-task-schedule>
         <label>日程规则<select name="schedule_key" data-public-rule-select><option value="">新增规则</option>${(task.rules||[]).map(saved=>`<option value="${esc(saved.schedule_id)}" ${saved.schedule_id===schedule.schedule_id?'selected':''}>${esc(publicRuleLabel(task,saved))}</option>`).join('')}</select></label><button type="button" data-public-rule-delete>删除所选规则</button>
         <p>检查频率不等于数据频率。后台服务运行时自动检查，关闭网页不影响。服务晚启动时补做最近一次到期检查，多次漏跑合并为一次；例如18:00到期，次日09:00启动会补查前一次。首次保存启用从下一个计划时间开始，不立即采集。关闭仅阻止新调度，已运行任务继续。自动检查仅增量，财务／快照只检查所填目标。</p><div class="collection-fields">
         <label><input name="enabled" type="checkbox" ${key!=='stocks'&&schedule.enabled?'checked':''}>启用自动检查</label><label>北京时间<input name="local_time" type="time" value="${esc(schedule.local_time)}" required></label>
-        <label>频率<select name="frequency" data-schedule-frequency>${Object.entries(frequencyNames).map(([value,label])=>`<option value="${value}" ${rule.frequency===value?'selected':''}>${label}</option>`).join('')}</select></label>
+        <label>频率<select name="frequency" data-schedule-frequency>${Object.entries(frequencyNames).filter(([value])=>key!=='etfs'||value!=='financial_season').map(([value,label])=>`<option value="${value}" ${rule.frequency===value?'selected':''}>${label}</option>`).join('')}</select></label>
         ${scheduleChoices(rule)}
         <label>月检查日（短月按月末）<input name="day" type="number" min="1" max="31" value="${rule.day||1}"></label>
         <label>月发布窗口起日（可选）<input name="window_start" type="number" min="1" max="31" value="${rule.window?.[0]||''}"></label><label>止日<input name="window_end" type="number" min="1" max="31" value="${rule.window?.[1]||''}"></label>
         ${seasonFields(rule)}
         ${task.action?targetPicker(task,schedule.params.target||target,'schedule'):''}
         ${key==='indices'?`${providerMenu(task,schedule.params.providers||task.providers,'自动检查来源')}`:''}
+        ${key==='etfs'?etfFields(task,schedule.params):''}
         <button type="submit">保存定时设置</button></div></form></details>`}${key==='stocks'?'<div data-stock-rules></div>':''}<details><summary>进度、最近20次运行及来源证据</summary><div data-task-history></div></details>${rateSettings(task)}</article>`;
     }
     function shippingModule(list){
@@ -370,7 +377,8 @@
     }
     function publicRuleLabel(task,rule){
       const frequency=rule.rule.frequency,when=frequency==='monthly'?`每月${rule.rule.day}日`:frequencyLabel(rule.rule);
-      const topic=rule.params.target||(rule.params.providers||[]).map(provider=>providerNames[provider]||provider).join('、')||task.name;
+      const topic=task.task_key==='etfs'?`${(rule.params.codes||[]).join('、')} · ${(rule.params.datasets||[]).map(name=>task.datasets[name]).join('、')}`:
+        rule.params.target||(rule.params.providers||[]).map(provider=>providerNames[provider]||provider).join('、')||task.name;
       return `${topic} · ${when} ${rule.local_time} · ${rule.enabled?'已启用':'已关闭'}`;
     }
     function editPublicRule(card,identity){
@@ -384,6 +392,10 @@
       form.elements.window_start.value=rule.window?.[0]||'';form.elements.window_end.value=rule.window?.[1]||'';
       if(form.elements.target){form.elements.target.value=saved?.params.target||'';const preset=form.querySelector('[data-target-preset]');preset.value=[...preset.options].some(o=>o.value===form.elements.target.value)?form.elements.target.value:'custom';form.elements.target.closest('label').hidden=preset.value!=='custom';}
       for(const input of form.querySelectorAll('input[name=provider]'))input.checked=(saved?.params.providers||task.providers).includes(input.value);
+      if(task.task_key==='etfs'){
+        form.elements.codes.value=(saved?.params.codes||[]).join(' ');
+        for(const input of form.querySelectorAll('input[name=dataset]'))input.checked=!saved||saved.params.datasets.includes(input.value);
+      }
       updateScheduleFrequency(form);
     }
     function renderCollections(){
@@ -427,7 +439,7 @@
         const batchesOpen=Boolean(card.querySelector('[data-task-batches]')?.open);
         if(task.history[0]&&!previousRuns.has(task.history[0].operation_ref))opened.add(task.history[0].operation_ref);
         const latest=task.history[0],blocked=collectionTasks.some(other=>other.running&&taskConflict(other,task));
-        card.querySelector('[data-task-status]').innerHTML=`<p><strong>${task.running?'运行中':latest?esc(({complete:'执行完成',failed:'失败',cancelled:'已停止',pending:'待恢复'})[latest.status]||latest.status):'尚无运行记录'}</strong> · 最近检查 ${esc(date(task.last_check))} · 最近执行成功 ${esc(date(task.last_success))}</p><p>最近分段覆盖：${esc(({unknown:'未知',partial:'部分',complete:'完整（仅分段）',empty:'来源为空'})[task.coverage]||task.coverage)}。${esc(task.coverage_note)}。${task.batches.length?`最近运行有 ${task.batches.length} 个分段。`:''}</p><p>自动检查${task.schedule.enabled?'已开启':'已关闭'} · 下次检查 ${esc(date(task.schedule.next_check))}</p>${task.cooldowns.filter(row=>row.cooldown_until).map(row=>`<p>来源 ${esc(row.source_system)} 冷却截止 ${esc(date(row.cooldown_until))} · ${esc(row.reason)}</p>`).join('')}${latest?.error?`<p class="collection-error">${esc(latest.error)}</p>`:''}`;
+        card.querySelector('[data-task-status]').innerHTML=`<p><strong>${task.running?'运行中':latest?esc(({complete:'执行完成',failed:'失败',cancelled:'已停止',pending:'待恢复'})[latest.status]||latest.status):'尚无运行记录'}</strong> · 最近检查 ${esc(date(task.last_check))} · 最近执行成功 ${esc(date(task.last_success))}</p><p>最近分段覆盖：${esc(({unknown:'未知',partial:'部分',complete:'完整（仅分段）',empty:'来源为空'})[task.coverage]||task.coverage)}。${esc(task.coverage_note)}。${task.batches.length?`最近运行有 ${task.batches.length} 个分段。`:''}</p><p>自动检查${task.schedule.enabled?'已开启':'已关闭'} · 下次检查 ${esc(date(task.schedule.next_check))}</p>${task.cooldowns.filter(row=>row.cooldown_until).map(row=>`<p>来源 ${esc(row.source_system)} 冷却截止 ${esc(date(row.cooldown_until))} · ${esc(row.reason)}</p>`).join('')}${latest?.error?`<p class="collection-error">${esc(latest.error)}</p>`:''}${task.task_key==='etfs'&&latest?.result.message?`<p>${esc(latest.result.message)}</p>`:''}`;
         const missingRoutes=(latest?.result?.channels||[]).filter(channel=>channel.missing_routes?.length);
         if(missingRoutes.length)card.querySelector('[data-task-status]').insertAdjacentHTML('beforeend',missingRoutes.map(channel=>`<p>${esc(channel.index)}：来源本期未提供 ${channel.missing_routes.length} 条分航线（${esc(channel.missing_routes.join('、'))}）；已公布数据正常记录。</p>`).join(''));
         card.querySelector('[data-task-run] button[type=submit]').disabled=blocked;
@@ -451,6 +463,14 @@
       if(!response.ok)throw Error(data.error||'操作失败');return data;
     }
     el('maintenance-collection-panel').addEventListener('change',event=>{
+      if(event.target.name==='mode'&&event.target.closest('[data-task="etfs"]')){
+        const resume=event.target.value==='resume';
+        event.target.form.querySelector('[data-etf-fields]').hidden=resume;
+        event.target.form.querySelector('[data-etf-resume]').hidden=!resume;
+        const announcement=event.target.form.querySelector('[data-etf-announcement]');
+        announcement.hidden=event.target.value!=='full';
+        announcement.querySelector('input').disabled=announcement.hidden;
+      }
       if(event.target.matches('[data-public-rule-select]')){editPublicRule(event.target.closest('[data-task]'),event.target.value);return;}
 
       if(event.target.matches('[data-shipping-select]')){const module=event.target.closest('[data-shipping-module]');module.querySelectorAll('[data-shipping-view]').forEach(view=>{view.hidden=view.dataset.shippingView!==event.target.value;});return;}
@@ -502,11 +522,24 @@
         if(values.get('group_id')) params.group_id=Number(values.get('group_id'));
         else if(!isSchedule) params.codes=values.get('codes').split(/[,，\s]+/).filter(Boolean);
       }
+      if(key==='etfs'){
+        if(params.mode==='resume'){
+          const ref=values.get('operation_ref')?.trim();
+          if(ref)params.operation_ref=ref;
+        }else{
+          params.codes=values.get('codes').split(/[,，\s]+/).filter(Boolean);
+          params.datasets=values.getAll('dataset');
+          if(!params.codes.length||!params.datasets.length){el('maintenance-collection-status').textContent='请填写 ETF 代码并选择采集数据';return;}
+          if(values.get('announcement_url')?.trim())params.announcement_url=values.get('announcement_url').trim();
+        }
+      }
       if(values.has('target'))params.target=values.get('target').trim();if(values.has('file'))params.file=values.get('file').trim();
       if(key==='indices'||key==='shipping_monthly'){if(key==='indices')params.providers=values.getAll('provider');for(const field of ['start','end'])if(values.get(field))params[field]=values.get(field);}
       const scopes={shipping_route_backfill:'仅复用本地正式财报与解析，按报告校验并补充航线明细，不联网。',stocks:`${params.group_id?'分组 '+collectionTasks.find(task=>task.task_key==='stocks').groups.find(group=>group.id===params.group_id)?.name:'股票 '+(params.codes||[]).join('、')}；数据：${(params.datasets||[]).map(key=>collectionTasks.find(task=>task.task_key==='stocks').datasets[key]).join('、')}。全量沿用各数据集建档历史范围，不下载正式财报。`,shipping_research_import:`按哈希复用已有研究Excel、14份正式报告及解析，文件：${params.file}。`,shipping_image_review:`发布明确核验的图片转录，保留图片及核验文件证据，文件：${params.file}。`,shipping_weekly:'官方可见CCFI全部航线及SCFI综合；只补当期和上期，不承诺历史完整。',shipping_monthly:`交通运输部月度指数及市场分析：${params.start||'2022-12'} 至 ${params.end||'最新'}。HTML表格与图片一起解析；校验未通过的图片保留缺口。`,market_financial:params.mode==='missing'?`财务补缺：报告期 ${params.target}，只补本地已知A股范围的接口缺行；已有行及字段空值不重抓。需该期已普通采集过；来源仍未披露的公司保留缺口。`:`全市场财务：全A股四表，报告期 ${params.target}。`,trade_snapshot:`季度交易快照：${params.target} 的季末交易日，完整分页校验后保存。`,indices:`指数估值与行情：${(params.providers||[]).map(provider=>providerNames[provider]||provider).join('、')}；${params.start||'按本地水位及所选模式'} 至 ${params.end||'最近已完成交易日'}。本入口不附带国债采集。`,market_congestion:'大盘拥挤度：乐咕来源。首次历史初始化包含API与HTML；后续更新只检查HTML。',sovereign_yields:'中美国债收益率：东方财富，独立运行；按本地水位补采，首次从2002年至今。'};
       const historyWarning=['full','backfill','audit'].includes(params.mode)?'历史初始化／回填或核查可能耗时较长。':'';
-      if(!isSchedule&&!confirm(`确认运行${collectionTasks.find(task=>task.task_key===key).name}？\n模式：${modeNames[params.mode]}\n${scopes[key]}\n${historyWarning}已提交分段保留，缺失不补造。`))return;
+      const etfScope=key==='etfs'?(params.mode==='resume'?`按原范围续跑${params.operation_ref?' '+params.operation_ref:''}`:`ETF ${params.codes.join('、')} · ${params.datasets.map(name=>collectionTasks.find(task=>task.task_key==='etfs').datasets[name]).join('、')}`):null;
+      const scope=key==='portfolio_historical_closes'?'招商证券已清仓的 27 只沪深 A 股，从腾讯补采固定历史窗口的未复权收盘价。优先验证三个样本窗口，已验证完整的分段可复用。':etfScope||scopes[key];
+      if(!isSchedule&&!confirm(`确认运行${collectionTasks.find(task=>task.task_key===key).name}？\n模式：${modeNames[params.mode]}\n${scope}\n${historyWarning}已提交分段保留，缺失不补造。`))return;
       let command={task_key:key,params};
       if(isSchedule){const frequency=values.get('frequency'),rule={frequency};if(frequency==='financial_season'){rule.days_before=Number(values.get('days_before'));rule.days_after=Number(values.get('days_after'));}if(frequency==='daily'&&values.get('daily_mode')==='weekdays')rule.daily_mode='weekdays';if(frequency==='weekly'){rule.weekdays=values.getAll('weekdays').map(Number);if(!rule.weekdays.length){el('maintenance-collection-status').textContent='请至少选择一个星期';return;}}if(frequency==='monthly'){rule.day=Number(values.get('day'));if(values.get('window_start')||values.get('window_end'))rule.window=[Number(values.get('window_start')),Number(values.get('window_end'))];}command={task_key:key,schedule:{enabled:values.has('enabled'),local_time:values.get('local_time'),rule,params}};}
       if(isSchedule)command.schedule.schedule_key=values.get('schedule_key')||null;

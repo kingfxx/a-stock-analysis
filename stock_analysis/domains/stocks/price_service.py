@@ -60,9 +60,10 @@ class PriceService:
                                (version, normalize_code(code), SOURCE)).fetchone()
             return dict(row) if row else {}
 
-    def read(self, code, adjustment="qfq", *, version=None, start="1990-01-01", end="9999-12-31", lease=True):
+    def read(self, code, adjustment="qfq", *, version=None, start="1990-01-01", end="9999-12-31", lease=True, exchange=None):
         code = normalize_code(code)
-        identity = instrument_id(self.db, code)
+        identity = (instrument_id(self.db, code, exchange=exchange) if adjustment == "raw" and exchange is not None
+                    else instrument_id(self.db, code))
         if identity is None:
             if version:
                 raise PriceVersionUnavailable("前复权版本不存在，请重新加载价格")

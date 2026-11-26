@@ -14,10 +14,16 @@ from stock_analysis.collection.collection_schedule import latest_daily_date, lat
 from stock_analysis.collection.collection_progress import attach_data_counts
 from stock_analysis.infrastructure.storage import utc_now
 from stock_analysis.collection import schedules as schedule_store
+from stock_analysis.domains.portfolio import history_collection
+from stock_analysis.domains.etfs import collection as etf_collection
 
 ZONE = market_congestion.ZONE
 TASKS = {
+    history_collection.TASK_KEY: dict(name='清仓股票未复权日线补采', group='持仓分析', providers=['tencent'],
+        modes=['incremental'], manual_only=True, no_file=True, fixed_pacing=True),
     'stocks': dict(name='个股采集', group='个股', providers=['sina','eastmoney','tencent','baidu','cninfo'], modes=['incremental','full','resume']),
+    etf_collection.TASK_KEY: dict(name='ETF 采集', group='ETF', providers=['sina','eastmoney','tencent','sse_fund','szse_fund','cninfo'],
+        modes=['incremental','full','resume'],datasets=etf_collection.DATASETS),
     'shipping_research_import': dict(name='航运既有研究资料导入', group='航运研究', providers=['user_excel'], modes=['incremental'], manual_only=True),
     'shipping_image_review': dict(name='航运月度图片核验导入', group='航运研究', providers=['mot'], modes=['incremental'], manual_only=True),
     'shipping_route_backfill': dict(name='航运财报航线明细回填', group='航运研究', providers=['company_reports'], modes=['incremental'], manual_only=True, no_file=True),
@@ -48,6 +54,8 @@ def task(key):
 
 def validate_params(key, params, *, scheduled=False):
     spec = task(key)
+    if key == etf_collection.TASK_KEY:
+        return etf_collection.validate_params(params,scheduled=scheduled)
     if key == 'stocks':
         from stock_analysis.domains.stocks.collection_operations import validate_params as validate_stock
         result = validate_stock(params)
@@ -62,7 +70,7 @@ def validate_params(key, params, *, scheduled=False):
     params = dict(params)
     mode = params.setdefault('mode', 'incremental')
     if spec.get('manual_only'):
-        if scheduled:raise ValueError('本地资料导入不支持定时运行')
+        if scheduled:raise ValueError('此任务仅支持手动运行')
         if not spec.get('no_file') and (not isinstance(params.get('file'),str) or not params['file'].strip() or len(params['file'])>1000):
             raise ValueError('请指定本地导入文件')
     if mode not in spec['modes'] or scheduled and mode != 'incremental':
@@ -218,10 +226,12 @@ class CollectionManagement:
             current=dict(current or dict(enabled=False,local_time='18:00',rule={'frequency':'daily'},params={'mode':'incremental'}))
             current.update(command)
             if spec.get('manual_only'):
-                raise ValueError('资料导入仅手动，不允许配置定时')
+                raise ValueError('此任务仅支持手动运行')
             if type(current['enabled']) is not bool or not isinstance(current['local_time'],str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',current['local_time']):
                 raise ValueError('请指定布尔开关和北京时间HH:MM')
             current['rule']=validate_rule(current['rule'])
+            if key == etf_collection.TASK_KEY and current['rule']['frequency']=='financial_season':
+                raise ValueError('ETF 自动检查仅支持日、周、月')
             if 'window' in current['rule'] and 'action' not in spec:
                 raise ValueError('发布窗口仅适用于指定报告期／季度目标')
             if current['enabled'] or 'params' in command:
@@ -233,10 +243,14 @@ class CollectionManagement:
             identity=schedule_store.save(conn,key,current)
         return dict(enabled=current['enabled'],rule=current['rule'],params=current['params'],local_time=current['local_time'],schedule_key=identity)
 
-    def reserve(self, conn, key, params):
+    def reserve(self, conn, key, params, *, scheduled=False, now=None):
         spec = task(key)
+        if key == etf_collection.TASK_KEY:
+            return etf_collection.reserve(conn,params,scheduled=scheduled,now=now)
         if key == 'stocks':
             return self.stocks.reserve(conn, params)
+        if key == history_collection.TASK_KEY:
+            return history_collection.reserve(conn, params)
         if key.startswith('shipping_'):
             return shipping_collection.reserve(conn,key,params)
         if 'action' in spec:
@@ -259,6 +273,10 @@ class CollectionManagement:
         try:
             if key == 'stocks':
                 self.stocks.run(ref)
+            elif key == etf_collection.TASK_KEY:
+                etf_collection.run(self.db,ref)
+            elif key == history_collection.TASK_KEY:
+                history_collection.run(self.db, ref)
             elif key.startswith('shipping_'):
                 shipping_collection.run(self.db,ref)
             elif 'action' in task(key):
@@ -348,8 +366,10 @@ class CollectionManagement:
                     (latest['operation_ref'],))} if latest else set()
                 coverage=('complete' if coverage_states=={'complete'} else 'empty' if coverage_states=={'empty'}
                     else 'partial' if 'partial' in coverage_states else 'unknown')
+                if key == etf_collection.TASK_KEY and coverage_states == {'empty','complete'}:
+                    coverage = 'complete'
                 items.append(dict(task_key=key,rules=[dict(r,next_check=next_check(r,now)) for r in schedule_store.read(conn,key)], **spec, supports_cancel='action' not in spec,
-                    rate_limits=[] if spec.get('manual_only') else describe(conn,key,spec['providers']),
+                    rate_limits=[] if spec.get('manual_only') or spec.get('fixed_pacing') else describe(conn,key,spec['providers']),
                     schedule=schedule, running=bool(conn.execute("SELECT 1 FROM collection_operations WHERE task_key=? AND status='running' LIMIT 1",(key,)).fetchone()),
                     last_check=source[0] if source else None,
                     last_success=next((r['finished_at'] for r in rows if r['status'] == 'complete'), None),
@@ -400,6 +420,9 @@ class CollectionManagement:
             )
             conn.execute("UPDATE collection_schedule_slots SET status=CASE WHEN attempts<2 THEN 'pending' ELSE 'failed' END,"
                          "updated_at=?,error='后台中断；已提交分段保留，最多自动恢复一次' WHERE status='running'", (recovered_at,))
+            conn.execute("UPDATE collection_batches SET status='skipped',finished_at=?,error='后台中断，本轮未请求' "
+                         "WHERE status='pending' AND operation_id IN (SELECT operation_id FROM collection_operations "
+                         "WHERE task_key=? AND status<>'running')", (recovered_at, history_collection.TASK_KEY))
 
     @staticmethod
     def target_complete(conn, key, params):
@@ -452,7 +475,8 @@ class CollectionManagement:
                 if old and old['status'] != 'pending':
                     continue
                 # Do not start during any relevant source cooldown. No slot is consumed.
-                states = conn.execute('SELECT cooldown_until FROM collection_provider_state WHERE source_system IN (' + ','.join('?' for _ in TASKS[key]['providers']) + ')', TASKS[key]['providers']).fetchall()
+                providers = ['eastmoney'] if key == etf_collection.TASK_KEY else TASKS[key]['providers']
+                states = conn.execute('SELECT cooldown_until FROM collection_provider_state WHERE source_system IN (' + ','.join('?' for _ in providers) + ')', providers).fetchall()
                 cooling=any(r[0] and datetime.fromisoformat(r[0]) > now for r in states)
                 skip_reason=None
                 if key=='market_congestion':
@@ -469,7 +493,10 @@ class CollectionManagement:
                 if cooling and key!='market_congestion':
                     continue
                 try:
-                    ref = self.reserve(conn, key, params)
+                    if key == etf_collection.TASK_KEY:
+                        ref = self.reserve(conn,key,params,scheduled=True,now=now)
+                    else:
+                        ref = self.reserve(conn, key, params)
                 except ValueError:
                     continue  # Busy or uninitialized; retry when admissible.
                 conn.execute("UPDATE collection_operations SET trigger_type='scheduled' WHERE operation_id=?",(ref,))

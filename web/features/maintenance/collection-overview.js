@@ -11,6 +11,7 @@ window.initCollectionOverview=({root,post,reload,makeEditor})=>{
   function content(task,rule){
     const params=rule.params;
     if(task.task_key==='stocks')return `${rule.group_name} · ${(params.datasets||[]).map(key=>task.datasets[key]||key).join('、')}`;
+    if(task.task_key==='etfs')return `${params.codes.join('、')} · ${params.datasets.map(key=>task.datasets[key]).join('、')}`;
     if(params.target)return params.target+' · '+task.name;
     if(params.providers)return params.providers.map(key=>({csindex:'中证',sws:'申万',legu:'乐咕'})[key]||key).join('、');
     return ({shipping_weekly:'CCFI 全部航线、SCFI 综合',shipping_monthly:'月度指数与吞吐量',market_congestion:'大盘拥挤度',sovereign_yields:'中美国债收益率'})[task.task_key]||task.name;

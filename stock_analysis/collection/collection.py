@@ -843,7 +843,9 @@ class RequestCollector:
                     if not healthy:
                         parsed_source(self.db,source_id,error='恢复验证响应无效')
                         release(refusal='恢复验证响应无效',response=response)
-                    with self.provider_lock(provider):
+                    # Finalize an already received healthy probe even if the user
+                    # cancelled during transport. Publication still checks cancellation.
+                    with self.provider_lock(provider, cancellable=False):
                         state=self.state(provider)
                         state.update(cooldown_until=None,reason=None,denials=0)
                         self.save_state(state)

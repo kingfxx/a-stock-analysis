@@ -84,6 +84,30 @@ def test_actual_pacing_shared_across_collectors_and_cooldown(management):
         assert audit['rate_limits']['legu']['cooldown'] == 3600
 
 
+def test_etf_prices_and_dividends_share_saved_eastmoney_rate(management):
+    db = management.db
+    clock = Clock()
+    session = Session(clock,[Response(),Response()])
+    collector = RequestCollector(db,session=session,clock=clock.time,sleep=clock.sleep,uniform=lambda *_:0)
+    state = collector.state('eastmoney')
+    with pytest.raises(ValueError,match='max_concurrency'):
+        management.configure_rate('etfs','eastmoney',settings(max_concurrency=2))
+    management.configure_rate('etfs','eastmoney',settings(interval=7,jitter=0))
+    assert collector.state('eastmoney')==state
+    with db.connection(write=True) as conn:
+        assert conn.execute('SELECT count(*) FROM collection_operations').fetchone()[0]==0
+        conn.execute("INSERT INTO collection_operations(operation_id,task_key,status,started_at) VALUES('etf-rate','etfs','running','2026-11-26')")
+    with pytest.raises(ValueError,match='运行'):
+        management.configure_rate('etfs','eastmoney',settings(interval=1))
+    for dataset in ('etf.prices','etf.dividends'):
+        batch = begin_batch(db,'etf-rate',dataset,'eastmoney',domain='etf')
+        collector.get(batch,'eastmoney',dataset,'https://example.test')
+        with db.connection() as conn:
+            scope = json.loads(conn.execute('SELECT scope_json FROM collection_batches WHERE id=?',(batch,)).fetchone()[0])
+            assert scope['rate_limits']['eastmoney']['interval']==7
+    assert session.calls[1]-session.calls[0]==7
+
+
 @pytest.mark.parametrize('scope,dataset,provider,expected', [
     ({},'index.cs.history','csindex','indices'),
     ({'datasets':['bond_zh_us_rate']},'index.legu.pe','legu','indices'),

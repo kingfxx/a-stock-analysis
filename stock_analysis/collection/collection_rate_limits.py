@@ -51,8 +51,8 @@ def describe(conn, key, providers):
         current = baseline(key, provider)
         saved = conn.execute('SELECT settings_json,updated_at FROM collection_rate_limits WHERE task_key=? AND provider=?',
                              (key, provider)).fetchone()
-        default = fields(PacingPolicy())
-        fast = fields(current)
+        default = fields(current if key == 'etfs' else PacingPolicy())
+        fast = None if key == 'etfs' else fields(current)
         if key in ('stocks', 'market_congestion', 'sovereign_yields'):
             fast.update(interval=2, jitter=3, window_requests=30, rest_min=10, rest_max=10)
         result.append(dict(provider=provider, current=json.loads(saved['settings_json']) if saved else fields(current),
@@ -66,7 +66,7 @@ def save(conn, key, provider, settings):
     if not isinstance(key, str) or not isinstance(provider, str):
         raise ValueError('任务及提供方须为登记的名称')
     spec = task(key)
-    if spec.get('manual_only') or provider not in spec['providers']:
+    if spec.get('manual_only') or spec.get('fixed_pacing') or provider not in spec['providers']:
         raise ValueError('该任务不支持此网络提供方的限速配置')
     settings = validate(settings, concurrency_cap(key, provider))
     # Same write transaction as configuration save and operation reservations.
@@ -80,7 +80,7 @@ def save(conn, key, provider, settings):
 
 
 def task_for_batch(conn, batch_id, provider):
-    batch = conn.execute('SELECT domain,dataset,operation_id,scope_json FROM collection_batches WHERE id=?', (batch_id,)).fetchone()
+    batch = conn.execute('SELECT domain,dataset,source_system,operation_id,scope_json FROM collection_batches WHERE id=?', (batch_id,)).fetchone()
     if batch and batch['domain'] == 'stock':
         return 'stocks' if json.loads(batch['scope_json']).get('batch_pacing') else None
     if not batch:
@@ -89,9 +89,11 @@ def task_for_batch(conn, batch_id, provider):
     if operation.startswith('sw_update_runs:'):
         row = conn.execute('SELECT action FROM collection_operations WHERE id=?', (operation.split(':', 1)[1],)).fetchone()
         return {'financial_period': 'market_financial', 'cap_quarter': 'trade_snapshot'}.get(row['action']) if row and provider == 'eastmoney' else None
-    row = conn.execute('SELECT scope_json FROM collection_operations WHERE operation_id=?', (operation,)).fetchone()
+    row = conn.execute('SELECT task_key,scope_json FROM collection_operations WHERE operation_id=?', (operation,)).fetchone()
     if not row:
         return None  # Unregistered CLI backfills retain their existing strategy.
+    if batch['domain'] == 'etf':
+        return 'etfs' if row['task_key'] == 'etfs' and batch['source_system'] == provider else None
     if batch['dataset'].startswith('bond_zh_us_rate') and provider == 'eastmoney':
         return 'sovereign_yields'
     scope = json.loads(row['scope_json'])

@@ -18,6 +18,7 @@
 | `collection/` | 公共运行控制、来源归档、预算、锁、限速、调度及已注册任务适配；publication_counts提供不含IO的发布计数，collection_progress只读汇总公共批次 |
 | `maintenance/` | 统计、备份恢复、空间整理和清理 |
 | `domains/stocks/` | 股票库、行情、公告、分红、筹码；data_service 负责个股加载和数据组装，source_parsers 负责离线解析，sync_support 提供共享同步状态与策略 |
+| `domains/etfs/` | 场内 ETF 采集范围、行情交接、分红核对和事实发布。来源适配通过公共 RequestCollector，解析与存储独立 |
 | `domains/stocks/stock_search.py` / `stock_search_worker.py` | 股票全拼及首字母预生成；初始化批量补缺，名称写入同事务发布，pypinyin 仅在短命离线子进程加载；股票库读取只读持久字段 |
 | `domains/stocks/collection_operations.py` | 个股首次/手动/分组执行编排与轻量运行状态；复用事实服务及公共来源，不复制业务缓存 |
 | `domains/stocks/group_execution.py` | 分组业务依赖及有界工作线程，复用唯一operation和取消生命周期 |
@@ -42,6 +43,7 @@
 | `domains/market/` | 全市场财务、交易快照、拥挤度、国债及市场数据工具；market_financial_missing.py负责按公司／接口缺行的手动补缺，不修改既有行 |
 | `domains/notes/` | 投资笔记与数据快照 |
 | `domains/portfolio/` | 招商快照及历史成交导入、来源留存、快照对账与只读估值展示 |
+| `domains/portfolio/history_collection.py` / `history_source.py` / `history_prices.py` | 清仓窗口的手动补采与分段发布、腾讯分页证据适配、区间行情及出处查询 |
 | `domains/research/` | 研究报告、Checklist、经营判断、模型适配及行业专题 |
 
 行业专题放在 `domains/research/sectors/<行业>/`，航运已归入 `shipping/`。领域专属采集、计算和存储在主题内组织，跨主题的预算、归档和请求锁复用公共采集层。

@@ -60,7 +60,8 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (46, "046_shipping_route_view.sql"), (47, "047_source_archive_members.sql"),
               (48, "048_snapshot_correction_source.sql"), (49, "049_stock_search.sql"),
               (50, "050_aluminum_forecast.sql"), (51, "051_portfolio.sql"),
-              (52, "052_portfolio_display_fields.sql"))
+              (52, "052_portfolio_display_fields.sql"),
+              (53, "053_portfolio_historical_closes.sql"), (54, "054_etf_collection.sql"))
 
 
 class StorageError(RuntimeError):

@@ -23,6 +23,9 @@ LABELS = {
     'market.financial.income': '利润表', 'market.financial.balance': '资产负债表',
     'market.financial.cashflow': '现金流量表', 'market.financial.performance': '业绩指标',
     'market.trade_snapshot': '交易快照', 'bond_zh_us_rate': '国债收益率',
+    'portfolio.historical_closes': '持仓历史未复权收盘价',
+    'etf.prices': 'ETF 历史行情', 'etf.dividends': 'ETF 历史分红', 'etf.dividends.official': 'ETF 正式分红公告',
+    'etf.dividends.audit': 'ETF 累计分红核对',
     'market.legu.congestion': '拥挤度 API', 'market.legu.congestion.page': '拥挤度页面',
     'shipping.ccfi': 'CCFI 周度', 'shipping.scfi': 'SCFI 周度',
     'shipping.mot_rates': '航运月度指数', 'shipping.mot_analysis': '航运吞吐量',
@@ -49,7 +52,7 @@ def normalize(batch, values, label):
     dataset = batch['dataset']
     if returned is None and (financial or dataset in {'market.trade_snapshot', 'market.legu.congestion', 'market.legu.congestion.page'}):
         returned = number(values.get('rows'))
-    if returned is None and dataset.startswith('stock.'):
+    if returned is None and dataset.startswith(('stock.','etf.')):
         returned = number(values.get('row_count'))
         if returned is None:
             returned = number(values.get('candidate_count'))

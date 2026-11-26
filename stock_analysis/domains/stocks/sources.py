@@ -133,7 +133,7 @@ def fetch_daily_prices(code: str, session: requests.Session, adjust: str,
     return [prices[key] for key in sorted(prices)]
 
 
-def fetch_price_history(code, session, adjust, start="1990-01-01", end=None):
+def fetch_price_history(code, session, adjust, start="1990-01-01", end=None, *, on_page=None):
     """Backward pages deliberately overlap 20 trades and validate their basis.
 
     Return only the requested date range. A short final page is source exhaustion,
@@ -197,6 +197,8 @@ def fetch_price_history(code, session, adjust, start="1990-01-01", end=None):
                 raise ValueError("腾讯分页重叠不足或复权基准发生变化")
             if batch[0]["date"] >= min(previous):
                 raise ValueError("腾讯历史分页未推进")
+        if on_page is not None:
+            on_page(batch, page_size)
         prices.update({r["date"]: r for r in batch})
         if batch[0]["date"] <= start or len(batch) < page_size:
             return [prices[d] for d in sorted(prices) if start <= d <= end]

@@ -24,9 +24,13 @@ def digest(value):
     return hashlib.sha256(encoded(value).encode("utf-8")).hexdigest()
 
 
-def instrument_id(db, code):
+def instrument_id(db, code, *, exchange=None):
+    code = normalize_code(code)
     with db.connection() as conn:
-        row = conn.execute("SELECT id FROM instruments WHERE code=?", (normalize_code(code),)).fetchone()
+        if exchange is None:
+            row = conn.execute("SELECT id FROM instruments WHERE code=?", (code,)).fetchone()
+        else:
+            row = conn.execute("SELECT id FROM instruments WHERE exchange=? AND code=?", (exchange, code)).fetchone()
         return row[0] if row else None
 
 
