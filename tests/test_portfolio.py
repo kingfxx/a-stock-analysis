@@ -18,7 +18,7 @@ from stock_analysis import application
 from stock_analysis.domains.portfolio import cmb_xls, hk_performance, performance_read, revaluation
 from stock_analysis.domains.portfolio.activity_read import activity_dates
 from stock_analysis.domains.portfolio.calculations import daily_change, fill_snapshot_daily_pnl
-from stock_analysis.domains.portfolio.cash_history import attach_cash, reconstruct_cash
+from stock_analysis.domains.portfolio.cash_history import account_return_with_hk, attach_cash, reconstruct_cash
 from stock_analysis.domains.portfolio.cmb_transfers import HEADERS
 from stock_analysis.domains.portfolio.performance import (
     attach_monthly_security_pnl, combine_market_performance, merge_performance, reconstruct,
@@ -285,6 +285,36 @@ def test_security_pnl_reconciles_when_fractional_cents_round():
     attach_monthly_security_pnl(result)
     assert [row['pnl'] for row in result['records']] == ['0.40', '-0.10']
     assert result['monthly_security_pnl'] == {'2026-02': {'sz:159857': 30}}
+
+
+def test_hk_account_return_counts_internal_cash_once_and_keeps_bank_flows_separate():
+    opening, buy, dividend, next_day = '2025-11-21', '2025-11-24', '2025-11-25', '2025-11-26'
+    def entry(day, event_type, asset, net=None, gross=None):
+        return dict(event_date=day, event_type=event_type, asset_type=asset, source_label=event_type,
+                    exchange='hk', code='01919', gross_amount=gross, net_cash=net, fees=None)
+    ledger = [entry(buy, 'bank_transfer_in', 'unknown', net='13000'),
+              entry(buy, 'buy', 'hong_kong', gross='12000'),
+              entry(dividend, 'dividend', 'hong_kong', gross='100'),
+              entry(next_day, 'dividend', 'hong_kong', gross='20')]
+    domestic = dict(start=buy, opening_date=buy, opening_assumed_zero=True, return_gaps=[],
+                    transfers=[{'date': buy, 'in': '13000', 'out': '0'},
+                               {'date': next_day, 'in': '200', 'out': '0'}])
+    mixed = dict(start=buy, as_of=next_day, records=[
+        {'date': buy, 'market_value': '12000.00'}, {'date': dividend, 'market_value': '11900.00'},
+        {'date': next_day, 'market_value': '12400.00'},
+    ])
+    first = dict(start=buy, opening_day=opening, anchor_day=dividend, as_of=next_day,
+                 confirmed_cash='1100', ledger=ledger, hk_security=('hk', '01919'),
+                 opening_market_value='0.00', opening_assumed_zero=True)
+    second = dict(start=next_day, opening_day=dividend, anchor_day=next_day, as_of=next_day,
+                  confirmed_cash='200', ledger=[entry(next_day, 'bank_transfer_in', 'unknown', net='200')],
+                  hk_security=None, opening_market_value='0.00', opening_assumed_zero=True)
+    result = account_return_with_hk(domestic, mixed, (first, second))
+    assert result['opening_assets'] == '0.00'
+    assert result['transfers'] == domestic['transfers']
+    assert [(row['cash_balance'], row['total_assets']) for row in result['records']] == [
+        ('1000.00', '13000.00'), ('1100.00', '13000.00'), ('1320.00', '13720.00'),
+    ]
 
 
 def test_cash_backfill_uses_actual_paid_dates_and_leaves_missing_balances_blank():

@@ -49,7 +49,7 @@
       return;
     }
     const daily = calendarRate(record.date, record.date);
-    const dailyRate = data.fixed_fx ? '' : daily == null ? ' · 账户收益率待核对' : ` · 当日账户收益率 ${rate(daily)}`;
+    const dailyRate = daily == null ? ' · 账户收益率待核对' : ` · 当日账户收益率 ${rate(daily)}`;
     const estimated = Number(record.estimated_dividend) ? ` · 其中 ETF 公告估算 ${money(record.estimated_dividend)}` : '';
     const carried = carriedCloses(record);
     const marketMarks = (record.carried_markets || []).map(({market, valuation_date}) =>
@@ -73,10 +73,12 @@
 
   const compoundReturn = () => $('performance-return-mode').value === 'compound';
   const returnLabel = () => compoundReturn() ? '复利（XIRR 年化）' : dietzLabel;
-  const accountRates = (start, endpoints) =>
-    data.fixed_fx ? new Map() : window.PortfolioReturns.periodReturns(report, start, endpoints, compoundReturn());
-  const calendarRate = (start, end) => data.fixed_fx ? null
-    : window.PortfolioReturns.periodReturns(report, start, [end], false).get(end);
+  const returnReport = () => data.fixed_fx ? report.account_with_hk : report;
+  const accountRates = (start, endpoints, compound) => {
+    const source = returnReport();
+    return source ? window.PortfolioReturns.periodReturns(source, start, endpoints, compound) : new Map();
+  };
+  const calendarRate = (start, end) => accountRates(start, [end], false).get(end);
 
   function calendarPeriodRate(records) {
     if (!records.length) return null;
@@ -335,7 +337,7 @@
     await Plotly.react($('performance-chart'), traces, chartLayout(`${key}/${metric}`, useRate), config);
     if (request !== chartRequest) return;
     const assetCount = rows.filter((row) => row.total_assets != null).length;
-    const assetLabel = data.fixed_fx ? `${data.scopeLabel}市值估算` : assetCount ? '总资产估算' : '证券市值（现金待核对）';
+    const assetLabel = assetCount ? '总资产估算' : '证券市值（现金待核对）';
     const amounts = rows.map((row) => {
       const amount = assetCount ? row.total_assets : row.market_value;
       return amount == null ? null : Number(amount);
@@ -401,28 +403,26 @@
       }
     }
     const rows = data.records.filter((record) => record.date >= start && record.date <= end);
-    const localClose = data.local_close_from && end >= data.local_close_from ? ' · 含本地收盘估算' : '';
-    const fx = data.fixed_fx ? ` · 固定汇率 ${data.fixed_fx} CNY/HKD` : '';
-    $('performance-period').textContent = `${start} 至 ${end}${localClose}${fx}`;
+    $('performance-period').textContent = `${start} 至 ${end}`;
     const summary = summarize(rows);
     const closing = rows.at(-1);
     const last = closing?.date;
     const endpoints = $('performance-chart-metric').value === 'rate' ? rows.map((row) => row.date) : last ? [last] : [];
-    const rates = accountRates(start, endpoints);
+    const rates = accountRates(start, endpoints, compoundReturn());
     $('performance-total-label').textContent = rows.length && summary.covered === rows.length ? '累计盈亏估算' : '已覆盖日期盈亏';
     $('performance-return-label').textContent = returnLabel();
     showMetric('performance-total', summary.amount, data.fixed_fx ? money : wholeYuan);
     showMetric('performance-return', rates.get(last), rate);
     $('performance-positive').textContent = `${rows.filter((row) => row.pnl > 0).length}／${rows.filter((row) => row.pnl < 0).length}`;
     $('performance-covered').textContent = `${summary.covered}／${rows.length} 个交易日`;
-    const flows = data.transfers.filter(({date}) => date >= start && date <= end);
+    const flows = (returnReport()?.transfers || []).filter(({date}) => date >= start && date <= end);
     const deposits = flows.reduce((total, flow) => total + Number(flow.in), 0);
     const withdrawals = flows.reduce((total, flow) => total + Number(flow.out), 0);
     $('performance-net-investment').textContent = wholeYuan(deposits - withdrawals).replace(/^\+/, '');
     const dividend = rows.length && rows.every((row) => row.dividend_net != null)
       ? rows.reduce((total, row) => total + Math.round(Number(row.dividend_net) * 100), 0) / 100 : null;
     $('performance-dividend-income').textContent = dividend == null ? '—' : wholeYuan(dividend).replace(/^\+/, '');
-    const accountMarketValue = Number(report.records.findLast((row) => row.date === last)?.market_value);
+    const accountMarketValue = Number(returnReport()?.records.findLast((row) => row.date === last)?.market_value);
     $('performance-dividend-yield').textContent = dividend != null && accountMarketValue > 0
       ? rate(dividend / accountMarketValue).replace(/^\+/, '') : '—';
     $('asset-flow-summary').textContent = `已导入银证转账参考 · 转入 ${balance(deposits)} · 转出 ${balance(withdrawals)}`;
@@ -478,34 +478,40 @@
     const hasFixedFx = Boolean(scopeData.fixed_fx);
     const rebuildCalendar = resetDates || data?.choice !== choice;
     data = { ...report, ...scopeData, scopeLabel, choice };
+    if (hasFixedFx && report.account_with_hk) {
+      const cashByDate = new Map(report.account_with_hk.records.map((row) => [row.date, row.cash_balance]));
+      data.records = scopeData.records.map((row) => {
+        const cash = cashByDate.get(row.date) ?? null;
+        return { ...row, cash_balance: cash, total_assets: cash != null && row.market_value != null
+          ? Number(cash) + Number(row.market_value) : null };
+      });
+    }
     byDate = new Map(data.records.map((row) => [row.date, row]));
     if (rebuildCalendar) setScopeDates(data, data.records, !resetDates);
-    for (const element of $('performance-data').querySelectorAll('[data-account-metric]')) element.hidden = hasFixedFx;
-    if (hasFixedFx) {
-      $('performance-chart-metric').value = 'amount';
-      for (const button of $('calendar-metric').querySelectorAll('button')) {
-        button.setAttribute('aria-pressed', String(button.value === 'amount'));
-      }
-    }
     const blocked = data.blocked_dates.length > 0;
     status.hidden = !blocked;
     if (blocked) {
       status.textContent = `这些日期的成交或持仓需要核对：${data.blocked_dates.join('、')}`;
     }
     $('performance-scope').textContent = `${data.broker} · ${scopeLabel} · 截至 ${data.as_of}`;
-    $('performance-assets-scope').textContent = hasFixedFx ? `${data.broker} · ${scopeLabel}人民币市值` :
-      `${data.broker} · ${scopeLabel}收盘市值＋账户人民币现金估算`;
+    $('performance-assets-scope').textContent = `${data.broker} · ${scopeLabel}收盘市值＋账户人民币现金估算`;
     const marketCoverage = data.domestic_from
       ? `${data.domestic_label}从 ${data.domestic_from} 开始复算，港股从 ${data.hong_kong_from} 开始复算，计算至双方共同覆盖的日期。按每日已有复算结果合计盈亏，另一市场缺当日记录时沿用上次市值。 ` : '';
     $('performance-basis').textContent = hasFixedFx
-      ? `${marketCoverage}01919 按 ${data.fx_basis_date} 快照汇率估算历史市值。港股股息按券商人民币净额和入账日计入。港股买入按导出人民币金额估算，实际扣款及费用待核对。`
+      ? `${marketCoverage}01919 按 ${data.fx_basis_date} 快照固定汇率 ${data.fixed_fx} CNY/HKD 估算历史市值。港股股息按券商人民币净额和入账日计入。港股买入按导出人民币金额估算，实际扣款及费用待核对。`
       : (report === payload.combined ? '合并账户汇总各券商的总资产及银证净流量。' : '') +
       '累计证券盈亏为逐日盈亏金额之和。' +
-      (data.local_close_from ? '券商快照之后，按已录流水推算持仓与现金，并按已保存的本地收盘日复算。' : '') +
       (data.fee_gap_count ? `${data.fee_gap_count} 笔买卖缺费用或净交收金额，估算未计这部分费用。` : '') +
       (choice !== 'etfs' ? '股票股息和补税按券商流水。' : '') +
       (choice !== 'stocks' ? 'ETF 分红计入除息日，优先使用实际到账金额。' : '');
-    $('performance-opening-note').textContent = !hasFixedFx && report.opening_assumed_zero
+    $('performance-return-basis').textContent = (hasFixedFx
+      ? '含港股账户收益率为估算值，按全账户的 A 股、ETF、港股收盘市值和人民币现金计算。港股买入扣款与净股息作为账户内部现金变动。'
+      : '账户收益率使用 A 股及 ETF 收盘市值和人民币现金。') +
+      '证券筛选影响盈亏金额和资产曲线。外部流水采用已入库的银证转账，同日转入转出按净额计算。所选区间采用此前最近一次收盘估值作为期初，缺少有效估值、流水或唯一可识别的收益率时留空。';
+    $('asset-cash-basis').textContent = '现金以券商确认的收盘余额为锚点，按已识别人民币流水计算。' +
+      (hasFixedFx ? '含已核对的港股买入和人民币净股息。' : '此证券范围的现金复算沿用境内证券流水。') +
+      (data.local_close_from ? '券商快照之后，按已录流水推算持仓与现金，并按已保存的本地收盘日复算。' : '');
+    $('performance-opening-note').textContent = returnReport()?.opening_assumed_zero
       ? '开户至今的起点按首笔已录净入金前资产为零估算。' : '';
     renderCalendar();
     await renderRange();

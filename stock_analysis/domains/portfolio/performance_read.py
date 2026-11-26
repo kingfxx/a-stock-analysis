@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from stock_analysis.domains.etfs.storage import read_cash_dividends, read_unadjusted_closes
-from stock_analysis.domains.portfolio.cash_history import TRANSFERS, attach_cash, reconstruct_cash
+from stock_analysis.domains.portfolio.cash_history import TRANSFERS, account_return_with_hk, attach_cash, reconstruct_cash
 from stock_analysis.domains.portfolio.performance import (
     advance_positions, attach_monthly_security_pnl, combine_market_performance, merge_performance, reconstruct,
     sum_domestic_performance,
@@ -13,7 +13,7 @@ from stock_analysis.domains.portfolio.performance import (
 from stock_analysis.domains.portfolio.performance_events import normalize_events, reconcile_etf_dividends
 from stock_analysis.domains.portfolio.reference import local_market_days
 from stock_analysis.domains.portfolio.history_prices import read_closes
-from stock_analysis.domains.portfolio.hk_performance import read_hk_performance
+from stock_analysis.domains.portfolio.hk_performance import SECURITY as HK_SECURITY, read_hk_performance
 
 
 def _read_account_coverage(conn):
@@ -41,7 +41,7 @@ def _saved_close_days(conn, account, anchor_day):
     """, (account, anchor_day))]
 
 
-def _read_performance(reader, broker, security_names, *, use_local_closes=True):
+def _read_performance(reader, broker, security_names, cash_inputs, *, use_local_closes=True):
     base = {'broker': broker, 'records': []}
     broker_label = broker.removesuffix('证券')
     conn = reader.conn
@@ -126,7 +126,7 @@ def _read_performance(reader, broker, security_names, *, use_local_closes=True):
         local_close_from = dates[dates.index(anchor_day) + 1]
         closing = advance_positions(closing, events, anchor_day)
         if closing is None:
-            return _read_performance(reader, broker, security_names, use_local_closes=False)
+            return _read_performance(reader, broker, security_names, cash_inputs, use_local_closes=False)
     for event in events:
         exchange, code = event['security']
         if event['name']:
@@ -153,7 +153,7 @@ def _read_performance(reader, broker, security_names, *, use_local_closes=True):
                              etf_events, prices, dividends)
     result = sum_domestic_performance(stock_result, etf_result)
     if local_days and any(day > anchor_day for scope in (result, stock_result) for day in scope['blocked_dates']):
-        return _read_performance(reader, broker, security_names, use_local_closes=False)
+        return _read_performance(reader, broker, security_names, cash_inputs, use_local_closes=False)
     balances = reconstruct_cash(dates, snapshot['confirmed_cash'], ledger, anchor_day=anchor_day)
     for scope in (result, stock_result, etf_result):
         attach_cash(scope['records'], balances)
@@ -170,6 +170,12 @@ def _read_performance(reader, broker, security_names, *, use_local_closes=True):
         opening_amount = Decimal(first_market) + Decimal(first_cash)
         if opening_amount >= 0:
             opening_assets = format(opening_amount, '.2f')
+    cash_inputs[broker] = {
+        'opening_day': opening, 'anchor_day': anchor_day, 'confirmed_cash': snapshot['confirmed_cash'],
+        'start': start, 'as_of': end, 'ledger': ledger, 'opening_market_value': first_market,
+        'opening_assumed_zero': assumed_zero,
+        'hk_security': HK_SECURITY if 'hong_kong' in base else None,
+    }
     return {**base, **result, 'year': int(end[:4]), 'start': start, 'as_of': end,
             'local_close_from': local_close_from,
             'opening_assets': opening_assets, 'opening_assumed_zero': assumed_zero,
@@ -180,12 +186,14 @@ def _read_performance(reader, broker, security_names, *, use_local_closes=True):
 
 def read_performance_reports(db, default_broker):
     security_names = {}
+    cash_inputs = {}
     with db.shared_reader() as reader:
         accounts = _read_account_coverage(reader.conn)
-        reports = {account['broker']: _read_performance(reader, account['broker'], security_names) for account in accounts}
+        reports = {account['broker']: _read_performance(reader, account['broker'], security_names, cash_inputs)
+                   for account in accounts}
         primary = reports.get(default_broker)
         if primary is None:
-            primary = _read_performance(reader, default_broker, security_names)
+            primary = _read_performance(reader, default_broker, security_names, cash_inputs)
     covered = [reports[row['broker']] for row in accounts if row['snapshot_date']]
     combined = merge_performance(covered)
     combined['missing_accounts'] = [row['broker'] for row in accounts if not row['snapshot_date']]
@@ -204,6 +212,10 @@ def read_performance_reports(db, default_broker):
                 if mixed is not None:
                     attach_monthly_security_pnl(mixed)
                     report[market_key] = mixed
+            if 'all_markets' in report:
+                cash_accounts = covered if report is combined else [primary]
+                report['account_with_hk'] = account_return_with_hk(
+                    report, report['all_markets'], [cash_inputs[row['broker']] for row in cash_accounts])
         attach_monthly_security_pnl(hk)
     for report in (combined, primary, *(report for report in reports.values() if report is not primary)):
         attach_monthly_security_pnl(report)

@@ -130,21 +130,21 @@
             <label>开始日期<input id="performance-start" type="date"></label>
             <label>结束日期<input id="performance-end" type="date"></label>
           </div>
-          <label data-account-metric>收益率口径<select id="performance-return-mode">
+          <label>收益率口径<select id="performance-return-mode">
             <option value="simple">单利（修正迪茨）</option><option value="compound">复利（XIRR 年化）</option>
           </select></label>
         </div>
         <p id="performance-period" class="muted" role="status"></p>
         <dl class="balance-strip performance-summary performance-summary-four">
           <div><dt id="performance-total-label">累计盈亏估算</dt><dd id="performance-total"></dd></div>
-          <div data-account-metric><dt id="performance-return-label">单利（修正迪茨）</dt><dd id="performance-return"></dd></div>
-          <div data-account-metric><dt>净投入</dt><dd id="performance-net-investment"></dd></div>
+          <div><dt id="performance-return-label">单利（修正迪茨）</dt><dd id="performance-return"></dd></div>
+          <div><dt>净投入</dt><dd id="performance-net-investment"></dd></div>
           <div>
-            <dt>股息收入<span data-account-metric> / 账户股息率</span></dt>
-            <dd><span id="performance-dividend-income"></span><span data-account-metric> / <span id="performance-dividend-yield"></span></span></dd>
+            <dt>股息收入 / 账户股息率</dt>
+            <dd><span id="performance-dividend-income"></span> / <span id="performance-dividend-yield"></span></dd>
           </div>
         </dl>
-        <label class="performance-chart-control" data-account-metric>曲线指标<select id="performance-chart-metric">
+        <label class="performance-chart-control">曲线指标<select id="performance-chart-metric">
           <option value="amount">累计盈亏</option><option value="rate">账户收益率</option>
         </select></label>
         <div id="performance-chart" class="performance-chart" role="region" aria-label="累计盈亏曲线"></div>
@@ -153,33 +153,33 @@
           <p id="performance-scope"></p>
           <p id="performance-account-coverage"></p>
           <p>盈利／亏损天数 <span id="performance-positive"></span> · 日线覆盖 <span id="performance-covered"></span></p>
-          <p data-account-metric>净投入为所选日期范围内已入库的银证转入减转出。</p>
-          <p data-account-metric>股息收入为所选时间和证券范围内的股息及分红扣除股息红利补税后的净额。账户股息率为该净额除以区间最后一个交易日的账户 A 股及 ETF 总市值。</p>
+          <p>净投入为所选日期范围内已入库的银证转入减转出。</p>
+          <p>股息收入为所选时间和证券范围内的股息及分红扣除股息红利补税后的净额。账户股息率为该净额除以区间末所用账户估值范围的证券总市值。</p>
           <p id="performance-basis"></p>
-          <p data-account-metric>单利采用修正迪茨法。区间净收益为期末总资产减期初总资产和外部净入金。分母为期初总资产加按剩余自然日加权的净入金，期末当天的现金流权重为零。</p>
-          <p data-account-metric>复利采用 XIRR。将期初总资产及各笔转入视为投入，转出和期末总资产视为收回，按实际日期及 365 天年化。盈亏日历的收益率统一采用修正迪茨法，按日、月或年对应的区间显示。</p>
-          <p data-account-metric>账户收益率使用 A 股及 ETF 收盘市值和人民币现金，证券筛选影响盈亏金额和资产曲线。外部流水使用已入库的银证转账，同日转入转出按净额计算。所选区间采用此前最近一次收盘估值作为期初，缺少有效估值、流水或唯一可识别的收益率时留空。</p>
+          <p>单利采用修正迪茨法。区间净收益为期末总资产减期初总资产和外部净入金。分母为期初总资产加按剩余自然日加权的净入金，期末当天的现金流权重为零。</p>
+          <p>复利采用 XIRR。将期初总资产及各笔转入视为投入，转出和期末总资产视为收回，按实际日期及 365 天年化。盈亏日历的收益率统一采用修正迪茨法，按日、月或年对应的区间显示。</p>
+          <p id="performance-return-basis"></p>
           <p id="performance-opening-note"></p>
         </details>
         <div class="panel-head calendar-head">
           <h2>资产轨迹</h2>
         </div>
         <dl class="balance-strip performance-summary">
-          <div data-account-metric><dt>总资产</dt><dd id="asset-total"></dd></div>
+          <div><dt>总资产</dt><dd id="asset-total"></dd></div>
           <div><dt>总市值</dt><dd id="asset-market-value"></dd></div>
-          <div data-account-metric><dt>现金</dt><dd id="asset-cash"></dd></div>
+          <div><dt>现金</dt><dd id="asset-cash"></dd></div>
         </dl>
         <div id="performance-assets" class="performance-chart" role="region" aria-label="总资产估算与银证转账"></div>
         <details id="asset-explanation" class="reconciliation performance-explanation">
           <summary>说明</summary>
           <p id="performance-assets-scope"></p>
           <p id="asset-card-date"></p>
-          <p id="asset-cash-summary" data-account-metric></p>
-          <p id="asset-flow-summary" data-account-metric></p>
-          <p data-account-metric>现金以券商确认的收盘余额为锚点，按已识别人民币流水计算前后各日余额。缺实际交收的成交按已知成交额和费用估算。港股流水、未确认的交收修正和未入账的公告分红未计入。</p>
+          <p id="asset-cash-summary"></p>
+          <p id="asset-flow-summary"></p>
+          <p id="asset-cash-basis"></p>
         </details>
         <div class="panel-head calendar-head">
-          <div><h2>盈亏日历</h2><p id="calendar-total" class="muted">盈亏 <strong id="calendar-total-pnl"></strong><span data-account-metric> / 收益率 <strong id="calendar-total-rate"></strong></span></p></div>
+          <div><h2>盈亏日历</h2><p id="calendar-total" class="muted">盈亏 <strong id="calendar-total-pnl"></strong> / 收益率 <strong id="calendar-total-rate"></strong></p></div>
           <div class="fields">
             <div class="calendar-control-field">
               <span id="calendar-view-label">视图</span>
@@ -188,7 +188,7 @@
                 <button class="metric-mode" type="button" value="year" aria-pressed="false">年</button>
               </div>
             </div>
-            <div class="calendar-control-field" data-account-metric>
+            <div class="calendar-control-field">
               <span id="calendar-metric-label">显示</span>
               <div id="calendar-metric" class="metric-mode-group" role="group" aria-labelledby="calendar-metric-label">
                 <button class="metric-mode" type="button" value="amount" aria-pressed="true">金额</button>
