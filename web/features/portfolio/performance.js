@@ -7,6 +7,7 @@
   const money = (value) => `${formatter.format(Number(value))} 元`;
   const rate = (value) => `${formatter.format(Number(value) * 100)}%`;
   let data;
+  let report;
   let byDate;
   let loading = false;
   let plotlyPromise;
@@ -18,6 +19,11 @@
     return node;
   }
 
+  function carriedCloses(record) {
+    return (record.estimated_closes || []).map(({code, date, price_date}) =>
+      `${code} 在 ${date} 沿用 ${price_date} 收盘价`).join('、');
+  }
+
   function showDay(record) {
     const detail = $('calendar-day-detail');
     if (record.pnl == null) {
@@ -25,7 +31,9 @@
       return;
     }
     const dailyRate = record.return_rate == null ? '收益率待核对' : `收益率 ${rate(record.return_rate)}`;
-    detail.textContent = `${record.date} · 估算盈亏 ${money(record.pnl)} · ${dailyRate} · 买卖 ${record.trades} 笔 · 股息及补税 ${money(record.dividend_net)}`;
+    const estimated = Number(record.estimated_dividend) ? ` · 其中 ETF 公告估算 ${money(record.estimated_dividend)}` : '';
+    const carried = carriedCloses(record);
+    detail.textContent = `${record.date} · 估算盈亏 ${money(record.pnl)} · ${dailyRate} · 买卖 ${record.trades} 笔 · 股息及补税 ${money(record.dividend_net)}${estimated}${carried ? ` · ${carried}` : ''}`;
   }
 
   function summarize(rows) {
@@ -33,21 +41,27 @@
     let amount = 0;
     let accumulated = compound ? 1 : 0;
     let complete = true;
+    let rateDays = 0;
     let covered = 0;
+    let estimatedDays = 0;
     const points = rows.map((row) => {
       if (row.pnl != null) {
         amount += Number(row.pnl);
         covered++;
+        if (row.estimated_closes?.length) estimatedDays++;
       }
-      if (row.return_rate == null) complete = false;
-      if (complete) {
+      const noCapital = row.pnl != null && Number(row.pnl) === 0 &&
+        row.return_base != null && Number(row.return_base) === 0;
+      if (row.return_rate == null && !noCapital) complete = false;
+      if (complete && row.return_rate != null) {
         const day = Number(row.return_rate);
         accumulated = compound ? accumulated * (1 + day) : accumulated + day;
+        rateDays++;
       }
       return { date: row.date, amount: row.pnl == null ? null : amount,
-        rate: complete ? accumulated - (compound ? 1 : 0) : null };
+        rate: complete && rateDays ? accumulated - (compound ? 1 : 0) : null };
     });
-    return { amount: covered ? amount : null, rate: points.at(-1)?.rate ?? null, points, covered };
+    return { amount: covered ? amount : null, rate: points.at(-1)?.rate ?? null, points, covered, estimatedDays };
   }
 
   function calendarMetric() {
@@ -80,9 +94,10 @@
     const useRate = calendarMetric() === 'rate';
     const value = useRate ? record.return_rate : record.pnl;
     const label = calendarText(value);
-    button.append(number, element('small', label));
-    button.setAttribute('aria-label', `${date} ${label}${value == null || useRate ? '' : ' 元'}`);
-    button.title = value == null ? (record.issues.join('、') || '没有可计算的收益率') : `${date} · ${label}`;
+    const carried = value == null ? '' : carriedCloses(record);
+    button.append(number, element('small', carried ? `≈ ${label}` : label));
+    button.setAttribute('aria-label', `${date} ${label}${value == null || useRate ? '' : ' 元'}${carried ? '（含沿用收盘价）' : ''}`);
+    button.title = value == null ? (record.issues.join('、') || '没有可计算的收益率') : `${date} · ${label}${carried ? ` · ${carried}` : ''}`;
     cell.className = calendarClass(value);
     button.addEventListener('click', () => {
       $('calendar-body').querySelector('[aria-pressed="true"]')?.setAttribute('aria-pressed', 'false');
@@ -96,6 +111,7 @@
 
   function renderCalendar() {
     const yearly = $('calendar-view').value === 'year';
+    $('calendar-year-control').hidden = !yearly;
     $('calendar-month-controls').hidden = $('calendar-month-grid').hidden = yearly;
     $('calendar-year-grid').hidden = !yearly;
     if (yearly) {
@@ -131,16 +147,18 @@
     const measure = useRate ? ($('performance-return-mode').value === 'simple' ? '单利估算' : '复利估算')
       : summary.covered === records.length ? '累计估算' : '已覆盖日期合计';
     const visible = value == null ? '暂无可计算结果' : `${measure} ${useRate ? rate(value) : money(value)}`;
-    $('calendar-total').textContent = `${visible} · ${summary.covered}/${records.length} 个交易日`;
+    $('calendar-total').textContent = `${visible} · ${summary.covered}/${records.length} 个交易日${summary.estimatedDays ? ` · ${summary.estimatedDays} 天沿用收盘价` : ''}`;
   }
 
   function renderYearCalendar() {
-    setCalendarSummary(data.records);
+    const year = $('calendar-year').value;
+    const yearRecords = data.records.filter((row) => row.date.startsWith(`${year}-`));
+    setCalendarSummary(yearRecords);
     $('calendar-day-detail').textContent = '选择月份查看交易日明细。';
     const cards = [];
     for (let month = 1; month <= 12; month++) {
-      const key = `${data.year}-${String(month).padStart(2, '0')}`;
-      const records = data.records.filter((row) => row.date.startsWith(key));
+      const key = `${year}-${String(month).padStart(2, '0')}`;
+      const records = yearRecords.filter((row) => row.date.startsWith(key));
       const summary = summarize(records);
       const value = calendarMetric() === 'rate' ? summary.rate : summary.amount;
       const card = element('button');
@@ -177,7 +195,7 @@
       paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
       showlegend: false,
       margin: { l: 70, r: 18, t: 18, b: 38 }, hovermode: 'x unified',
-      xaxis: { type: 'date', tickformat: '%m-%d', hoverformat: '%Y-%m-%d', gridcolor: '#354853' },
+      xaxis: { type: 'date', tickformat: '%Y-%m', hoverformat: '%Y-%m-%d', gridcolor: '#354853' },
       yaxis: { tickformat: percent ? '.1f' : ',.0f', ticksuffix: percent ? '%' : ' 元',
         gridcolor: '#354853', zerolinecolor: '#607985' }
     };
@@ -229,10 +247,11 @@
     const flows = data.transfers.filter((transfer) => transfer.date >= bounds[0] && transfer.date <= bounds[1]);
     const assets = rows.map((row) => row.market_value == null ? null : Number(row.market_value));
     const marketValues = new Map(rows.map((row, index) => [row.date, assets[index]]));
+    const assetsLabel = `${data.scopeLabel}收盘市值`;
     const assetsTraces = [{
-      type: 'scatter', mode: 'lines', name: 'A 股收盘市值', x: rows.map((row) => row.date), y: assets,
+      type: 'scatter', mode: 'lines', name: assetsLabel, x: rows.map((row) => row.date), y: assets,
       line: { color: '#e5aa75', width: 2.4 }, connectgaps: false,
-      hovertemplate: 'A 股收盘市值：%{y:,.2f} 元<extra></extra>'
+      hovertemplate: `${assetsLabel}：%{y:,.2f} 元<extra></extra>`
     }];
     const totals = [];
     for (const [direction, title, color] of [['in', '转入', '#ff949b'], ['out', '转出', '#80dce3']]) {
@@ -260,24 +279,24 @@
   async function renderRange() {
     if (!data) return;
     const kind = $('performance-range').value;
-    const first = data.records[0].date;
     let start = `${data.year}-01-01`;
     let end = data.as_of;
     $('performance-dates').hidden = kind !== 'custom';
     if (kind === 'month') start = `${data.as_of.slice(0, 7)}-01`;
+    if (kind === 'all') start = data.start;
     if (kind === 'custom') {
       start = $('performance-start').value;
       end = $('performance-end').value;
-      if (!start || !end || start > end || start < `${data.year}-01-01` || end > data.as_of) {
-        $('performance-period').textContent = `请选择 ${data.year}-01-01 至 ${data.as_of} 内的有效日期，图表保留上次选择。`;
+      if (!start || !end || start > end || start < data.start || end > data.as_of) {
+        $('performance-period').textContent = `请选择 ${data.start} 至 ${data.as_of} 内的有效日期，图表保留上次选择。`;
         return;
       }
     }
     const rows = data.records.filter((record) => record.date >= start && record.date <= end);
     $('performance-period').textContent = kind === 'all'
-      ? `开户至今的完整历史暂不可用，显示 ${first} 至 ${end} 的可复算区间。` : `${start} 至 ${end}`;
+      ? `${start} 至 ${end} · 从本地最早流水起算` : `${start} 至 ${end}`;
     const summary = summarize(rows);
-    $('performance-total-label').textContent = summary.covered === rows.length ? '累计盈亏估算' : '已覆盖日期盈亏';
+    $('performance-total-label').textContent = rows.length && summary.covered === rows.length ? '累计盈亏估算' : '已覆盖日期盈亏';
     $('performance-return-label').textContent = `收益率估算 · ${$('performance-return-mode').value === 'simple' ? '单利' : '复利'}`;
     showMetric('performance-total', summary.amount, money);
     showMetric('performance-return', summary.rate, rate);
@@ -286,9 +305,30 @@
     await drawCharts(rows, summary, [start, end]);
   }
 
+  async function selectScope() {
+    if (!report) return;
+    const stocksOnly = $('performance-security-scope').value === 'stocks';
+    const scopeLabel = stocksOnly ? 'A 股' : 'A 股及 ETF';
+    data = { ...report, ...(stocksOnly ? report.stocks : {}), scopeLabel };
+    byDate = new Map(data.records.map((row) => [row.date, row]));
+    const status = $('performance-status');
+    const blocked = data.blocked_dates.length > 0;
+    status.hidden = !blocked;
+    if (blocked) {
+      status.textContent = `这些日期的成交或持仓需要核对：${data.blocked_dates.join('、')}`;
+    }
+    $('performance-scope').textContent = `${data.broker} · ${scopeLabel} · 截至 ${data.as_of}`;
+    $('performance-assets-scope').textContent = `招商${scopeLabel}收盘市值 · 港股及现金未计入`;
+    $('performance-basis').textContent = '日收益率按当日盈亏除以（前收证券市值＋当日买入资金）估算。单利累加日收益率，复利连乘日增长因子。' +
+      (data.fee_gap_count ? `${data.fee_gap_count} 笔买卖缺费用或净交收金额，估算未计这部分费用。` : '') +
+      (stocksOnly ? '股票股息和补税按券商流水。' : '股票股息和补税按券商流水。ETF 分红计入除息日，优先使用实际到账金额。');
+    renderCalendar();
+    await renderRange();
+  }
+
   async function loadPerformance() {
     if (loading) return;
-    if (data) {
+    if (report) {
       for (const id of ['performance-chart', 'performance-assets']) {
         if ($(id).data) window.Plotly.Plots.resize($(id));
       }
@@ -300,29 +340,29 @@
     status.textContent = '正在读取本地成交与行情。';
     try {
       const response = await fetch('/api/portfolio/performance');
-      const report = await response.json();
-      if (!response.ok || report.error) throw new Error(report.error || '无法读取盈亏数据');
-      if (report.blocked_dates.length) throw new Error(`这些日期的成交或持仓需要核对：${report.blocked_dates.join('、')}`);
-      if (!report.records.length) throw new Error('暂无可复算的交易日');
-      data = report;
-      byDate = new Map(data.records.map((row) => [row.date, row]));
-      $('performance-scope').textContent = `${data.broker} · A 股 · 截至 ${data.as_of}`;
-      $('performance-basis').textContent = '日收益率按当日盈亏除以（前收 A 股市值＋当日买入资金）估算。单利累加日收益率，复利连乘日增长因子。' +
-        (data.fee_gap_count ? `${data.fee_gap_count} 笔买卖缺费用或净交收金额，估算未计这部分费用。` : '') +
-        '股息和补税暂用原表金额。';
-      for (const id of ['performance-start', 'performance-end']) {
-        $(id).min = `${data.year}-01-01`;
-        $(id).max = data.as_of;
+      const result = await response.json();
+      if (!response.ok || result.error) throw new Error(result.error || '无法读取盈亏数据');
+      if (!result.records.length && !result.stocks.records.length) {
+        const blocked = [...new Set([...result.blocked_dates, ...result.stocks.blocked_dates])];
+        throw new Error(blocked.length ? `这些日期的成交或持仓需要核对：${blocked.join('、')}` : '暂无可复算的交易日');
       }
-      $('performance-start').value = `${data.year}-01-01`;
-      $('performance-end').value = data.as_of;
-      const months = [...new Set(data.records.map((row) => row.date.slice(0, 7)))];
+      report = result;
+      for (const id of ['performance-start', 'performance-end']) {
+        $(id).min = report.start;
+        $(id).max = report.as_of;
+      }
+      $('performance-start').value = report.start;
+      $('performance-end').value = report.as_of;
+      const records = report.records.length ? report.records : report.stocks.records;
+      const months = [...new Set(records.map((row) => row.date.slice(0, 7)))];
+      const years = [...new Set(months.map((month) => month.slice(0, 4)))];
       $('calendar-month').replaceChildren(...months.map((month) => new Option(month, month)));
       $('calendar-month').value = months.at(-1);
-      renderCalendar();
+      $('calendar-year').replaceChildren(...years.map((year) => new Option(year, year)));
+      $('calendar-year').value = years.at(-1);
+      if (!report.records.length) $('performance-security-scope').value = 'stocks';
       $('performance-data').hidden = false;
-      status.hidden = true;
-      await renderRange();
+      await selectScope();
     } catch (error) {
       status.textContent = error.message;
       status.hidden = false;
@@ -331,7 +371,11 @@
     }
   }
 
-  for (const id of ['calendar-month', 'calendar-view', 'calendar-metric']) $(id).addEventListener('change', renderCalendar);
+  for (const id of ['calendar-month', 'calendar-year', 'calendar-view', 'calendar-metric']) $(id).addEventListener('change', renderCalendar);
+  $('performance-security-scope').addEventListener('change', () => selectScope().catch((error) => {
+    $('performance-status').hidden = false;
+    $('performance-status').textContent = error.message;
+  }));
   for (const id of ['performance-range', 'performance-start', 'performance-end',
     'performance-return-mode', 'performance-chart-metric']) {
     $(id).addEventListener('change', () => {

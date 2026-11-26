@@ -16,6 +16,7 @@ from stock_analysis.domains.portfolio import cmb_xls
 from stock_analysis.domains.portfolio.calculations import daily_change, fill_snapshot_daily_pnl
 from stock_analysis.domains.portfolio.cmb_transfers import HEADERS
 from stock_analysis.domains.portfolio.performance import reconstruct
+from stock_analysis.domains.portfolio.performance_events import reconcile_etf_dividends
 from stock_analysis.domains.portfolio.service import ImportConflict, Portfolio
 from stock_analysis.http.server import Handler, ThreadingHTTPServer
 from stock_analysis.infrastructure.storage import Database, restore_backup
@@ -119,14 +120,58 @@ def test_performance_reconstructs_trades_dividends_and_gaps():
     assert Decimal(result['records'][0]['return_rate']) == Decimal('104') / Decimal('1106')
     assert Decimal(result['records'][2]['return_rate']) == 0
     del prices[key][days[1]]
-    incomplete = reconstruct(days, {key: 105}, events, prices)
-    assert [row['pnl'] for row in incomplete['records']] == [None, None, '0.00']
-    assert incomplete['records'][0]['market_value'] is None
-    assert incomplete['records'][1]['market_value'] == '1260.00'
-    assert incomplete['records'][1]['return_rate'] is None
-    assert '600000 缺少 2026-01-05 收盘价' in incomplete['records'][1]['issues']
+    estimated = reconstruct(days, {key: 105}, events, prices)['records']
+    assert [row['pnl'] for row in estimated] == ['-6.00', '221.00', '0.00']
+    assert [row['market_value'] for row in estimated] == ['1100.00', '1260.00', '1260.00']
+    assert Decimal(estimated[1]['return_rate']) == Decimal('221') / Decimal('1100')
+    assert estimated[1]['issues'] == []
+    assert estimated[0]['estimated_closes'] == estimated[1]['estimated_closes'] == [
+        {'code': '600000', 'date': days[1], 'price_date': days[0]}]
+    assert estimated[2]['estimated_closes'] == []
     assert reconstruct(days, {key: 105}, [event(days[1], 'unknown', '0')], prices)['blocked_dates'] == [days[1]]
     assert reconstruct(days, {key: 0}, events, prices)['blocked_dates'] == [days[1]]
+
+
+def test_performance_carries_one_prior_close_across_consecutive_gaps():
+    a, b = ('sh', '600110'), ('sh', '600000')
+    days = ['2022-10-19', '2022-10-20', '2022-10-21', '2022-10-24']
+    before = '2022-10-18'
+    prices = {a: {before: Decimal('10'), days[3]: Decimal('12')},
+              b: {day: Decimal(value) for day, value in zip(days, ('20', '21', '22', '23'))}}
+    records = reconstruct(days, {a: 100, b: 100}, [], prices)['records']
+    assert [row['pnl'] for row in records] == ['100.00', '100.00', '300.00']
+    assert [entry['price_date'] for entry in records[1]['estimated_closes']] == [before, before]
+    assert days[1] not in prices[a]
+    del prices[b][days[2]]
+    records = reconstruct(days, {a: 100, b: 100}, [], prices)['records']
+    assert [row['pnl'] for row in records] == ['100.00', None, None]
+    assert any('600000' in issue for issue in records[1]['issues'])
+    del prices[a][before]
+    missing = reconstruct(days, {a: 100}, [], prices)['records'][0]
+    assert missing['pnl'] is None and missing['estimated_closes'] == []
+
+
+@pytest.mark.parametrize('posted,expected,estimated', [(True, '11.00', '0.00'), (False, '10.00', '10.00')])
+def test_etf_dividend_uses_registration_holdings_and_counts_booked_cash_once(posted, expected, estimated):
+    key = ('sh', '510300')
+    days = ['2026-01-15', '2026-01-16', '2026-01-19', '2026-01-20', '2026-01-21']
+    prices = {key: dict.fromkeys(days, Decimal('4'))}
+    events = [
+        {'id': 1, 'security': key, 'asset_type': 'etf', 'event_date': days[2], 'event_type': 'sell',
+         'quantity': -50, 'gross_amount': '200', 'fees': '0', 'net_cash': None},
+    ]
+    if posted:
+        events.extend([
+            {'id': 2, 'security': key, 'asset_type': 'etf', 'event_date': days[1],
+             'event_type': 'settlement_adjustment', 'quantity': 0, 'gross_amount': '11', 'net_cash': None},
+            {'id': 3, 'security': key, 'asset_type': 'etf', 'event_date': days[3],
+             'event_type': 'dividend', 'quantity': 0, 'gross_amount': '11', 'net_cash': None},
+        ])
+    dividends = [{'security': key, 'registration_date': days[1], 'ex_date': days[2],
+                  'payment_date': days[4], 'cash_per_unit': Decimal('0.10')}]
+    result = reconstruct(days, {key: 50}, reconcile_etf_dividends(events, dividends), prices, dividends)
+    assert [row['pnl'] for row in result['records']] == ['0.00', expected, '0.00', '0.00']
+    assert result['records'][1]['estimated_dividend'] == estimated
 
 
 def test_snapshot_reconciliation_missing_cash_and_revision(isolated, tmp_path):
@@ -290,7 +335,7 @@ def test_portfolio_http_gate_and_import(isolated, monkeypatch):
             assert posted.ok and posted.json()['saved_count'] == 2
             assert session.get(base + '/api/portfolio/transfers', timeout=5).json()['total_count'] == 0
             report = session.get(base + '/api/portfolio/performance', timeout=5)
-            assert report.ok and report.json()['error'] == '缺少招商 2026 年收盘持仓快照'
+            assert report.ok and report.json()['error'] == '缺少招商收盘持仓快照'
             http.request_gate = SimpleNamespace(enter=lambda: False)
             assert session.get(base + '/api/portfolio/history', timeout=5).status_code == 503
         finally:

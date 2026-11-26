@@ -80,10 +80,13 @@
       </div>
     </section>
     <section id="performance" class="panel performance-panel" role="tabpanel" aria-labelledby="performance-tab" hidden>
-      <div class="panel-head"><div><h2>2026 年盈亏分析</h2><p id="performance-scope" class="muted">招商证券 · A 股</p></div></div>
+      <div class="panel-head"><div><h2>盈亏分析</h2><p id="performance-scope" class="muted">招商证券 · A 股及 ETF</p></div></div>
       <p id="performance-status" class="muted" role="status">正在读取本地成交与行情。</p>
       <div id="performance-data" hidden>
         <div class="fields performance-controls">
+          <label>证券范围<select id="performance-security-scope">
+            <option value="all">A 股及 ETF</option><option value="stocks">仅 A 股</option>
+          </select></label>
           <label>时间范围<select id="performance-range">
             <option value="month">本月</option><option value="year" selected>今年</option>
             <option value="all">开户至今</option><option value="custom">自定义</option>
@@ -107,17 +110,18 @@
         <label class="performance-chart-control">曲线指标<select id="performance-chart-metric">
           <option value="amount">累计盈亏</option><option value="rate">累计收益率</option>
         </select></label>
-        <div id="performance-chart" class="performance-chart" role="region" aria-label="2026 年 A 股累计盈亏曲线"></div>
+        <div id="performance-chart" class="performance-chart" role="region" aria-label="累计盈亏曲线"></div>
         <div class="panel-head calendar-head">
-          <div><h2>资产轨迹</h2><p class="muted">招商 A 股收盘市值 · 不含 ETF、港股及现金</p></div>
+          <div><h2>资产轨迹</h2><p id="performance-assets-scope" class="muted"></p></div>
         </div>
         <p id="asset-flow-summary" class="muted"></p>
-        <div id="performance-assets" class="performance-chart" role="region" aria-label="A 股收盘市值与银证转账"></div>
+        <div id="performance-assets" class="performance-chart" role="region" aria-label="证券收盘市值与银证转账"></div>
         <div class="panel-head calendar-head">
           <div><h2>盈亏日历</h2><p id="calendar-total" class="muted"></p></div>
           <div class="fields">
             <label>视图<select id="calendar-view"><option value="month">月</option><option value="year">年</option></select></label>
             <label>显示<select id="calendar-metric"><option value="amount">金额</option><option value="rate">收益率</option></select></label>
+            <label id="calendar-year-control" hidden>年份<select id="calendar-year"></select></label>
             <div id="calendar-month-controls" class="fields">
               <button id="calendar-prev" type="button" aria-label="上个月">‹</button>
               <label>月份<select id="calendar-month"></select></label>

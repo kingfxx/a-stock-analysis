@@ -17,7 +17,7 @@ def stored_closes(conn, exchange, code, start, end):
     """, (exchange, code, start, end))
 
 
-def read_closes(reader, securities, start, end):
+def read_closes(reader, securities, start, end, *, include_prior=False):
     securities = sorted({(market, code) for market, code in securities if market in ('sh', 'sz')})
     prices = {security: {} for security in securities}
     if not securities:
@@ -46,4 +46,23 @@ def read_closes(reader, securities, start, end):
     for row in rows:
         prices[row['exchange'], row['code']].setdefault(row['trade_date'], (
             Decimal(row['close']), ('portfolio_historical_closes', row['batch_id'], row['source_id'], row['revision'])))
+    if include_prior:
+        for (market, code), series in prices.items():
+            if start in series:
+                continue
+            raw = reader.conn.execute("""
+                SELECT p.trade_date,p.close FROM instruments i JOIN raw_daily_prices p ON p.instrument_id=i.id
+                WHERE i.exchange=? AND i.code=? AND p.source=? AND p.trade_date<?
+                ORDER BY p.trade_date DESC LIMIT 1
+            """, (market, code, SOURCE, start)).fetchone()
+            saved = reader.conn.execute("""
+                SELECT trade_date,close,batch_id,source_id,revision FROM portfolio_historical_closes
+                WHERE exchange=? AND code=? AND trade_date<? ORDER BY trade_date DESC,revision DESC LIMIT 1
+            """, (market, code, start)).fetchone()
+            if raw and (not saved or raw['trade_date'] >= saved['trade_date']):
+                stamp = raw['trade_date']
+                series[stamp] = (Decimal(str(raw['close'])), ('raw_daily_prices', market, code, stamp, SOURCE))
+            elif saved:
+                series[saved['trade_date']] = (Decimal(saved['close']), (
+                    'portfolio_historical_closes', saved['batch_id'], saved['source_id'], saved['revision']))
     return prices

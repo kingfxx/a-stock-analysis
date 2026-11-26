@@ -26,6 +26,28 @@ def span(conn, symbol, provider):
     """, (symbol[:2],symbol[2:],provider)).fetchone())
 
 
+def read_unadjusted_closes(conn, exchange, code, start, end, *, include_prior=False):
+    closes = {}
+    for provider in ('sina', 'eastmoney', 'tencent'):
+        for day, row in prices(conn, exchange + code, provider, start, end).items():
+            closes.setdefault(day, row['close'])
+    if include_prior and start not in closes:
+        prior = conn.execute("""
+            SELECT trade_date,close FROM etf_daily_prices WHERE exchange=? AND code=? AND trade_date<?
+            ORDER BY trade_date DESC,CASE source WHEN 'sina' THEN 0 WHEN 'eastmoney' THEN 1 ELSE 2 END,
+                     revision DESC LIMIT 1
+        """, (exchange, code, start)).fetchone()
+        if prior:
+            closes[prior['trade_date']] = prior['close']
+    return closes
+
+
+def read_cash_dividends(conn, exchange, code, start, end):
+    events = {**latest(conn, 'etf_cash_dividend_events', exchange, code, 'eastmoney', 'event_key'),
+              **official_events(conn, {'exchange': exchange, 'code': code})}
+    return [row for row in events.values() if start < row['ex_date'] <= end]
+
+
 def insert_versions(conn, table, fields, rows, previous, batch, scope, source_id, key):
     stamp = utc_now()
     changes = []
