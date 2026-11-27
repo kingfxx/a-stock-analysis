@@ -28,7 +28,8 @@ from stock_analysis.domains.portfolio.performance_events import reconcile_etf_di
 from stock_analysis.domains.portfolio.service import ImportConflict, Portfolio
 from stock_analysis.http.server import Handler, ThreadingHTTPServer
 from stock_analysis.infrastructure import storage
-from stock_analysis.infrastructure.storage import Database, restore_backup
+from stock_analysis.domains.valuation import hk_valuation
+from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, restore_backup
 from stock_analysis.maintenance.maintenance import DESCRIPTIONS, MaintenanceService, table_time
 
 
@@ -127,6 +128,15 @@ def test_confirmed_hk_snapshot_and_fixed_rate_history(isolated, monkeypatch):
               (account, '2025-11-22', 'dividend', '股息入账', 0, '352', 2, DAY)])
     dates = ['2025-11-20', '2025-11-21', DAY, '2025-11-25']
     raw = dict(zip(dates, map(Decimal, ('14.90', '14.92', '16.73', '16.93'))))
+    instrument = isolated.db.ensure_instrument('01919')
+    valuation_days = ['2020-12-01', DAY, dates[-1]]
+    for metric, values in [('pe', [12, 8, 9]), ('pb', [2, 1, 1.2])]:
+        key = SyncKey(instrument, f'valuation:{metric}', hk_valuation.SOURCE)
+        run = isolated.db.start_sync(key, parser_version=hk_valuation.VERSION, methodology_version=hk_valuation.VERSION)
+        points = [dict(observed_on=day, value=value, sampling_version=hk_valuation.VERSION, raw_json={})
+                  for day, value in zip(valuation_days, values)]
+        isolated.db.complete_sync(run, SyncResult(len(points), valuation_days[0], dates[-1], dates[-1]),
+                                  lambda conn: isolated.db.upsert_valuation_observations(conn, key, run, points))
     def closes(reader, keys, start, end):
         return {(market, code): {stamp: (quote, ()) for stamp, quote in raw.items() if start <= stamp <= end}
                 for market, code in keys}
@@ -137,6 +147,9 @@ def test_confirmed_hk_snapshot_and_fixed_rate_history(isolated, monkeypatch):
     payload = isolated.snapshot(snapshot_id)
     hk = next(row for row in payload['positions'] if row['exchange'] == 'hk')
     assert hk['included'] and hk['weight'] and payload['totals']['market_value'] == '15717.15'
+    valuation = hk['reference']['valuation']
+    assert (valuation['pe']['value'], valuation['pe']['years'], valuation['pe']['percentile']) == (8, 5, 0)
+    assert valuation['pb']['value'] == 1 and 'dividend_yield' not in valuation
 
     report = isolated.performance()
     scope = report['hong_kong']
@@ -153,6 +166,7 @@ def test_confirmed_hk_snapshot_and_fixed_rate_history(isolated, monkeypatch):
     saved = revaluation.save_revaluation(isolated.db, payload, value)
     current = isolated.revaluation_snapshot(saved['saved_id'])
     assert current['positions'][-1]['daily_pnl_basis'] == 'fixed_fx_estimate'
+    assert current['positions'][-1]['reference']['valuation']['pe']['value'] == 9
     assert isolated.performance()['hong_kong']['records'][-1]['pnl'] == '169.96'
 
     legacy = {**value, 'positions': [row for row in value['positions'] if row['asset_type'] != 'hong_kong'],
@@ -395,12 +409,7 @@ def test_revaluation_uses_same_day_raw_prices_and_keeps_snapshot(isolated, monke
     assert intraday['quote_date'] == DAY
     assert intraday['totals'] == dict(market_value='1500.00', holding_pnl='300.00', daily_pnl='140.00')
     after_close = revaluation.read_revaluation(isolated.db, before, datetime.fromisoformat(following + 'T16:30:00'))
-    assert after_close['quote_date'] == following
-    assert after_close['positions'][0]['market_value'] == '1100.00'
-    assert after_close['positions'][1]['close'] is None
-    assert all(value is None for value in after_close['totals'].values())
-    assert 'saved_id' not in revaluation.save_revaluation(isolated.db, before, intraday)
-    assert 'saved_id' not in revaluation.save_revaluation(isolated.db, before, after_close)
+    assert after_close == intraday
     assert isolated.snapshot(snapshot_id) == before
     etf[following] = 2.6
     # The index calendar may publish later than the stock and ETF closes.
@@ -448,6 +457,31 @@ def test_revaluation_uses_same_day_raw_prices_and_keeps_snapshot(isolated, monke
     assert isolated.revaluation_snapshot(legacy_id)['totals']['daily_pnl'] is None
 
 
+def test_revaluation_saves_updated_prior_close_as_new_version(isolated, monkeypatch):
+    payload = isolated.snapshot(import_snapshot(isolated)['snapshot_id'])
+    following = '2025-11-25'
+    now = datetime.fromisoformat(following + 'T16:30:00')
+    etf = {DAY: '2.5'}
+    monkeypatch.setattr(revaluation, 'read_closes', lambda *_: {
+        ('sz', '000001'): {DAY: (Decimal('10'), None), following: (Decimal('11'), None)}})
+    monkeypatch.setattr(revaluation, 'read_unadjusted_closes', lambda *_: etf)
+    monkeypatch.setattr(revaluation, 'local_market_days', lambda *_: [DAY, following])
+    first = revaluation.read_revaluation(isolated.db, payload, now)
+    assert first['quote_date'] == DAY and first['totals']['market_value'] == '1500.00'
+    version = revaluation.save_revaluation(isolated.db, payload, first)
+    assert revaluation.save_revaluation(isolated.db, payload, first) == version
+    etf[DAY] = '2.55'
+    corrected = revaluation.read_revaluation(isolated.db, payload, now)
+    revised = revaluation.save_revaluation(isolated.db, payload, corrected)
+    assert revised['saved_id'] > version['saved_id'] and revised['quote_date'] == DAY
+    assert revised['totals']['market_value'] == '1510.00'
+    assert isolated.saved_revaluation(version['saved_id']) == version
+    etf.clear()
+    incomplete = revaluation.read_revaluation(isolated.db, payload, now)
+    assert incomplete['positions'][1]['close'] is None
+    assert 'saved_id' not in revaluation.save_revaluation(isolated.db, payload, incomplete)
+
+
 def test_performance_extends_saved_close_using_post_snapshot_ledger(isolated, monkeypatch):
     import_snapshot(isolated, cash='900')
     prior, following = '2025-11-21', '2025-11-25'
@@ -476,7 +510,7 @@ def test_performance_extends_saved_close_using_post_snapshot_ledger(isolated, mo
     assert official['as_of'] == DAY
     payload = isolated.snapshot()
     estimate = revaluation.read_revaluation(isolated.db, payload, datetime.fromisoformat(following + 'T16:30:00'))
-    assert revaluation.save_revaluation(isolated.db, payload, estimate)['saved_id']
+    saved_id = revaluation.save_revaluation(isolated.db, payload, estimate)['saved_id']
     updated = isolated.performance()
     assert updated['as_of'] == updated['combined']['as_of'] == following
     assert updated['local_close_from'] == updated['combined']['local_close_from'] == following
@@ -489,6 +523,8 @@ def test_performance_extends_saved_close_using_post_snapshot_ledger(isolated, mo
     assert updated['etfs']['records'][-1]['market_value'] == '520.00'
     assert updated['combined']['etfs']['records'][-1]['pnl'] == '20.00'
     assert set(updated['etfs']['monthly_security_pnl']['2025-11']) == {'sz:159915'}
+    revaluation.delete_revaluation(isolated.db, saved_id)
+    assert isolated.performance()['combined']['as_of'] == DAY
 
 
 def test_revaluation_schema_upgrades_from_54(tmp_path, monkeypatch):
@@ -501,6 +537,24 @@ def test_revaluation_schema_upgrades_from_54(tmp_path, monkeypatch):
     with db.connection() as conn:
         assert revaluation.revaluation_directory(conn, None) == []
         assert table_time(conn, 'portfolio_revaluation_snapshots', {'written_at'}) == (None, 'written_at')
+
+
+def test_revaluation_upgrade_retains_versions_and_never_reuses_deleted_id(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'upgrade.sqlite3')
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, 'MIGRATIONS', storage.MIGRATIONS[:-1])
+        assert db.initialize()['schema_version'] == 59
+        with db.connection(write=True) as conn:
+            conn.execute("""
+                INSERT INTO portfolio_revaluation_snapshots VALUES (42,NULL,?,'[]','fixture','{}',?)
+            """, (DAY, DAY))
+    assert db.initialize()['schema_version'] == 60
+    assert revaluation.saved_revaluation(db, 42) == {'saved_id': 42}
+    revaluation.delete_revaluation(db, 42)
+    result = revaluation.save_revaluation(db, {'snapshot': {'id': 1}}, {
+        'quote_date': DAY, 'today': DAY, 'totals': {'market_value': '1.00'},
+    })
+    assert result['saved_id'] > 42
 
 
 def test_snapshot_reconciliation_missing_cash_and_revision(isolated, tmp_path):
@@ -841,6 +895,17 @@ def test_portfolio_http_gate_and_import(isolated, monkeypatch):
             selected = session.get(snapshots, params={'estimate': published.json()['saved_id']}, timeout=5)
             assert selected.ok and selected.json()['snapshot']['snapshot_date'] == '2025-11-25'
             assert selected.json()['totals']['market_value'] == '1620.00'
+            delete = revalue + '/delete'
+            identity = {'estimate': published.json()['saved_id']}
+            assert session.get(delete, params=identity, timeout=5).status_code == 404
+            assert session.post(delete, json=identity, timeout=5).status_code == 403
+            assert session.post(delete, json={'snapshot': snapshot_id}, headers=headers, timeout=5).status_code == 400
+            assert session.post(delete, json=identity, headers=headers, timeout=5).json() == {
+                'deleted_id': identity['estimate'],
+            }
+            assert session.post(delete, json=identity, headers=headers, timeout=5).status_code == 404
+            assert session.get(snapshots, params=identity, timeout=5).status_code == 404
+            assert session.get(snapshots, params={'snapshot': snapshot_id}, timeout=5).json()['revaluations'] == []
             http.request_gate = SimpleNamespace(enter=lambda: False)
             assert session.get(base + '/api/portfolio/history', timeout=5).status_code == 503
         finally:

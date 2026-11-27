@@ -22,6 +22,29 @@ a { color: var(--cyan); text-underline-offset: 3px; }
 .muted, .empty { color: var(--muted); font-size: var(--research-detail-size); line-height: 1.55; }
 .empty { padding: .9rem 0; }
 .fields { display: flex; align-items: end; flex-wrap: wrap; gap: .75rem; }
+@media (min-width: 950px) {
+  #holdings .panel-head > .fields { flex-shrink: 0; }
+}
+#snapshot-control { display: grid; gap: .35rem; width: 17rem; max-width: 100%; color: var(--muted); font-size: var(--research-detail-size); }
+#snapshot-picker { position: relative; min-width: 0; }
+#snapshot-picker > summary {
+  display: flex; gap: .55rem; justify-content: space-between; align-items: center; list-style: none;
+  padding: 10px 12px; border: 1px solid #4b616d; border-radius: 7px;
+  background: #26343c; color: var(--ink); font-size: var(--research-input-size); cursor: pointer;
+}
+#snapshot-picker > summary::after { content: "▾"; }
+#snapshot-current { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#snapshot-versions {
+  position: absolute; inset: calc(100% + 4px) 0 auto; z-index: 3; max-height: min(18rem, 42dvh);
+  overflow: auto; overscroll-behavior: contain; margin: 0; padding: 5px; list-style: none;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--panel);
+}
+#snapshot-versions li { display: flex; gap: 4px; }
+#snapshot-versions button { min-height: 32px; border-color: transparent; background: transparent; }
+#snapshot-versions button[data-version] { flex: 1; min-width: 0; text-align: left; }
+#snapshot-versions button[data-delete] { flex: none; color: var(--muted); }
+#snapshot-versions button[aria-current], #snapshot-versions button:hover { background: #26343c; color: var(--cyan); }
+#snapshot-versions button:focus-visible { outline-offset: -2px; }
 label { display: grid; gap: .35rem; color: var(--muted); font-size: var(--research-detail-size); }
 label.check { display: flex; align-items: center; margin: .65rem 0; }
 button, input, select {
@@ -66,6 +89,8 @@ th:first-child, td:first-child { text-align: left; }
 th:last-child, td:last-child { text-align: left; }
 th.market-column, td.market-column { text-align: right; min-width: 7.5rem; }
 td.market-column { font-weight: var(--research-emphasis-weight); color: var(--ink); }
+.position-valuation { display: grid; width: max-content; grid-template-columns: max-content max-content; gap: .25rem .45rem; margin: 0; }
+.position-valuation dd { margin: 0; text-align: right; }
 .subline { display: block; color: var(--muted); font-size: .75rem; margin-top: .23rem; }
 .subline.gain { color: var(--up); }
 .subline.loss { color: var(--down); }

@@ -564,7 +564,7 @@ v50 新增 `research_aluminum_forecast_versions`，一行表示 601600 的一个
 |---|---|---|
 | `portfolio_accounts` | 已导入数据的券商账户 | `created_at` |
 | `portfolio_snapshots` | 一个账户某交易日及盘中／收盘状态的一版快照，含券商资金汇总、确认现金、来源哈希和修订关系 | `imported_at` |
-| `portfolio_revaluation_snapshots` | v55 本地估算快照，每行保存一个账户或合并范围在估值日的一版结果、券商快照 ID 及采用的收盘价和估算金额。相同内容重复请求返回已有版本 | `written_at` |
+| `portfolio_revaluation_snapshots` | v55 本地估算快照，每行保存一个账户或合并范围在报价日的一版结果、券商快照 ID 及采用的收盘价和估算金额。相同内容重复请求返回已有版本。v60 保留已有编号，删除后的编号不再复用 | `written_at` |
 | `portfolio_snapshot_positions` | 快照中逐条证券持仓，外键关联快照头，保留原始行号和港股报价、汇率及折算市值核对所需信息 | 关联 `portfolio_snapshots.imported_at` |
 | `portfolio_ledger_entries` | 券商历史成交、银证转账及相关业务事件。保留源行及原表金额。成功转账在净现金列保存方向，作废等无效转账净现金留空 | `imported_at` |
 | `portfolio_historical_closes` | 清仓股票人民币未复权日收盘价。按市场、代码、交易日与修订保存来源精度，通过组合外键引用真实腾讯分页及批次。相同收盘价保留既有修订和出处 | `written_at` |

@@ -25,6 +25,18 @@ def _nonnegative(value):
     return result if result is not None and result >= 0 else None
 
 
+def percentile_position(value, metric):
+    """Same seven percentile bands and yield color direction as the valuation card."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 100:
+        return {}
+    rank = (0 if value <= 5 else 1 if value <= 20 else 2 if value < 40 else
+            3 if value <= 60 else 4 if value < 80 else 5 if value < 95 else 6)
+    is_yield = metric == 'dividend_yield'
+    labels = ['极低', '低息' if is_yield else '低位', '偏低', '中值', '偏高', '高息' if is_yield else '高位', '极高']
+    markers = ['🟢', '🟢', '🔵', '🟡', '🟠', '🔴', '🔴']
+    return {'position': {'label': labels[rank], 'marker': markers[6 - rank if is_yield else rank]}}
+
+
 def cash_dividend_per_share_365(events: list[dict], observation_date: str) -> float:
     """Sum implemented pre-tax cash dividends per share in (date - 365 days, date]."""
     end = date.fromisoformat(observation_date)

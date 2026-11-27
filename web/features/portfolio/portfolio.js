@@ -135,25 +135,25 @@
       weight.append(meter);
     }
     const reference = node('td');
-    if (position.reference) {
+    const valuation = position.reference?.valuation;
+    if (valuation) {
       const names = { pe: 'PE（TTM）', pb: 'PB', dividend_yield: '股息率' };
-      for (const [key, metric] of Object.entries(position.reference.valuation)) {
-        if (metric.value == null) continue;
-        const suffix = key === 'dividend_yield' ? '%' : ' 倍';
-        const percentile = metric.percentile == null ? '' : ` · 近5年分位 ${display(metric.percentile)}%`;
-        const line = node('span', `${names[key]} ${display(metric.value)}${suffix}${percentile}`, 'subline');
-        line.append(node('time', ` · ${metric.date}`));
-        reference.append(line);
+      const metrics = node('dl', null, 'position-valuation');
+      for (const [key, name] of Object.entries(names)) {
+        const metric = valuation[key];
+        if (metric?.value == null) continue;
+        const value = `${money(metric.value)}${key === 'dividend_yield' ? '%' : '倍'}`;
+        const title = metric.years ? `${name}/近${metric.years}年历史分位` : name;
+        const rank = metric.position ? `/${money(metric.percentile)}%（${metric.position.marker} ${metric.position.label}）` : '';
+        metrics.append(node('dt', title), node('dd', value + rank));
       }
-      if (position.reference.close_date) {
-        reference.append(node('span', `未复权收盘 ${quote(position.reference.close)} · ${position.reference.close_date}`, 'subline'));
-      }
+      if (metrics.childElementCount) reference.append(metrics);
     }
     if (hk && position.exchange_rate != null) {
       reference.append(node('span', `快照汇率 ${display(position.exchange_rate)} CNY/HKD`, 'subline'));
     }
     if (!reference.childElementCount) {
-      reference.textContent = position.asset_type === 'etf' ? '券商快照 · 暂无本地行情' : '暂无本地估值';
+      reference.textContent = '暂无本地估值';
     }
     row.append(name, node('td', money(position.market_value), 'market-column'), node('td', display(position.quantity)),
       paired(quote(position.price), quote(position.cost_price)),
@@ -198,6 +198,7 @@
     snapshotSelection = snapshot ? (data.scope === 'combined'
       ? { day: data.basis_date ?? snapshot.snapshot_date } : { snapshot: String(snapshot.id) }) : null;
     $('open-revaluation').hidden = !snapshot;
+    $('snapshot-picker').open = false;
     const combined = data.scope === 'combined';
     const accounts = Object.entries(data.accounts);
     $('account-control').hidden = accounts.length < 2;
@@ -230,8 +231,23 @@
     }
     const selected = data.estimate_id ? `estimate:${data.estimate_id}` : (snapshotSelection.day ?? snapshotSelection.snapshot);
     versions.sort((a, b) => b.day.localeCompare(a.day));
-    $('snapshot-select').replaceChildren(...versions.map(({ label, value }) =>
-      new Option(label, value, false, value === selected)));
+    $('snapshot-current').textContent = versions.find(({ value }) => value === selected)?.label ?? '';
+    $('snapshot-versions').replaceChildren(...versions.map(({ label, value }) => {
+      const row = node('li');
+      const choose = node('button', label);
+      choose.type = 'button';
+      choose.dataset.version = value;
+      if (value === selected) choose.setAttribute('aria-current', 'true');
+      row.append(choose);
+      if (value.startsWith('estimate:')) {
+        const remove = node('button', '删除');
+        remove.type = 'button';
+        remove.dataset.delete = value;
+        remove.setAttribute('aria-label', `删除 ${label}`);
+        row.append(remove);
+      }
+      return row;
+    }));
     $('market-value').textContent = money(data.totals.market_value);
     $('cash-value').textContent = data.totals.cash == null ? '待核对' : money(data.totals.cash);
     $('asset-value').textContent = money(data.totals.assets ?? snapshot.broker_assets);
@@ -272,31 +288,63 @@
 
   async function saveRevaluation() {
     if (!snapshotSelection) return;
-    const button = $('open-revaluation');
     const current = snapshotRequest;
-    button.disabled = true;
-    notice('正在按当天本地收盘行情计算持仓。');
+    $('open-revaluation').disabled = true;
+    notice('正在读取本地收盘行情并计算持仓。');
     try {
       const result = await request('/api/portfolio/revaluation', snapshotSelection);
       if (result.saved_id) document.dispatchEvent(new Event('portfolio:performance-changed'));
       if (current !== snapshotRequest) return;
       if (result.saved_id) {
         await loadSnapshot({ estimate: result.saved_id });
-        if (snapshotRequest === current + 1) notice(`已保存 ${result.quote_date} 收盘快照。`);
+        if (snapshotRequest === current + 1) {
+          const fallback = result.quote_date === result.today ? '' : '已使用上一交易日行情，';
+          notice(`${fallback}已保存 ${result.quote_date} 收盘快照。`);
+        }
       } else if (result.missing_accounts.length) {
         notice(`缺少同日券商快照：${result.missing_accounts.join('、')}。未生成收盘版本。`);
       } else if (!result.positions.length) {
         notice('当前快照没有可重估的持仓。');
-      } else if (result.quote_date !== result.today) {
-        notice('当天收盘行情尚未入库，未生成收盘版本。');
+      } else if (!result.quote_date) {
+        notice('没有可用于当前快照的收盘行情，未生成版本。');
       } else {
         const missing = result.positions.filter((position) => position.market_value == null).map((position) => position.code);
-        notice(`缺少当天收盘价：${missing.join('、')}。未生成收盘版本。`);
+        notice(`缺少 ${result.quote_date} 收盘价：${missing.join('、')}。未生成收盘版本。`);
       }
     } catch (error) {
       notice(error.message);
     } finally {
-      button.disabled = false;
+      $('open-revaluation').disabled = false;
+    }
+  }
+
+  function snapshotOptions(value) {
+    if (value.startsWith('estimate:')) return { estimate: value.slice('estimate:'.length) };
+    return { [snapshotScope === 'combined' ? 'day' : 'snapshot']: value };
+  }
+
+  async function deleteRevaluation(button) {
+    const save = $('open-revaluation');
+    const version = button.dataset.delete;
+    const label = button.previousElementSibling.textContent;
+    if (save.disabled || !window.confirm(`删除「${label}」？`)) return;
+    const selected = $('snapshot-versions').querySelector('[aria-current]').dataset.version;
+    const account = $('account-select').value;
+    const current = snapshotRequest;
+    save.disabled = button.disabled = true;
+    try {
+      await request('/api/portfolio/revaluation/delete', { estimate: Number(snapshotOptions(version).estimate) });
+      document.dispatchEvent(new Event('portfolio:performance-changed'));
+      if (current === snapshotRequest) {
+        const next = version === selected ? (account ? { account } : {}) : snapshotOptions(selected);
+        $('snapshot-picker').querySelector('summary').focus();
+        await loadSnapshot(next);
+        if (snapshotRequest === current + 1) notice(`已删除「${label}」。`);
+      }
+    } catch (error) {
+      notice(error.message);
+    } finally {
+      save.disabled = button.disabled = false;
     }
   }
 
@@ -560,13 +608,29 @@
       renderSortedPositions();
     });
   }
-  $('snapshot-select').addEventListener('change', (event) => {
-    const selected = event.target.value;
+  const snapshotPicker = $('snapshot-picker');
+  $('snapshot-versions').addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.dataset.delete) {
+      deleteRevaluation(button);
+      return;
+    }
+    snapshotPicker.open = false;
+    snapshotPicker.querySelector('summary').focus();
+    if (button.hasAttribute('aria-current')) return;
     notice('');
-    const key = snapshotScope === 'combined' ? 'day' : 'snapshot';
-    const options = selected.startsWith('estimate:') ? { estimate: selected.slice('estimate:'.length) }
-      : { [key]: selected };
-    loadSnapshot(options).catch((error) => notice(error.message));
+    loadSnapshot(snapshotOptions(button.dataset.version)).catch((error) => notice(error.message));
+  });
+  snapshotPicker.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && snapshotPicker.open) {
+      event.preventDefault();
+      snapshotPicker.open = false;
+      snapshotPicker.querySelector('summary').focus();
+    }
+  });
+  document.addEventListener('pointerdown', (event) => {
+    if (snapshotPicker.open && !snapshotPicker.contains(event.target)) snapshotPicker.open = false;
   });
   for (const [kind, state] of Object.entries(activity)) {
     const form = $(`${kind}-filter`);

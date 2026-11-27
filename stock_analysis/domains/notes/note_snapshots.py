@@ -13,6 +13,7 @@ from stock_analysis.domains.financials.business_segment_service import BusinessS
 from stock_analysis.domains.financials.statements import read_statements
 from stock_analysis.domains.financials.core import build_period_rows, view_rows
 from stock_analysis.domains.valuation.valuation import daily_dividend_yield_observations, valuation_summary, valuation_summary_observations
+from stock_analysis.domains.valuation.calculations import percentile_position
 
 FINANCIAL = {
     'revenue': ('营业收入', '亿元', 1e8, 'lrb.BIZINCO/BIZTOTINCO'),
@@ -43,18 +44,6 @@ def number(value, unit, scale=1):
     if not valid(value):
         return '暂无数据'
     return f'{value / scale:,.2f}{unit}'
-
-
-def percentile_position(value, metric):
-    """Same seven percentile bands and yield color direction as the valuation card."""
-    if not valid(value) or not 0 <= value <= 100:
-        return {}
-    rank = (0 if value <= 5 else 1 if value <= 20 else 2 if value < 40 else
-            3 if value <= 60 else 4 if value < 80 else 5 if value < 95 else 6)
-    is_yield = metric == 'dividend_yield'
-    labels = ['极低', '低息' if is_yield else '低位', '偏低', '中值', '偏高', '高息' if is_yield else '高位', '极高']
-    markers = ['🟢', '🟢', '🔵', '🟡', '🟠', '🔴', '🔴']
-    return {'position': {'label': labels[rank], 'marker': markers[6-rank if is_yield else rank]}}
 
 
 def catalog(db, command, cache, valuation_cache, chip_cache):

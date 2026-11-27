@@ -1,10 +1,33 @@
 import pytest
 
+from stock_analysis.domains.valuation.position_reference import summarize_position_valuation
 from stock_analysis.domains.valuation.valuation import (
     fetch_dividend_events, fetch_industry_snapshot, fetch_valuation_series,
     merge_adjusted_prices, merge_dividend_yields, monthly_dividend_yields,
     monthly_valuation, valuation_summary,
 )
+
+
+def test_portfolio_valuation_uses_longest_covered_window_per_metric():
+    end = '2026-11-26'
+    observations = [
+        {'date': '2016-12-02', 'pe': 10, 'pb': -1},
+        {'date': '2021-12-03', 'pe': 11, 'pb': 1},
+        {'date': end, 'pe': 7.01, 'pb': 2},
+        {'date': '2026-11-27', 'pe': 99, 'pb': 99},
+    ]
+    saved = {'observation_rows': observations, 'rows': [
+        {'date': '2023-12-31', 'dividend_yield_date': '2023-12-08', 'dividend_yield': 2},
+        {'date': end, 'dividend_yield': 0},
+    ]}
+    result = summarize_position_valuation(saved, [], None, end)
+    assert [(row['years'], row['percentile']) for row in result.values()] == [(10, 0), (5, 50), (3, 0)]
+    assert result['pe']['value'] == 7.01
+    assert result['pe']['position'] == {'label': '极低', 'marker': '🟢'}
+    assert result['dividend_yield']['position'] == {'label': '极低', 'marker': '🔴'}
+    short = summarize_position_valuation({**saved, 'observation_rows': observations[2:]}, [], None, end)['pe']
+    assert short['value'] == 7.01 and short['years'] is short['percentile'] is None
+    assert 'position' not in short
 
 
 class FakeResponse:

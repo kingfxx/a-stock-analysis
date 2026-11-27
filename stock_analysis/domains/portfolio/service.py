@@ -15,10 +15,10 @@ from stock_analysis.domains.portfolio.huatai_snapshot import HUATAI, parse_trans
 from stock_analysis.domains.portfolio.ledger_storage import archive, find_overlaps, save_entries
 from stock_analysis.domains.portfolio.manual_entries import manual_options, save_manual_entry
 from stock_analysis.domains.portfolio.performance_read import read_performance_reports
-from stock_analysis.domains.portfolio.reference import previous_market_day, read_hk_close_reference
+from stock_analysis.domains.portfolio.reference import previous_market_day, read_hk_reference
 from stock_analysis.domains.portfolio.revaluation import (
-    display_revaluation, load_saved_revaluation, previous_revaluation_closes, read_revaluation, revaluation_directory,
-    saved_revaluation, save_revaluation,
+    delete_revaluation, display_revaluation, load_saved_revaluation, previous_revaluation_closes, read_revaluation,
+    revaluation_directory, saved_revaluation, save_revaluation,
 )
 from stock_analysis.infrastructure.storage import utc_now
 
@@ -204,7 +204,7 @@ class Portfolio:
         if position['asset_type'] == 'stock' and position['exchange'] in ('sh', 'sz'):
             return self.reference_reader(db, position['code'], day)
         if position['asset_type'] == 'hong_kong' and position_included(position):
-            return read_hk_close_reference(db, position['code'], day)
+            return read_hk_reference(db, position['code'], day)
         return None
 
     @staticmethod
@@ -263,6 +263,9 @@ class Portfolio:
 
     def saved_revaluation(self, estimate_id):
         return saved_revaluation(self.db, estimate_id)
+
+    def delete_revaluation(self, estimate_id):
+        delete_revaluation(self.db, estimate_id)
 
     def revaluation_snapshot(self, estimate_id):
         account_id, basis_ids, saved = load_saved_revaluation(self.db, estimate_id)

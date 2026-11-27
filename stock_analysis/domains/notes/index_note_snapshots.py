@@ -8,7 +8,8 @@ from stock_analysis.domains.notes.investment_notes import note_code
 from stock_analysis.domains.indices.index_definitions import METRICS
 from stock_analysis.domains.indices.index_read_service import IndexReadService
 from stock_analysis.domains.valuation.valuation import valuation_summary_observations
-from stock_analysis.domains.notes.note_snapshots import number, valid, percentile_position
+from stock_analysis.domains.notes.note_snapshots import number, valid
+from stock_analysis.domains.valuation.calculations import percentile_position
 
 LABELS = dict(pe_source='来源披露 PE', pe_static='静态 PE', pe_dynamic='预测动态 PE',
               pe_ttm='TTM PE', pe_rolling='滚动 PE', pb='PB', ps='PS', ps_ttm='TTM PS', dividend_yield='股息率')

@@ -80,10 +80,13 @@ class PortfolioRoutes:
 
     def _post_portfolio(self, path):
         revaluation = path == '/api/portfolio/revaluation'
+        delete_estimate = path == '/api/portfolio/revaluation/delete'
         manual = MANUAL_WRITES.get(path)
-        if not revaluation and not manual and path not in {'/api/portfolio/import/preview', '/api/portfolio/import/confirm'}:
+        if not (revaluation or delete_estimate or manual) and path not in {
+            '/api/portfolio/import/preview', '/api/portfolio/import/confirm',
+        }:
             return False
-        operation = '手工录入' if manual else '重估' if revaluation else '导入'
+        operation = '手工录入' if manual else '重估' if revaluation else '删除本地估算版本' if delete_estimate else '导入'
         try:
             try:
                 self._maintenance_auth()
@@ -91,10 +94,17 @@ class PortfolioRoutes:
                 self._ai_reply({'error': '请从本机持仓页面发起' + operation}, 403)
                 return True
             length = int(self.headers.get('Content-Length', '0'))
-            limit = 4096 if manual else 1024 if revaluation else MAX_REQUEST_BYTES
+            limit = 4096 if manual else 1024 if revaluation or delete_estimate else MAX_REQUEST_BYTES
             if self.headers.get_content_type() != 'application/json' or not 0 < length <= limit:
-                raise ValueError('持仓请求格式无效' if revaluation or manual else '文件须为 4 MiB 以内的 XLS')
+                raise ValueError('持仓请求格式无效' if revaluation or delete_estimate or manual else '文件须为 4 MiB 以内的 XLS')
             request = json.loads(self.rfile.read(length).decode('utf-8'))
+            if delete_estimate:
+                if (not isinstance(request, dict) or set(request) != {'estimate'}
+                        or type(request['estimate']) is not int or not 0 < request['estimate'] < 2**63):
+                    raise ValueError('请选择一份本地估算版本')
+                app.portfolio_service().delete_revaluation(request['estimate'])
+                self._ai_reply({'deleted_id': request['estimate']})
+                return True
             if manual:
                 self._ai_reply(app.portfolio_service().save_manual(manual, request))
                 return True

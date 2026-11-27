@@ -31,7 +31,13 @@
         <div><h2 id="holdings-title">持仓快照</h2><p id="snapshot-context" class="muted"></p></div>
         <div class="fields">
           <label id="account-control" hidden>账户<select id="account-select"></select></label>
-          <label id="snapshot-control" hidden>快照日期<select id="snapshot-select"></select></label>
+          <div id="snapshot-control" hidden>
+            <span id="snapshot-label">快照日期</span>
+            <details id="snapshot-picker">
+              <summary aria-labelledby="snapshot-label snapshot-current"><span id="snapshot-current"></span></summary>
+              <ul id="snapshot-versions" aria-labelledby="snapshot-label"></ul>
+            </details>
+          </div>
           <button id="open-revaluation" type="button" hidden>重估并保存</button>
         </div>
       </div>

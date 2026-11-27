@@ -35,6 +35,13 @@ def saved_revaluation(db, estimate_id):
     return load_saved_revaluation(db, estimate_id)[2]
 
 
+def delete_revaluation(db, estimate_id):
+    with db.connection(write=True) as conn:
+        cursor = conn.execute('DELETE FROM portfolio_revaluation_snapshots WHERE id=?', (estimate_id,))
+        if not cursor.rowcount:
+            raise LookupError('找不到本地估算快照')
+
+
 def _display_position(source, close, market_value, holding_pnl, daily_pnl, reference):
     costs = [position_cost(part) for part in source.get('accounts', [source])]
     cost = sum(costs) if None not in costs else None
@@ -99,7 +106,7 @@ def display_revaluation(payload, saved, references, previous_closes):
 
 
 def save_revaluation(db, payload, result):
-    if result['quote_date'] != result['today'] or result['totals']['market_value'] is None:
+    if result['quote_date'] is None or result['totals']['market_value'] is None:
         return result
     snapshot = payload['snapshot']
     account_id = snapshot.get('account_id')
@@ -108,14 +115,16 @@ def save_revaluation(db, payload, result):
     content = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     digest = sha256((basis + content).encode('utf-8')).hexdigest()
     with db.connection(write=True) as conn:
-        conn.execute("""
-            INSERT INTO portfolio_revaluation_snapshots(account_id,quote_date,snapshot_ids,result_sha256,result_json,written_at)
-            VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING
-        """, (account_id, result['quote_date'], basis, digest, content, utc_now()))
         identity = conn.execute("""
             SELECT id FROM portfolio_revaluation_snapshots WHERE account_id IS ? AND quote_date=? AND result_sha256=?
-        """, (account_id, result['quote_date'], digest)).fetchone()[0]
-    return {**result, 'saved_id': identity}
+        """, (account_id, result['quote_date'], digest)).fetchone()
+        if identity is not None:
+            return {**result, 'saved_id': identity[0]}
+        estimate_id = conn.execute("""
+            INSERT INTO portfolio_revaluation_snapshots(account_id,quote_date,snapshot_ids,result_sha256,result_json,written_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (account_id, result['quote_date'], basis, digest, content, utc_now())).lastrowid
+    return {**result, 'saved_id': estimate_id}
 
 
 def _read_prices(reader, positions, start, end):
@@ -152,21 +161,27 @@ def read_revaluation(db, payload, now):
     if not snapshot:
         raise LookupError('请选择一份持仓快照')
     baseline = snapshot['snapshot_date']
-    today = now.date()
+    today = now.date().isoformat()
     # Daily providers can publish today's provisional bar during trading hours.
     positions = [row for row in payload['positions'] if position_included(row) and row['quantity'] > 0]
     cutoff = time(16, 15) if any(row['asset_type'] == 'hong_kong' for row in positions) else time(15)
-    end = (today - timedelta(days=int(now.time() < cutoff))).isoformat()
+    end = (now.date() - timedelta(days=int(now.time() < cutoff))).isoformat()
     start = date.fromordinal(max(1, date.fromisoformat(baseline).toordinal() - 15)).isoformat()
     with db.shared_reader() as reader:
         prices, trading_days = _read_prices(reader, positions, start, end)
-    quote_date = max((day for day in trading_days if day >= baseline), default=None)
-    previous_day = max((day for day in trading_days if quote_date and day < quote_date), default=None)
+    # Keep at most one fallback session and never combine different quote dates.
+    days = sorted(day for day in trading_days if day <= end)
+    previous_day = next((day for day in reversed(days) if day < today), None)
+    complete_today = all(today in prices.get((row['exchange'], row['code'], row['asset_type']), {}) for row in positions)
+    quote_date = today if today in days and complete_today else previous_day
+    if quote_date is not None and quote_date < baseline and baseline != today:
+        quote_date = None
+    previous_day = max((day for day in days if quote_date and day < quote_date), default=None)
     rows = revalue_positions(positions, prices, quote_date, previous_day)
     missing_accounts = payload.get('missing_accounts', [])
     totals = {}
     for key in ('market_value', 'holding_pnl', 'daily_pnl'):
         value = sum_known(rows, key) if rows and not missing_accounts else None
         totals[key] = format(value, '.2f') if value is not None else None
-    return dict(snapshot_date=baseline, quote_date=quote_date, today=today.isoformat(), broker=snapshot['broker'],
+    return dict(snapshot_date=baseline, quote_date=quote_date, today=today, broker=snapshot['broker'],
                 positions=rows, totals=totals, missing_accounts=missing_accounts)

@@ -6,6 +6,7 @@ from stock_analysis.domains.indices.index_prices import read_prices
 from stock_analysis.domains.industries.portfolio_lookup import read_classification
 from stock_analysis.domains.stocks.dividend_service import DividendService, SOURCE as DIVIDEND_SOURCE
 from stock_analysis.domains.stocks.price_service import PriceService
+from stock_analysis.domains.valuation.hk_valuation import read as read_hk_valuation
 from stock_analysis.domains.valuation.position_reference import summarize_position_valuation
 from stock_analysis.domains.valuation.valuation_service import ValuationService
 
@@ -23,12 +24,14 @@ def previous_market_day(db, day):
     return sessions[-2] if len(sessions) >= 2 and sessions[-1] == day else None
 
 
-def read_hk_close_reference(db, code, day):
+def read_hk_reference(db, code, day):
     start = date.fromordinal(max(1, date.fromisoformat(day).toordinal() - 15)).isoformat()
     prices = PriceService(db).read(code, 'raw', start=start, end=day, lease=False, exchange='hk')
     latest = prices[-1] if prices else None
+    valuation = summarize_position_valuation(read_hk_valuation(db, code), prices, None, day,
+                                            include_dividend_yield=False)
     return {'close': latest['close'] if latest else None, 'close_date': latest['date'] if latest else None,
-            'valuation': {}}
+            'valuation': valuation}
 
 
 def read_stock_reference(db, code, as_of, *, cache, valuation_cache):
