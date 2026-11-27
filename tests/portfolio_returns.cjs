@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 require('../web/features/portfolio/returns.js');
-const { periodReturns } = globalThis.PortfolioReturns;
+const { periodReturns, maxDrawdown } = globalThis.PortfolioReturns;
 
 const first = '2021-01-01';
 const year = '2022-01-01';
@@ -38,3 +38,22 @@ const following = '2022-01-02';
 const day = { ...investor, records: [close(year, 170000), close(following, 171700)] };
 near(periodReturns(day, following, [following], true, false).get(following), 0.01);
 console.log('Modified Dietz and XIRR cases passed');
+
+const pnlClose = (index, pnl, total_assets) => ({ date: `2025-01-0${index}`, pnl, total_assets });
+const rows = [
+  pnlClose(1, '30.50', 1000), pnlClose(2, '-100.15', 800),
+  pnlClose(3, '180.15', 5000), pnlClose(4, '-150.25', 4000), pnlClose(5, '100.25', 5100)
+];
+assert.deepEqual(maxDrawdown(rows), {
+  amount: -150.25, rate: -150.25 / 5000, peakDate: rows[2].date, troughDate: rows[3].date
+});
+assert.equal(maxDrawdown(rows.slice(0, 2)).amount, -100.15);
+assert.equal(maxDrawdown(rows.slice(1, 3)).amount, 0);
+assert.equal(maxDrawdown(rows.slice(0, 1)), null);
+assert.equal(maxDrawdown([]), null);
+assert.deepEqual(maxDrawdown([
+  pnlClose(1, 50, 500), pnlClose(2, null, 500),
+  pnlClose(3, -100, null), pnlClose(4, -20, 700)
+]), { amount: -20, rate: null, peakDate: '2025-01-03', troughDate: '2025-01-04' });
+assert.equal(maxDrawdown([pnlClose(1, 0, 300), pnlClose(2, 0, 300)]).rate, 0);
+console.log('Maximum drawdown cases passed');

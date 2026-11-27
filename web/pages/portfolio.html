@@ -141,13 +141,20 @@
           </select></label>
         </div>
         <p id="performance-period" class="muted" role="status"></p>
-        <dl class="balance-strip performance-summary performance-summary-four">
+        <dl class="balance-strip performance-summary performance-summary-five">
           <div><dt id="performance-total-label">累计盈亏估算</dt><dd id="performance-total"></dd></div>
           <div><dt id="performance-return-label">单利（修正迪茨）</dt><dd id="performance-return"></dd></div>
           <div><dt>净投入</dt><dd id="performance-net-investment"></dd></div>
           <div>
             <dt>股息收入 / 账户股息率</dt>
             <dd><span id="performance-dividend-income"></span> / <span id="performance-dividend-yield"></span></dd>
+          </div>
+          <div id="performance-drawdown-card" aria-describedby="performance-drawdown-dates">
+            <dt id="performance-drawdown-label">最大回撤</dt>
+            <dd>
+              <span id="performance-drawdown-amount"></span> / <span id="performance-drawdown-rate"></span>
+              <span id="performance-drawdown-dates" role="tooltip" hidden></span>
+            </dd>
           </div>
         </dl>
         <label class="performance-chart-control">曲线指标<select id="performance-chart-metric">
@@ -161,6 +168,7 @@
           <p>盈利／亏损天数 <span id="performance-positive"></span> · 日线覆盖 <span id="performance-covered"></span></p>
           <p>净投入为所选日期范围内已入库的银证转入减转出。</p>
           <p>股息收入为所选时间和证券范围内的股息及分红扣除股息红利补税后的净额。账户股息率为该净额除以区间末所用账户估值范围的证券总市值。</p>
+          <p>最大回撤取区间内连续收盘累计盈亏从前高到后续低点的最大金额跌幅。百分比用同一段跌幅除以高点当天所选证券市值与人民币现金之和。缺少日盈亏时分段计算，缺少正数峰值资产时比例留空。</p>
           <p id="performance-basis"></p>
           <p>单利采用修正迪茨法。区间净收益为期末总资产减期初总资产和外部净入金。分母为期初总资产加按剩余自然日加权的净入金，期末当天的现金流权重为零。</p>
           <p>复利采用 XIRR。将期初总资产及各笔转入视为投入，转出和期末总资产视为收回，按实际日期及 365 天年化。盈亏日历的收益率统一采用修正迪茨法，按日、月或年对应的区间显示。</p>

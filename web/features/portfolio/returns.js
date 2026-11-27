@@ -1,4 +1,4 @@
-/* Account returns from dated external cash flows and close valuations. */
+/* Portfolio returns and drawdown from dated local results. */
 (() => {
   'use strict';
   const dayNumber = (date) => Date.parse(date) / 86400000;
@@ -91,5 +91,32 @@
     return results;
   }
 
-  globalThis.PortfolioReturns = { periodReturns };
+  function maxDrawdown(rows) {
+    let cumulative = 0;
+    let peak;
+    let worst = null;
+    for (const row of rows) {
+      const pnl = row.pnl == null ? NaN : Number(row.pnl);
+      if (!Number.isFinite(pnl)) {
+        peak = null;
+        cumulative = 0;
+        continue;
+      }
+      cumulative += Math.round(pnl * 100);
+      if (peak) {
+        const amount = Math.min(0, cumulative - peak.cents) / 100;
+        const ratio = peak.assets > 0 ? amount / peak.assets : null;
+        const firstValidZero = amount === 0 && worst?.amount === 0 && worst.rate == null && ratio !== null;
+        if (!worst || amount < worst.amount || firstValidZero) {
+          worst = { amount, rate: ratio, peakDate: peak.date, troughDate: row.date };
+        }
+      }
+      if (!peak || cumulative > peak.cents) {
+        peak = { cents: cumulative, date: row.date, assets: Number(row.total_assets) };
+      }
+    }
+    return worst;
+  }
+
+  globalThis.PortfolioReturns = { periodReturns, maxDrawdown };
 })();

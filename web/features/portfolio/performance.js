@@ -30,6 +30,8 @@
   let loadRevision = 0;
   let plotlyPromise;
   let chartRequest = 0;
+  const drawdownCard = $('performance-drawdown-card');
+  const drawdownHighlight = () => drawdownCard.matches(':hover, :focus-visible') ? 1 : 0;
 
   function element(tag, text = '') {
     const node = document.createElement(tag);
@@ -306,7 +308,7 @@
     return { x, y };
   }
 
-  async function drawCharts(rows, summary, bounds, rates, flows) {
+  async function drawCharts(rows, summary, bounds, rates, flows, drawdown) {
     const request = ++chartRequest;
     const useRate = $('performance-chart-metric').value === 'rate';
     const Plotly = await loadPlotly();
@@ -334,7 +336,15 @@
     });
     const config = { responsive: true, displayModeBar: false };
     const key = bounds.join('/');
-    await Plotly.react($('performance-chart'), traces, chartLayout(`${key}/${metric}`, useRate), config);
+    const layout = chartLayout(`${key}/${metric}`, useRate);
+    if (drawdown?.amount < 0) {
+      layout.shapes = [{
+        type: 'rect', xref: 'x', yref: 'paper', x0: drawdown.peakDate, x1: drawdown.troughDate,
+        y0: 0, y1: 1, layer: 'below', fillcolor: 'rgba(128,220,227,.20)', line: { width: 0 },
+        opacity: drawdownHighlight()
+      }];
+    }
+    await Plotly.react($('performance-chart'), traces, layout, config);
     if (request !== chartRequest) return;
     const assetCount = rows.filter((row) => row.total_assets != null).length;
     const assetLabel = assetCount ? '总资产估算' : '证券市值（现金待核对）';
@@ -425,6 +435,15 @@
     const accountMarketValue = Number(returnReport()?.records.findLast((row) => row.date === last)?.market_value);
     $('performance-dividend-yield').textContent = dividend != null && accountMarketValue > 0
       ? rate(dividend / accountMarketValue).replace(/^\+/, '') : '—';
+    const drawdown = window.PortfolioReturns.maxDrawdown(rows);
+    $('performance-drawdown-label').textContent = summary.covered < rows.length ? '已覆盖最大回撤' : '最大回撤';
+    showMetric('performance-drawdown-amount', drawdown?.amount, wholeYuan);
+    showMetric('performance-drawdown-rate', drawdown?.rate, (value) => `${wholeYuanFormatter.format(value * 100)}%`);
+    const dates = $('performance-drawdown-dates');
+    const hasDrawdown = drawdown?.amount < 0;
+    dates.textContent = hasDrawdown ? `高点 ${drawdown.peakDate} → 低点 ${drawdown.troughDate}` : '';
+    dates.hidden = !hasDrawdown;
+    drawdownCard.tabIndex = hasDrawdown ? 0 : -1;
     $('asset-flow-summary').textContent = `已导入银证转账参考 · 转入 ${balance(deposits)} · 转出 ${balance(withdrawals)}`;
     $('asset-card-date').textContent = last ? `卡片金额取 ${last} 收盘估算。` : '所选区间无交易日。';
     for (const [id, value] of [
@@ -434,7 +453,7 @@
     ]) {
       $(id).textContent = value == null ? '—' : balance(value);
     }
-    await drawCharts(rows, summary, [start, end], rates, flows);
+    await drawCharts(rows, summary, [start, end], rates, flows, drawdown);
   }
 
   function setScopeDates(scope, records, preserve) {
@@ -590,6 +609,17 @@
       loading = false;
       if (revision !== loadRevision && !$('performance').hidden) loadPerformance();
     }
+  }
+
+  function updateDrawdownHighlight() {
+    const chart = $('performance-chart');
+    if (chart.layout?.shapes?.length) {
+      window.Plotly.relayout(chart, { 'shapes[0].opacity': drawdownHighlight() });
+    }
+  }
+
+  for (const event of ['pointerenter', 'pointerleave', 'focus', 'blur']) {
+    drawdownCard.addEventListener(event, updateDrawdownHighlight);
   }
 
   $('performance-account').addEventListener('change', () => selectAccount().catch((error) => {
