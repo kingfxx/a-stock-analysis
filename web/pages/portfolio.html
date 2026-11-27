@@ -45,7 +45,7 @@
       <div id="holdings-data" hidden>
         <dl class="balance-strip">
           <div><dt>人民币总资产</dt><dd id="asset-value"></dd><small id="asset-source" class="subline"></small></div>
-          <div><dt>确认现金</dt><dd id="cash-value"></dd><small id="cash-weight" class="subline" title="现金占纳入总资产比例" hidden></small></div>
+          <div><dt id="cash-label">确认现金</dt><dd id="cash-value"></dd><small id="cash-weight" class="subline" title="现金占纳入总资产比例" hidden></small></div>
           <div><dt>纳入证券市值</dt><dd id="market-value"></dd><small id="market-weight" class="subline" title="证券市值占纳入总资产比例" hidden></small></div>
           <div><dt>持仓盈亏</dt><dd id="holding-pnl"></dd></div>
           <div><dt>今日盈亏</dt><dd id="daily-pnl"></dd><small id="daily-pnl-rate" class="subline"></small></div>
@@ -298,7 +298,7 @@
       <div id="manual-security-box"></div>
       <label id="manual-name-field">证券名称<input name="name" maxlength="80" autocomplete="off"></label>
       <label id="manual-quantity-field"><span id="manual-quantity-label">数量</span><input name="quantity" inputmode="numeric"></label>
-      <label id="manual-price-field">成交均价<input name="price" inputmode="decimal"></label>
+      <label id="manual-price-field"><span id="manual-price-label">成交均价</span><input name="price" inputmode="decimal"></label>
       <label id="manual-amount-field"><span id="manual-amount-label">金额</span><input name="gross_amount" inputmode="decimal"></label>
     </div>
     <p id="manual-preview" class="muted" aria-live="polite"></p>
@@ -307,7 +307,7 @@
       <div class="manual-fields">
         <label>时间<input name="event_time" type="time" step="1"></label>
         <label id="manual-fees-field">合计手续费<input name="fees" inputmode="decimal"></label>
-        <label id="manual-net-field">实际净收付<input name="net_cash" inputmode="decimal" placeholder="流入为正，流出为负"></label>
+        <label id="manual-net-field"><span id="manual-net-label">实际净收付</span><input name="net_cash" inputmode="decimal" placeholder="流入为正，流出为负"></label>
         <label><span id="manual-reference-label">成交编号</span><input name="execution_reference" maxlength="80"></label>
         <label id="manual-order-field">委托号<input name="order_reference" maxlength="80"></label>
       </div>

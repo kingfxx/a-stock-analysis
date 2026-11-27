@@ -15,9 +15,12 @@ from stock_analysis.domains.portfolio.huatai_snapshot import HUATAI, parse_trans
 from stock_analysis.domains.portfolio.ledger_storage import archive, find_overlaps, save_entries
 from stock_analysis.domains.portfolio.manual_entries import manual_options, save_manual_entry
 from stock_analysis.domains.portfolio.performance_read import read_performance_reports
+from stock_analysis.domains.portfolio.projected_snapshot import (
+    book_view, build_book, quote_for_close, read_accounts, read_quotes,
+)
 from stock_analysis.domains.portfolio.reference import previous_market_day, read_hk_reference
 from stock_analysis.domains.portfolio.revaluation import (
-    delete_revaluation, display_revaluation, load_saved_revaluation, previous_revaluation_closes, read_revaluation,
+    book_quotes, delete_revaluation, display_revaluation, load_saved_revaluation, previous_revaluation_closes, read_revaluation,
     revaluation_directory, saved_revaluation, save_revaluation,
 )
 from stock_analysis.infrastructure.storage import utc_now
@@ -169,7 +172,7 @@ class Portfolio:
                          [(snapshot_id, *(row[col] for col in POSITION_COLUMNS)) for row in data['positions']])
         return {'kind': 'snapshot', 'snapshot_id': snapshot_id, 'saved_count': len(data['positions'])}
 
-    def snapshot(self, snapshot_id=None, *, account_id=None, day=None, basis_ids=None):
+    def snapshot(self, snapshot_id=None, *, account_id=None, day=None, basis_ids=None, close_as_of=None):
         if day is not None:
             day = check_day(day)
             if snapshot_id is not None or account_id is not None:
@@ -183,11 +186,13 @@ class Portfolio:
             """)]
             accounts = {row['account_id']: row['broker'] for row in directory}
             if snapshot_id is None and account_id is None and len(accounts) > 1:
-                return self._combined_snapshot(db, directory, accounts, day, basis_ids)
+                return self._combined_snapshot(db, directory, accounts, day, basis_ids, close_as_of)
             selected = next((row for row in directory if (snapshot_id is None or row['id'] == snapshot_id)
-                             and (account_id is None or row['account_id'] == account_id)), None)
+                             and (account_id is None or row['account_id'] == account_id)
+                             and (close_as_of is None or row['session'] == 'close'
+                                  and row['snapshot_date'] <= close_as_of)), None)
             payload = {'directory': directory, 'accounts': accounts, 'snapshot': None, 'scope': 'account'}
-            if not selected and (snapshot_id is not None or account_id is not None):
+            if not selected and close_as_of is None and (snapshot_id is not None or account_id is not None):
                 raise LookupError('找不到持仓快照')
             if not selected:
                 return payload
@@ -216,14 +221,17 @@ class Portfolio:
             'SELECT * FROM portfolio_snapshot_positions WHERE snapshot_id=? ORDER BY source_row', (identity,))]
         return snapshot, positions
 
-    def _combined_snapshot(self, db, directory, accounts, day, basis_ids=None):
+    def _combined_snapshot(self, db, directory, accounts, day, basis_ids=None, close_as_of=None):
         days = list(dict.fromkeys(row['snapshot_date'] for row in directory if row['session'] == 'close'))
         selected_day = day or (days[0] if days else None)
         selected = {}
         for row in directory:
-            if (row['snapshot_date'] == selected_day and row['session'] == 'close'
+            matches = row['snapshot_date'] <= close_as_of if close_as_of else row['snapshot_date'] == selected_day
+            if (matches and row['session'] == 'close'
                     and (basis_ids is None or row['id'] in basis_ids)):
                 selected.setdefault(row['account_id'], row)
+        if close_as_of and selected:
+            selected_day = max(entry['snapshot_date'] for entry in selected.values())
         if day and not selected:
             raise LookupError('找不到这一天的收盘快照')
         funds, parts = [], []
@@ -233,9 +241,10 @@ class Portfolio:
             snapshot, positions = self._load_snapshot(db.conn, entry)
             for position in positions:
                 key = (position['exchange'], position['asset_type'], position['code'])
-                if key not in references:
-                    references[key] = self._reference(db, position, selected_day)
-                position['reference'] = references[key]
+                reference_key = (*key, snapshot['snapshot_date'])
+                if reference_key not in references:
+                    references[reference_key] = self._reference(db, position, snapshot['snapshot_date'])
+                position['reference'] = references[reference_key]
             fill_snapshot_daily_pnl(snapshot, positions, previous_day)
             funds.append({'snapshot': snapshot, 'reconciliation': reconcile(snapshot, positions),
                           'totals': snapshot_totals(snapshot, positions)})
@@ -256,10 +265,60 @@ class Portfolio:
     def performance(self):
         return read_performance_reports(self.db, BROKER)
 
-    def revaluation(self, snapshot_id=None, *, account_id=None, day=None, save=False):
-        payload = self.snapshot(snapshot_id, account_id=account_id, day=day)
-        result = read_revaluation(self.db, payload, datetime.now(ZoneInfo('Asia/Shanghai')))
-        return save_revaluation(self.db, payload, result) if save else result
+    def current_snapshot(self, account_id=None):
+        now = datetime.now(ZoneInfo('Asia/Shanghai'))
+        today = now.date().isoformat()
+        payload = self.snapshot(account_id=account_id, close_as_of=today)
+        with self.db.shared_reader() as reader:
+            accounts = read_accounts(reader, payload, today)
+            if any(account['ledger_ids'] for account in accounts):
+                prices, days = read_quotes(reader, self._projected_securities(accounts), now)
+                quote = quote_for_close(accounts, prices, days, today)
+                book = build_book(payload, accounts, prices, days, quote, today)
+                return book_view(payload, book, quote, lambda row, day: self._reference(reader, row, day))
+        return self.snapshot(account_id=account_id)
+
+    @staticmethod
+    def _projected_securities(accounts):
+        return [row for account in accounts for row in account['positions'].values() if position_included(row)]
+
+    def revaluation(self, snapshot_id=None, *, account_id=None, day=None, save=False, current=False):
+        now = datetime.now(ZoneInfo('Asia/Shanghai'))
+        today = now.date().isoformat()
+        selection = dict(snapshot_id=snapshot_id, account_id=account_id, day=day)
+        payload = self.snapshot(**selection, close_as_of=today if current else None)
+        payload, result = self._read_projected_close(payload, selection, now, current)
+        if result is None:
+            result = read_revaluation(self.db, payload, now)
+        if save and not result['missing_accounts']:
+            return save_revaluation(self.db, payload, result)
+        return result
+
+    def _read_projected_close(self, payload, selection, now, current):
+        today = now.date().isoformat()
+        with self.db.shared_reader() as reader:
+            accounts = read_accounts(reader, payload, today)
+            if not any(account['ledger_ids'] for account in accounts):
+                return payload, None
+            prices, days = read_quotes(reader, self._projected_securities(accounts), now)
+            quote = quote_for_close(accounts, prices, days, today)
+            if current and quote and quote < payload['snapshot']['snapshot_date']:
+                payload = self.snapshot(**selection, close_as_of=quote)
+            snapshot = payload['snapshot']
+            missing = payload.get('missing_accounts', [])
+            if not quote or not snapshot or quote < snapshot['snapshot_date']:
+                return payload, dict(quote_date=None, today=today, positions=payload.get('positions', []),
+                                     totals={}, missing_accounts=missing)
+            accounts = read_accounts(reader, payload, quote)
+            extra = [row for row in self._projected_securities(accounts)
+                     if (row['exchange'], row['code'], row['asset_type']) not in prices]
+            if extra:
+                prices.update(read_quotes(reader, extra, now)[0])
+            book = build_book(payload, accounts, prices, days, quote, quote)
+            return payload, dict(snapshot_date=snapshot['snapshot_date'], quote_date=quote, today=today,
+                                 broker=snapshot['broker'], book=book,
+                                 positions=book_quotes(book),
+                                 totals=book['totals'], missing_accounts=missing)
 
     def saved_revaluation(self, estimate_id):
         return saved_revaluation(self.db, estimate_id)
@@ -270,7 +329,12 @@ class Portfolio:
     def revaluation_snapshot(self, estimate_id):
         account_id, basis_ids, saved = load_saved_revaluation(self.db, estimate_id)
         payload = (self.snapshot(basis_ids[0]) if account_id is not None
-                   else self.snapshot(day=saved['snapshot_date'], basis_ids=basis_ids))
+                   else self.snapshot(day=saved['snapshot_date'], basis_ids=basis_ids,
+                                      close_as_of=saved['quote_date'] if 'book' in saved else None))
+        if 'book' in saved:
+            with self.db.shared_reader() as db:
+                return book_view(payload, saved['book'], saved['quote_date'],
+                                 lambda row, day: self._reference(db, row, day), estimate_id=estimate_id)
         keys = {(row['asset_type'], row['code']) for row in saved['positions']}
         positions = [row for row in payload['positions'] if position_included(row) and row['quantity'] > 0
                      and (row['asset_type'], row['code']) in keys]

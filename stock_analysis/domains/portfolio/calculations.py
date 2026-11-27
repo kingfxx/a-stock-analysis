@@ -15,6 +15,8 @@ def position_included(row):
         return False
     if row.get('accounts'):
         return all(position_included(part) for part in row['accounts'])
+    if row.get('book_projected'):
+        return True
     if any(row.get(key) is None for key in ('price', 'market_value', 'exchange_rate')):
         return False
     price, value, rate = (Decimal(row[key]) for key in ('price', 'market_value', 'exchange_rate'))
@@ -27,9 +29,9 @@ def sum_known(rows, key):
 
 
 def position_cost(part):
-    if part['cost_amount'] is not None:
+    if part.get('cost_amount') is not None:
         return Decimal(part['cost_amount'])
-    if part['market_value'] is not None and part['holding_pnl'] is not None:
+    if part.get('market_value') is not None and part.get('holding_pnl') is not None:
         return Decimal(part['market_value']) - Decimal(part['holding_pnl'])
     return None
 
@@ -164,10 +166,13 @@ def combine_positions(positions, day):
             row['cost_amount'] = None
             ref = row['reference']
             if row['asset_type'] == 'hong_kong':
-                row['market_value'] = str(sum_known(parts, 'market_value'))
-                share_rate = sum(Decimal(part['exchange_rate']) * part['quantity'] for part in parts)
-                if row['quantity']:
+                market = sum_known(parts, 'market_value')
+                row['market_value'] = str(market) if market is not None else None
+                if row['quantity'] and all(part['exchange_rate'] is not None for part in parts):
+                    share_rate = sum(Decimal(part['exchange_rate']) * part['quantity'] for part in parts)
                     row['exchange_rate'] = str(share_rate / row['quantity'])
+                else:
+                    row['exchange_rate'] = None
                 if not all(part['price'] == row['price'] for part in parts):
                     row['price'] = None
             elif ref and ref['close_date'] == day:

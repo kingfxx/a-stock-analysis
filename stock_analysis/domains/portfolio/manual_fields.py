@@ -80,8 +80,10 @@ def normalize_entry(kind, body, today, security_name):
     name = ''
     if kind == 'history':
         code, exchange, asset_type = identity(fields.get('code', ''))
-        if not re.fullmatch(r'[0-9]{6}', code) or (mode != 'ipo' and exchange not in ('sh', 'sz')):
-            raise ValueError('请输入有效的六位沪深证券代码')
+        if mode == 'ipo' and not re.fullmatch(r'[0-9]{6}', code):
+            raise ValueError('请输入有效的六位沪深申购代码')
+        if mode != 'ipo' and exchange not in ('sh', 'sz', 'hk'):
+            raise ValueError('请输入有效的沪深或港股证券代码')
         name = security_name or fields.get('name', '')
         if not name and mode != 'ipo':
             raise ValueError('请填写证券名称')
@@ -99,13 +101,16 @@ def normalize_entry(kind, body, today, security_name):
         if price is None or not 0 < Decimal(price) < Decimal('1e9') or len(price.partition('.')[2]) > 8:
             raise ValueError('请填写有效的成交均价')
         amount = (abs(units) * Decimal(price)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        gross = _amount(fields.get('gross_amount', '') or str(amount), '成交金额', positive=True)
+        hk = exchange == 'hk'
+        gross = _amount(fields.get('gross_amount', '') or ('' if hk else str(amount)), '人民币成交金额', positive=True)
         fees = _amount(fields.get('fees', ''), '合计手续费')
-        net = _amount(fields.get('net_cash', ''), '实际净收付', signed=True)
-        signed = Decimal(gross) * (-1 if event_type == 'buy' else 1)
-        if net is not None and (Decimal(net) > signed or
-                                fees is not None and Decimal(net) != signed - Decimal(fees)):
-            raise ValueError('请核对成交金额、费用与实际净收付')
+        net = _amount(fields.get('net_cash', ''), '人民币实际净收付', signed=True, required=hk)
+        if hk and (Decimal(net) >= 0 if event_type == 'buy' else Decimal(net) < 0):
+            raise ValueError('请核对港股人民币实际净收付的正负方向')
+        if net is not None and gross is not None:
+            signed = Decimal(gross) * (-1 if event_type == 'buy' else 1)
+            if Decimal(net) > signed or fees is not None and Decimal(net) != signed - Decimal(fees):
+                raise ValueError('请核对成交金额、费用与实际净收付')
     if mode == 'cash':
         gross = _amount(fields.get('gross_amount', ''), '实际金额', required=True, positive=True)
         net = '-' + gross if event_type in ('dividend_tax', 'bank_transfer_out') else gross

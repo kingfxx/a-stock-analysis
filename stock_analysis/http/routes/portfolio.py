@@ -43,12 +43,19 @@ class PortfolioRoutes:
                 set() if path.endswith('/performance') else {'start', 'end', 'offset', *ACTIVITY_FIELDS})
             if path == MANUAL_OPTIONS:
                 allowed = {'q', 'account'}
+            if path.endswith('/snapshots'):
+                allowed.add('current')
             if query.keys() - allowed or any(len(values) != 1 for values in query.values()):
                 raise ValueError('持仓查询参数无效')
             args = {key: values[0] for key, values in query.items()}
             service = app.portfolio_service()
             if path == MANUAL_OPTIONS:
                 result = service.manual_options(args.get('q', ''), int(args['account']) if 'account' in args else None)
+            elif 'current' in args:
+                if args['current'] != '1' or args.keys() - {'current', 'account'}:
+                    raise ValueError('当前持仓查询参数无效')
+                result = service.current_snapshot(int(args['account']) if 'account' in args else None)
+                result['session_token'] = app.LOCAL_SESSION_TOKEN
             elif 'estimate' in args:
                 if len(args) != 1:
                     raise ValueError('请选择一份估算快照')
@@ -109,11 +116,14 @@ class PortfolioRoutes:
                 self._ai_reply(app.portfolio_service().save_manual(manual, request))
                 return True
             if revaluation:
-                if (not isinstance(request, dict) or set(request) not in ({'snapshot'}, {'day'})
-                        or any(not isinstance(value, str) for value in request.values())):
+                if (not isinstance(request, dict) or set(request) not in (
+                        {'snapshot'}, {'day'}, {'current'}, {'current', 'account'})
+                        or any(not isinstance(value, str) for value in request.values())
+                        or ('current' in request and request['current'] != '1')):
                     raise ValueError('请选择一份仓位快照')
                 result = app.portfolio_service().revaluation(
-                    int(request['snapshot']) if 'snapshot' in request else None, day=request.get('day'), save=True)
+                    int(request['snapshot']) if 'snapshot' in request else None, day=request.get('day'), save=True,
+                    current='current' in request, account_id=int(request['account']) if 'account' in request else None)
                 self._ai_reply(result)
                 return True
             if not isinstance(request, dict):

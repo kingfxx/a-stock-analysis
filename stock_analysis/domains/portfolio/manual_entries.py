@@ -18,10 +18,10 @@ def _securities(conn, query, account_id):
             SELECT p.code,p.name,p.exchange,p.asset_type,
                    CASE WHEN ? IS NULL OR s.account_id=? THEN 0 ELSE 2 END priority,s.id position
             FROM portfolio_snapshot_positions p JOIN portfolio_snapshots s ON s.id=p.snapshot_id
-            WHERE p.asset_type IN ('stock','etf')
+            WHERE p.asset_type IN ('stock','etf','hong_kong')
             UNION ALL
             SELECT code,name,exchange,asset_type,CASE WHEN ? IS NULL OR account_id=? THEN 1 ELSE 3 END,id
-            FROM portfolio_ledger_entries WHERE duplicate_of_id IS NULL AND asset_type IN ('stock','etf')
+            FROM portfolio_ledger_entries WHERE duplicate_of_id IS NULL AND asset_type IN ('stock','etf','hong_kong')
         ) WHERE name<>'' AND (priority<2 OR ?<>'') AND (instr(code,?) OR instr(name,?))
         GROUP BY code,name,exchange,asset_type,priority ORDER BY priority,max(position) DESC LIMIT 30
     """, (account_id, account_id, account_id, account_id, query, query, query))
@@ -30,7 +30,7 @@ def _securities(conn, query, account_id):
         suggestions.setdefault(row['code'], dict(row))
     if query:
         for row in conn.execute("""
-            SELECT code,name,exchange,'stock' AS asset_type FROM instruments
+            SELECT code,name,exchange,CASE WHEN exchange='hk' THEN 'hong_kong' ELSE 'stock' END AS asset_type FROM instruments
             WHERE name IS NOT NULL AND (instr(code,?) OR instr(lower(name),?) OR instr(search_initials,?) OR instr(search_pinyin,?))
             ORDER BY code=? DESC,code LIMIT 20
         """, (query, query, query, query, query)):

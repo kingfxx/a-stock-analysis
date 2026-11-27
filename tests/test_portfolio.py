@@ -482,6 +482,64 @@ def test_revaluation_saves_updated_prior_close_as_new_version(isolated, monkeypa
     assert 'saved_id' not in revaluation.save_revaluation(isolated.db, payload, incomplete)
 
 
+def test_manual_trade_advances_live_holdings_and_freezes_close(isolated, monkeypatch):
+    anchor = import_snapshot(isolated, cash='900')['snapshot_id']
+    quote, today = '2025-11-25', '2025-11-26'
+
+    class Morning(datetime):
+        @classmethod
+        def now(cls, tz):
+            return cls(2025, 11, 26, 10, tzinfo=tz)
+
+    monkeypatch.setattr('stock_analysis.domains.portfolio.service.datetime', Morning)
+    stock = {DAY: (Decimal('10'), None), quote: (Decimal('11'), None)}
+    monkeypatch.setattr(revaluation, 'read_closes', lambda reader, keys, start, end: {
+        key: {day: price for day, price in stock.items() if day <= end} for key in keys})
+    monkeypatch.setattr(revaluation, 'read_unadjusted_closes', lambda *_: {DAY: '2.5', quote: '2.6'})
+    monkeypatch.setattr(revaluation, 'local_market_days', lambda *_: [DAY, quote])
+
+    def trade(day, business, code, quantity, price, **extra):
+        return isolated.save_manual('history', dict(broker='招商', event_date=day, business=business,
+                                    code=code, name='测试标的', quantity=quantity, price=price,
+                                    request_id=str(uuid4()), **extra))
+
+    buy = trade(quote, '买入', '000001', '10', '10.5', fees='1')
+    trade(today, '卖出', '000001', '110', '11', net_cash='1209')
+    trade(today, '买入', '000002', '10', '11', net_cash='-110')
+    isolated.save_manual('transfers', dict(broker='招商', business='银行转证券', event_date=today,
+                                          gross_amount='200', request_id=str(uuid4())))
+    live = isolated.current_snapshot()
+    assert live['live'] and live['position_date'] == today and live['quote_date'] == quote
+    assert {row['code'] for row in live['positions'] if row['included']} == {'000002', '159915'}
+    assert live['totals']['cash'] == '2093.00' and live['totals']['daily_pnl'] is None
+    saved = isolated.revaluation(save=True, current=True)
+    assert saved['book']['ledger_ids'] == [buy['id']]
+    assert saved['quote_date'] == quote
+    view = isolated.revaluation_snapshot(saved['saved_id'])
+    position = next(row for row in view['positions'] if row['code'] == '000001')
+    assert position['quantity'] == 110 and position['cost_amount'] == '906'
+    assert view['totals']['cash'] == '794.00' and view['totals']['daily_pnl'] == '124.00'
+    assert isolated.snapshot(anchor)['positions'][0]['quantity'] == 100
+    trade(quote, '买入', '000002', '5', '11', net_cash='-55')
+    assert isolated.revaluation_snapshot(saved['saved_id'])['totals']['cash'] == '794.00'
+    import_snapshot(isolated, cash='700', day=today)
+    assert isolated.current_snapshot()['totals']['cash'] == '700'
+
+
+def test_manual_hk_requires_actual_rmb_net(isolated):
+    import_snapshot(isolated)
+    body = dict(broker='招商', business='买入', event_date=DAY, code='01919', name='港股样例',
+                quantity='100', price='17', request_id=str(uuid4()))
+    with pytest.raises(ValueError, match='人民币实际净收付'):
+        isolated.save_manual('history', body)
+    saved = isolated.save_manual('history', dict(body, net_cash='-1500'))
+    assert saved['id']
+    event = isolated.history()['entries'][0]
+    assert (event['exchange'], event['asset_type'], event['price'], event['net_cash']) == (
+        'hk', 'hong_kong', '17', '-1500')
+    assert event['gross_amount'] is None
+
+
 def test_performance_extends_saved_close_using_post_snapshot_ledger(isolated, monkeypatch):
     import_snapshot(isolated, cash='900')
     prior, following = '2025-11-21', '2025-11-25'
@@ -816,6 +874,9 @@ def test_portfolio_http_gate_and_import(isolated, monkeypatch):
             assert response.headers['Cache-Control'] == 'no-store'
             assert response.json()['snapshot'] is None
             token = response.json()['session_token']
+            current = session.get(base + '/api/portfolio/snapshots', params={'current': '1'}, timeout=5)
+            assert current.ok and current.json()['snapshot'] is None
+            assert session.get(base + '/api/portfolio/snapshots', params={'current': '0'}, timeout=5).status_code == 400
             assert session.get(base + '/api/portfolio/history', headers={'Host': 'invalid.test'}, timeout=5).status_code == 400
             revalue = base + '/api/portfolio/revaluation'
             assert session.get(revalue, headers={'Host': 'invalid.test'}, timeout=5).status_code == 400

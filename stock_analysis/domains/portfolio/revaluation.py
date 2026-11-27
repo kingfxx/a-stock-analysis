@@ -28,7 +28,10 @@ def load_saved_revaluation(db, estimate_id):
         """, (estimate_id,)).fetchone()
     if row is None:
         raise LookupError('找不到本地估算快照')
-    return row['account_id'], json.loads(row['snapshot_ids']), {**json.loads(row['result_json']), 'saved_id': estimate_id}
+    result = json.loads(row['result_json'])
+    if 'book' in result:
+        result['positions'] = book_quotes(result['book'])
+    return row['account_id'], json.loads(row['snapshot_ids']), {**result, 'saved_id': estimate_id}
 
 
 def saved_revaluation(db, estimate_id):
@@ -40,6 +43,11 @@ def delete_revaluation(db, estimate_id):
         cursor = conn.execute('DELETE FROM portfolio_revaluation_snapshots WHERE id=?', (estimate_id,))
         if not cursor.rowcount:
             raise LookupError('找不到本地估算快照')
+
+
+def book_quotes(book):
+    return [{**{key: row[key] for key in ('code', 'name', 'asset_type', 'quantity', 'market_value', 'holding_pnl', 'daily_pnl')},
+             'close': row['price']} for row in book['positions'] if row['included']]
 
 
 def _display_position(source, close, market_value, holding_pnl, daily_pnl, reference):
@@ -112,7 +120,8 @@ def save_revaluation(db, payload, result):
     account_id = snapshot.get('account_id')
     snapshots = [entry['snapshot'] for entry in payload['funds']] if 'funds' in payload else [snapshot]
     basis = json.dumps(sorted(row['id'] for row in snapshots), separators=(',', ':'))
-    content = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    stored = ({key: value for key, value in result.items() if key != 'positions'} if 'book' in result else result)
+    content = json.dumps(stored, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     digest = sha256((basis + content).encode('utf-8')).hexdigest()
     with db.connection(write=True) as conn:
         identity = conn.execute("""
@@ -127,7 +136,7 @@ def save_revaluation(db, payload, result):
     return {**result, 'saved_id': estimate_id}
 
 
-def _read_prices(reader, positions, start, end):
+def read_revaluation_prices(reader, positions, start, end):
     stock_closes = read_closes(reader, {(row['exchange'], row['code']) for row in positions
                                         if row['asset_type'] == 'stock'}, start, end)
     prices = {(exchange, code, 'stock'): {day: value for day, (value, _) in series.items()}
@@ -151,7 +160,7 @@ def previous_revaluation_closes(reader, positions, saved):
         return {}
     end = saved['quote_date']
     start = date.fromordinal(max(1, date.fromisoformat(end).toordinal() - 15)).isoformat()
-    prices, days = _read_prices(reader, positions, start, end)
+    prices, days = read_revaluation_prices(reader, positions, start, end)
     previous = max((day for day in days if day < end), default=None)
     return {key: series.get(previous) for key, series in prices.items()}
 
@@ -168,7 +177,7 @@ def read_revaluation(db, payload, now):
     end = (now.date() - timedelta(days=int(now.time() < cutoff))).isoformat()
     start = date.fromordinal(max(1, date.fromisoformat(baseline).toordinal() - 15)).isoformat()
     with db.shared_reader() as reader:
-        prices, trading_days = _read_prices(reader, positions, start, end)
+        prices, trading_days = read_revaluation_prices(reader, positions, start, end)
     # Keep at most one fallback session and never combine different quote dates.
     days = sorted(day for day in trading_days if day <= end)
     previous_day = next((day for day in reversed(days) if day < today), None)

@@ -156,6 +156,7 @@
       const mode = current?.mode;
       const trade = mode === 'trade';
       const ipo = mode === 'ipo';
+      const hk = /^\d{5}$/.test(clean(field('code').value));
       $('manual-security-box').hidden = !history;
       security.input.disabled = !history;
       showField('name', history && !ipo, history && !ipo);
@@ -163,16 +164,21 @@
       showField('price', trade, true);
       showField('gross_amount', trade || mode === 'cash', mode === 'cash');
       showField('fees', trade);
-      showField('net_cash', trade);
+      showField('net_cash', trade, trade && hk);
+      const actualNet = $('manual-net-field');
+      const preceding = $(trade && hk ? 'manual-amount-field' : 'manual-fees-field');
+      if (preceding.nextElementSibling !== actualNet) preceding.after(actualNet);
       showField('order_reference', history);
       $('manual-date-label').textContent = history ? (trade ? '成交日期' : '业务日期') : '转账日期';
       $('manual-quantity-label').textContent = ipo ? '配号数量' : mode === 'credit' ? '入账数量' : '成交数量';
       $('manual-reference-label').textContent = !history ? '银行流水号' : ipo ? '配号编号' : '成交编号';
-      $('manual-amount-label').textContent = trade ? '券商实际成交额（可选）' : '实际金额';
+      $('manual-price-label').textContent = hk ? '成交均价（港元）' : '成交均价';
+      $('manual-net-label').textContent = hk ? '实际净收付（人民币）' : '实际净收付';
+      $('manual-amount-label').textContent = trade ? (hk ? '人民币成交额（可选）' : '券商实际成交额（可选）') : '实际金额（人民币）';
       const gross = trade ? roundedGross(clean(field('quantity').value), clean(field('price').value)) : '';
       const cashSide = ['转出证券', '股息红利税补缴'].includes(current?.label) ? '资金流出' : '资金流入';
       const actual = clean(field('gross_amount').value);
-      $('manual-preview').textContent = (gross ? `按数量和价格计算 ${gross} 元${actual ? ` · 采用券商成交额 ${actual} 元` : ''}` :
+      $('manual-preview').textContent = (gross ? `按数量和价格计算 ${gross} ${hk ? '港元' : '元'}${actual ? ` · 采用券商成交额 ${actual} 元` : ''}` :
         mode === 'cash' ? `${cashSide}${actual ? ` ${actual} 元` : ''}` : '');
       if (ipo) $('manual-more').open = true;
     }
@@ -218,10 +224,11 @@
       updateFields();
     });
     const security = combobox('manual-security', 'code', '证券代码', () => securities.map((row) => ({
-      ...row, value: row.code, label: `${row.code} ${row.name} · ${row.exchange.toUpperCase()} ${row.asset_type === 'etf' ? 'ETF' : 'A 股'}`
+      ...row, value: row.code, label: `${row.code} ${row.name} · ${row.exchange.toUpperCase()} ${{ etf: 'ETF', hong_kong: '港股' }[row.asset_type] ?? 'A 股'}`
     })), (row) => {
       field('name').value = row.name;
       clearConfirmation();
+      updateFields();
     }, (expanded) => {
       if (!expanded) {
         field('name').value = '';

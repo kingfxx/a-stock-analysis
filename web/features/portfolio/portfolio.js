@@ -181,11 +181,12 @@
 
   async function loadSnapshot(options = {}) {
     const current = ++snapshotRequest;
-    const query = `?${new URLSearchParams(options)}`;
+    const isLatest = !options.snapshot && !options.day && !options.estimate;
+    const query = `?${new URLSearchParams(isLatest ? { ...options, current: '1' } : options)}`;
     let data = await request('/api/portfolio/snapshots' + query);
     if (current !== snapshotRequest) return;
     const latest = data.revaluations?.[0];
-    if (latest && !options.snapshot && !options.day && !options.estimate &&
+    if (latest && isLatest && !data.live &&
         (latest.quote_date > data.snapshot.snapshot_date ||
          (latest.quote_date === data.snapshot.snapshot_date && data.snapshot.session !== 'close'))) {
       const estimate = await request(`/api/portfolio/snapshots?estimate=${latest.id}`);
@@ -195,8 +196,8 @@
     token = data.session_token;
     snapshotScope = data.scope;
     const snapshot = data.snapshot;
-    snapshotSelection = snapshot ? (data.scope === 'combined'
-      ? { day: data.basis_date ?? snapshot.snapshot_date } : { snapshot: String(snapshot.id) }) : null;
+    snapshotSelection = !snapshot ? null : data.scope === 'combined'
+      ? { current: '1' } : { current: '1', account: String(snapshot.account_id) };
     $('open-revaluation').hidden = !snapshot;
     $('snapshot-picker').open = false;
     const combined = data.scope === 'combined';
@@ -215,11 +216,16 @@
     $('current-portfolio-name').textContent = snapshot.broker;
     $('current-portfolio-account').textContent = snapshot.snapshot_date;
     const missing = data.missing_accounts?.length ? ` · ${data.missing_accounts.join('、')}缺同日快照` : '';
-    const basis = data.estimate_id ? ` · 本地估算，仓位与现金沿用 ${data.basis_date} 快照` : '';
+    const basis = data.position_date
+      ? `仓位截至 ${data.position_date} · 按券商收盘快照及后续流水推算`
+      : data.estimate_id ? ` · 本地估算，仓位与现金沿用 ${data.basis_date} 快照` : '';
     const hk = data.positions.some((row) => row.included && row.asset_type === 'hong_kong');
     const scope = hk ? 'A 股、境内 ETF 及港股' : 'A 股及境内 ETF';
-    const fx = hk && data.estimate_id ? ' · 港股按快照固定汇率' : '';
-    $('snapshot-context').textContent = `${snapshot.snapshot_date} · ${sessionLabel(snapshot.session)} · ${scope}${missing}${basis}${fx}`;
+    const fx = hk && (data.estimate_id || data.live) ? ' · 港股按快照固定汇率' : '';
+    const quote = data.quote_date ? `${data.quote_date} 收盘行情` : '暂无可用收盘行情';
+    const projection = data.position_date ? `${basis} · ${quote} · ${scope}${missing}${fx}`
+      : `${snapshot.snapshot_date} · ${sessionLabel(snapshot.session)} · ${scope}${missing}${basis}${fx}`;
+    $('snapshot-context').textContent = [projection, ...(data.projection_issues ?? [])].join(' · ');
     const versions = combined
       ? data.days.map((day) => ({ day, value: day, label: `${day} 收盘` }))
       : data.directory.filter((entry) => entry.account_id === snapshot.account_id).map((entry) => ({
@@ -229,8 +235,10 @@
     for (const { id, quote_date } of data.revaluations ?? []) {
       versions.push({ day: quote_date, value: `estimate:${id}`, label: `${quote_date} 收盘 · 本地估算 #${id}` });
     }
-    const selected = data.estimate_id ? `estimate:${data.estimate_id}` : (snapshotSelection.day ?? snapshotSelection.snapshot);
+    const selected = data.live ? 'current' : data.estimate_id ? `estimate:${data.estimate_id}`
+      : (combined ? snapshot.snapshot_date : String(snapshot.id));
     versions.sort((a, b) => b.day.localeCompare(a.day));
+    versions.unshift({ value: 'current', label: '当前持仓' });
     $('snapshot-current').textContent = versions.find(({ value }) => value === selected)?.label ?? '';
     $('snapshot-versions').replaceChildren(...versions.map(({ label, value }) => {
       const row = node('li');
@@ -250,6 +258,7 @@
     }));
     $('market-value').textContent = money(data.totals.market_value);
     $('cash-value').textContent = data.totals.cash == null ? '待核对' : money(data.totals.cash);
+    $('cash-label').textContent = data.position_date ? '推算现金' : '确认现金';
     $('asset-value').textContent = money(data.totals.assets ?? snapshot.broker_assets);
     $('asset-source').textContent = data.totals.assets == null && snapshot.broker_assets != null ? '券商原表资产' : '';
     const cashWeight = data.totals.cash_weight;
@@ -274,7 +283,7 @@
     $('excluded-title').textContent = `排除明细（${excluded.length} 条）`;
     $('excluded-list').replaceChildren(...excluded.map((row) => node('li',
       [row.code, row.name, labels[row.asset_type], row.exclusion_reason].filter(Boolean).join(' · '))));
-    $('funds-title').textContent = data.estimate_id ? '原券商快照资金与市值核对' : '券商资金与市值核对';
+    $('funds-title').textContent = data.estimate_id || data.live ? '原券商快照资金与市值核对' : '券商资金与市值核对';
     const funds = data.funds ?? [{ snapshot, reconciliation: data.reconciliation }];
     $('funds-details').replaceChildren(...funds.map((entry) => {
       const panel = node('section');
@@ -319,6 +328,10 @@
   }
 
   function snapshotOptions(value) {
+    if (value === 'current') {
+      const account = $('account-select').value;
+      return account ? { account } : {};
+    }
     if (value.startsWith('estimate:')) return { estimate: value.slice('estimate:'.length) };
     return { [snapshotScope === 'combined' ? 'day' : 'snapshot']: value };
   }
@@ -679,6 +692,8 @@
       notice(result.already_saved ? `${result.event_date} 的这笔记录已保存。` : `已保存 ${result.event_date} 的记录。`);
       activity[kind].loaded = false;
       loadActivity(kind).catch((error) => notice(`记录已保存。列表刷新失败：${error.message}`));
+      const account = $('account-select').value;
+      loadSnapshot(account ? { account } : {}).catch((error) => notice(`记录已保存。持仓刷新失败：${error.message}`));
     }
   });
   loadSnapshot().catch((error) => notice(error.message));
