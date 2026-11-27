@@ -277,8 +277,8 @@ class Portfolio:
                 'snapshot': headline if funds else None, 'positions': holdings, 'funds': funds,
                 'missing_accounts': missing, 'totals': totals}
 
-    def performance(self):
-        return read_performance_reports(self.db, BROKER)
+    def performance(self, *, account=None, types=()):
+        return read_performance_reports(self.db, BROKER, account=account, types=types)
 
     def current_snapshot(self, account_id=None):
         now = datetime.now(ZoneInfo('Asia/Shanghai'))

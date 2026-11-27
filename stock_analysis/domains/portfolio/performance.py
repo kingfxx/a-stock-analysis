@@ -324,7 +324,7 @@ def sum_domestic_performance(stocks, etfs):
     return {'records': records, 'blocked_dates': []}
 
 
-def combine_market_performance(domestic, hong_kong, *, domestic_label='A 股及 ETF'):
+def combine_market_performance(domestic, hong_kong, *, domestic_label='A 股及 ETF', valuation_only=False):
     if not domestic['records'] or not hong_kong['records']:
         return None
     scopes = (domestic, hong_kong)
@@ -343,19 +343,27 @@ def combine_market_performance(domestic, hong_kong, *, domestic_label='A 股及 
         for index, rows in enumerate(by_market):
             row = rows.get(day)
             if row is not None:
-                daily.append(row)
+                if not valuation_only:
+                    daily.append(row)
                 last[index] = row
             mark = last[index]
             if mark is not None:
                 marks.append(mark['market_value'])
-                if row is None:
+                if row is None and not valuation_only:
                     carried.append({'market': markets[index], 'valuation_date': mark['date']})
+        market_value = _sum_amounts(marks)
+        if valuation_only:
+            records.append({'date': day, 'market_value': market_value})
+            continue
         combined, cumulative = _sum_security_rows(day, daily, cumulative)
         combined['carried_markets'] = carried
-        combined['market_value'] = _sum_amounts(marks)
+        combined['market_value'] = market_value
         records.append(combined)
+    start = min(scope['start'] for scope in scopes)
+    if valuation_only:
+        return {'records': records, 'start': start, 'as_of': end}
     return {
-        'records': records, 'start': min(scope['start'] for scope in scopes), 'as_of': end, 'year': int(end[:4]),
+        'records': records, 'start': start, 'as_of': end, 'year': int(end[:4]),
         'domestic_label': domestic_label, 'domestic_from': domestic['start'], 'hong_kong_from': hong_kong['start'],
         'fixed_fx': hong_kong['fixed_fx'], 'fx_basis_date': hong_kong['fx_basis_date'],
         'local_close_from': min((scope['local_close_from'] for scope in scopes

@@ -46,6 +46,7 @@
 | `domains/notes/` | 投资笔记与数据快照 |
 | `domains/portfolio/` | 券商快照与流水、来源留存、快照对账、重估及盈亏复算 |
 | `domains/portfolio/reference.py` | 本地证券行情与估值引用，按证券和截止日缓存，引用数据变更后失效，闲置一小时由既有调度器回收 |
+| `domains/portfolio/performance_read.py` | 从本地快照、账本和行情复算盈亏，按当前账户和证券组合组装页面序列与账户收益率输入 |
 | `domains/portfolio/revaluation.py` | 按实际行情日计算、保存和删除本地持仓版本 |
 | `domains/portfolio/holdings_projection.py` / `projected_snapshot.py` | 按账本推算当前或指定收盘日的持仓数量、成本、现金及市值 |
 | `domains/portfolio/manual_fields.py` / `manual_entries.py` / `ledger_storage.py` | 手工录入的字段与业务归一、本地候选和事务编排、手录及文件导入共用的账本保存与归档 |

@@ -14,19 +14,15 @@
   const dietzLabel = '单利（修正迪茨）';
   let data;
   let payload;
-  let report;
   const securityInputs = () => [...$('performance-security-scope').querySelectorAll('input')];
-  const scopeKeys = {
-    stocks: 'stocks', etfs: 'etfs', hong_kong: 'hong_kong', 'stocks+etfs': 'all',
-    'stocks+hong_kong': 'stocks_hk', 'etfs+hong_kong': 'etfs_hk', 'stocks+etfs+hong_kong': 'all_markets'
-  };
   let preferredTypes = new Set(['stocks', 'etfs', 'hong_kong']);
   let byDate;
   let calendarMonths;
   let calendarYears;
   let selectedMonth;
   let pickerYearIndex;
-  let loading = false;
+  let activeSelection;
+  let pendingSelection;
   let loadRevision = 0;
   let plotlyPromise;
   let chartRequest = 0;
@@ -75,7 +71,7 @@
 
   const compoundReturn = () => $('performance-return-mode').value === 'compound';
   const returnLabel = () => compoundReturn() ? '复利（XIRR 年化）' : dietzLabel;
-  const returnReport = () => data.fixed_fx ? report.account_with_hk : report;
+  const returnReport = () => payload.returns;
   const accountRates = (start, endpoints, compound) => {
     const source = returnReport();
     return source ? window.PortfolioReturns.periodReturns(source, start, endpoints, compound) : new Map();
@@ -476,12 +472,10 @@
     $('calendar-year').value = preserve && calendarYears.includes(calendarYear) ? calendarYear : calendarYears.at(-1);
   }
 
-  async function selectScope(resetDates = false) {
-    if (!report) return;
+  async function renderScope(resetDates) {
+    const { report, scope: choice, scope_data: scopeData } = payload;
     const picked = securityInputs().filter((input) => input.checked && !input.disabled);
-    const choice = scopeKeys[picked.map((input) => input.value).join('+')];
     const scopeLabel = picked.map((input) => input.closest('label').textContent.trim()).join('、');
-    const scopeData = choice === 'all' ? report : report[choice];
     const status = $('performance-status');
     $('performance-data').toggleAttribute('data-no-scope', !scopeData?.records.length);
     if (!scopeData?.records.length) {
@@ -497,8 +491,8 @@
     const hasFixedFx = Boolean(scopeData.fixed_fx);
     const rebuildCalendar = resetDates || data?.choice !== choice;
     data = { ...report, ...scopeData, scopeLabel, choice };
-    if (hasFixedFx && report.account_with_hk) {
-      const cashByDate = new Map(report.account_with_hk.records.map((row) => [row.date, row.cash_balance]));
+    if (hasFixedFx && payload.returns) {
+      const cashByDate = new Map(payload.returns.records.map((row) => [row.date, row.cash_balance]));
       data.records = scopeData.records.map((row) => {
         const cash = cashByDate.get(row.date) ?? null;
         return { ...row, cash_balance: cash, total_assets: cash != null && row.market_value != null
@@ -518,7 +512,7 @@
       ? `${data.domestic_label}从 ${data.domestic_from} 开始复算，港股从 ${data.hong_kong_from} 开始复算，计算至双方共同覆盖的日期。按每日已有复算结果合计盈亏，另一市场缺当日记录时沿用上次市值。 ` : '';
     $('performance-basis').textContent = hasFixedFx
       ? `${marketCoverage}01919 按 ${data.fx_basis_date} 快照固定汇率 ${data.fixed_fx} CNY/HKD 估算历史市值。港股股息按券商人民币净额和入账日计入。港股买入按导出人民币金额估算，实际扣款及费用待核对。`
-      : (report === payload.combined ? '合并账户汇总各券商的总资产及银证净流量。' : '') +
+      : ($('performance-account').value === 'combined' ? '合并账户汇总各券商的总资产及银证净流量。' : '') +
       '累计证券盈亏为逐日盈亏金额之和。' +
       (data.fee_gap_count ? `${data.fee_gap_count} 笔买卖缺费用或净交收金额，估算未计这部分费用。` : '') +
       (choice !== 'etfs' ? '股票股息和补税按券商流水。' : '') +
@@ -536,19 +530,17 @@
     await renderRange();
   }
 
-  async function selectAccount() {
-    const selected = $('performance-account').value;
+  async function renderSelection(selected, resetDates) {
+    const { report, accounts, available, selected: types } = payload;
     const combined = selected === 'combined';
-    const account = payload.accounts.find(({broker}) => broker === selected);
-    report = combined ? payload.combined : [payload, ...payload.other_accounts].find(({broker}) => broker === selected);
-    chartRequest++;
+    const account = accounts.find(({broker}) => broker === selected);
     const coverage = $('performance-account-coverage');
     if (account) {
       const dates = account.trade_count ? `（${account.first_trade} 至 ${account.last_trade}）` : '';
       coverage.textContent = `已导入买卖 ${account.trade_count} 笔${dates} · 有效银证转账 ${account.transfer_count} 笔 · ` +
         (account.snapshot_date ? `最近收盘快照 ${account.snapshot_date}` : '缺少收盘快照');
     } else {
-      const brokers = payload.accounts.filter(({snapshot_date}) => snapshot_date).map(({broker}) => broker).join('、');
+      const brokers = accounts.filter(({snapshot_date}) => snapshot_date).map(({broker}) => broker).join('、');
       const range = report.start ? `历史范围 ${report.start} 至 ${report.as_of}` : '';
       const missing = report.missing_accounts?.length ? `缺收盘快照：${report.missing_accounts.join('、')}` : '';
       coverage.textContent = [brokers, range, missing].filter(Boolean).join(' · ');
@@ -557,57 +549,71 @@
     $('performance-scope').textContent = report.broker;
     const inputs = securityInputs();
     for (const input of inputs) {
-      input.disabled = !report[input.value];
-      input.checked = !input.disabled && preferredTypes.has(input.value);
+      input.disabled = !available.includes(input.value);
+      input.checked = types.includes(input.value);
     }
-    if (preferredTypes.size && !inputs.some((input) => input.checked)) {
-      for (const input of inputs) input.checked = !input.disabled;
-    }
-    if (!report.records.length && inputs.every((input) => input.disabled)) {
+    if (!available.length) {
       data = null;
       $('performance-data').hidden = true;
       status.hidden = false;
-      const blocked = [...new Set([...(report.blocked_dates ?? []), ...(report.stocks?.blocked_dates ?? [])])];
+      const blocked = report.blocked_dates ?? [];
       const reason = report.error || (blocked.length ? `这些日期的成交或持仓需要核对：${blocked.join('、')}` : '暂无可复算的交易日');
       status.textContent = [reason, coverage.textContent].filter(Boolean).join(' · ');
       return;
     }
     $('performance-data').hidden = false;
-    await selectScope(true);
+    await renderScope(resetDates);
   }
 
-  async function loadPerformance() {
-    if (loading) return;
-    if (payload) {
-      for (const id of ['performance-chart', 'performance-assets']) {
-        if (!$('performance-data').hidden && $(id).data) window.Plotly.Plots.resize($(id));
-      }
-      return;
-    }
-    loading = true;
-    const revision = loadRevision;
+  async function requestSelection(account = $('performance-account').value || 'combined') {
+    pendingSelection = { account, scope: [...preferredTypes].join(','), revision: ++loadRevision };
+    chartRequest++;
     const status = $('performance-status');
     status.hidden = false;
     status.textContent = '正在读取本地成交与行情。';
+    $('performance-data').setAttribute('data-no-scope', '');
+    if (activeSelection) return;
     try {
-      const response = await fetch('/api/portfolio/performance');
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || '无法读取盈亏数据');
-      if (revision !== loadRevision) return;
-      payload = result;
-      $('performance-account').replaceChildren(new Option(result.combined.broker, 'combined', true, true),
-        ...result.accounts.map(({broker}) => new Option(broker, broker)));
-      $('performance-account-control').hidden = !result.accounts.length;
-      $('performance-range').value = 'all';
-      await selectAccount();
-    } catch (error) {
-      if (revision === loadRevision) {
-        status.textContent = error.message;
-        status.hidden = false;
+      // Coalesce rapid changes without running several expensive requests at once.
+      while (pendingSelection) {
+        activeSelection = pendingSelection;
+        const { account, scope, revision } = activeSelection;
+        pendingSelection = null;
+        try {
+          const response = await fetch(`/api/portfolio/performance?${new URLSearchParams({ account, scope })}`);
+          const result = await response.json();
+          if (revision !== loadRevision) continue;
+          if (!response.ok) throw new Error(result.error || '无法读取盈亏数据');
+          const resetDates = !payload || payload.account !== account;
+          if (!payload) {
+            $('performance-account').replaceChildren(new Option('合并盈亏', 'combined', true, true),
+              ...result.accounts.map(({broker}) => new Option(broker, broker)));
+            $('performance-account').value = account;
+            $('performance-range').value = 'all';
+          }
+          $('performance-account-control').hidden = !result.accounts.length;
+          payload = { ...result, account };
+          await renderSelection(account, resetDates);
+        } catch (error) {
+          if (revision === loadRevision) {
+            status.textContent = error.message;
+            status.hidden = false;
+          }
+        }
       }
     } finally {
-      loading = false;
-      if (revision !== loadRevision && !$('performance').hidden) loadPerformance();
+      activeSelection = null;
+    }
+  }
+
+  function loadPerformance() {
+    if (!payload) {
+      if (!pendingSelection && activeSelection?.revision !== loadRevision) requestSelection('combined');
+      return;
+    }
+    if (activeSelection) return;
+    for (const id of ['performance-chart', 'performance-assets']) {
+      if (!$('performance-data').hidden && $(id).data) window.Plotly.Plots.resize($(id));
     }
   }
 
@@ -622,10 +628,7 @@
     drawdownCard.addEventListener(event, updateDrawdownHighlight);
   }
 
-  $('performance-account').addEventListener('change', () => selectAccount().catch((error) => {
-    $('performance-status').hidden = false;
-    $('performance-status').textContent = error.message;
-  }));
+  $('performance-account').addEventListener('change', () => requestSelection());
   $('calendar-year').addEventListener('change', renderCalendar);
   $('calendar-securities').addEventListener('toggle', renderSecurityBreakdown);
   for (const id of ['calendar-view', 'calendar-metric']) {
@@ -660,10 +663,7 @@
       if (input.checked) preferredTypes.add(input.value);
       else preferredTypes.delete(input.value);
     }
-    selectScope().catch((error) => {
-      $('performance-status').hidden = false;
-      $('performance-status').textContent = error.message;
-    });
+    requestSelection();
   });
   for (const id of ['performance-range', 'performance-year', 'performance-start', 'performance-end',
     'performance-return-mode', 'performance-chart-metric']) {
@@ -683,12 +683,12 @@
   document.addEventListener('portfolio:performance', loadPerformance);
   function invalidatePerformance() {
     loadRevision++;
-    payload = report = data = null;
+    pendingSelection = payload = data = null;
     chartRequest++;
     $('performance-data').hidden = true;
     $('performance-account-control').hidden = true;
     $('performance-account-coverage').hidden = true;
-    if (!$('performance').hidden) loadPerformance();
+    if (!$('performance').hidden) requestSelection('combined');
   }
   document.addEventListener('portfolio:ledger-changed', invalidatePerformance);
   document.addEventListener('portfolio:performance-changed', invalidatePerformance);

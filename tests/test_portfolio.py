@@ -203,6 +203,10 @@ def test_confirmed_hk_snapshot_and_fixed_rate_history(isolated, monkeypatch):
     assert scope['records'][1]['pnl'] == scope['records'][1]['dividend_net'] == '352.00'
     assert scope['records'][-1]['cumulative'] == '2449.63'
     assert scope['monthly_security_pnl'] == {'2025-11': {'hk:01919': 244963}}
+    selected = isolated.performance(account='combined', types=('hong_kong',))
+    assert selected['selected'] == ['hong_kong'] and selected['scope'] == 'hong_kong'
+    assert selected['scope_data'] == scope
+    assert 'other_accounts' not in selected and 'records' not in selected['report']
 
     value = revaluation.read_revaluation(isolated.db, payload, datetime.fromisoformat(dates[-1] + 'T16:30:00'))
     market = next(row for row in value['positions'] if row['asset_type'] == 'hong_kong')
@@ -961,6 +965,10 @@ def test_portfolio_http_gate_and_import(isolated, monkeypatch):
         try:
             page = session.get(base + '/portfolio', timeout=5)
             assert page.ok and '<title>持仓分析</title>' in page.text
+            performance = base + '/api/portfolio/performance'
+            assert session.get(performance, params={'account': 'combined', 'scope': 'stocks'}, timeout=5).ok
+            assert session.get(performance, params={'account': 'combined', 'scope': 'stocks,stocks'}, timeout=5).status_code == 400
+            assert session.get(performance, params={'account': 'missing', 'scope': ''}, timeout=5).status_code == 404
             response = session.get(base + '/api/portfolio/snapshots', timeout=5)
             assert response.headers['Cache-Control'] == 'no-store'
             assert response.json()['snapshot'] is None

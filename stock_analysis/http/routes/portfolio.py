@@ -8,6 +8,7 @@ from urllib.parse import parse_qs
 
 from stock_analysis import application as app
 from stock_analysis.domains.portfolio.activity_read import ACTIVITY_FIELDS
+from stock_analysis.domains.portfolio.performance_read import SECURITY_TYPES
 from stock_analysis.domains.portfolio.service import ImportConflict
 from stock_analysis.http.assets import asset_path
 from stock_analysis.http.rendering import render_portfolio
@@ -40,7 +41,7 @@ class PortfolioRoutes:
                 return True
             query = parse_qs(parsed.query, keep_blank_values=True)
             allowed = {'snapshot', 'account', 'day', 'estimate'} if path in SNAPSHOT_READS else (
-                set() if path.endswith('/performance') else {'start', 'end', 'offset', *ACTIVITY_FIELDS})
+                {'account', 'scope'} if path.endswith('/performance') else {'start', 'end', 'offset', *ACTIVITY_FIELDS})
             if path == MANUAL_OPTIONS:
                 allowed = {'q', 'account'}
             if path.endswith('/snapshots'):
@@ -74,7 +75,15 @@ class PortfolioRoutes:
                 if path.endswith('/snapshots'):
                     result['session_token'] = app.LOCAL_SESSION_TOKEN
             elif path.endswith('/performance'):
-                result = service.performance()
+                if args:
+                    if set(args) != {'account', 'scope'} or not args['account']:
+                        raise ValueError('请选择券商账户与证券范围')
+                    types = tuple(args['scope'].split(',')) if args['scope'] else ()
+                    if len(types) != len(set(types)) or set(types) - set(SECURITY_TYPES):
+                        raise ValueError('证券范围无效')
+                    result = service.performance(account=args['account'], types=types)
+                else:
+                    result = service.performance()
             else:
                 offset = int(args.pop('offset', 0))
                 result = service.history(offset=offset, transfers=path.endswith('/transfers'), **args)

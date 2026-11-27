@@ -16,6 +16,20 @@ from stock_analysis.domains.portfolio.history_prices import read_closes
 from stock_analysis.domains.portfolio.hk_performance import SECURITY as HK_SECURITY, read_hk_performance
 
 
+COMBINED_ACCOUNT = 'combined'
+SECURITY_TYPES = ('stocks', 'etfs', 'hong_kong')
+MIXED_SCOPES = {
+    'all_markets': (None, 'A 股及 ETF'),
+    'stocks_hk': ('stocks', 'A 股'),
+    'etfs_hk': ('etfs', 'ETF'),
+}
+SCOPES = {
+    ('stocks', 'etfs'): 'all', SECURITY_TYPES: 'all_markets',
+    ('stocks', 'hong_kong'): 'stocks_hk', ('etfs', 'hong_kong'): 'etfs_hk',
+    **{(kind,): kind for kind in SECURITY_TYPES},
+}
+
+
 def _read_account_coverage(conn):
     return [dict(row) for row in conn.execute("""
         SELECT a.broker,
@@ -184,31 +198,82 @@ def _read_performance(reader, broker, security_names, cash_inputs, *, use_local_
             'trading_days': len(dates) - 1, 'transfers': transfer_days, 'stocks': stock_result, 'etfs': etf_result}
 
 
-def read_performance_reports(db, default_broker):
+def _mix_performance(report, hk, scope):
+    domestic_key, label = MIXED_SCOPES[scope]
+    if domestic_key and domestic_key not in report:
+        return None
+    domestic = {**report, **report[domestic_key]} if domestic_key else report
+    return combine_market_performance(domestic, hk, domestic_label=label)
+
+
+def _selected_report(report, requested, cash_inputs):
+    available = [kind for kind in SECURITY_TYPES if kind in report]
+    selected = [kind for kind in available if kind in requested]
+    if requested and not selected:
+        selected = available
+    scope = SCOPES.get(tuple(selected))
+    hk = report.get('hong_kong')
+    if scope in MIXED_SCOPES:
+        scoped = _mix_performance(report, hk, scope)
+    else:
+        scoped = report if scope == 'all' else report.get(scope)
+
+    returns = report if scoped is not None else None
+    if scoped is not None and 'hong_kong' in selected:
+        # The existing account return includes the whole account, even for one security type.
+        mixed = scoped if scope == 'all_markets' else combine_market_performance(
+            report, hk, valuation_only=True)
+        returns = account_return_with_hk(report, mixed, cash_inputs) if mixed else None
+    if returns is not None:
+        returns = {**{key: returns[key] for key in (
+            'transfers', 'opening_assets', 'opening_date', 'opening_assumed_zero', 'return_gaps'
+        ) if key in returns}, 'records': [
+            {key: row.get(key) for key in ('date', 'cash_balance', 'market_value', 'total_assets')}
+            for row in returns['records']
+        ]}
+
+    report_summary = {key: report[key] for key in (
+        'broker', 'start', 'as_of', 'error', 'local_close_from', 'missing_accounts', 'blocked_dates'
+    ) if key in report}
+    if scoped is not None:
+        attach_monthly_security_pnl(scoped)
+        if scoped is report:
+            scoped = {key: value for key, value in scoped.items() if key not in SECURITY_TYPES}
+    return {'report': report_summary, 'available': available, 'selected': selected,
+            'scope': scope, 'scope_data': scoped, 'returns': returns}
+
+
+def read_performance_reports(db, default_broker, *, account=None, types=()):
     security_names = {}
     cash_inputs = {}
     with db.shared_reader() as reader:
         accounts = _read_account_coverage(reader.conn)
-        reports = {account['broker']: _read_performance(reader, account['broker'], security_names, cash_inputs)
-                   for account in accounts}
+        if account not in (None, COMBINED_ACCOUNT) and not any(row['broker'] == account for row in accounts):
+            raise LookupError('找不到券商账户')
+        covered_names = [row['broker'] for row in accounts if row['snapshot_date']]
+        brokers = ([row['broker'] for row in accounts] if account is None else
+                   covered_names if account == COMBINED_ACCOUNT else [account])
+        reports = {broker: _read_performance(reader, broker, security_names, cash_inputs)
+                   for broker in brokers}
         primary = reports.get(default_broker)
-        if primary is None:
+        if account is None and primary is None:
             primary = _read_performance(reader, default_broker, security_names, cash_inputs)
-    covered = [reports[row['broker']] for row in accounts if row['snapshot_date']]
-    combined = merge_performance(covered)
-    combined['missing_accounts'] = [row['broker'] for row in accounts if not row['snapshot_date']]
+    if account in (None, COMBINED_ACCOUNT):
+        covered = [reports[broker] for broker in covered_names]
+        combined = merge_performance(covered)
+        combined['missing_accounts'] = [row['broker'] for row in accounts if not row['snapshot_date']]
+        if primary is not None and 'hong_kong' in primary:
+            combined['hong_kong'] = primary['hong_kong']
+    if account is not None:
+        brokers = covered_names if account == COMBINED_ACCOUNT else [account]
+        selection = _selected_report(combined if account == COMBINED_ACCOUNT else reports[account],
+                                     types, [cash_inputs[broker] for broker in brokers if broker in cash_inputs])
+        return {**selection, 'accounts': accounts, 'security_names': security_names}
     if 'hong_kong' in primary:
-        hk = combined['hong_kong'] = primary['hong_kong']
+        hk = primary['hong_kong']
         for report in (combined, primary):
-            for domestic_key, market_key, label in (
-                (None, 'all_markets', 'A 股及 ETF'),
-                ('stocks', 'stocks_hk', 'A 股'),
-                ('etfs', 'etfs_hk', 'ETF'),
-            ):
-                if domestic_key and domestic_key not in report:
-                    continue
-                domestic = {**report, **report[domestic_key]} if domestic_key else report
-                mixed = combine_market_performance(domestic, hk, domestic_label=label)
+            for market_key in MIXED_SCOPES:
+                mixed = _mix_performance(report, hk, market_key)
                 if mixed is not None:
                     attach_monthly_security_pnl(mixed)
                     report[market_key] = mixed
