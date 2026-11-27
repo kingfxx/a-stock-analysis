@@ -68,7 +68,8 @@ MIGRATIONS = ((1, "001_initial.sql"), (2, "002_shared_data.sql"), (3, "003_p4_fa
               (57, "057_hk_announcement_and_dividend.sql"),
               (58, "058_hk_business_segment_source.sql"),
               (59, "059_stock_fact_revisions.sql"),
-              (60, "060_portfolio_revaluation_version_ids.sql"))
+              (60, "060_portfolio_revaluation_version_ids.sql"),
+              (61, "061_portfolio_reference_revision.sql"))
 
 
 class StorageError(RuntimeError):

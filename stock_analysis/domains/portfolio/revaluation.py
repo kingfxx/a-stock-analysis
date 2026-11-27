@@ -15,10 +15,20 @@ from stock_analysis.infrastructure.storage import utc_now
 
 
 def revaluation_directory(conn, account_id):
-    return [dict(row) for row in conn.execute("""
+    versions = [dict(row) for row in conn.execute("""
         SELECT id,quote_date FROM portfolio_revaluation_snapshots
         WHERE account_id IS ? ORDER BY quote_date DESC, id DESC
     """, (account_id,))]
+    if account_id is not None:
+        versions.extend(dict(row, inherited=True) for row in conn.execute("""
+            SELECT r.id,r.quote_date FROM portfolio_revaluation_snapshots r
+            WHERE r.account_id IS NULL AND EXISTS (
+                SELECT 1 FROM json_each(r.snapshot_ids) AS basis
+                JOIN portfolio_snapshots s ON s.id=basis.value WHERE s.account_id=?
+            )
+        """, (account_id,)))
+        versions.sort(key=lambda row: (row['quote_date'], row['id']), reverse=True)
+    return versions
 
 
 def load_saved_revaluation(db, estimate_id):

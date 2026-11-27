@@ -12,7 +12,7 @@ from stock_analysis.domains.portfolio.performance import POSITION_TYPES, _cash, 
 from stock_analysis.domains.portfolio.revaluation import read_revaluation_prices
 
 
-def read_accounts(reader, payload, through):
+def read_accounts(reader, payload, through, *, ledger_ids=None):
     if not payload['snapshot']:
         return []
     if payload['scope'] == 'combined':
@@ -30,7 +30,8 @@ def read_accounts(reader, payload, through):
             FROM portfolio_ledger_entries WHERE account_id=? AND duplicate_of_id IS NULL
             AND event_date>? AND event_date<=? ORDER BY event_date,coalesce(event_time,'23:59:59'),id
         """, (snapshot['account_id'], snapshot['snapshot_date'], through))
-        accounts.append(advance_account(snapshot, held, rows))
+        selected = rows if ledger_ids is None else (row for row in rows if row['id'] in ledger_ids)
+        accounts.append(advance_account(snapshot, held, selected))
     return accounts
 
 
@@ -119,9 +120,18 @@ def build_book(payload, accounts, prices, days, quote, through):
         issues.append(f'缺收盘价：{"、".join(missing_quotes)}')
     if missing_fx:
         issues.append(f'缺港股快照汇率：{"、".join(missing_fx)}')
-    return dict(positions=positions, totals=totals, position_date=through, ledger_ids=sorted({
+    book = dict(positions=positions, totals=totals, position_date=through, ledger_ids=sorted({
         entry_id for account in accounts for entry_id in account['ledger_ids']
     }), issues=issues)
+    if payload['scope'] == 'combined':
+        book['account_balances'] = {
+            str(account['snapshot']['account_id']): {
+                'cash': account['cash'], 'daily_pnl': format(pnl, '.2f') if pnl is not None else None,
+                'issues': account['issues'],
+            }
+            for account, (_, pnl) in zip(accounts, marked, strict=True)
+        }
+    return book
 
 
 def book_view(payload, book, quote, reference, *, estimate_id=None):

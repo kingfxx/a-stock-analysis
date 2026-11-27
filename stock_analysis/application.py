@@ -33,15 +33,22 @@ _MAINTENANCE_SERVICES = {}
 
 _ALUMINUM_SERVICES = {}
 
+_PORTFOLIO_SERVICES = {}
+
 LOCAL_SESSION_TOKEN = secrets.token_urlsafe(32)
 
 def portfolio_service():
-    from stock_analysis.domains.portfolio.reference import read_stock_reference
+    from stock_analysis.domains.portfolio.reference import PortfolioReferenceCache, read_stock_reference
     from stock_analysis.domains.portfolio.service import Portfolio
 
-    db = Database(settings.DATABASE_PATH)
-    reference = partial(read_stock_reference, cache=settings.CACHE, valuation_cache=settings.VALUATION_CACHE)
-    return Portfolio(db, db.path.parent / 'portfolio_sources', reference)
+    with _SERVICE_LOCK:
+        key = Path(settings.DATABASE_PATH).resolve()
+        if key not in _PORTFOLIO_SERVICES:
+            db = Database(key)
+            reference = partial(read_stock_reference, cache=settings.CACHE, valuation_cache=settings.VALUATION_CACHE)
+            _PORTFOLIO_SERVICES[key] = Portfolio(db, db.path.parent / 'portfolio_sources', reference,
+                                                 reference_cache=PortfolioReferenceCache())
+        return _PORTFOLIO_SERVICES[key]
 
 def aluminum_forecast():
     from stock_analysis.domains.research.sectors.aluminum.forecast import AluminumForecast
@@ -132,12 +139,14 @@ def _clear_runtime_services():
         data._SERVICES.clear(); _AI_SERVICES.clear(); _INDUSTRY_SERVICES.clear(); _MAINTENANCE_SERVICES.clear()
         data._DATA_LOCKS.clear()
         _ALUMINUM_SERVICES.clear()
+        _PORTFOLIO_SERVICES.clear()
 
 
 def _expire_idle_caches(server):
     """Expire existing owners, then reclaim process heaps during verified idle time."""
     with _SERVICE_LOCK:
         owners = [*_INDUSTRY_SERVICES.values(), *_MAINTENANCE_SERVICES.values(), *_ALUMINUM_SERVICES.values()]
+        owners.extend(service.reference_cache for service in _PORTFOLIO_SERVICES.values())
         index_reader = getattr(server, 'index_reader', None)
         if index_reader is not None:
             owners.append(index_reader)

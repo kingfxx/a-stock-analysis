@@ -1,6 +1,8 @@
 """Private snapshot imports, provenance and read-only portfolio queries."""
 
+from contextlib import contextmanager
 from datetime import date, datetime
+from decimal import Decimal
 from hashlib import sha256
 import json
 from zoneinfo import ZoneInfo
@@ -46,10 +48,11 @@ def check_day(value):
 
 
 class Portfolio:
-    def __init__(self, db, source_root, reference_reader):
+    def __init__(self, db, source_root, reference_reader, *, reference_cache=None):
         self.db = db
         self.source_root = source_root
         self.reference_reader = reference_reader
+        self.reference_cache = reference_cache
 
     @staticmethod
     def _assess(conn, broker, data, digest, day, session, cash):
@@ -177,7 +180,7 @@ class Portfolio:
             day = check_day(day)
             if snapshot_id is not None or account_id is not None:
                 raise ValueError('合并日期和分户快照请分别选择')
-        with self.db.shared_reader() as db:
+        with self._reference_snapshot() as (db, reference):
             conn = db.conn
             directory = [dict(row) for row in conn.execute("""
                 SELECT s.id, s.account_id, s.snapshot_date, s.session, s.supersedes_id, a.broker
@@ -186,7 +189,7 @@ class Portfolio:
             """)]
             accounts = {row['account_id']: row['broker'] for row in directory}
             if snapshot_id is None and account_id is None and len(accounts) > 1:
-                return self._combined_snapshot(db, directory, accounts, day, basis_ids, close_as_of)
+                return self._combined_snapshot(db, reference, directory, accounts, day, basis_ids, close_as_of)
             selected = next((row for row in directory if (snapshot_id is None or row['id'] == snapshot_id)
                              and (account_id is None or row['account_id'] == account_id)
                              and (close_as_of is None or row['session'] == 'close'
@@ -198,19 +201,31 @@ class Portfolio:
                 return payload
             snapshot, positions = self._load_snapshot(conn, selected)
             for position in positions:
-                position['reference'] = self._reference(db, position, snapshot['snapshot_date'])
+                position['reference'] = reference(position, snapshot['snapshot_date'])
             fill_snapshot_daily_pnl(snapshot, positions, previous_market_day(db, snapshot['snapshot_date']))
             return {**payload, 'snapshot': snapshot, 'positions': positions,
                     'revaluations': revaluation_directory(conn, snapshot['account_id']),
                     'totals': snapshot_totals(snapshot, positions),
                     'reconciliation': reconcile(snapshot, positions)}
 
-    def _reference(self, db, position, day):
+    @contextmanager
+    def _reference_snapshot(self):
+        cache = self.reference_cache
+        with self.db.shared_reader() as db:
+            revision = cache.revision(db.conn) if cache is not None else None
+            yield db, lambda position, day: self._reference(db, position, day, revision)
+
+    def _reference(self, db, position, day, revision):
         if position['asset_type'] == 'stock' and position['exchange'] in ('sh', 'sz'):
-            return self.reference_reader(db, position['code'], day)
-        if position['asset_type'] == 'hong_kong' and position_included(position):
-            return read_hk_reference(db, position['code'], day)
-        return None
+            read = self.reference_reader
+        elif position['asset_type'] == 'hong_kong' and position_included(position):
+            read = read_hk_reference
+        else:
+            return None
+        code = position['code']
+        if revision is None:
+            return read(db, code, day)
+        return self.reference_cache.read(revision, (position['exchange'], code, day), lambda: read(db, code, day))
 
     @staticmethod
     def _load_snapshot(conn, entry):
@@ -221,7 +236,7 @@ class Portfolio:
             'SELECT * FROM portfolio_snapshot_positions WHERE snapshot_id=? ORDER BY source_row', (identity,))]
         return snapshot, positions
 
-    def _combined_snapshot(self, db, directory, accounts, day, basis_ids=None, close_as_of=None):
+    def _combined_snapshot(self, db, reference, directory, accounts, day, basis_ids=None, close_as_of=None):
         days = list(dict.fromkeys(row['snapshot_date'] for row in directory if row['session'] == 'close'))
         selected_day = day or (days[0] if days else None)
         selected = {}
@@ -243,7 +258,7 @@ class Portfolio:
                 key = (position['exchange'], position['asset_type'], position['code'])
                 reference_key = (*key, snapshot['snapshot_date'])
                 if reference_key not in references:
-                    references[reference_key] = self._reference(db, position, snapshot['snapshot_date'])
+                    references[reference_key] = reference(position, snapshot['snapshot_date'])
                 position['reference'] = references[reference_key]
             fill_snapshot_daily_pnl(snapshot, positions, previous_day)
             funds.append({'snapshot': snapshot, 'reconciliation': reconcile(snapshot, positions),
@@ -269,13 +284,13 @@ class Portfolio:
         now = datetime.now(ZoneInfo('Asia/Shanghai'))
         today = now.date().isoformat()
         payload = self.snapshot(account_id=account_id, close_as_of=today)
-        with self.db.shared_reader() as reader:
+        with self._reference_snapshot() as (reader, reference):
             accounts = read_accounts(reader, payload, today)
             if any(account['ledger_ids'] for account in accounts):
                 prices, days = read_quotes(reader, self._projected_securities(accounts), now)
                 quote = quote_for_close(accounts, prices, days, today)
                 book = build_book(payload, accounts, prices, days, quote, today)
-                return book_view(payload, book, quote, lambda row, day: self._reference(reader, row, day))
+                return book_view(payload, book, quote, reference)
         return self.snapshot(account_id=account_id)
 
     @staticmethod
@@ -326,22 +341,62 @@ class Portfolio:
     def delete_revaluation(self, estimate_id):
         delete_revaluation(self.db, estimate_id)
 
-    def revaluation_snapshot(self, estimate_id):
-        account_id, basis_ids, saved = load_saved_revaluation(self.db, estimate_id)
-        payload = (self.snapshot(basis_ids[0]) if account_id is not None
+    def revaluation_snapshot(self, estimate_id, *, account_id=None):
+        saved_account, basis_ids, saved = load_saved_revaluation(self.db, estimate_id)
+        if saved_account is not None and account_id not in (None, saved_account):
+            raise LookupError('该账户没有此收盘版本')
+        payload = (self.snapshot(basis_ids[0]) if saved_account is not None
                    else self.snapshot(day=saved['snapshot_date'], basis_ids=basis_ids,
                                       close_as_of=saved['quote_date'] if 'book' in saved else None))
+        inherited = account_id is not None and saved_account is None
+        if inherited:
+            basis = next((entry['snapshot'] for entry in payload['funds']
+                          if entry['snapshot']['account_id'] == account_id), None)
+            if basis is None:
+                raise LookupError('该账户没有此收盘版本')
         if 'book' in saved:
-            with self.db.shared_reader() as db:
-                return book_view(payload, saved['book'], saved['quote_date'],
-                                 lambda row, day: self._reference(db, row, day), estimate_id=estimate_id)
-        keys = {(row['asset_type'], row['code']) for row in saved['positions']}
-        positions = [row for row in payload['positions'] if position_included(row) and row['quantity'] > 0
-                     and (row['asset_type'], row['code']) in keys]
-        with self.db.shared_reader() as db:
-            references = [self._reference(db, position, saved['quote_date']) for position in positions]
-            previous = previous_revaluation_closes(db, positions, saved)
-        return display_revaluation(payload, saved, references, previous)
+            with self._reference_snapshot() as (_, reference):
+                view = book_view(payload, saved['book'], saved['quote_date'], reference, estimate_id=estimate_id)
+        else:
+            keys = {(row['asset_type'], row['code']) for row in saved['positions']}
+            positions = [row for row in payload['positions'] if position_included(row) and row['quantity'] > 0
+                         and (row['asset_type'], row['code']) in keys]
+            with self._reference_snapshot() as (db, reference):
+                references = [reference(position, saved['quote_date']) for position in positions]
+                previous = previous_revaluation_closes(db, positions, saved)
+            view = display_revaluation(payload, saved, references, previous)
+        return self._inherited_revaluation(view, saved, basis) if inherited else view
+
+    def _inherited_revaluation(self, view, saved, basis):
+        payload = self.snapshot(basis['id'])
+        positions = [{**part, 'reference': row.get('reference')}
+                     for row in view['positions'] for part in row.get('accounts', [row])
+                     if part.get('broker') == basis['broker']]
+        snapshot = {**basis, 'snapshot_date': saved['quote_date'], 'session': 'close',
+                    'broker_assets': None, 'broker_daily_pnl': None, 'broker_daily_pnl_rate': None}
+        book = saved.get('book')
+        issues = []
+        if book is not None:
+            balances = book.get('account_balances', {}).get(str(basis['account_id']))
+            if balances is None:
+                with self.db.shared_reader() as db:
+                    account = read_accounts(db, payload, saved['quote_date'], ledger_ids=set(book['ledger_ids']))[0]
+                held = {(row['exchange'], row['code']) for row in positions if position_included(row)}
+                can_sum = all(event['event_date'] != saved['quote_date']
+                              or (event['exchange'], event['code']) in held for event in account['activities'])
+                daily = sum_known([row for row in positions if position_included(row)], 'daily_pnl') if can_sum else None
+                balances = {**account, 'daily_pnl': daily}
+            snapshot['confirmed_cash'] = balances['cash']
+            issues = balances['issues']
+        totals = snapshot_totals(snapshot, positions)
+        if book is not None:
+            daily = balances['daily_pnl']
+            totals.update(daily_change(totals['assets'], Decimal(daily) if daily is not None else None))
+        return {**payload, 'snapshot': snapshot, 'positions': positions, 'totals': totals,
+                'estimate_id': saved['saved_id'], 'basis_date': basis['snapshot_date'],
+                'quote_date': saved['quote_date'], 'position_date': view.get('position_date'),
+                'projection_issues': issues,
+                'funds': [{'snapshot': basis, 'reconciliation': payload['reconciliation']}]}
 
     def history(self, start=None, end=None, offset=0, *, transfers=False, **options):
         return read_activity(self.db, local_day(), start, end, offset, transfers, options)

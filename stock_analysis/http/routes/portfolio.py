@@ -57,10 +57,12 @@ class PortfolioRoutes:
                 result = service.current_snapshot(int(args['account']) if 'account' in args else None)
                 result['session_token'] = app.LOCAL_SESSION_TOKEN
             elif 'estimate' in args:
-                if len(args) != 1:
+                snapshot_view = path.endswith('/snapshots')
+                if args.keys() - ({'estimate', 'account'} if snapshot_view else {'estimate'}):
                     raise ValueError('请选择一份估算快照')
-                if path.endswith('/snapshots'):
-                    result = service.revaluation_snapshot(int(args['estimate']))
+                if snapshot_view:
+                    result = service.revaluation_snapshot(
+                        int(args['estimate']), account_id=int(args['account']) if 'account' in args else None)
                     result['session_token'] = app.LOCAL_SESSION_TOKEN
                 else:
                     result = service.saved_revaluation(int(args['estimate']))

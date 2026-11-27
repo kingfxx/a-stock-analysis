@@ -25,7 +25,9 @@ from stock_analysis.domains.portfolio.performance import (
     sum_domestic_performance,
 )
 from stock_analysis.domains.portfolio.performance_events import reconcile_etf_dividends
+from stock_analysis.domains.portfolio.reference import PortfolioReferenceCache
 from stock_analysis.domains.portfolio.service import ImportConflict, Portfolio
+from stock_analysis.domains.stocks.stock_library import StockLibrary
 from stock_analysis.http.server import Handler, ThreadingHTTPServer
 from stock_analysis.infrastructure import storage
 from stock_analysis.domains.valuation import hk_valuation
@@ -80,6 +82,48 @@ def import_snapshot(store, **extra):
     args = {'day': DAY, 'session': 'close', **extra}
     preview = store.ingest(SNAPSHOT, 'positions.xls', **args)
     return store.ingest(SNAPSHOT, 'positions.xls', confirmation=preview['preview'], **args)
+
+
+def test_snapshot_reuses_local_reference_until_idle_or_market_data_changes(isolated):
+    snapshot_id = import_snapshot(isolated)['snapshot_id']
+    identity = isolated.db.ensure_instrument('000001')
+    key = SyncKey(identity, 'valuation:pe', 'baidu:opendata')
+    run = isolated.db.start_sync(key, parser_version='fixture', methodology_version='fixture')
+    isolated.db.complete_sync(run, SyncResult(1, DAY, DAY, DAY), lambda conn:
+                              isolated.db.upsert_valuation_observations(conn, key, run, [
+                                  dict(observed_on=DAY, value=10, sampling_version='fixture', raw_json={}),
+                              ]))
+    calls = []
+    now = [0]
+
+    def reference(reader, code, day):
+        calls.append((code, day))
+        value = reader.valuation_observations(identity, key.source, 'pe')[0]['value']
+        return {'valuation': {'pe': {'value': value}}}
+
+    cache = PortfolioReferenceCache(clock=lambda: now[0])
+    store = Portfolio(isolated.db, isolated.source_root, reference, reference_cache=cache)
+
+    def local_reference():
+        return store.snapshot(snapshot_id)['positions'][0]['reference']
+
+    first = local_reference()
+    first['valuation']['pe']['value'] = -1
+    now[0] = 3599
+    assert StockLibrary(isolated.db).change({'action': 'visit', 'code': '000001'})['recent'] == ['000001']
+    assert local_reference()['valuation']['pe']['value'] == 10
+    assert calls == [('000001', DAY)]
+    now[0] = 3600
+    assert cache.expire_idle() == 0
+    now[0] = 7199
+    assert cache.expire_idle() == 1
+    local_reference()
+    assert len(calls) == 2
+
+    with isolated.db.connection(write=True) as conn:
+        conn.execute('UPDATE valuation_observations SET value=11 WHERE instrument_id=?', (identity,))
+    assert local_reference()['valuation']['pe']['value'] == 11
+    assert len(calls) == 3
 
 
 def test_daily_change_respects_snapshot_asset_scope_and_broker_rate():
@@ -600,19 +644,35 @@ def test_revaluation_schema_upgrades_from_54(tmp_path, monkeypatch):
 def test_revaluation_upgrade_retains_versions_and_never_reuses_deleted_id(tmp_path, monkeypatch):
     db = Database(tmp_path / 'upgrade.sqlite3')
     with monkeypatch.context() as patch:
-        patch.setattr(storage, 'MIGRATIONS', storage.MIGRATIONS[:-1])
+        patch.setattr(storage, 'MIGRATIONS', tuple(row for row in storage.MIGRATIONS if row[0] <= 59))
         assert db.initialize()['schema_version'] == 59
         with db.connection(write=True) as conn:
             conn.execute("""
                 INSERT INTO portfolio_revaluation_snapshots VALUES (42,NULL,?,'[]','fixture','{}',?)
             """, (DAY, DAY))
-    assert db.initialize()['schema_version'] == 60
+    assert db.initialize()['schema_version'] == storage.MIGRATIONS[-1][0]
     assert revaluation.saved_revaluation(db, 42) == {'saved_id': 42}
     revaluation.delete_revaluation(db, 42)
     result = revaluation.save_revaluation(db, {'snapshot': {'id': 1}}, {
         'quote_date': DAY, 'today': DAY, 'totals': {'market_value': '1.00'},
     })
     assert result['saved_id'] > 42
+
+
+def test_portfolio_reference_revision_upgrade_from_60(tmp_path, monkeypatch):
+    db = Database(tmp_path / 'reference.sqlite3')
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, 'MIGRATIONS', tuple(row for row in storage.MIGRATIONS if row[0] <= 60))
+        assert db.initialize()['schema_version'] == 60
+        identity = db.ensure_instrument('000001')
+    assert db.initialize()['schema_version'] == 61
+    with db.connection() as conn:
+        assert conn.execute('SELECT id FROM instruments WHERE code=?', ('000001',)).fetchone()[0] == identity
+        assert conn.execute('SELECT revision FROM portfolio_reference_revision').fetchone()[0] == 0
+        written_at, column = table_time(conn, 'portfolio_reference_revision', {'updated_at'})
+        assert written_at and column == 'updated_at'
+    stats = next(row for row in MaintenanceService(db).read()['tables'] if row['name'] == 'portfolio_reference_revision')
+    assert stats['rows'] == 1 and stats['total_bytes'] > 0
 
 
 def test_snapshot_reconciliation_missing_cash_and_revision(isolated, tmp_path):
@@ -772,7 +832,7 @@ def test_activity_date_presets(period, today, first):
     assert activity_dates(period, today) == (first, today)
 
 
-def test_huatai_transcription_and_same_day_account_rollup(isolated):
+def test_huatai_transcription_and_same_day_account_rollup(isolated, monkeypatch):
     store = isolated
     first = import_snapshot(store)['snapshot_id']
     image = b'\xff\xd8\xff fixture'
@@ -820,6 +880,37 @@ def test_huatai_transcription_and_same_day_account_rollup(isolated):
     assert display['scope'] == 'combined' and display['totals']['market_value'] == '2170.00'
     assert row['market_value'] == '1650.00'
     assert sorted(part['market_value'] for part in row['accounts']) == ['1100.00', '550.00']
+    huatai = store.snapshot(saved)['snapshot']['account_id']
+    assert store.current_snapshot(huatai)['revaluations'][0] == {
+        'id': estimate_id, 'quote_date': next_day, 'inherited': True,
+    }
+    account = store.revaluation_snapshot(estimate_id, account_id=huatai)
+    assert account['scope'] == 'account' and account['snapshot']['account_id'] == huatai
+    assert account['totals']['cash'] == '1020'
+    assert account['totals']['market_value'] == '550.00'
+    assert account['totals']['daily_pnl'] == '50.00'
+    assert len(account['positions']) == 1 and account['positions'][0]['quantity'] == 50
+    with pytest.raises(LookupError, match='该账户'):
+        store.revaluation_snapshot(estimate_id, account_id=huatai + 99)
+
+    class AfterClose(datetime):
+        @classmethod
+        def now(cls, tz):
+            return cls(2025, 11, 25, 17, tzinfo=tz)
+
+    monkeypatch.setattr('stock_analysis.domains.portfolio.service.datetime', AfterClose)
+    monkeypatch.setattr(revaluation, 'read_closes', lambda *_: {
+        ('sz', '000001'): {day: (value, None) for day, value in prices['sz', '000001', 'stock'].items()},
+    })
+    monkeypatch.setattr(revaluation, 'read_unadjusted_closes', lambda *_: prices['sz', '159915', 'etf'])
+    monkeypatch.setattr(revaluation, 'local_market_days', lambda *_: [DAY, next_day])
+    store.save_manual('history', dict(broker='华泰', event_date=next_day, business='卖出', code='000001',
+                                     quantity='50', price='12', net_cash='600', request_id=str(uuid4())))
+    projected = store.revaluation(day=DAY, save=True)
+    account = store.revaluation_snapshot(projected['saved_id'], account_id=huatai)
+    assert account['positions'] == []
+    assert account['totals']['market_value'] == '0'
+    assert account['totals']['cash'] == '1620.00' and account['totals']['daily_pnl'] == '100.00'
 
 
 def test_bank_transfers_ignore_balance_checks_and_separate_cash_from_trade_history(isolated):
@@ -956,6 +1047,11 @@ def test_portfolio_http_gate_and_import(isolated, monkeypatch):
             selected = session.get(snapshots, params={'estimate': published.json()['saved_id']}, timeout=5)
             assert selected.ok and selected.json()['snapshot']['snapshot_date'] == '2025-11-25'
             assert selected.json()['totals']['market_value'] == '1620.00'
+            account_id = selected.json()['snapshot']['account_id']
+            assert session.get(snapshots, params={'estimate': published.json()['saved_id'], 'account': account_id},
+                               timeout=5).ok
+            assert session.get(snapshots, params={'estimate': published.json()['saved_id'], 'account': account_id + 100},
+                               timeout=5).status_code == 404
             delete = revalue + '/delete'
             identity = {'estimate': published.json()['saved_id']}
             assert session.get(delete, params=identity, timeout=5).status_code == 404

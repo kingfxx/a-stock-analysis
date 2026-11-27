@@ -22,6 +22,8 @@ v30未新增表，交易快照用途扩展为东财原始值及独立历史合�
 
 ## 统计内容与口径
 
+结构 v61 的 `portfolio_reference_revision` 归入「持仓分析」，单行记录本地行情、估值、分红及分类引用的缓存失效版本。更新时间取 `updated_at`，对应迁移初始化或最近一次引用变更。
+
 结构 v23/v24 的公共采集、指数目录／映射／定义／估值表和任务／冷却状态已登记为「指数数据」或「运行与配置」。时间依据只用真实采集／写入／批次时间，未知时间不以观察日补充；旧采集未迁移。详见[指数估值采集](index-data-collection.md)。
 
 个股接入公共调度后继续复用三张公共采集表，不新增数据库表。个股 `collection_batches` 以 `domain=stock` 区分，`collection_sources` 记录逐次请求元数据；个股证据策略为 `metadata_only`，请求取得时间仍使用 `obtained_at`，原文路径、双哈希和字节数为空。批次与请求状态在维护统计中按真实更新时间字段识别，不能由报告期或交易日推算。共享 provider 预算／冷却在 `collection_provider_state`；详见[个股采集说明](stock-collection.md)。

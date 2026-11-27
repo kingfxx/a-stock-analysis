@@ -189,7 +189,9 @@
     if (latest && isLatest && !data.live &&
         (latest.quote_date > data.snapshot.snapshot_date ||
          (latest.quote_date === data.snapshot.snapshot_date && data.snapshot.session !== 'close'))) {
-      const estimate = await request(`/api/portfolio/snapshots?estimate=${latest.id}`);
+      const params = new URLSearchParams({ estimate: latest.id });
+      if (options.account) params.set('account', options.account);
+      const estimate = await request(`/api/portfolio/snapshots?${params}`);
       if (current !== snapshotRequest) return;
       if (!estimate.positions.some((row) => row.asset_type === 'hong_kong' && row.exclusion_reason)) data = estimate;
     }
@@ -232,22 +234,23 @@
         day: entry.snapshot_date, value: String(entry.id),
         label: `${entry.snapshot_date} ${sessionLabel(entry.session)}${entry.supersedes_id ? ` · 修订 #${entry.id}` : ''}`
       }));
-    for (const { id, quote_date } of data.revaluations ?? []) {
-      versions.push({ day: quote_date, value: `estimate:${id}`, label: `${quote_date} 收盘 · 本地估算 #${id}` });
+    for (const { id, quote_date, inherited } of data.revaluations ?? []) {
+      const source = inherited ? '合并版' : '本地估算';
+      versions.push({ day: quote_date, value: `estimate:${id}`, label: `${quote_date} 收盘 · ${source} #${id}`, removable: !inherited });
     }
     const selected = data.live ? 'current' : data.estimate_id ? `estimate:${data.estimate_id}`
       : (combined ? snapshot.snapshot_date : String(snapshot.id));
     versions.sort((a, b) => b.day.localeCompare(a.day));
     versions.unshift({ value: 'current', label: '当前持仓' });
     $('snapshot-current').textContent = versions.find(({ value }) => value === selected)?.label ?? '';
-    $('snapshot-versions').replaceChildren(...versions.map(({ label, value }) => {
+    $('snapshot-versions').replaceChildren(...versions.map(({ label, value, removable }) => {
       const row = node('li');
       const choose = node('button', label);
       choose.type = 'button';
       choose.dataset.version = value;
       if (value === selected) choose.setAttribute('aria-current', 'true');
       row.append(choose);
-      if (value.startsWith('estimate:')) {
+      if (removable) {
         const remove = node('button', '删除');
         remove.type = 'button';
         remove.dataset.delete = value;
@@ -305,7 +308,7 @@
       if (result.saved_id) document.dispatchEvent(new Event('portfolio:performance-changed'));
       if (current !== snapshotRequest) return;
       if (result.saved_id) {
-        await loadSnapshot({ estimate: result.saved_id });
+        await loadSnapshot(snapshotOptions(`estimate:${result.saved_id}`));
         if (snapshotRequest === current + 1) {
           const fallback = result.quote_date === result.today ? '' : '已使用上一交易日行情，';
           notice(`${fallback}已保存 ${result.quote_date} 收盘快照。`);
@@ -328,11 +331,14 @@
   }
 
   function snapshotOptions(value) {
+    const account = $('account-select').value;
     if (value === 'current') {
-      const account = $('account-select').value;
       return account ? { account } : {};
     }
-    if (value.startsWith('estimate:')) return { estimate: value.slice('estimate:'.length) };
+    if (value.startsWith('estimate:')) {
+      const estimate = value.slice('estimate:'.length);
+      return account ? { estimate, account } : { estimate };
+    }
     return { [snapshotScope === 'combined' ? 'day' : 'snapshot']: value };
   }
 

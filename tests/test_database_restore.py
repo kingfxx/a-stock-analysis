@@ -133,7 +133,7 @@ def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch
     from stock_analysis.http import server
     db,backup,_=setup_db(tmp_path)
     monkeypatch.setattr(app.settings,'DATABASE_PATH',db.path)
-    for name in ('_SERVICES','_AI_SERVICES','_INDUSTRY_SERVICES','_MAINTENANCE_SERVICES','_DATA_LOCKS'):
+    for name in ('_SERVICES','_AI_SERVICES','_INDUSTRY_SERVICES','_MAINTENANCE_SERVICES','_PORTFOLIO_SERVICES','_DATA_LOCKS'):
         monkeypatch.setattr(app.data if name in ('_SERVICES', '_DATA_LOCKS') else app, name, {})
     starts=[]
     def initialize(database,skip_legacy=False):
@@ -159,6 +159,8 @@ def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch
             if starts:break
             time.sleep(.02)
         listing=request('/api/maintenance/backups');token=listing['session_token']
+        assert request('/api/portfolio/snapshots')['snapshot'] is None
+        portfolio = app.portfolio_service()
         with pytest.raises(urllib.error.HTTPError) as rejected:request('/api/maintenance/restore/preview',{'backup':backup.name})
         assert rejected.value.code==400
         preview=request('/api/maintenance/restore/preview',{'backup':backup.name},token)
@@ -171,6 +173,8 @@ def test_http_restore_reloads_listener_and_protects_session(tmp_path,monkeypatch
             except (OSError,urllib.error.URLError):pass
             time.sleep(.05)
         assert state['phase']=='complete' and len(starts)==2 and starts==[False,True]
+        assert request('/api/portfolio/snapshots')['snapshot'] is None
+        assert app.portfolio_service() is not portfolio
         assert request('/api/maintenance/storage')['summary']['schema_version']==MIGRATIONS[-1][0]
         assert db.check()['instruments']==0
     finally:
