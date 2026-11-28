@@ -24,8 +24,16 @@
   };
   let snapshotScope = 'account';
   let snapshotSelection;
+  let snapshotData;
   let positionRows = [];
   let positionSort = { key: 'market_value', direction: -1 };
+  const privacyKey = 'portfolio.hideAmounts';
+  const privateFields = new Set(['quantity', 'price', 'amount', 'net_cash']);
+  const privacyToggle = $('portfolio-privacy-toggle');
+  const amountsHidden = () => document.documentElement.hasAttribute('data-hide-amounts');
+  const amount = (value, format = money) => amountsHidden() && value != null ? '****' : format(value);
+  const signedMoney = (value) => amount(value, (entry) => entry > 0 ? `+${money(entry)}` : money(entry));
+  window.PortfolioPrivacy = { amountsHidden, amount };
 
   function node(tag, text, className) {
     const element = document.createElement(tag);
@@ -51,9 +59,9 @@
   }
 
   function setPnl(element, value) {
-    element.textContent = value > 0 ? `+${money(value)}` : money(value);
-    element.classList.toggle('gain', value > 0);
-    element.classList.toggle('loss', value < 0);
+    element.textContent = signedMoney(value);
+    element.classList.toggle('gain', !amountsHidden() && value > 0);
+    element.classList.toggle('loss', !amountsHidden() && value < 0);
   }
 
   function setRate(element, rate) {
@@ -96,7 +104,7 @@
     ];
     container.replaceChildren(...fields.map(([label, value]) => {
       const item = node('div');
-      item.append(node('dt', label), node('dd', money(value)));
+      item.append(node('dt', label), node('dd', amount(value)));
       return item;
     }));
   }
@@ -106,7 +114,7 @@
     const name = node('td');
     const hk = position.asset_type === 'hong_kong';
     const quote = (value, formatter) => `${display(value, formatter)}${value != null && hk ? ' HKD' : ''}`;
-    const costQuote = (value) => quote(value, costFormatters[position.asset_type]);
+    const costQuote = (value) => amount(value, (entry) => quote(entry, costFormatters[position.asset_type]));
     if (position.asset_type === 'stock' && ['sh', 'sz'].includes(position.exchange)) {
       const link = node('a', position.name);
       link.href = `/?${new URLSearchParams({ code: position.code, tab: 'notes' })}`;
@@ -127,8 +135,8 @@
       for (const part of position.accounts) {
         const cost = part.cost_price == null ? '成本待核对' : `成本 ${costQuote(part.cost_price)}`;
         const daily = part.daily_pnl == null ? '今日盈亏待核对'
-          : `今日 ${part.daily_pnl > 0 ? '+' : ''}${money(part.daily_pnl)}${part.daily_pnl_basis ? '（估算）' : ''}`;
-        accounts.append(node('div', `${part.broker}　${display(part.quantity)} 股／份　${cost}　市值 ${money(part.market_value)}　持仓盈亏 ${money(part.holding_pnl)}　${daily}`));
+          : `今日 ${signedMoney(part.daily_pnl)}${part.daily_pnl_basis ? '（估算）' : ''}`;
+        accounts.append(node('div', `${part.broker}　${amount(part.quantity, display)} 股／份　${cost}　市值 ${amount(part.market_value)}　持仓盈亏 ${amount(part.holding_pnl)}　${daily}`));
       }
       name.append(accounts);
     }
@@ -172,7 +180,7 @@
     if (!reference.childElementCount) {
       reference.textContent = '暂无本地估值';
     }
-    row.append(name, node('td', money(position.market_value), 'market-column'), node('td', display(position.quantity)),
+    row.append(name, node('td', amount(position.market_value), 'market-column'), node('td', amount(position.quantity, display)),
       paired(quote(position.price), costQuote(position.cost_price)),
       pnlPair(position.holding_pnl, position.holding_pnl_rate),
       pnlPair(position.daily_pnl, position.daily_pnl_rate, position.daily_pnl_basis),
@@ -212,6 +220,7 @@
       if (current !== snapshotRequest) return;
       if (!estimate.positions.some((row) => row.asset_type === 'hong_kong' && row.exclusion_reason)) data = estimate;
     }
+    snapshotData = data;
     token = data.session_token;
     snapshotScope = data.scope;
     const snapshot = data.snapshot;
@@ -276,10 +285,15 @@
       }
       return row;
     }));
-    $('market-value').textContent = money(data.totals.market_value);
-    $('cash-value').textContent = data.totals.cash == null ? '待核对' : money(data.totals.cash);
+    renderSnapshotAmounts(data);
+  }
+
+  function renderSnapshotAmounts(data) {
+    const { snapshot } = data;
+    $('market-value').textContent = amount(data.totals.market_value);
+    $('cash-value').textContent = data.totals.cash == null ? '待核对' : amount(data.totals.cash);
     $('cash-label').textContent = data.position_date ? '推算现金' : '确认现金';
-    $('asset-value').textContent = money(data.totals.assets ?? snapshot.broker_assets);
+    $('asset-value').textContent = amount(data.totals.assets ?? snapshot.broker_assets);
     $('asset-source').textContent = data.totals.assets == null && snapshot.broker_assets != null ? '券商原表资产' : '';
     const cashWeight = data.totals.cash_weight;
     $('cash-weight').hidden = $('market-weight').hidden = cashWeight == null;
@@ -310,7 +324,7 @@
       const fields = node('dl');
       renderFunds(entry.snapshot, entry.reconciliation, fields);
       panel.append(node('h3', entry.snapshot.broker), node('p', entry.snapshot.confirmed_cash == null
-        ? '期初现金待核对' : `已确认现金 ${money(entry.snapshot.confirmed_cash)} 元`), fields);
+        ? '期初现金待核对' : `已确认现金 ${amount(entry.snapshot.confirmed_cash)} 元`), fields);
       return panel;
     }));
   }
@@ -392,7 +406,7 @@
     row.append(node('td', date));
     if (!preview) row.append(node('td', entry.broker));
     for (const value of [label, `${entry.code} ${entry.name}`.trim(),
-      display(entry.quantity), display(entry.price), money(entry.gross_amount)]) row.append(node('td', value));
+      amount(entry.quantity, display), amount(entry.price, display), amount(entry.gross_amount)]) row.append(node('td', value));
     return row;
   }
 
@@ -400,10 +414,10 @@
     const row = node('tr');
     const date = [entry.event_date, entry.event_time].filter(Boolean).join(' ');
     const label = entry.source_label + (preview && entry.overlap ? ' · 疑似重复' : '');
-    const cash = entry.net_cash > 0 ? `+${money(entry.net_cash)}` : money(entry.net_cash);
+    const cash = signedMoney(entry.net_cash);
     row.append(node('td', date));
     if (!preview) row.append(node('td', entry.broker));
-    row.append(...[label, money(entry.gross_amount), cash].map((value) => node('td', value)));
+    row.append(...[label, amount(entry.gross_amount), cash].map((value) => node('td', value)));
     return row;
   }
 
@@ -421,6 +435,7 @@
     if (current !== state.request) return;
     state.loaded = true;
     state.offset = data.offset;
+    state.entries = data.entries;
     const transfers = kind === 'transfers';
     $(`${kind}-count`).textContent = `${params.get('broker') || '全部券商'} · ${data.total_count} 条` +
       (transfers && !params.has('business') ? ' · 含作废记录' : '');
@@ -434,8 +449,7 @@
       form.elements.start.value = data.period.start || '';
       form.elements.end.value = data.period.end;
     }
-    const renderRow = transfers ? transferRow : historyRow;
-    $(`${kind}-body`).replaceChildren(...data.entries.map((entry) => renderRow(entry)));
+    renderActivityRows(kind);
     $(`${kind}-empty`).hidden = Boolean(data.entries.length);
     $(`${kind}-pages`).hidden = data.total_count <= 100;
     $(`${kind}-prev`).disabled = state.offset === 0;
@@ -449,6 +463,41 @@
       else header.removeAttribute('aria-sort');
       button.querySelector('span').textContent = active ? (state.direction === 'asc' ? '↑' : '↓') : '↕';
     }
+  }
+
+  function renderActivityRows(kind) {
+    const renderRow = kind === 'transfers' ? transferRow : historyRow;
+    $(`${kind}-body`).replaceChildren(...activity[kind].entries.map((entry) => renderRow(entry)));
+  }
+
+  function setAmountPrivacy(hidden) {
+    document.documentElement.toggleAttribute('data-hide-amounts', hidden);
+    privacyToggle.textContent = hidden ? '显示金额' : '隐藏金额';
+    privacyToggle.setAttribute('aria-pressed', String(hidden));
+    if (hidden) {
+      for (const id of ['manual-dialog', 'import-dialog']) {
+        if ($(id).open) $(id).close();
+      }
+      notice('');
+    }
+    if (snapshotData?.snapshot) renderSnapshotAmounts(snapshotData);
+    if (importPreview) renderPreview(importPreview.data);
+    for (const [kind, state] of Object.entries(activity)) {
+      const filters = [...$(kind).querySelectorAll('input[data-activity-filter]')]
+        .filter((input) => privateFields.has(input.name));
+      const hasFilter = filters.some((input) => input.value.trim());
+      for (const input of filters) input.disabled = hidden;
+      if (state.entries) renderActivityRows(kind);
+      if (hasFilter && (state.loaded || state.request)) {
+        loadActivity(kind).catch((error) => notice(error.message));
+      }
+    }
+    document.dispatchEvent(new Event('portfolio:amount-privacy'));
+  }
+
+  function readAmountPrivacy() {
+    try { return localStorage.getItem(privacyKey) === '1'; }
+    catch { return amountsHidden(); }
   }
 
   const tabs = Array.from(document.querySelectorAll('.portfolio-nav [role="tab"]'));
@@ -503,8 +552,8 @@
       renderFunds(data.summary, data.reconciliation, funds);
       const positions = data.positions.map((position) => {
         const row = node('tr');
-        row.append(...[`${position.code} ${position.name}`, labels[position.asset_type], display(position.quantity),
-          money(position.market_value)].map((value) => node('td', value)));
+        row.append(...[`${position.code} ${position.name}`, labels[position.asset_type], amount(position.quantity, display),
+          amount(position.market_value)].map((value) => node('td', value)));
         return row;
       });
       const reconciliation = node('div', null, 'reconciliation');
@@ -707,6 +756,22 @@
     $(`${kind}-prev`).addEventListener('click', () => loadActivity(kind, state.offset - 100).catch((error) => notice(error.message)));
     $(`${kind}-next`).addEventListener('click', () => loadActivity(kind, state.offset + 100).catch((error) => notice(error.message)));
   }
+  setAmountPrivacy(readAmountPrivacy());
+  privacyToggle.hidden = false;
+  privacyToggle.addEventListener('click', () => {
+    const hidden = !amountsHidden();
+    setAmountPrivacy(hidden);
+    try { localStorage.setItem(privacyKey, hidden ? '1' : '0'); }
+    catch { /* The current page can still hide amounts. */ }
+  });
+  window.addEventListener('storage', (event) => {
+    if ((event.key === privacyKey || event.key === null) && readAmountPrivacy() !== amountsHidden()) {
+      setAmountPrivacy(readAmountPrivacy());
+    }
+  });
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted && readAmountPrivacy() !== amountsHidden()) setAmountPrivacy(readAmountPrivacy());
+  });
   selectTabFromLocation();
   window.initPortfolioManual({
     request,

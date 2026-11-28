@@ -7,8 +7,10 @@
   const wholeYuanFormatter = new Intl.NumberFormat('zh-CN', {
     signDisplay: 'exceptZero', maximumFractionDigits: 0
   });
-  const wholeYuan = (value) => `${wholeYuanFormatter.format(value)} 元`;
-  const money = (value) => `${formatter.format(Number(value))} 元`;
+  const amount = (value, format) => window.PortfolioPrivacy.amount(value, format);
+  const amountsHidden = () => window.PortfolioPrivacy.amountsHidden();
+  const wholeYuan = (value) => amount(value, (entry) => `${wholeYuanFormatter.format(entry)} 元`);
+  const money = (value) => amount(value, (entry) => entry == null ? '—' : `${formatter.format(Number(entry))} 元`);
   const balance = (value) => money(value).replace(/^\+/, '');
   const rate = (value) => `${formatter.format(Number(value) * 100)}%`;
   const dietzLabel = '单利（修正迪茨）';
@@ -19,6 +21,8 @@
   let byDate;
   let calendarMonths;
   let calendarYears;
+  let previousMetrics;
+  let displayedBounds;
   let selectedMonth;
   let pickerYearIndex;
   let activeSelection;
@@ -106,12 +110,12 @@
     for (const button of $(group).querySelectorAll('button')) {
       button.setAttribute('aria-pressed', String(button.value === value));
     }
-    renderCalendar();
+    if (data) renderCalendar();
   }
 
   function calendarText(value) {
     if (value == null) return '缺数据';
-    return calendarMetric() === 'rate' ? rate(value) : formatter.format(value);
+    return calendarMetric() === 'rate' ? rate(value) : amount(value, (entry) => formatter.format(entry));
   }
 
   function calendarClass(value) {
@@ -373,7 +377,7 @@
     const chart = $('performance-chart');
     chart.setAttribute('aria-label', useRate ? '账户和基准收益率曲线' : '累计盈亏曲线');
     await Plotly.react(chart, traces, layout, config);
-    if (request !== chartRequest) return;
+    if (request !== chartRequest || amountsHidden()) return;
     const assetCount = rows.filter((row) => row.total_assets != null).length;
     const assetLabel = assetCount ? '总资产估算' : '证券市值（现金待核对）';
     const amounts = rows.map((row) => {
@@ -412,9 +416,10 @@
   }
 
   function showMetric(id, value, format) {
-    $(id).textContent = value == null ? '—' : format(value);
-    $(id).classList.toggle('gain', value > 0);
-    $(id).classList.toggle('loss', value < 0);
+    const text = value == null ? '—' : format(value);
+    $(id).textContent = text;
+    $(id).classList.toggle('gain', text !== '****' && value > 0);
+    $(id).classList.toggle('loss', text !== '****' && value < 0);
   }
 
   function renderBenchmarks(start, dates, last, accountRate, compound) {
@@ -455,7 +460,7 @@
     return selected;
   }
 
-  async function renderRange() {
+  async function renderRange({ refreshPrivacy = false } = {}) {
     if (!data) return;
     const useRate = $('performance-chart-metric').value === 'rate';
     $('performance-benchmark-row').hidden = !useRate;
@@ -472,16 +477,21 @@
       end = `${year}-12-31` < data.as_of ? `${year}-12-31` : data.as_of;
     }
     if (start < data.start) start = data.start;
+    let invalid = false;
     if (kind === 'custom') {
       start = $('performance-start').value;
       end = $('performance-end').value;
-      if (!start || !end || start > end || start < data.start || end > data.as_of) {
+      invalid = !start || !end || start > end || start < data.start || end > data.as_of;
+      if (invalid) {
         $('performance-period').textContent = `请选择 ${data.start} 至 ${data.as_of} 内的有效日期，图表保留上次选择。`;
-        return;
+        if (!refreshPrivacy) return;
+        [start, end] = displayedBounds ?? [data.start, data.as_of];
+        if (start < data.start || end > data.as_of) [start, end] = [data.start, data.as_of];
       }
     }
     const rows = data.records.filter((record) => record.date >= start && record.date <= end);
-    $('performance-period').textContent = `${start} 至 ${end}`;
+    if (!invalid) $('performance-period').textContent = `${start} 至 ${end}`;
+    displayedBounds = [start, end];
     const summary = summarize(rows);
     const closing = rows.at(-1);
     const last = closing?.date;
@@ -741,12 +751,34 @@
     }
     requestSelection();
   });
-  function updateRange() {
-    renderRange().catch((error) => {
+  function updateRange(options) {
+    renderRange(options).catch((error) => {
       $('performance-status').hidden = false;
       $('performance-status').textContent = error.message;
     });
   }
+  document.addEventListener('portfolio:amount-privacy', () => {
+    const chartMetric = $('performance-chart-metric');
+    const amountOption = chartMetric.querySelector('option[value="amount"]');
+    const amountButton = $('calendar-metric').querySelector('button[value="amount"]');
+    const hidden = amountsHidden();
+    amountOption.disabled = amountButton.disabled = hidden;
+    if (hidden) {
+      previousMetrics = [chartMetric.value, calendarMetric()];
+      chartMetric.value = 'rate';
+      chartRequest++;
+      for (const id of ['performance-chart', 'performance-assets']) {
+        if ($(id).data) window.Plotly.purge($(id));
+      }
+      selectCalendarOption('calendar-metric', 'rate');
+    } else if (previousMetrics) {
+      const [chart, calendar] = previousMetrics;
+      chartMetric.value = chart;
+      selectCalendarOption('calendar-metric', calendar);
+      previousMetrics = null;
+    }
+    updateRange({ refreshPrivacy: true });
+  });
   for (const id of ['performance-range', 'performance-year', 'performance-start', 'performance-end',
     'performance-return-mode', 'performance-chart-metric']) {
     $(id).addEventListener('change', updateRange);

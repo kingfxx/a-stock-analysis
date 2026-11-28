@@ -11,6 +11,14 @@ h1 { margin-bottom: 4px; font-size: clamp(27px, 3vw, 42px); letter-spacing: .03e
 h2 { margin-bottom: 5px; font-size: 22px; }
 a { color: var(--cyan); text-underline-offset: 3px; }
 .stock-sidebar #cached-picker { display: none; }
+.portfolio-sidebar-column { position: sticky; top: 20px; z-index: 30; display: grid; gap: .65rem; }
+#portfolio-privacy-toggle[aria-pressed="true"] { border-color: var(--cyan); color: var(--cyan); }
+@media (max-width: 800px) {
+  .portfolio-sidebar-column { top: 8px; }
+}
+[data-hide-amounts] :is(#open-import, [data-manual-entry], #performance-asset-section,
+  input[data-activity-filter]:is([name="quantity"], [name="price"], [name="amount"], [name="net_cash"]),
+  #calendar-metric button[value="amount"], #performance-chart-metric option[value="amount"]) { display: none !important; }
 .workspace-head, .panel-head, .dialog-head { display: flex; gap: 1rem; align-items: flex-start; justify-content: space-between; }
 .workspace-head { align-items: end; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
 .portfolio-nav { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: 1.15rem; border-bottom: 1px solid var(--line); }

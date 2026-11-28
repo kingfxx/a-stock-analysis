@@ -13,7 +13,10 @@
 </head>
 <body>
 <main class="shell">
-  __RESEARCH_SIDEBAR__
+  <div class="portfolio-sidebar-column">
+    __RESEARCH_SIDEBAR__
+    <button id="portfolio-privacy-toggle" type="button" aria-pressed="false" hidden>隐藏金额</button>
+  </div>
   <div class="workspace-content">
     <header class="workspace-head">
       <div><h1>持仓分析</h1><p id="coverage" class="muted">招商证券</p></div>
@@ -185,23 +188,25 @@
           <p id="performance-return-basis"></p>
           <p id="performance-opening-note"></p>
         </details>
-        <div class="panel-head calendar-head">
-          <h2>资产轨迹</h2>
+        <div id="performance-asset-section">
+          <div class="panel-head calendar-head">
+            <h2>资产轨迹</h2>
+          </div>
+          <dl class="balance-strip performance-summary">
+            <div><dt>总资产</dt><dd id="asset-total"></dd></div>
+            <div><dt>总市值</dt><dd id="asset-market-value"></dd></div>
+            <div><dt>现金</dt><dd id="asset-cash"></dd></div>
+          </dl>
+          <div id="performance-assets" class="performance-chart" role="region" aria-label="总资产估算与银证转账"></div>
+          <details id="asset-explanation" class="reconciliation performance-explanation">
+            <summary>说明</summary>
+            <p id="performance-assets-scope"></p>
+            <p id="asset-card-date"></p>
+            <p id="asset-cash-summary"></p>
+            <p id="asset-flow-summary"></p>
+            <p id="asset-cash-basis"></p>
+          </details>
         </div>
-        <dl class="balance-strip performance-summary">
-          <div><dt>总资产</dt><dd id="asset-total"></dd></div>
-          <div><dt>总市值</dt><dd id="asset-market-value"></dd></div>
-          <div><dt>现金</dt><dd id="asset-cash"></dd></div>
-        </dl>
-        <div id="performance-assets" class="performance-chart" role="region" aria-label="总资产估算与银证转账"></div>
-        <details id="asset-explanation" class="reconciliation performance-explanation">
-          <summary>说明</summary>
-          <p id="performance-assets-scope"></p>
-          <p id="asset-card-date"></p>
-          <p id="asset-cash-summary"></p>
-          <p id="asset-flow-summary"></p>
-          <p id="asset-cash-basis"></p>
-        </details>
         <div class="panel-head calendar-head">
           <div><h2>盈亏日历</h2><p id="calendar-total" class="muted">盈亏 <strong id="calendar-total-pnl"></strong> / 收益率 <strong id="calendar-total-rate"></strong></p></div>
           <div class="fields">
