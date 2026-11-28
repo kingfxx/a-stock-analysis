@@ -86,9 +86,9 @@
   const compoundReturn = () => $('performance-return-mode').value === 'compound';
   const returnLabel = () => compoundReturn() ? '复利（XIRR 年化）' : dietzLabel;
   const returnReport = () => payload.returns;
-  const accountRates = (start, endpoints, compound) => {
+  const accountRates = (start, endpoints, compound, annualize = true) => {
     const source = returnReport();
-    return source ? window.PortfolioReturns.periodReturns(source, start, endpoints, compound) : new Map();
+    return source ? window.PortfolioReturns.periodReturns(source, start, endpoints, compound, annualize) : new Map();
   };
   const calendarRate = (start, end) => accountRates(start, [end], false).get(end);
 
@@ -324,7 +324,8 @@
     const Plotly = await loadPlotly();
     if (request !== chartRequest) return;
     const metric = useRate ? $('performance-return-mode').value : 'amount';
-    const label = useRate ? returnLabel() : summary.covered < rows.length ? '已覆盖累计盈亏' : '累计盈亏';
+    const label = useRate ? (metric === 'compound' ? '账户累计复利收益率' : dietzLabel)
+      : summary.covered < rows.length ? '已覆盖累计盈亏' : '累计盈亏';
     const suffix = useRate ? '%' : ' 元';
     const x = summary.points.map((point) => point.date);
     const y = summary.points.map((point) => {
@@ -358,6 +359,10 @@
     const config = { responsive: true, displayModeBar: false };
     const key = bounds.join('/');
     const layout = chartLayout(`${key}/${metric}`, useRate);
+    if (metric === 'compound') {
+      layout.yaxis.title = { text: '累计收益率', standoff: 8 };
+      layout.yaxis.automargin = true;
+    }
     if (drawdown?.amount < 0) {
       layout.shapes = [{
         type: 'rect', xref: 'x', yref: 'paper', x0: drawdown.peakDate, x1: drawdown.troughDate,
@@ -412,22 +417,23 @@
     $(id).classList.toggle('loss', value < 0);
   }
 
-  function renderBenchmarks(start, dates, last, accountRate) {
+  function renderBenchmarks(start, dates, last, accountRate, compound) {
     const source = returnReport();
     const opening = source && window.PortfolioReturns.periodOpening(source, start).openingDate;
     const marketDays = payload.benchmark_closes?.['000300'] ?? {};
+    const closingDates = last ? [last] : [];
+    const { benchmarkReturns } = window.PortfolioReturns;
     let selected;
     for (const { button, name } of benchmarkButtons) {
       const code = button.value;
       const closes = payload.benchmark_closes?.[code] ?? {};
       const picked = code === benchmarkSelector.value;
-      // Leave A-share market holidays out of the benchmark trace, including Hong Kong-only sessions.
-      const endpoints = picked ? dates.filter((date) => date in marketDays || date in closes) : last ? [last] : [];
-      const rates = window.PortfolioReturns.benchmarkReturns(
-        closes, opening, endpoints, compoundReturn()
-      );
-      const closingRate = rates.get(last);
-      if (picked) selected = { name, rates, closingRate };
+      const closingRate = benchmarkReturns(closes, opening, closingDates, compound).get(last);
+      if (picked) {
+        // Leave A-share market holidays out of the benchmark trace, including Hong Kong-only sessions.
+        const endpoints = dates.filter((date) => date in marketDays || date in closes);
+        selected = { name, rates: benchmarkReturns(closes, opening, endpoints, false), closingRate };
+      }
       button.setAttribute('aria-pressed', String(picked && benchmarkOverlay));
       const label = element('span', name);
       const gap = closingRate == null || accountRate == null ? null : accountRate - closingRate;
@@ -442,7 +448,9 @@
         button.prepend(direction);
       }
     }
-    $('performance-benchmark-label').textContent = selected.name;
+    $('performance-benchmark-label').textContent = compound ? `${selected.name}（年化）` : selected.name;
+    $('performance-benchmark-basis').hidden = !compound;
+    benchmarkComparison.setAttribute('aria-label', compound ? '各指数年化超额收益' : '各指数超额收益');
     showMetric('performance-benchmark-return', selected.closingRate, rate);
     return selected;
   }
@@ -450,7 +458,7 @@
   async function renderRange() {
     if (!data) return;
     const useRate = $('performance-chart-metric').value === 'rate';
-    benchmarkComparison.hidden = !useRate;
+    $('performance-benchmark-row').hidden = !useRate;
     const kind = $('performance-range').value;
     let start = `${data.year}-01-01`;
     let end = data.as_of;
@@ -477,13 +485,16 @@
     const summary = summarize(rows);
     const closing = rows.at(-1);
     const last = closing?.date;
-    const endpoints = useRate ? rows.map((row) => row.date) : last ? [last] : [];
-    const rates = accountRates(start, endpoints, compoundReturn());
+    const closingDates = last ? [last] : [];
+    const endpoints = useRate ? rows.map((row) => row.date) : closingDates;
+    const compound = compoundReturn();
+    const rates = accountRates(start, endpoints, compound, !useRate);
+    const closingRate = useRate && compound ? accountRates(start, closingDates, true).get(last) : rates.get(last);
     $('performance-total-label').textContent = rows.length && summary.covered === rows.length ? '累计盈亏估算' : '已覆盖日期盈亏';
     $('performance-return-label').textContent = returnLabel();
     showMetric('performance-total', summary.amount, data.fixed_fx ? money : wholeYuan);
-    showMetric('performance-return', rates.get(last), rate);
-    const benchmark = renderBenchmarks(start, endpoints, last, rates.get(last));
+    showMetric('performance-return', closingRate, rate);
+    const benchmark = renderBenchmarks(start, useRate ? endpoints : [], last, closingRate, compound);
     $('performance-positive').textContent = `${rows.filter((row) => row.pnl > 0).length}／${rows.filter((row) => row.pnl < 0).length}`;
     $('performance-covered').textContent = `${summary.covered}／${rows.length} 个交易日`;
     const flows = (returnReport()?.transfers || []).filter(({date}) => date >= start && date <= end);

@@ -4,6 +4,11 @@
   const labels = { stock: 'A 股', etf: 'ETF', hong_kong: '港股', unknown: '待确认' };
   const moneyFormatter = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const decimalFormatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 });
+  const costFormatters = {
+    stock: moneyFormatter,
+    hong_kong: moneyFormatter,
+    etf: new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+  };
   const rateFormatter = new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'exceptZero'
   });
@@ -100,7 +105,8 @@
     const row = node('tr');
     const name = node('td');
     const hk = position.asset_type === 'hong_kong';
-    const quote = (value) => value != null && hk ? `${display(value)} HKD` : display(value);
+    const quote = (value, formatter) => `${display(value, formatter)}${value != null && hk ? ' HKD' : ''}`;
+    const costQuote = (value) => quote(value, costFormatters[position.asset_type]);
     if (position.asset_type === 'stock' && ['sh', 'sz'].includes(position.exchange)) {
       const link = node('a', position.name);
       link.href = `/?${new URLSearchParams({ code: position.code, tab: 'notes' })}`;
@@ -119,7 +125,7 @@
       const accounts = node('details', null, 'subline account-breakdown');
       accounts.append(node('summary', position.accounts.length > 1 ? '查看分户持仓' : position.accounts[0].broker));
       for (const part of position.accounts) {
-        const cost = part.cost_price == null ? '成本待核对' : `成本 ${quote(part.cost_price)}`;
+        const cost = part.cost_price == null ? '成本待核对' : `成本 ${costQuote(part.cost_price)}`;
         const daily = part.daily_pnl == null ? '今日盈亏待核对'
           : `今日 ${part.daily_pnl > 0 ? '+' : ''}${money(part.daily_pnl)}${part.daily_pnl_basis ? '（估算）' : ''}`;
         accounts.append(node('div', `${part.broker}　${display(part.quantity)} 股／份　${cost}　市值 ${money(part.market_value)}　持仓盈亏 ${money(part.holding_pnl)}　${daily}`));
@@ -136,6 +142,7 @@
     }
     const reference = node('td');
     const valuation = position.reference?.valuation;
+    const trackingIndex = position.reference?.tracking_index;
     if (valuation) {
       const names = { pe: 'PE（TTM）', pb: 'PB', dividend_yield: '股息率' };
       const metrics = node('dl', null, 'position-valuation');
@@ -144,8 +151,18 @@
         if (metric?.value == null) continue;
         const value = `${money(metric.value)}${key === 'dividend_yield' ? '%' : '倍'}`;
         const title = metric.years ? `${name}/近${metric.years}年历史分位` : name;
-        const rank = metric.position ? `/${money(metric.percentile)}%（${metric.position.marker} ${metric.position.label}）` : '';
-        metrics.append(node('dt', title), node('dd', value + rank));
+        const rank = metric.position ? `/${money(metric.percentile)}%` : '';
+        const number = node('dd');
+        number.append(node('span', value + rank, 'position-valuation-value'));
+        if (metric.position) {
+          number.append(node('span', `${metric.position.marker} ${metric.position.label}`, 'position-valuation-position'));
+        }
+        if (metric.source && metric.date) {
+          const index = trackingIndex ? `跟踪指数 ${trackingIndex.name} · ` : '';
+          const samples = metric.percentile == null ? '' : ` · ${metric.sample_count} 个有效样本`;
+          number.title = `${index}${metric.source} · ${metric.date}${samples}`;
+        }
+        metrics.append(node('dt', title), number);
       }
       if (metrics.childElementCount) reference.append(metrics);
     }
@@ -156,7 +173,7 @@
       reference.textContent = '暂无本地估值';
     }
     row.append(name, node('td', money(position.market_value), 'market-column'), node('td', display(position.quantity)),
-      paired(quote(position.price), quote(position.cost_price)),
+      paired(quote(position.price), costQuote(position.cost_price)),
       pnlPair(position.holding_pnl, position.holding_pnl_rate),
       pnlPair(position.daily_pnl, position.daily_pnl_rate, position.daily_pnl_basis),
       weight, reference);

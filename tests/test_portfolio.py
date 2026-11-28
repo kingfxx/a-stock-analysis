@@ -15,9 +15,10 @@ import pytest
 import requests
 
 from stock_analysis import application
+from stock_analysis.domains.indices.index_repository import publish
 from stock_analysis.domains.portfolio import cmb_xls, hk_performance, performance_read, revaluation
 from stock_analysis.domains.portfolio.activity_read import activity_dates
-from stock_analysis.domains.portfolio.calculations import daily_change, fill_snapshot_daily_pnl
+from stock_analysis.domains.portfolio.calculations import combine_positions, daily_change, fill_snapshot_daily_pnl
 from stock_analysis.domains.portfolio.cash_history import account_return_with_hk, attach_cash, reconstruct_cash
 from stock_analysis.domains.portfolio.cmb_transfers import HEADERS
 from stock_analysis.domains.portfolio.performance import (
@@ -33,6 +34,7 @@ from stock_analysis.infrastructure import storage
 from stock_analysis.domains.valuation import hk_valuation
 from stock_analysis.infrastructure.storage import Database, SyncKey, SyncResult, restore_backup
 from stock_analysis.maintenance.maintenance import DESCRIPTIONS, MaintenanceService, table_time
+from test_index_collection import source as index_source
 
 
 SNAPSHOT = cmb_xls.BIFF_SIGNATURE + b'snapshot'
@@ -82,6 +84,43 @@ def import_snapshot(store, **extra):
     args = {'day': DAY, 'session': 'close', **extra}
     preview = store.ingest(SNAPSHOT, 'positions.xls', **args)
     return store.ingest(SNAPSHOT, 'positions.xls', confirmation=preview['preview'], **args)
+
+
+def test_etf_snapshot_uses_index_valuation_as_of_and_updates_after_revision(isolated):
+    snapshot_id = import_snapshot(isolated)['snapshot_id']
+    _, _, pe = index_source(isolated.db)
+    _, _, pb = index_source(isolated.db, 'legu', 'pb.ordinary')
+    with isolated.db.connection(write=True) as conn:
+        conn.execute("UPDATE portfolio_snapshot_positions SET code='510300',exchange='sh' WHERE asset_type='etf'")
+        publish(conn, [
+            dict(pe, observation_date='2015-11-25', pe_rolling=9),
+            dict(pe, observation_date=DAY, pe_rolling=12),
+            dict(pe, observation_date='2025-11-25', pe_rolling=50),
+            dict(pb, frequency='monthly', observation_date='2025-10-31', pe_rolling=None, pb=1.2),
+            dict(pb, frequency='monthly', observation_date='2025-11-20', pe_rolling=None, pb=1.3),
+            dict(pb, frequency='monthly', observation_date='2025-11-28', pe_rolling=None, pb=1.9),
+        ])
+    isolated.reference_cache = PortfolioReferenceCache()
+
+    def etf_position():
+        return next(row for row in isolated.snapshot(snapshot_id)['positions'] if row['asset_type'] == 'etf')
+
+    position = etf_position()
+    reference = position['reference']
+    assert reference['tracking_index'] == {'code': 'cn:000300', 'name': '沪深300'}
+    assert reference['valuation']['pe']['value'] == 12
+    assert reference['valuation']['pe']['percentile'] == 50
+    assert reference['valuation']['pb']['value'] == 1.3
+    assert reference['valuation']['pb']['date'] == '2025-11-20'
+    assert reference['valuation']['pb']['percentile'] == 50
+    assert reference['valuation']['pb']['years'] == 3
+    assert reference['valuation']['pb']['sample_count'] == 2
+    assert 'dividend_yield' not in reference['valuation']
+    assert Decimal(combine_positions([position, position], DAY)[0]['market_value']) == 1000
+
+    with isolated.db.connection(write=True) as conn:
+        publish(conn, [dict(pe, observation_date=DAY, pe_rolling=14)])
+    assert etf_position()['reference']['valuation']['pe']['value'] == 14
 
 
 def test_snapshot_reuses_local_reference_until_idle_or_market_data_changes(isolated):

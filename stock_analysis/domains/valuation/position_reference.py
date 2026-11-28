@@ -21,6 +21,22 @@ def _covered_years(rows, metric, as_of):
     return None
 
 
+def summarize_position_metric(rows, metric, as_of, *, observed, trading_dates=None, allow_partial_history=False):
+    years = _covered_years(rows, metric, as_of)
+    if years is None and allow_partial_history:
+        years = 3
+    if observed:
+        result = valuation_summary_observations(rows, metric, years or 5, {}, as_of=as_of, trading_dates=trading_dates)
+    else:
+        result = valuation_summary(rows, metric, years or 5, {}, as_of=as_of)
+    percentile = result['percentile'] if years and result['count'] > 1 else None
+    return {
+        'value': result['current'], 'date': result['current_date'], 'percentile': percentile,
+        'sample_count': result['count'], 'years': years if percentile is not None else None,
+        **percentile_position(percentile, metric),
+    }
+
+
 def summarize_position_valuation(saved, prices, dividends, as_of, *, include_dividend_yield=True):
     reference = {}
     trading_dates = [row['date'] for row in prices]
@@ -31,15 +47,5 @@ def summarize_position_valuation(saved, prices, dividends, as_of, *, include_div
         observed = metric != 'dividend_yield' and bool(observations)
         rows = (observations if observed else yield_rows if metric == 'dividend_yield' and yield_rows else
                 [{**row, 'date': row.get(f'{metric}_date') or row['date']} for row in saved.get('rows', [])])
-        years = _covered_years(rows, metric, as_of)
-        if observed:
-            result = valuation_summary_observations(rows, metric, years or 5, {}, as_of=as_of, trading_dates=trading_dates)
-        else:
-            result = valuation_summary(rows, metric, years or 5, {}, as_of=as_of)
-        percentile = result['percentile'] if years and result['count'] > 1 else None
-        reference[metric] = {
-            'value': result['current'], 'date': result['current_date'], 'percentile': percentile,
-            'sample_count': result['count'], 'years': years if percentile is not None else None,
-            **percentile_position(percentile, metric),
-        }
+        reference[metric] = summarize_position_metric(rows, metric, as_of, observed=observed, trading_dates=trading_dates)
     return reference

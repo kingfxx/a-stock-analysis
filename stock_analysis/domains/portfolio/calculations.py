@@ -175,7 +175,7 @@ def combine_positions(positions, day):
                     row['exchange_rate'] = None
                 if not all(part['price'] == row['price'] for part in parts):
                     row['price'] = None
-            elif ref and ref['close_date'] == day:
+            elif ref and ref.get('close_date') == day:
                 close = Decimal(str(ref['close']))
             elif (row['price'] is not None and all(part['price'] == row['price'] and part['market_value'] is not None
                   and abs(Decimal(part['market_value']) - part['quantity'] * Decimal(row['price'])) <= Decimal('0.01')

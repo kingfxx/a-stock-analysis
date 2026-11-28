@@ -166,7 +166,10 @@
           <option value="amount">累计盈亏</option><option value="rate">账户收益率</option>
         </select></label>
         <div id="performance-chart" class="performance-chart" role="region" aria-label="累计盈亏曲线"></div>
-        <ul id="performance-benchmark-comparison" class="performance-benchmark-comparison" aria-label="各指数超额收益" hidden></ul>
+        <div id="performance-benchmark-row" class="performance-benchmark-row" hidden>
+          <span id="performance-benchmark-basis" class="muted" aria-hidden="true" hidden>年化</span>
+          <ul id="performance-benchmark-comparison" class="performance-benchmark-comparison" aria-label="各指数超额收益"></ul>
+        </div>
         <details id="performance-explanation" class="reconciliation performance-explanation">
           <summary>说明</summary>
           <p id="performance-scope"></p>
@@ -177,8 +180,8 @@
           <p>最大回撤取区间内连续收盘累计盈亏从前高到后续低点的最大金额跌幅。百分比用同一段跌幅除以高点当天所选证券市值与人民币现金之和。缺少日盈亏时分段计算，缺少正数峰值资产时比例留空。</p>
           <p id="performance-basis"></p>
           <p>单利采用修正迪茨法。区间净收益为期末总资产减期初总资产和外部净入金。分母为期初总资产加按剩余自然日加权的净入金，期末当天的现金流权重为零。</p>
-          <p>复利采用 XIRR。将期初总资产及各笔转入视为投入，转出和期末总资产视为收回，按实际日期及 365 天年化。盈亏日历的收益率统一采用修正迪茨法，按日、月或年对应的区间显示。</p>
-          <p>基准收益率以账户期初估值日和同日期末的指数收盘点位计算，为价格收益率，未计指数成分股分红。单利模式显示区间涨跌幅，XIRR 模式下基准按相同自然日数及 365 天年化。图下带正负号的数值是账户收益率减去基准收益率的百分点差额。基准曲线跳过 A 股休市日，缺少同日收盘点位时留空。</p>
+          <p>复利采用 XIRR。将期初总资产及各笔转入视为投入，转出和期末总资产视为收回。汇总按实际日期及 365 天年化，趋势图显示从区间起点到各日的累计复利收益率。盈亏日历的收益率统一采用修正迪茨法，按日、月或年对应的区间显示。</p>
+          <p>基准收益率以账户期初估值日和同日期末的指数收盘点位计算，为价格收益率，未计指数成分股分红。曲线显示累计涨跌幅，复利模式下的基准汇总按相同自然日数及 365 天年化。图下带正负号的数值是账户收益率减去基准收益率的百分点差额，沿用汇总口径。基准曲线跳过 A 股休市日，缺少同日收盘点位时留空。</p>
           <p id="performance-return-basis"></p>
           <p id="performance-opening-note"></p>
         </details>

@@ -1,17 +1,30 @@
-"""Assemble stock references from existing market-domain readers."""
+"""Assemble security references from existing market-domain readers."""
 
 from copy import deepcopy
 from datetime import date
 from threading import Lock
 
 from stock_analysis.domains.indices.index_prices import read_prices
+from stock_analysis.domains.indices.index_repository import read_valuation_observations
 from stock_analysis.domains.industries.portfolio_lookup import read_classification
 from stock_analysis.domains.stocks.dividend_service import DividendService, SOURCE as DIVIDEND_SOURCE
 from stock_analysis.domains.stocks.price_service import PriceService
 from stock_analysis.domains.valuation.hk_valuation import read as read_hk_valuation
-from stock_analysis.domains.valuation.position_reference import summarize_position_valuation
+from stock_analysis.domains.valuation.position_reference import summarize_position_metric, summarize_position_valuation
 from stock_analysis.domains.valuation.valuation_service import ValuationService
 from stock_analysis.infrastructure.idle_cache import IdleCache
+
+
+ETF_INDEXES = {
+    ('sh', '510300'): ('cn:000300', '沪深300'),
+    ('sh', '512100'): ('cn:000852', '中证1000'),
+    ('sz', '159352'): ('cn:000510', '中证A500'),
+}
+ETF_INDEX_METRICS = (
+    ('pe', 'pe_rolling', 'csindex', 'history.rolling', 'daily', '中证指数 · 历史滚动 PE · 日度'),
+    ('pb', 'pb', 'legu', 'pb.ordinary', 'monthly', '乐咕 · 普通 PB · 月度'),
+    ('dividend_yield', 'dividend_yield', 'csindex', 'dashboard', 'daily', '中证指数 · 每日板块估值 · 日度'),
+)
 
 
 class PortfolioReferenceCache:
@@ -73,6 +86,19 @@ def read_hk_reference(db, code, day):
                                             include_dividend_yield=False)
     return {'close': latest['close'] if latest else None, 'close_date': latest['date'] if latest else None,
             'valuation': valuation}
+
+
+def read_etf_index_reference(db, index, as_of):
+    code, name = index
+    valuation = {}
+    for metric, field, provider, series, frequency, source in ETF_INDEX_METRICS:
+        rows = read_valuation_observations(db, code=code, provider=provider, series=series,
+                                           metric=field, frequency=frequency, as_of=as_of)
+        points = [{'date': row['observation_date'], metric: row[field]} for row in rows]
+        summary = summarize_position_metric(points, metric, as_of, observed=True, allow_partial_history=True)
+        if summary['value'] is not None:
+            valuation[metric] = {**summary, 'source': source}
+    return {'tracking_index': {'code': code, 'name': name}, 'valuation': valuation} if valuation else None
 
 
 def read_stock_reference(db, code, as_of, *, cache, valuation_cache):

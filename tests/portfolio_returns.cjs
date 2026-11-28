@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 require('../web/features/portfolio/returns.js');
-const { periodReturns, maxDrawdown } = globalThis.PortfolioReturns;
+const { periodReturns, benchmarkReturns, maxDrawdown } = globalThis.PortfolioReturns;
 
 const first = '2021-01-01';
 const year = '2022-01-01';
@@ -37,6 +37,14 @@ assert.equal(periodReturns(ambiguous, first, [end], true).get(end), null);
 const following = '2022-01-02';
 const day = { ...investor, records: [close(year, 170000), close(following, 171700)] };
 near(periodReturns(day, following, [following], true, false).get(following), 0.01);
+const closes = { [year]: 100, [following]: 102, [end]: 76 };
+const benchmarkTrend = benchmarkReturns(closes, year, [year, following, end], false);
+near(benchmarkTrend.get(year), 0);
+near(benchmarkTrend.get(following), 0.02);
+near(benchmarkTrend.get(end), -0.24);
+const annualBenchmark = benchmarkReturns(closes, year, [following, end], true);
+near(annualBenchmark.get(following), 1.02 ** 365 - 1);
+near(annualBenchmark.get(end), -0.24);
 console.log('Modified Dietz and XIRR cases passed');
 
 const pnlClose = (index, pnl, total_assets) => ({ date: `2025-01-0${index}`, pnl, total_assets });

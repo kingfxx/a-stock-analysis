@@ -20,7 +20,9 @@ from stock_analysis.domains.portfolio.performance_read import read_performance_r
 from stock_analysis.domains.portfolio.projected_snapshot import (
     book_view, build_book, quote_for_close, read_accounts, read_quotes,
 )
-from stock_analysis.domains.portfolio.reference import previous_market_day, read_hk_reference
+from stock_analysis.domains.portfolio.reference import (
+    ETF_INDEXES, previous_market_day, read_etf_index_reference, read_hk_reference,
+)
 from stock_analysis.domains.portfolio.revaluation import (
     book_quotes, delete_revaluation, display_revaluation, load_saved_revaluation, previous_revaluation_closes, read_revaluation,
     revaluation_directory, saved_revaluation, save_revaluation,
@@ -216,16 +218,23 @@ class Portfolio:
             yield db, lambda position, day: self._reference(db, position, day, revision)
 
     def _reference(self, db, position, day, revision):
+        code = position['code']
+        cache_key = (position['exchange'], code, day)
         if position['asset_type'] == 'stock' and position['exchange'] in ('sh', 'sz'):
-            read = self.reference_reader
+            load = lambda: self.reference_reader(db, code, day)
         elif position['asset_type'] == 'hong_kong' and position_included(position):
-            read = read_hk_reference
+            load = lambda: read_hk_reference(db, code, day)
+        elif position['asset_type'] == 'etf' and (index := ETF_INDEXES.get((position['exchange'], code))):
+            load = lambda: read_etf_index_reference(db, index, day)
+            if revision is not None:
+                index_revision = db.conn.execute(
+                    "SELECT revision FROM index_read_revisions WHERE scope='indices'").fetchone()[0]
+                cache_key += (index_revision,)
         else:
             return None
-        code = position['code']
         if revision is None:
-            return read(db, code, day)
-        return self.reference_cache.read(revision, (position['exchange'], code, day), lambda: read(db, code, day))
+            return load()
+        return self.reference_cache.read(revision, cache_key, load)
 
     @staticmethod
     def _load_snapshot(conn, entry):

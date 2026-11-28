@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 
 from stock_analysis.domains.indices.index_definitions import METRICS
-from stock_analysis.domains.indices.index_repository import index_valuation_views, read_indices
+from stock_analysis.domains.indices.index_repository import index_valuation_views, read_indices, read_valuation_observations
 from stock_analysis.domains.indices.index_prices import read_overlay
 from stock_analysis.infrastructure.idle_cache import IDLE_SECONDS, IdleCache
 
@@ -103,15 +103,8 @@ class IndexReadService:
             if key in self.cache:
                 self.cache.move_to_end(key)
                 return self.cache[key]
-            with self.db.connection() as conn:
-                identities = conn.execute('SELECT id,frequency FROM index_valuation_series WHERE index_code=? AND provider=? AND series_key=? AND definition_version=?',
-                                          (code,provider,series,definition)).fetchall()
-                rows = []
-                for identity in identities:
-                    monthly = " AND NOT EXISTS(SELECT 1 FROM index_valuation_observations n WHERE n.series_id=f.series_id AND n.is_latest=1 AND substr(n.observation_date,1,7)=substr(f.observation_date,1,7) AND n.observation_date>f.observation_date)" if identity['frequency']=='monthly' else ''
-                    rows.extend(dict(r,frequency=identity['frequency']) for r in conn.execute(
-                        f'SELECT observation_date,{metric} FROM index_valuation_observations f WHERE series_id=? AND is_latest=1'+monthly+' ORDER BY observation_date', (identity['id'],)))
-            rows.sort(key=lambda r:r['observation_date'])
+            rows = read_valuation_observations(self.db, code=code, provider=provider, series=series,
+                                               definition=definition, metric=metric)
             views = index_valuation_views(rows, (metric,))
             target = 'pe' if metric.startswith('pe_') else 'ps' if metric.startswith('ps') else metric
             for view in views[metric].values():

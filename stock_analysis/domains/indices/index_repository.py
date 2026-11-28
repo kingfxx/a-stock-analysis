@@ -33,6 +33,35 @@ def index_valuation_views(rows, metrics=METRICS):
     return views
 
 
+def read_valuation_observations(db, *, code, provider, series, metric,
+                                definition=VERSION, frequency=None, as_of='9999-12-31'):
+    """Read published points, retaining the last actual monthly observation as of the cutoff."""
+    if metric not in METRICS:
+        raise ValueError('无效指数估值指标')
+    with db.connection() as conn:
+        identities = conn.execute("""
+            SELECT id,frequency FROM index_valuation_series
+            WHERE index_code=? AND provider=? AND series_key=? AND definition_version=?
+            AND (? IS NULL OR frequency=?)
+        """, (code, provider, series, definition, frequency, frequency)).fetchall()
+        rows = []
+        for identity in identities:
+            args = (identity['id'], as_of)
+            monthly = ''
+            if identity['frequency'] == 'monthly':
+                monthly = """ AND NOT EXISTS (
+                    SELECT 1 FROM index_valuation_observations n
+                    WHERE n.series_id=f.series_id AND n.is_latest=1 AND n.observation_date<=?
+                    AND substr(n.observation_date,1,7)=substr(f.observation_date,1,7)
+                    AND n.observation_date>f.observation_date
+                )"""
+                args += (as_of,)
+            rows.extend(dict(row, frequency=identity['frequency']) for row in conn.execute(
+                f'SELECT observation_date,{metric} FROM index_valuation_observations f '
+                'WHERE series_id=? AND is_latest=1 AND observation_date<=?' + monthly, args))
+    return sorted(rows, key=lambda row: row['observation_date'])
+
+
 def install_definitions(conn):
     for (provider,series),definition in DEFINITIONS.items():
         body=encoded(definition)
