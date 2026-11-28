@@ -26,6 +26,9 @@
   let loadRevision = 0;
   let plotlyPromise;
   let chartRequest = 0;
+  let benchmarkOverlay = true;
+  const benchmarkSelector = $('performance-benchmark');
+  const benchmarkComparison = $('performance-benchmark-comparison');
   const drawdownCard = $('performance-drawdown-card');
   const drawdownHighlight = () => drawdownCard.matches(':hover, :focus-visible') ? 1 : 0;
 
@@ -34,6 +37,17 @@
     node.textContent = text;
     return node;
   }
+
+  const benchmarkButtons = [...benchmarkSelector.options].map(({ value, text }) => {
+    const item = element('li');
+    const button = element('button');
+    button.type = 'button';
+    button.value = value;
+    button.setAttribute('aria-controls', 'performance-chart');
+    item.append(button);
+    benchmarkComparison.append(item);
+    return { button, name: text };
+  });
 
   function carriedCloses(record) {
     return (record.estimated_closes || []).map(({code, date, price_date}) =>
@@ -330,7 +344,7 @@
       type: 'scatter', mode: 'markers', x, y, marker: { opacity: .001, size: 6 }, name: label,
       hovertemplate: `${label}：%{y:,.2f}${suffix}<extra></extra>`
     });
-    if (useRate && benchmark) {
+    if (useRate && benchmarkOverlay) {
       const name = `${benchmark.name}基准`;
       const benchmarkDates = [...benchmark.rates.keys()];
       const benchmarkValues = [...benchmark.rates.values()].map((value) => value == null ? null : value * 100);
@@ -399,14 +413,14 @@
   }
 
   function renderBenchmarks(start, dates, last, accountRate) {
-    const selector = $('performance-benchmark');
     const source = returnReport();
     const opening = source && window.PortfolioReturns.periodOpening(source, start).openingDate;
     const marketDays = payload.benchmark_closes?.['000300'] ?? {};
     let selected;
-    const comparisons = [...selector.options].map(({ value: code, text: name }) => {
+    for (const { button, name } of benchmarkButtons) {
+      const code = button.value;
       const closes = payload.benchmark_closes?.[code] ?? {};
-      const picked = code === selector.value;
+      const picked = code === benchmarkSelector.value;
       // Leave A-share market holidays out of the benchmark trace, including Hong Kong-only sessions.
       const endpoints = picked ? dates.filter((date) => date in marketDays || date in closes) : last ? [last] : [];
       const rates = window.PortfolioReturns.benchmarkReturns(
@@ -414,32 +428,29 @@
       );
       const closingRate = rates.get(last);
       if (picked) selected = { name, rates, closingRate };
-      const item = element('li');
-      item.classList.toggle('selected', picked);
+      button.setAttribute('aria-pressed', String(picked && benchmarkOverlay));
       const label = element('span', name);
       const gap = closingRate == null || accountRate == null ? null : accountRate - closingRate;
       const difference = element('strong', gap != null ? rate(gap)
         : closingRate == null ? '缺指数数据' : '缺账户收益率');
+      button.replaceChildren(label, difference);
       if (gap != null) {
         const color = difference.textContent.startsWith('+') ? 'gain'
           : difference.textContent.startsWith('-') ? 'loss' : '';
         const direction = element('span', color === 'gain' ? '跑赢' : color === 'loss' ? '跑输' : '持平');
         direction.className = difference.className = color;
-        item.append(direction);
+        button.prepend(direction);
       }
-      item.append(label, difference);
-      return item;
-    });
+    }
     $('performance-benchmark-label').textContent = selected.name;
     showMetric('performance-benchmark-return', selected.closingRate, rate);
-    $('performance-benchmark-comparison').replaceChildren(...comparisons);
     return selected;
   }
 
   async function renderRange() {
     if (!data) return;
     const useRate = $('performance-chart-metric').value === 'rate';
-    $('performance-benchmark-comparison').hidden = !useRate;
+    benchmarkComparison.hidden = !useRate;
     const kind = $('performance-range').value;
     let start = `${data.year}-01-01`;
     let end = data.as_of;
@@ -719,13 +730,25 @@
     }
     requestSelection();
   });
+  function updateRange() {
+    renderRange().catch((error) => {
+      $('performance-status').hidden = false;
+      $('performance-status').textContent = error.message;
+    });
+  }
   for (const id of ['performance-range', 'performance-year', 'performance-start', 'performance-end',
-    'performance-return-mode', 'performance-chart-metric', 'performance-benchmark']) {
-    $(id).addEventListener('change', () => {
-      renderRange().catch((error) => {
-        $('performance-status').hidden = false;
-        $('performance-status').textContent = error.message;
-      });
+    'performance-return-mode', 'performance-chart-metric']) {
+    $(id).addEventListener('change', updateRange);
+  }
+  benchmarkSelector.addEventListener('change', () => {
+    benchmarkOverlay = true;
+    updateRange();
+  });
+  for (const { button } of benchmarkButtons) {
+    button.addEventListener('click', () => {
+      benchmarkOverlay = button.value !== benchmarkSelector.value || !benchmarkOverlay;
+      benchmarkSelector.value = button.value;
+      updateRange();
     });
   }
   for (const [id, delta] of [['calendar-prev', -1], ['calendar-next', 1]]) {

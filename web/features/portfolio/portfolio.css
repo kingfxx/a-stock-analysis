@@ -111,12 +111,13 @@ meter::-webkit-meter-optimum-value { background: var(--cyan); }
   gap: .4rem .55rem; margin: 0; padding: 0; list-style: none;
 }
 .performance-benchmark-comparison:not([hidden]) { display: flex; flex-wrap: wrap; }
-.performance-benchmark-comparison li {
+.performance-benchmark-comparison button {
   display: flex; align-items: baseline; gap: .35rem;
   border: 1px solid var(--line); border-radius: 6px; padding: .3rem .5rem; color: var(--muted);
-  font-size: var(--research-detail-size);
+  background: transparent; min-height: 0; font-size: var(--research-detail-size);
 }
-.performance-benchmark-comparison .selected { border-color: #e9c36d; }
+.performance-benchmark-comparison button:hover { border-color: var(--muted); }
+.performance-benchmark-comparison button[aria-pressed="true"] { border-color: #e9c36d; }
 #performance-drawdown-card { position: relative; }
 #performance-drawdown-dates {
   position: absolute;
