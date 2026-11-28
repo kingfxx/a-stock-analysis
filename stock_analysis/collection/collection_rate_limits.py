@@ -102,6 +102,8 @@ def task_for_batch(conn, batch_id, provider):
     for key, source in (('shipping_monthly', 'mot'), ('shipping_weekly', 'sse')):
         if scope.get('dataset') == key and provider == source:
             return key
+    if row['task_key'] == 'indices' and batch['dataset'].startswith('index.sina.') and provider == 'sina':
+        return 'indices'
     if not scope.get('dataset') and provider in ('csindex', 'legu', 'sws'):
         return 'indices'
     return None

@@ -13,6 +13,7 @@ PROJECTION = 'json_object(' + ','.join(
     "THEN NULL ELSE json_extract(result_json,'$." + key + "') END" for key in FIELDS) + ", 'changed_type',json_type(result_json,'$.changed'))"
 INDEX_DATASETS = {'index.cs.history', 'index.cs.dashboard', 'index.cs.indicator',
                   'index.sw.analysis', 'index.legu.pe', 'index.legu.pb'}
+INDEX_PRICE_DATASETS = {'index.sina.history', 'index.sina.quote'}
 LABELS = {
     'stock.financial.lrb': '利润表', 'stock.financial.fzb': '资产负债表', 'stock.financial.llb': '现金流量表',
     'stock.financial.gjzb': '财务关键指标', 'stock.business_segments': '主营构成', 'stock.announcements': '公告元数据',
@@ -116,6 +117,8 @@ def attach_data_counts(conn, rows, providers):
             refs[batch['operation_id']].append(normalize(batch, values, '估值'))
             if isinstance(values.get('price_counts'), dict):
                 refs[batch['operation_id']].append(normalize(batch, values['price_counts'], '行情'))
+        elif dataset in INDEX_PRICE_DATASETS:
+            refs[batch['operation_id']].append(normalize(batch, values.get('price_counts') or {}, '行情'))
         elif dataset in LABELS or any(values.get(k) is not None for k in ('inserted', 'new', 'revised', 'published')):
             # Discovery requests are evidence, not another set of published yields.
             if values.get('kind') != 'target_discovery':

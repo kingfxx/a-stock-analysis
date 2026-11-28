@@ -33,7 +33,7 @@ TASKS = {
                              action='financial_period', modes=['incremental', 'review', 'missing']),
     'trade_snapshot': dict(name='季度交易快照', group='全市场', providers=['eastmoney'],
                           action='cap_quarter', modes=['incremental', 'review']),
-    'indices': dict(name='指数估值与行情', group='指数', providers=['csindex', 'legu', 'sws'],
+    'indices': dict(name='指数估值与行情', group='指数', providers=['csindex', 'legu', 'sws', 'sina'],
                     modes=['incremental', 'full', 'review', 'audit', 'backfill']),
     'market_congestion': dict(name='大盘拥挤度', group='市场指标', providers=['legu'],
                              modes=['incremental', 'review', 'full']),

@@ -410,8 +410,8 @@ def test_browser_latest_once_collapsed_batches_and_dropdown_multi_select(live):
             menu.locator('summary').focus();page.keyboard.press('Enter')
             expect(menu).to_have_attribute('open','')
             menu.locator('input[value=legu]').uncheck()
-            expect(menu.locator('[data-provider-selection]')).to_have_text('已选 2 / 3 项')
-            assert card.locator('[data-task-run]').evaluate("form=>new FormData(form).getAll('provider')")==['csindex','sws']
+            expect(menu.locator('[data-provider-selection]')).to_have_text('已选 3 / 4 项')
+            assert card.locator('[data-task-run]').evaluate("form=>new FormData(form).getAll('provider')")==['csindex','sws','sina']
             page.keyboard.press('Escape');expect(menu).not_to_have_attribute('open','')
             refresh_collections(page);page.wait_for_timeout(150)
             expect(menu.locator('input[value=legu]')).not_to_be_checked()
@@ -419,7 +419,7 @@ def test_browser_latest_once_collapsed_batches_and_dropdown_multi_select(live):
             card.locator(':scope > details').first.locator('summary').first.click()
             scheduled=card.locator('[data-task-schedule] [data-provider-menu]')
             scheduled.locator('summary').click();scheduled.locator('input[value=sws]').uncheck()
-            expect(scheduled.locator('[data-provider-selection]')).to_have_text('已选 2 / 3 项')
+            expect(scheduled.locator('[data-provider-selection]')).to_have_text('已选 3 / 4 项')
             refresh_collections(page);page.wait_for_timeout(150)
             expect(scheduled).not_to_have_attribute('open','')
             expect(scheduled.locator('input[value=sws]')).not_to_be_checked()
@@ -479,10 +479,10 @@ def test_browser_provider_options_not_clipped_by_card_or_viewport(live):
                 menu.locator('summary').scroll_into_view_if_needed()
                 page.evaluate('(y)=>window.scrollTo(0,y)',menu.locator('summary').evaluate('node=>node.getBoundingClientRect().top+scrollY-innerHeight+80'))
                 menu.locator('summary').click()
-                expect(menu.locator('.collection-provider-options label')).to_have_count(3)
+                expect(menu.locator('.collection-provider-options label')).to_have_count(4)
                 for label in menu.locator('.collection-provider-options label').all():expect(label).to_be_in_viewport(ratio=1)
                 menu.locator('input[value=sws]').uncheck();menu.locator('input[value=sws]').check()
-                expect(menu.locator('[data-provider-selection]')).to_have_text('已选 3 / 3 项')
+                expect(menu.locator('[data-provider-selection]')).to_have_text('已选 4 / 4 项')
                 page.keyboard.press('Escape')
         finally:browser.close()
 

@@ -39,6 +39,7 @@
 | `domains/valuation/` | 估值、DCF、股息预测；纯计算在 calculations，视图数据组装在 payloads |
 | `domains/valuation/institution_forecast_parser.py` | 标准库 HTML 表格纯解析与机构净利润预测校验，无 pandas、网络或存储依赖；请求仍由 institution_forecast 复用公共采集 |
 | `domains/indices/` | 指数定义、采集、查询、行情与编码 |
+| `domains/indices/sina_index_collection.py` · `sina_index_parser.py` | 创业板50新浪日线采集与历史文件、收盘快照解析 |
 | `domains/industries/` | 通用行业分类、成员、财务／市值汇总与比较；company_preview.py 只读组装单公司快览 |
 | `domains/financials/company_preview_metrics.py` | 行业公司快览纯周期、同比及派生计算；不引入网络或存储 |
 | `domains/financials/company_preview_dividends.py` | 快览上年分红方案纯解析、保守年度合并及季末股息率估算，不取数、不写库 |

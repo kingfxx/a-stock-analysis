@@ -26,6 +26,7 @@ from stock_analysis.collection.collection import (Cancelled, ProviderBlocked, Re
 from stock_analysis.domains.indices.index_definitions import BOARD_CODES, CS_CODES, CS_CANDIDATES, DEFINITIONS, LG_CODES, METRICS, STRATEGY_CODES, canonical
 from stock_analysis.domains.indices.index_repository import catalog, publish
 from stock_analysis.domains.indices.index_prices import parse_prices, publish_prices, price_coverage
+from stock_analysis.domains.indices import sina_index_collection
 from stock_analysis.infrastructure.storage import DEFAULT_DATABASE, Database, instance_lock, utc_now
 
 CS_HISTORY='https://www.csindex.com.cn/csindex-home/perf/index-perf'
@@ -407,6 +408,8 @@ class IndexCollector:
             for code,name in LG_CODES.items():
                 for dataset in ('pe','pb'):
                     self.register_work_unit('legu',code+':'+dataset,f'乐咕 {name} {dataset.upper()}')
+        if 'sina' in providers:
+            self.register_work_unit('sina',sina_index_collection.CODE,sina_index_collection.LABEL)
         if 'sws' in providers:
             starts=self.sw_incremental_starts(start,end) if getattr(self,'auto_incremental',False) else {1:start,2:start}
             if min(starts.values())<=end:
@@ -872,7 +875,7 @@ def _operation_message(status, mode, valuation_batches, derived_result):
 
 def start_operation(db,mode='full',providers=('csindex','legu','sws'),start=None,end=None,datasets=None,*,connection=None):
     valid_datasets=datasets is not None and isinstance(datasets,(list,tuple)) and bool(datasets) and not (set(datasets)-{'bond_zh_us_rate'})
-    if mode not in ('full','incremental','backfill','audit','review') or not isinstance(providers,(list,tuple)) or (not providers and not valid_datasets) or not set(providers)<= {'csindex','legu','sws'}:
+    if mode not in ('full','incremental','backfill','audit','review') or not isinstance(providers,(list,tuple)) or (not providers and not valid_datasets) or not set(providers)<= {'csindex','legu','sws','sina'}:
         raise ValueError('指数采集模式／来源无效')
     if datasets is not None and not valid_datasets:
         raise ValueError('指数采集数据集无效')
@@ -923,6 +926,7 @@ def _run_operation_locked(db,operation,*,collector=None):
     with db.connection() as conn:
         row=dict(conn.execute('SELECT * FROM collection_operations WHERE operation_id=?',(operation,)).fetchone())
     scope=json.loads(row['scope_json'])
+    sina_only=scope.get('providers')==['sina']
     if not scope.get('providers') and scope.get('datasets')==['bond_zh_us_rate']:
         return _run_bond_only_operation(db,operation,row)
     injected_collector=collector is not None
@@ -934,8 +938,8 @@ def _run_operation_locked(db,operation,*,collector=None):
         bond_result={}
         bond_task_id=(tracker.register('eastmoney','bond_zh_us_rate','中美国债收益率')
                       if 'bond_zh_us_rate' in scope.get('datasets',[]) else None)
-        derived_result={'status':'pending','facts':0,'network_requests':0}
-        dependency_result={'status':'pending','network_requests':0}
+        derived_result={'status':'skipped' if sina_only else 'pending','facts':0,'network_requests':0}
+        dependency_result={'status':'skipped' if sina_only else 'pending','network_requests':0}
         derive_through=None
         status='complete'
         def run_bond(http):
@@ -975,7 +979,7 @@ def _run_operation_locked(db,operation,*,collector=None):
             bond_future=bond_pool.submit(run_bond,bond_http)
         try:
             with nullcontext():
-                collector.load_calendar(cached=row['mode'] in ('incremental','review'))
+                collector.load_calendar(cached=sina_only or row['mode'] in ('incremental','review'))
                 local_now=datetime.now(ZoneInfo('Asia/Shanghai'))
                 today=local_now.date()
                 # After market close, incremental collection may check today's data from every selected provider.
@@ -1000,17 +1004,18 @@ def _run_operation_locked(db,operation,*,collector=None):
                 if start>end:
                     raise ValueError('滚动窗口没有已完成交易日')
                 derive_through=end
-                try:
-                    from stock_analysis.domains.market.market_congestion import prepare_index_dependency
-                    def dependency_cancelled():
-                        with db.connection() as conn:
-                            item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
-                        return not item or bool(item[0])
-                    dependency_result=prepare_index_dependency(db,operation,end,dependency_cancelled)
-                except Cancelled:
-                    raise
-                except Exception as exc:
-                    dependency_result={'status':'failed','network_requests':0,'error':str(exc)}
+                if not sina_only:
+                    try:
+                        from stock_analysis.domains.market.market_congestion import prepare_index_dependency
+                        def dependency_cancelled():
+                            with db.connection() as conn:
+                                item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                            return not item or bool(item[0])
+                        dependency_result=prepare_index_dependency(db,operation,end,dependency_cancelled)
+                    except Cancelled:
+                        raise
+                    except Exception as exc:
+                        dependency_result={'status':'failed','network_requests':0,'error':str(exc)}
                 collector.http.requests+=dependency_result.get('network_requests',0)
                 progress(f'指数采集范围 {start}—{end}；主题指数未纳入')
                 legu_plan_start=start
@@ -1032,6 +1037,9 @@ def _run_operation_locked(db,operation,*,collector=None):
                                 current=(current-timedelta(days=1)).replace(day=1)
                             lg_start=current.isoformat()
                         worker.collect_legu(lg_start,end,row['mode'])
+                    elif provider=='sina':
+                        worker.execute_work_unit('sina',sina_index_collection.CODE,sina_index_collection.LABEL,
+                                                  lambda:sina_index_collection.collect(worker,start,end,row['mode']))
                     else:
                         worker.collect_sw(start,end,row['mode'])
                     return worker
@@ -1083,23 +1091,24 @@ def _run_operation_locked(db,operation,*,collector=None):
                         "AND dataset NOT IN ('index.price.derived','market.legu.congestion.page')",(operation,)).fetchone()[0]
                 if errors or failed:
                     status='failed'
-                try:
-                    from stock_analysis.domains.indices.index_price_derived import recompute
-                    def derivation_cancelled():
+                if not sina_only:
+                    try:
+                        from stock_analysis.domains.indices.index_price_derived import recompute
+                        def derivation_cancelled():
+                            with db.connection() as conn:
+                                item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
+                            return not item or bool(item[0])
                         with db.connection() as conn:
-                            item=conn.execute('SELECT cancel_requested FROM collection_operations WHERE operation_id=?',(operation,)).fetchone()
-                        return not item or bool(item[0])
-                    with db.connection() as conn:
-                        affected_start=conn.execute("SELECT min(scope_start) FROM collection_batches WHERE operation_id=? "
-                            "AND status='complete' AND dataset IN ('index.cs.history','index.sw.analysis')",(operation,)).fetchone()[0]
-                    # Tail catch-up can extend before the default ten-day review window.
-                    estimate_start=min(d for d in (start,affected_start,dependency_result.get('first')) if d)
-                    derived_result=recompute(db,operation,start=estimate_start,through=derive_through,cancelled=derivation_cancelled)
-                except Cancelled:
-                    raise
-                except Exception as exc:
-                    # A failed local estimate never rolls back already committed provider fields.
-                    derived_result={'status':'failed','facts':0,'network_requests':0,'error':str(exc)}
+                            affected_start=conn.execute("SELECT min(scope_start) FROM collection_batches WHERE operation_id=? "
+                                "AND status='complete' AND dataset IN ('index.cs.history','index.sw.analysis')",(operation,)).fetchone()[0]
+                        # Tail catch-up can extend before the default ten-day review window.
+                        estimate_start=min(d for d in (start,affected_start,dependency_result.get('first')) if d)
+                        derived_result=recompute(db,operation,start=estimate_start,through=derive_through,cancelled=derivation_cancelled)
+                    except Cancelled:
+                        raise
+                    except Exception as exc:
+                        # A failed local estimate never rolls back already committed provider fields.
+                        derived_result={'status':'failed','facts':0,'network_requests':0,'error':str(exc)}
         except Cancelled as exc:
             status='cancelled'
             errors['operation']=str(exc)

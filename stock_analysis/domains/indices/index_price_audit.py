@@ -12,6 +12,8 @@ from stock_analysis.collection.collection import atomic_write, encoded, read_sou
 from stock_analysis.domains.indices.index_collection import IndexCollector, day
 from stock_analysis.domains.indices.index_prices import FIELDS, OHLC_FIELDS, DEFINITIONS, legacy_definition, parse_prices, price_hash
 from stock_analysis.domains.indices.index_price_replay import DATASETS
+from stock_analysis.domains.indices import sina_index_collection
+from stock_analysis.domains.indices.sina_index_parser import parse_history, parse_quote
 from stock_analysis.infrastructure.storage import Database, DEFAULT_DATABASE
 
 
@@ -60,9 +62,15 @@ def audit(db, *, report_path=None, samples_per_series=3):
         raw,source=read_source(db,sid)
         with db.connection() as conn:
             batch=conn.execute('SELECT * FROM collection_batches WHERE id=?',(source['batch_id'],)).fetchone()
-        provider,key,code_key,date_key=DATASETS[source['dataset']]
+        dataset=source['dataset']
+        live_sina=dataset in (sina_index_collection.HISTORY_DATASET,sina_index_collection.QUOTE_DATASET)
+        provider,key,code_key,date_key=('sina','history.points','_code','date') if live_sina else DATASETS[dataset]
         request=json.loads(source['request_json']);expected=None
-        if provider=='sina':
+        if live_sina:
+            expected=sina_index_collection.CODE
+            symbol=sina_index_collection.SYMBOL
+            rows=[parse_quote(raw,symbol)] if dataset==sina_index_collection.QUOTE_DATASET else parse_history(raw,symbol)
+        elif provider=='sina':
             import re
             from py_mini_racer import MiniRacer
             if js is None:
