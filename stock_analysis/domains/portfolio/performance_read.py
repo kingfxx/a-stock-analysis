@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from stock_analysis.domains.etfs.storage import read_cash_dividends, read_unadjusted_closes
+from stock_analysis.domains.indices.index_prices import read_prices
 from stock_analysis.domains.portfolio.cash_history import TRANSFERS, account_return_with_hk, attach_cash, reconstruct_cash
 from stock_analysis.domains.portfolio.performance import (
     advance_positions, attach_monthly_security_pnl, combine_market_performance, merge_performance, reconstruct,
@@ -17,6 +18,9 @@ from stock_analysis.domains.portfolio.hk_performance import SECURITY as HK_SECUR
 
 
 COMBINED_ACCOUNT = 'combined'
+BENCHMARK_PROVIDERS = {
+    '000001': 'csindex', '000985': 'csindex', '000300': 'csindex', '399673': 'sina',
+}
 SECURITY_TYPES = ('stocks', 'etfs', 'hong_kong')
 MIXED_SCOPES = {
     'all_markets': (None, 'A 股及 ETF'),
@@ -243,6 +247,20 @@ def _selected_report(report, requested, cash_inputs):
             'scope': scope, 'scope_data': scoped, 'returns': returns}
 
 
+def _read_benchmark_closes(db, scope, returns):
+    if not scope or not scope['records'] or not returns:
+        return {}
+    start = min(scope['start'], returns.get('opening_date') or scope['start'])
+    return {
+        code: {row['observation_date']: row['close'] for row in read_prices(
+            db, index_code=f'cn:{code}', provider=provider, series_key='history.points',
+            frequency='daily', return_type='unspecified', fields=('close',),
+            start=start, end=scope['as_of'],
+        ) if row['close'] is not None and row['close'] > 0}
+        for code, provider in BENCHMARK_PROVIDERS.items()
+    }
+
+
 def read_performance_reports(db, default_broker, *, account=None, types=()):
     security_names = {}
     cash_inputs = {}
@@ -268,7 +286,8 @@ def read_performance_reports(db, default_broker, *, account=None, types=()):
         brokers = covered_names if account == COMBINED_ACCOUNT else [account]
         selection = _selected_report(combined if account == COMBINED_ACCOUNT else reports[account],
                                      types, [cash_inputs[broker] for broker in brokers if broker in cash_inputs])
-        return {**selection, 'accounts': accounts, 'security_names': security_names}
+        return {**selection, 'accounts': accounts, 'security_names': security_names,
+                'benchmark_closes': _read_benchmark_closes(db, selection['scope_data'], selection['returns'])}
     if 'hong_kong' in primary:
         hk = primary['hong_kong']
         for report in (combined, primary):

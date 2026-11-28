@@ -304,7 +304,7 @@
     return { x, y };
   }
 
-  async function drawCharts(rows, summary, bounds, rates, flows, drawdown) {
+  async function drawCharts(rows, summary, bounds, rates, benchmark, flows, drawdown) {
     const request = ++chartRequest;
     const useRate = $('performance-chart-metric').value === 'rate';
     const Plotly = await loadPlotly();
@@ -330,6 +330,17 @@
       type: 'scatter', mode: 'markers', x, y, marker: { opacity: .001, size: 6 }, name: label,
       hovertemplate: `${label}：%{y:,.2f}${suffix}<extra></extra>`
     });
+    if (useRate && benchmark) {
+      const name = `${benchmark.name}基准`;
+      const benchmarkDates = [...benchmark.rates.keys()];
+      const benchmarkValues = [...benchmark.rates.values()].map((value) => value == null ? null : value * 100);
+      const valid = benchmarkValues.filter((value) => value != null).length;
+      if (valid) traces.push({
+        type: 'scatter', mode: valid === 1 ? 'markers' : 'lines', name, x: benchmarkDates, y: benchmarkValues,
+        line: { color: '#e9c36d', width: 2 }, marker: { color: '#e9c36d' },
+        connectgaps: false, hovertemplate: `${name}：%{y:,.2f}%<extra></extra>`
+      });
+    }
     const config = { responsive: true, displayModeBar: false };
     const key = bounds.join('/');
     const layout = chartLayout(`${key}/${metric}`, useRate);
@@ -340,7 +351,9 @@
         opacity: drawdownHighlight()
       }];
     }
-    await Plotly.react($('performance-chart'), traces, layout, config);
+    const chart = $('performance-chart');
+    chart.setAttribute('aria-label', useRate ? '账户和基准收益率曲线' : '累计盈亏曲线');
+    await Plotly.react(chart, traces, layout, config);
     if (request !== chartRequest) return;
     const assetCount = rows.filter((row) => row.total_assets != null).length;
     const assetLabel = assetCount ? '总资产估算' : '证券市值（现金待核对）';
@@ -385,8 +398,48 @@
     $(id).classList.toggle('loss', value < 0);
   }
 
+  function renderBenchmarks(start, dates, last, accountRate) {
+    const selector = $('performance-benchmark');
+    const source = returnReport();
+    const opening = source && window.PortfolioReturns.periodOpening(source, start).openingDate;
+    const marketDays = payload.benchmark_closes?.['000300'] ?? {};
+    let selected;
+    const comparisons = [...selector.options].map(({ value: code, text: name }) => {
+      const closes = payload.benchmark_closes?.[code] ?? {};
+      const picked = code === selector.value;
+      // Leave A-share market holidays out of the benchmark trace, including Hong Kong-only sessions.
+      const endpoints = picked ? dates.filter((date) => date in marketDays || date in closes) : last ? [last] : [];
+      const rates = window.PortfolioReturns.benchmarkReturns(
+        closes, opening, endpoints, compoundReturn()
+      );
+      const closingRate = rates.get(last);
+      if (picked) selected = { name, rates, closingRate };
+      const item = element('li');
+      item.classList.toggle('selected', picked);
+      const label = element('span', name);
+      const gap = closingRate == null || accountRate == null ? null : accountRate - closingRate;
+      const difference = element('strong', gap != null ? rate(gap)
+        : closingRate == null ? '缺指数数据' : '缺账户收益率');
+      if (gap != null) {
+        const color = difference.textContent.startsWith('+') ? 'gain'
+          : difference.textContent.startsWith('-') ? 'loss' : '';
+        const direction = element('span', color === 'gain' ? '跑赢' : color === 'loss' ? '跑输' : '持平');
+        direction.className = difference.className = color;
+        item.append(direction);
+      }
+      item.append(label, difference);
+      return item;
+    });
+    $('performance-benchmark-label').textContent = selected.name;
+    showMetric('performance-benchmark-return', selected.closingRate, rate);
+    $('performance-benchmark-comparison').replaceChildren(...comparisons);
+    return selected;
+  }
+
   async function renderRange() {
     if (!data) return;
+    const useRate = $('performance-chart-metric').value === 'rate';
+    $('performance-benchmark-comparison').hidden = !useRate;
     const kind = $('performance-range').value;
     let start = `${data.year}-01-01`;
     let end = data.as_of;
@@ -413,12 +466,13 @@
     const summary = summarize(rows);
     const closing = rows.at(-1);
     const last = closing?.date;
-    const endpoints = $('performance-chart-metric').value === 'rate' ? rows.map((row) => row.date) : last ? [last] : [];
+    const endpoints = useRate ? rows.map((row) => row.date) : last ? [last] : [];
     const rates = accountRates(start, endpoints, compoundReturn());
     $('performance-total-label').textContent = rows.length && summary.covered === rows.length ? '累计盈亏估算' : '已覆盖日期盈亏';
     $('performance-return-label').textContent = returnLabel();
     showMetric('performance-total', summary.amount, data.fixed_fx ? money : wholeYuan);
     showMetric('performance-return', rates.get(last), rate);
+    const benchmark = renderBenchmarks(start, endpoints, last, rates.get(last));
     $('performance-positive').textContent = `${rows.filter((row) => row.pnl > 0).length}／${rows.filter((row) => row.pnl < 0).length}`;
     $('performance-covered').textContent = `${summary.covered}／${rows.length} 个交易日`;
     const flows = (returnReport()?.transfers || []).filter(({date}) => date >= start && date <= end);
@@ -449,7 +503,7 @@
     ]) {
       $(id).textContent = value == null ? '—' : balance(value);
     }
-    await drawCharts(rows, summary, [start, end], rates, flows, drawdown);
+    await drawCharts(rows, summary, [start, end], rates, benchmark, flows, drawdown);
   }
 
   function setScopeDates(scope, records, preserve) {
@@ -666,7 +720,7 @@
     requestSelection();
   });
   for (const id of ['performance-range', 'performance-year', 'performance-start', 'performance-end',
-    'performance-return-mode', 'performance-chart-metric']) {
+    'performance-return-mode', 'performance-chart-metric', 'performance-benchmark']) {
     $(id).addEventListener('change', () => {
       renderRange().catch((error) => {
         $('performance-status').hidden = false;

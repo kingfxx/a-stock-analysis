@@ -106,7 +106,17 @@ meter::-webkit-meter-optimum-value { background: var(--cyan); }
 .reconciliation dd { color: var(--ink); font-variant-numeric: tabular-nums; }
 .pager { justify-content: flex-end; margin-top: .75rem; }
 .performance-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.performance-summary-five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.performance-summary-six { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.performance-benchmark-comparison {
+  gap: .4rem .55rem; margin: 0; padding: 0; list-style: none;
+}
+.performance-benchmark-comparison:not([hidden]) { display: flex; flex-wrap: wrap; }
+.performance-benchmark-comparison li {
+  display: flex; align-items: baseline; gap: .35rem;
+  border: 1px solid var(--line); border-radius: 6px; padding: .3rem .5rem; color: var(--muted);
+  font-size: var(--research-detail-size);
+}
+.performance-benchmark-comparison .selected { border-color: #e9c36d; }
 #performance-drawdown-card { position: relative; }
 #performance-drawdown-dates {
   position: absolute;
@@ -125,12 +135,12 @@ meter::-webkit-meter-optimum-value { background: var(--cyan); }
   visibility: hidden;
 }
 #performance-drawdown-card:is(:hover, :focus-visible) #performance-drawdown-dates { visibility: visible; }
-@media (min-width: 1140px) {
-  .performance-summary-five {
-    grid-template-columns: minmax(max-content, 1.1fr) repeat(2, minmax(max-content, .8fr))
+@media (min-width: 1400px) {
+  .performance-summary-six {
+    grid-template-columns: minmax(max-content, 1.1fr) repeat(3, minmax(max-content, .8fr))
       repeat(2, minmax(max-content, 1.3fr));
   }
-  .performance-summary-five dd {
+  .performance-summary-six dd {
     font-size: clamp(1rem, calc(2.5vw - .7rem), 1.4rem);
     white-space: nowrap;
   }
@@ -221,7 +231,7 @@ dialog > * + * { margin-top: .7rem; }
   .balance-strip div:nth-child(3) { border-left: 0; }
   .balance-strip div:nth-child(n+3) { border-top: 1px solid var(--line); }
   .performance-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .performance-summary-five div:last-child { grid-column: 1 / -1; border-left: 0; }
+  .performance-summary-six div:nth-child(odd) { border-left: 0; }
   .calendar-year-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .calendar-security-columns { grid-template-columns: minmax(0, 1fr); }
 }

@@ -52,13 +52,30 @@
     return (low + high) / 2;
   }
 
-  function periodReturns(report, start, dates, annualXirr, annualize = true) {
+  function periodOpening(report, start) {
     const preceding = report.records.findLast((row) => row.date < start);
     const initial = preceding ? preceding.total_assets : report.opening_assets;
     const openingDate = preceding?.date ?? report.opening_date ?? start;
+    const includeOpeningDay = !preceding && (report.opening_assumed_zero || openingDate === start);
+    return { initial, openingDate, includeOpeningDay };
+  }
+
+  function benchmarkReturns(closes, openingDate, dates, annualize) {
+    const initial = closes[openingDate];
+    const opening = dayNumber(openingDate);
+    return new Map(dates.map((date) => {
+      const closing = closes[date];
+      const duration = dayNumber(date) - opening;
+      const value = initial > 0 && closing > 0 && duration >= 0 && (!annualize || duration > 0)
+        ? Math.expm1(Math.log(closing / initial) * (annualize ? 365 / duration : 1)) : null;
+      return [date, Number.isFinite(value) ? value : null];
+    }));
+  }
+
+  function periodReturns(report, start, dates, annualXirr, annualize = true) {
+    const { initial, openingDate, includeOpeningDay } = periodOpening(report, start);
     const opening = dayNumber(openingDate);
     const assets = new Map(report.records.map((row) => [row.date, row.total_assets]));
-    const includeOpeningDay = !preceding && (report.opening_assumed_zero || openingDate === start);
     const afterOpening = (date) => date > openingDate || (includeOpeningDay && date === openingDate);
     const flows = report.transfers.filter(({date}) => afterOpening(date))
       .map(({date, in: deposit, out: withdrawal}) => [dayNumber(date), Number(deposit) - Number(withdrawal)])
@@ -118,5 +135,5 @@
     return worst;
   }
 
-  globalThis.PortfolioReturns = { periodReturns, maxDrawdown };
+  globalThis.PortfolioReturns = { periodOpening, periodReturns, benchmarkReturns, maxDrawdown };
 })();

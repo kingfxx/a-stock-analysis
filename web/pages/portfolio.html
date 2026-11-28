@@ -139,11 +139,16 @@
           <label>收益率口径<select id="performance-return-mode">
             <option value="simple">单利（修正迪茨）</option><option value="compound">复利（XIRR 年化）</option>
           </select></label>
+          <label>收益率基准<select id="performance-benchmark">
+            <option value="000001">上证指数</option><option value="000985">中证全指</option>
+            <option value="000300" selected>沪深300</option><option value="399673">创业板50</option>
+          </select></label>
         </div>
         <p id="performance-period" class="muted" role="status"></p>
-        <dl class="balance-strip performance-summary performance-summary-five">
+        <dl class="balance-strip performance-summary performance-summary-six">
           <div><dt id="performance-total-label">累计盈亏估算</dt><dd id="performance-total"></dd></div>
           <div><dt id="performance-return-label">单利（修正迪茨）</dt><dd id="performance-return"></dd></div>
+          <div><dt id="performance-benchmark-label">沪深300</dt><dd id="performance-benchmark-return"></dd></div>
           <div><dt>净投入</dt><dd id="performance-net-investment"></dd></div>
           <div>
             <dt>股息收入 / 账户股息率</dt>
@@ -161,6 +166,7 @@
           <option value="amount">累计盈亏</option><option value="rate">账户收益率</option>
         </select></label>
         <div id="performance-chart" class="performance-chart" role="region" aria-label="累计盈亏曲线"></div>
+        <ul id="performance-benchmark-comparison" class="performance-benchmark-comparison" aria-label="各指数超额收益" hidden></ul>
         <details id="performance-explanation" class="reconciliation performance-explanation">
           <summary>说明</summary>
           <p id="performance-scope"></p>
@@ -172,6 +178,7 @@
           <p id="performance-basis"></p>
           <p>单利采用修正迪茨法。区间净收益为期末总资产减期初总资产和外部净入金。分母为期初总资产加按剩余自然日加权的净入金，期末当天的现金流权重为零。</p>
           <p>复利采用 XIRR。将期初总资产及各笔转入视为投入，转出和期末总资产视为收回，按实际日期及 365 天年化。盈亏日历的收益率统一采用修正迪茨法，按日、月或年对应的区间显示。</p>
+          <p>基准收益率以账户期初估值日和同日期末的指数收盘点位计算，为价格收益率，未计指数成分股分红。单利模式显示区间涨跌幅，XIRR 模式下基准按相同自然日数及 365 天年化。图下带正负号的数值是账户收益率减去基准收益率的百分点差额。基准曲线跳过 A 股休市日，缺少同日收盘点位时留空。</p>
           <p id="performance-return-basis"></p>
           <p id="performance-opening-note"></p>
         </details>
